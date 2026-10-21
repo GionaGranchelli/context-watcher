@@ -33,6 +33,10 @@
   let selectedProjectFilter = $state<string>('ALL');
   let collapsedProjects = $state<Record<string, boolean>>({});
 
+  // Interactive hover states for Treemap & Attention Candles
+  let hoveredTreemapName = $state<string | null>(null);
+  let hoveredCandleNodeId = $state<string | null>(null);
+
   // Fold form state
   let foldStart = $state<number>(1);
   let foldEnd = $state<number>(2);
@@ -170,28 +174,192 @@
   });
 
   // Compute D3 Treemap layout from CategoryBreakdown
-  let treemapLeaves = $derived.by(() => {
+  let treemapCategories = $derived.by(() => {
     if (!latestTurn) return [];
     const cb = latestTurn.category_breakdown;
-    const data = {
-      name: 'root',
-      children: [
-        { name: 'MCP & Native Tools', value: cb.mcp_and_native_tools, color: '#6366f1' },
-        { name: 'System & Identity', value: cb.system_and_identity, color: '#0ea5e9' },
-        { name: 'Rules & Instructions', value: cb.rules_and_instructions, color: '#14b8a6' },
-        { name: 'Skills Catalog', value: cb.skills_catalog, color: '#8b5cf6' },
-        { name: 'File Reads (Fresh)', value: cb.file_reads_fresh, color: '#22c55e' },
-        { name: 'File Reads (Stale/Dup)', value: cb.file_reads_stale_or_duplicate, color: '#f97316' },
-        { name: 'Command Outputs', value: cb.command_outputs, color: '#eab308' },
-        { name: 'Assistant Thinking', value: cb.assistant_thinking, color: '#ec4899' },
-        { name: 'Conversation & Calls', value: cb.assistant_responses_and_calls + cb.user_prompts, color: '#3b82f6' },
-        { name: 'Pinned & Folded', value: cb.pinned_and_folded, color: '#10b981' }
-      ].filter((d) => d.value > 0)
-    };
+    const total = Math.max(
+      1,
+      cb.mcp_and_native_tools +
+        cb.system_and_identity +
+        cb.rules_and_instructions +
+        cb.skills_catalog +
+        cb.file_reads_fresh +
+        cb.file_reads_stale_or_duplicate +
+        cb.command_outputs +
+        cb.assistant_thinking +
+        cb.assistant_responses_and_calls +
+        cb.user_prompts +
+        cb.pinned_and_folded
+    );
+    return [
+      {
+        name: 'Conversation & Calls',
+        value: cb.assistant_responses_and_calls + cb.user_prompts,
+        color: '#3b82f6',
+        whatMatters: 'Keep recent turns; older debugging back-and-forth can be folded.',
+        canCut: 'Medium (Fold old turns)'
+      },
+      {
+        name: 'Command Outputs',
+        value: cb.command_outputs,
+        color: '#eab308',
+        whatMatters: 'Only the latest command output or error summary matters; old verbose logs/stack traces from past turns are prime candidates to cut!',
+        canCut: 'High (Safe to prune old logs)'
+      },
+      {
+        name: 'Assistant Thinking',
+        value: cb.assistant_thinking,
+        color: '#ec4899',
+        whatMatters: 'Internal model reasoning helped produce past answers, but old thinking blocks from earlier turns rarely help future turns.',
+        canCut: 'High (Safe to prune old thoughts)'
+      },
+      {
+        name: 'File Reads (Fresh)',
+        value: cb.file_reads_fresh,
+        color: '#22c55e',
+        whatMatters: 'Latest code state of files the agent is actively working on. Keep these unless you moved to an unrelated task.',
+        canCut: 'Low (Keep active files)'
+      },
+      {
+        name: 'File Reads (Stale/Dup)',
+        value: cb.file_reads_stale_or_duplicate,
+        color: '#f97316',
+        whatMatters: 'Outdated or duplicate file contents that were superseded by later edits or re-reads. Keeping them confuses the model!',
+        canCut: '100% Safe to Cut (Shadow-Dedupe)'
+      },
+      {
+        name: 'MCP & Native Tools',
+        value: cb.mcp_and_native_tools,
+        color: '#6366f1',
+        whatMatters: 'JSON schemas for tools. Gate off MCP servers you are not using in this session.',
+        canCut: 'High (Gate unused MCP tools)'
+      },
+      {
+        name: 'Rules & Instructions',
+        value: cb.rules_and_instructions,
+        color: '#14b8a6',
+        whatMatters: 'Project guidelines (AGENTS.md, CLAUDE.md, user rules). Essential for coding standards—pin if attention drops.',
+        canCut: 'Keep (Core instructions)'
+      },
+      {
+        name: 'System & Identity',
+        value: cb.system_and_identity,
+        color: '#0ea5e9',
+        whatMatters: 'Base harness system prompt and identity instructions.',
+        canCut: 'Keep (System core)'
+      },
+      {
+        name: 'Skills Catalog',
+        value: cb.skills_catalog,
+        color: '#8b5cf6',
+        whatMatters: 'Descriptions of available agent skills.',
+        canCut: 'Low'
+      },
+      {
+        name: 'Pinned & Folded',
+        value: cb.pinned_and_folded,
+        color: '#10b981',
+        whatMatters: 'Compact summaries of folded turns and high-attention tail reminders.',
+        canCut: 'Keep (Already optimized)'
+      }
+    ]
+      .filter((d) => d.value > 0)
+      .map((d) => ({
+        ...d,
+        pct: ((d.value / total) * 100).toFixed(1)
+      }))
+      .sort((a, b) => b.value - a.value);
+  });
+
+  let treemapLeaves = $derived.by(() => {
+    if (treemapCategories.length === 0) return [];
+    const data = { name: 'root', children: treemapCategories };
     const root = hierarchy<any>(data).sum((d: any) => d.value || 0).sort((a, b) => (b.value || 0) - (a.value || 0));
-    const layout = treemap<any>().size([740, 320]).paddingInner(4).paddingOuter(4);
+    const layout = treemap<any>().size([520, 300]).paddingInner(4).paddingOuter(4);
     return layout(root).leaves();
   });
+
+  let activeCandleNode = $derived<ContextNode | null>(
+    latestTurn?.nodes.find((n) => n.id === hoveredCandleNodeId) ?? selectedNode
+  );
+
+  // Smart Prune & Cut Advisor: evaluates every node in the context to tell the human what matters vs what can be cut
+  let pruneAdvisorItems = $derived.by(() => {
+    if (!latestTurn) return [];
+    const maxTurn = Math.max(1, ...latestTurn.nodes.map((n) => n.turn_seq || 1));
+    const staleNodeIds = new Set<string>();
+    for (const f of latestTurn.lint_findings) {
+      if (f.rule_id === 'CW-L001' || f.rule_id === 'CW-L002' || f.rule_id === 'CW-L003') {
+        for (const id of f.affected_node_ids) staleNodeIds.add(id);
+      }
+    }
+
+    const items: {
+      node: ContextNode;
+      label: string;
+      preview: string;
+      tokens: number;
+      verdict: 'cut_recommended' | 'can_compact' | 'keep';
+      verdictBadge: string;
+      reason: string;
+    }[] = [];
+
+    for (const n of latestTurn.nodes) {
+      const k = n.kind.kind;
+      const tok = n.token_span.count;
+      const text = nodeDisplayText(n);
+      if (text.startsWith('[cw:pruned') || text.startsWith('[cw:shadow_deduped') || text.startsWith('[cw:folded')) {
+        continue;
+      }
+
+      if (staleNodeIds.has(n.id)) {
+        items.push({
+          node: n,
+          label: humanToolActionLabel(n),
+          preview: text.slice(0, 140),
+          tokens: tok,
+          verdict: 'cut_recommended',
+          verdictBadge: '🔴 Safe to Cut (Stale / Bloated)',
+          reason: 'Outdated or duplicate file read / oversized tool output. Cutting this prevents model confusion and saves tokens immediately.'
+        });
+      } else if (k === 'tool_result' && (n.turn_seq < maxTurn || tok > 120)) {
+        items.push({
+          node: n,
+          label: humanToolActionLabel(n),
+          preview: text.slice(0, 140),
+          tokens: tok,
+          verdict: n.turn_seq < maxTurn ? 'cut_recommended' : 'can_compact',
+          verdictBadge: n.turn_seq < maxTurn ? '🟠 Old Tool Output (Safe to Cut)' : '🟡 Latest Tool Output (Can Compact)',
+          reason:
+            n.turn_seq < maxTurn
+              ? `From earlier Turn #${n.turn_seq} ( model already acted on this output). Safe to replace with a 1-line stub.`
+              : 'From the latest turn. Keep if the model still needs to read these details, or prune if it is noisy log output.'
+        });
+      } else if (k === 'assistant_thinking' && (n.turn_seq < maxTurn || tok > 80)) {
+        items.push({
+          node: n,
+          label: `🧠 Assistant Thinking (Turn #${n.turn_seq})`,
+          preview: text.slice(0, 140),
+          tokens: tok,
+          verdict: 'can_compact',
+          verdictBadge: '🟠 Old Reasoning (Safe to Cut)',
+          reason: `Internal reasoning block from Turn #${n.turn_seq}. Once the assistant has taken its action, raw thinking blocks can be pruned.`
+        });
+      }
+    }
+
+    return items.sort((a, b) => {
+      if (a.verdict === 'cut_recommended' && b.verdict !== 'cut_recommended') return -1;
+      if (b.verdict === 'cut_recommended' && a.verdict !== 'cut_recommended') return 1;
+      return b.tokens - a.tokens;
+    });
+  });
+
+  let totalSafeToCutTokens = $derived(
+    pruneAdvisorItems
+      .filter((i) => i.verdict === 'cut_recommended' || i.verdict === 'can_compact')
+      .reduce((acc, i) => acc + Math.max(0, i.tokens - 12), 0)
+  );
 
   let mcpToolsList = $derived.by(() => {
     if (!latestTurn) return [];
@@ -268,6 +436,29 @@
     if (!activeSessionId) return;
     await fetch(`/api/v1/sessions/${activeSessionId}/optimize`, { method: 'POST' });
     statusBanner = 'Applied 1-Click Context Optimization (Shadow-Dedupe + Prefix Normalization + Loop Folding).';
+    await fetchSessionGraph(activeSessionId);
+  }
+
+  async function bulkCutSafeItems() {
+    if (!activeSessionId) return;
+    const toCut = pruneAdvisorItems.filter((i) => i.verdict === 'cut_recommended' || i.verdict === 'can_compact');
+    for (const item of toCut) {
+      await fetch(`/api/v1/sessions/${activeSessionId}/mutations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          op: {
+            op: 'prune_or_stub',
+            target_fingerprint: item.node.fingerprint,
+            target_call_id: null,
+            target_json_pointer: item.node.raw_json_pointer,
+            stub_text: `[cw:pruned original_tokens=${item.tokens} label="${item.label}"]`
+          },
+          status: 'committed'
+        })
+      });
+    }
+    statusBanner = `Cut ${toCut.length} prunable tool outputs & old thoughts (saved ~${totalSafeToCutTokens.toLocaleString()} tokens).`;
     await fetchSessionGraph(activeSessionId);
   }
 
@@ -840,46 +1031,129 @@
             {/each}
           </div>
         {:else if activeTab === 'treemap'}
+          <!-- 1. Proportional Token Treemap + Complete Legend Table -->
           <div style="display: flex; align-items: center; margin-bottom: 8px;">
-            <h3 style="margin: 0; font-size: 15px;">Proportional Token Treemap (d3-hierarchy)</h3>
-            <HelpTip text="Sizes each rectangle proportionally to how many tokens that category consumes in the current context window. Helps you immediately spot if MCP Tool Schemas or Stale File Reads are dominating your budget." />
+            <h3 style="margin: 0; font-size: 15px;">1. Proportional Token Treemap & Full Category Legend</h3>
+            <HelpTip text="Every rectangle is sized by token count. Smaller blocks that cannot fit text inside the rectangle are listed in the complete color-coded legend right next to the chart—hover any block or row to see what it contains and whether it can be cut." />
           </div>
-          <svg width="740" height="320" style="background: #111827; border-radius: 8px; border: 1px solid #1f2937; max-width: 100%;">
-            {#each treemapLeaves as leaf}
-              <g transform="translate({leaf.x0},{leaf.y0})">
-                <rect
-                  width={Math.max(0, leaf.x1 - leaf.x0)}
-                  height={Math.max(0, leaf.y1 - leaf.y0)}
-                  fill={leaf.data.color}
-                  rx="4"
-                  opacity="0.85"
-                />
-                {#if leaf.x1 - leaf.x0 > 70 && leaf.y1 - leaf.y0 > 32}
-                  <text x="8" y="18" fill="#ffffff" font-size="12" font-weight="bold">{leaf.data.name}</text>
-                  <text x="8" y="34" fill="#e2e8f0" font-size="11">{leaf.value?.toLocaleString()} tok</text>
-                {/if}
-              </g>
-            {/each}
-          </svg>
 
-          <div style="display: flex; align-items: center; margin-top: 22px; margin-bottom: 8px;">
-            <h3 style="margin: 0; font-size: 15px;">KV Cache Prefix Tape & "Lost in the Middle" Attention Curve</h3>
-            <HelpTip text="LLMs pay the strongest attention to the very beginning (System Prompt) and very end (Recency Tail) of the context window. Instructions in the middle trough (<40% salience, shown in orange) are much more likely to be forgotten unless Pinned to the tail." />
+          <div style="display: grid; grid-template-columns: 520px 1fr; gap: 14px; align-items: start;">
+            <svg width="520" height="300" style="background: #111827; border-radius: 8px; border: 1px solid #1f2937; max-width: 100%;">
+              {#each treemapLeaves as leaf}
+                <g
+                  role="button"
+                  tabindex="0"
+                  transform="translate({leaf.x0},{leaf.y0})"
+                  onmouseenter={() => (hoveredTreemapName = leaf.data.name)}
+                  onmouseleave={() => (hoveredTreemapName = null)}
+                  onclick={() => (hoveredTreemapName = leaf.data.name)}
+                  onkeydown={(e) => e.key === 'Enter' && (hoveredTreemapName = leaf.data.name)}
+                  style="cursor: pointer;"
+                >
+                  <rect
+                    width={Math.max(0, leaf.x1 - leaf.x0)}
+                    height={Math.max(0, leaf.y1 - leaf.y0)}
+                    fill={leaf.data.color}
+                    stroke={hoveredTreemapName === leaf.data.name ? '#ffffff' : '#0b0f19'}
+                    stroke-width={hoveredTreemapName === leaf.data.name ? '2.5' : '1'}
+                    rx="4"
+                    opacity={hoveredTreemapName && hoveredTreemapName !== leaf.data.name ? '0.5' : '0.9'}
+                  />
+                  {#if leaf.x1 - leaf.x0 > 65 && leaf.y1 - leaf.y0 > 30}
+                    <text x="7" y="17" fill="#ffffff" font-size="11.5" font-weight="bold">{leaf.data.name}</text>
+                    <text x="7" y="32" fill="#f1f5f9" font-size="10.5">{leaf.value?.toLocaleString()} tok ({leaf.data.pct}%)</text>
+                  {/if}
+                </g>
+              {/each}
+            </svg>
+
+            <!-- Complete Legend Table (Shows 100% of blocks including small unlabeled ones!) -->
+            <div style="background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="font-size: 11.5px; font-weight: 700; color: #94a3b8; border-bottom: 1px solid #1f2937; padding-bottom: 5px;">
+                All Context Blocks (Hover to inspect what matters vs. what to cut)
+              </div>
+              {#each treemapCategories as cat}
+                <div
+                  role="button"
+                  tabindex="0"
+                  onmouseenter={() => (hoveredTreemapName = cat.name)}
+                  onmouseleave={() => (hoveredTreemapName = null)}
+                  onclick={() => (hoveredTreemapName = cat.name)}
+                  onkeydown={(e) => e.key === 'Enter' && (hoveredTreemapName = cat.name)}
+                  style="padding: 6px 8px; border-radius: 6px; background: {hoveredTreemapName === cat.name ? '#1e293b' : '#0b0f19'}; border-left: 4px solid {cat.color}; cursor: pointer; font-size: 12px;"
+                >
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong style="color: #f8fafc;">{cat.name}</strong>
+                    <span style="color: #38bdf8; font-weight: 700;">{cat.value.toLocaleString()} tok ({cat.pct}%)</span>
+                  </div>
+                  <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                    {cat.whatMatters}
+                  </div>
+                  <div style="font-size: 10.5px; color: #fbbf24; margin-top: 2px;">
+                    ✂️ Prunability: {cat.canCut}
+                  </div>
+                </div>
+              {/each}
+            </div>
           </div>
+
+          <!-- 2. Interactive KV Cache Prefix Tape & "Lost in the Middle" Attention Candles -->
+          <div style="display: flex; align-items: center; margin-top: 22px; margin-bottom: 8px;">
+            <h3 style="margin: 0; font-size: 15px;">2. Interactive KV Cache Tape & "Lost in the Middle" Attention Candles</h3>
+            <HelpTip text="Hover over ANY candle bar or KV tape segment below to see an instant X-Ray card of what message, file read, or command output is inside that candle, its exact attention score, and a 1-click button to Prune or Pin it!" />
+          </div>
+
           <div style="background: #111827; padding: 14px; border-radius: 8px; border: 1px solid #1f2937;">
-            <div style="display: flex; height: 26px; border-radius: 6px; overflow: hidden; margin-bottom: 12px;">
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">
+              <strong>KV Cache Prefix Tape</strong> (Green = Cached Hit, Yellow = Newly Written, Red = Cache Invalidated) — <em>Hover any segment:</em>
+            </div>
+            <div style="display: flex; height: 24px; border-radius: 6px; overflow: hidden; margin-bottom: 14px;">
               {#each latestTurn.nodes as n}
                 <div
-                  title="{n.id}: {n.token_span.count} tok ({n.kv_status}) | Attention: {(n.attention_salience * 100).toFixed(0)}%"
-                  style="flex: {n.token_span.count}; background: {kvColor(n.kv_status)}; border-right: 1px solid #0b0f19;"
+                  role="button"
+                  tabindex="0"
+                  onmouseenter={() => {
+                    hoveredCandleNodeId = n.id;
+                    selectedNodeId = n.id;
+                  }}
+                  onclick={() => {
+                    hoveredCandleNodeId = n.id;
+                    selectedNodeId = n.id;
+                  }}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') {
+                      hoveredCandleNodeId = n.id;
+                      selectedNodeId = n.id;
+                    }
+                  }}
+                  style="flex: {Math.max(1, n.token_span.count)}; background: {kvColor(n.kv_status)}; border-right: 1px solid #0b0f19; opacity: {activeCandleNode?.id === n.id ? '1' : '0.78'}; outline: {activeCandleNode?.id === n.id ? '2px solid #ffffff' : 'none'}; cursor: pointer;"
                 ></div>
               {/each}
             </div>
-            <div style="display: flex; align-items: flex-end; height: 68px; gap: 2px; border-bottom: 1px solid #334155;">
+
+            <div style="font-size: 11px; color: #94a3b8; margin-bottom: 4px;">
+              <strong>Positional Attention Salience Candles</strong> (Blue = High Attention Zone, Orange = Middle Dead Zone &lt;40%) — <em>Hover any candle:</em>
+            </div>
+            <div style="display: flex; align-items: flex-end; height: 78px; gap: 3px; border-bottom: 1px solid #334155; padding-top: 6px;">
               {#each latestTurn.nodes as n}
                 <div
-                  title="Attention Salience: {(n.attention_salience * 100).toFixed(0)}%"
-                  style="flex: 1; height: {Math.round(n.attention_salience * 65)}px; background: {n.attention_salience < 0.4 ? '#f97316' : '#38bdf8'}; border-radius: 2px 2px 0 0;"
+                  role="button"
+                  tabindex="0"
+                  onmouseenter={() => {
+                    hoveredCandleNodeId = n.id;
+                    selectedNodeId = n.id;
+                  }}
+                  onclick={() => {
+                    hoveredCandleNodeId = n.id;
+                    selectedNodeId = n.id;
+                  }}
+                  onkeydown={(e) => {
+                    if (e.key === 'Enter') {
+                      hoveredCandleNodeId = n.id;
+                      selectedNodeId = n.id;
+                    }
+                  }}
+                  style="flex: 1; height: {Math.max(8, Math.round(n.attention_salience * 72))}px; background: {activeCandleNode?.id === n.id ? '#ffffff' : n.attention_salience < 0.4 ? '#f97316' : '#38bdf8'}; border-radius: 3px 3px 0 0; cursor: pointer; transition: background 0.1s;"
                 ></div>
               {/each}
             </div>
@@ -888,7 +1162,137 @@
               <span>Middle Trough (Attention Dead Zone &lt; 40%)</span>
               <span>Token {latestTurn.token_usage.input_tokens} (Recency Tail — Highest Attention)</span>
             </div>
+
+            <!-- Live Hovered Candle X-Ray Card -->
+            {#if activeCandleNode}
+              <div style="margin-top: 12px; padding: 11px 14px; border-radius: 8px; background: #0f172a; border: 1px solid #38bdf8; display: flex; justify-content: space-between; align-items: flex-start; gap: 14px;">
+                <div style="flex: 1; overflow: hidden;">
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px;">
+                    <span style="background: #1e3a8a; color: #93c5fd; font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px;">
+                      Turn #{activeCandleNode.turn_seq}
+                    </span>
+                    <strong style="font-size: 13px; color: #f8fafc;">{humanToolActionLabel(activeCandleNode)}</strong>
+                    <span style="font-size: 11.5px; color: #38bdf8; font-weight: 700;">
+                      {activeCandleNode.token_span.count.toLocaleString()} tok (span {activeCandleNode.token_span.start}..{activeCandleNode.token_span.end})
+                    </span>
+                    <span style="font-size: 11.5px; padding: 2px 7px; border-radius: 999px; background: {activeCandleNode.attention_salience < 0.4 ? '#7c2d12' : '#064e3b'}; color: {activeCandleNode.attention_salience < 0.4 ? '#fed7aa' : '#6ee7b7'};">
+                      Attention: {(activeCandleNode.attention_salience * 100).toFixed(0)}% {activeCandleNode.attention_salience < 0.4 ? '(⚠️ Low Attention Trough)' : '(🔥 Strong Attention)'}
+                    </span>
+                  </div>
+                  <div style="font-size: 12px; color: #cbd5e1; white-space: pre-wrap; max-height: 64px; overflow: hidden; text-overflow: ellipsis; background: #0b0f19; padding: 6px 8px; border-radius: 4px; border: 1px solid #1e293b;">
+                    {nodeDisplayText(activeCandleNode).slice(0, 260)}
+                  </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;">
+                  <button
+                    onclick={() =>
+                      applyMutation(
+                        {
+                          op: 'prune_or_stub',
+                          target_fingerprint: activeCandleNode!.fingerprint,
+                          target_call_id: null,
+                          target_json_pointer: activeCandleNode!.raw_json_pointer,
+                          stub_text: `[cw:pruned original_tokens=${activeCandleNode!.token_span.count}]`
+                        },
+                        'committed',
+                        `Cut node ${activeCandleNode!.id} (-${activeCandleNode!.token_span.count} tok)`
+                      )}
+                    style="background: #dc2626; color: white; border: none; border-radius: 5px; padding: 5px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer;"
+                  >
+                    ✂️ Cut This Node (-{activeCandleNode.token_span.count} tok)
+                  </button>
+                  <button
+                    onclick={() =>
+                      applyMutation(
+                        {
+                          op: 'pin_context',
+                          label: humanToolActionLabel(activeCandleNode!),
+                          content: nodeDisplayText(activeCandleNode!).slice(0, 180),
+                          source_node_id: activeCandleNode!.id
+                        },
+                        'committed',
+                        `Pinned ${activeCandleNode!.id} to high-attention tail`
+                      )}
+                    style="background: #059669; color: white; border: none; border-radius: 5px; padding: 5px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer;"
+                  >
+                    📌 Pin to Tail (Boost Attention)
+                  </button>
+                </div>
+              </div>
+            {/if}
           </div>
+
+          <!-- 3. Smart "What Can We Cut?" Prunability & Importance Advisor -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 22px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center;">
+              <h3 style="margin: 0; font-size: 15px;">3. ✂️ What Can We Cut? (Tool Output & Context Prunability Advisor)</h3>
+              <HelpTip text="Automatically scans all tool call outputs, file reads, and thinking blocks in the session to tell you what actually matters vs. what is safe to cut right now." />
+            </div>
+
+            {#if pruneAdvisorItems.length > 0}
+              <div style="display: flex; align-items: center;">
+                <button
+                  onclick={bulkCutSafeItems}
+                  style="background: #dc2626; color: white; border: none; border-radius: 6px; padding: 7px 14px; font-size: 12.5px; font-weight: 700; cursor: pointer;"
+                >
+                  ⚡ Cut All {pruneAdvisorItems.length} Prunable Items (Save ~{totalSafeToCutTokens.toLocaleString()} tok)
+                </button>
+                <HelpTip position="left" text="Replaces all stale file reads, old turn command outputs, and old thinking blocks listed below with compact 1-line stubs in a single click." />
+              </div>
+            {/if}
+          </div>
+
+          {#if pruneAdvisorItems.length === 0}
+            <div style="background: #064e3b; color: #a7f3d0; padding: 12px 14px; border-radius: 8px; font-size: 12.5px;">
+              ✅ Your context is super clean! No bloated tool outputs or redundant old blocks left to cut.
+            </div>
+          {:else}
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              {#each pruneAdvisorItems as item}
+                <div style="background: #111827; border: 1px solid #1f2937; border-left: 4px solid {item.verdict === 'cut_recommended' ? '#ef4444' : '#f59e0b'}; border-radius: 8px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; gap: 14px;">
+                  <div style="flex: 1; overflow: hidden;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                      <span style="font-size: 11px; padding: 2px 7px; border-radius: 4px; background: #1e293b; color: #f8fafc; font-weight: 700;">
+                        Turn #{item.node.turn_seq}
+                      </span>
+                      <span style="font-size: 11px; padding: 2px 7px; border-radius: 999px; background: {item.verdict === 'cut_recommended' ? '#7f1d1d' : '#78350f'}; color: #fde68a; font-weight: 600;">
+                        {item.verdictBadge}
+                      </span>
+                      <strong style="font-size: 12.5px; color: #f8fafc;">{item.label}</strong>
+                      <span style="font-size: 12px; color: #38bdf8; font-weight: 700;">{item.tokens.toLocaleString()} tok</span>
+                    </div>
+                    <div style="font-size: 11.5px; color: #94a3b8; margin-top: 4px;">
+                      💡 <strong>Why you can cut this:</strong> {item.reason}
+                    </div>
+                    <div style="font-size: 11px; color: #64748b; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                      Preview: <code>{item.preview}</code>
+                    </div>
+                  </div>
+
+                  <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+                    <button
+                      onclick={() =>
+                        applyMutation(
+                          {
+                            op: 'prune_or_stub',
+                            target_fingerprint: item.node.fingerprint,
+                            target_call_id: null,
+                            target_json_pointer: item.node.raw_json_pointer,
+                            stub_text: `[cw:pruned original_tokens=${item.tokens} label="${item.label}"]`
+                          },
+                          'committed',
+                          `Cut ${item.label} (saved ~${item.tokens} tok)`
+                        )}
+                      style="background: #dc2626; color: white; border: none; border-radius: 5px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;"
+                    >
+                      ✂️ Cut (-{item.tokens} tok)
+                    </button>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
         {:else if activeTab === 'tools'}
           <div style="display: flex; align-items: center; margin-bottom: 10px;">
             <h3 style="margin: 0; font-size: 15px;">Dynamic MCP Tool & Schema Gate</h3>

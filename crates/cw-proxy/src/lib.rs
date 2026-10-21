@@ -19,6 +19,7 @@ use cw_core::{
     },
     mutation::{apply_mutations_to_payload, estimate_mutation_impact, evaluate_firewall},
     normalizer::detect_provider,
+    optimizer::{OptimizationStrategyPlan, build_optimization_plans},
     radix::{RadixGraph, build_radix_graph},
 };
 use cw_store::CwStore;
@@ -615,6 +616,7 @@ struct SessionGraphResponse {
     radix_graph: RadixGraph,
     mutations: Vec<MutationRule>,
     file_states: Vec<FileContextState>,
+    optimization_plans: Vec<OptimizationStrategyPlan>,
 }
 
 async fn api_get_session_graph(
@@ -628,6 +630,10 @@ async fn api_get_session_graph(
         Some(lt) => build_radix_graph(lt, &turns),
         None => RadixGraph::default(),
     };
+    let optimization_plans = match &latest_turn {
+        Some(lt) => build_optimization_plans(lt),
+        None => Vec::new(),
+    };
     let mutations = state.store.list_mutations(&id).unwrap_or_default();
     let file_states = state.store.get_file_states(&id).unwrap_or_default();
 
@@ -638,6 +644,7 @@ async fn api_get_session_graph(
         radix_graph,
         mutations,
         file_states,
+        optimization_plans,
     })
 }
 
@@ -749,27 +756,63 @@ async fn api_delete_mutation(
     Json(json!({ "deleted": deleted }))
 }
 
-/// 1-Click Context Optimizer: commits `ShadowDedupe` + `NormalizePrefix` and folds any detected failed debugging loops.
+#[derive(Deserialize, Default)]
+struct OptimizeRequest {
+    strategy_id: Option<String>,
+    selected_item_ids: Option<Vec<String>>,
+    status: Option<MutationStatus>,
+}
+
+/// Applies either a specific `OptimizationStrategyPlan` (filtered by `selected_item_ids` checkboxes)
+/// or all active lint suggestions if called without a body.
 async fn api_auto_optimize(
     State(state): State<DaemonState>,
     Path(id): Path<String>,
+    body: Bytes,
 ) -> impl IntoResponse {
+    let req: OptimizeRequest = serde_json::from_slice(&body).unwrap_or_default();
+    let target_status = req.status.unwrap_or(MutationStatus::Committed);
     let mut created = Vec::new();
+
     if let Ok(Some(latest)) = state.store.get_latest_turn(&id) {
-        for finding in &latest.lint_findings {
-            if let Some(op) = &finding.suggested_mutation {
-                let (saved, kv_break) = estimate_mutation_impact(op, &latest.nodes);
-                let rule = MutationRule {
-                    id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
-                    session_id: id.clone(),
-                    op: op.clone(),
-                    status: MutationStatus::Committed,
-                    estimated_saved_tokens: saved,
-                    estimated_kv_break_tokens: kv_break,
-                    created_at: Utc::now(),
-                };
-                let _ = state.store.save_mutation(&rule);
-                created.push(rule);
+        if let Some(strat_id) = req.strategy_id {
+            let plans = build_optimization_plans(&latest);
+            if let Some(plan) = plans.into_iter().find(|p| p.id == strat_id) {
+                for item in plan.items {
+                    if let Some(ref allowed) = req.selected_item_ids
+                        && !allowed.contains(&item.item_id)
+                    {
+                        continue;
+                    }
+                    let rule = MutationRule {
+                        id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
+                        session_id: id.clone(),
+                        op: item.mutation_op,
+                        status: target_status,
+                        estimated_saved_tokens: item.saved_tokens,
+                        estimated_kv_break_tokens: item.kv_break_tokens,
+                        created_at: Utc::now(),
+                    };
+                    let _ = state.store.save_mutation(&rule);
+                    created.push(rule);
+                }
+            }
+        } else {
+            for finding in &latest.lint_findings {
+                if let Some(op) = &finding.suggested_mutation {
+                    let (saved, kv_break) = estimate_mutation_impact(op, &latest.nodes);
+                    let rule = MutationRule {
+                        id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
+                        session_id: id.clone(),
+                        op: op.clone(),
+                        status: target_status,
+                        estimated_saved_tokens: saved,
+                        estimated_kv_break_tokens: kv_break,
+                        created_at: Utc::now(),
+                    };
+                    let _ = state.store.save_mutation(&rule);
+                    created.push(rule);
+                }
             }
         }
     }

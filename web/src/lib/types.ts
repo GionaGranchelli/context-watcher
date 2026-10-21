@@ -132,3 +132,39 @@ export interface PendingInterceptInfo {
   rule_name: string;
   payload_preview: any;
 }
+
+export interface OptimizationCandidateItem {
+  item_id: string;
+  node_id: string | null;
+  turn_seq: number;
+  timestamp: string | null;
+  title: string;
+  action_kind: string;
+  what_we_do: string;
+  why_it_matters: string;
+  content_preview: string;
+  tokens_before: number;
+  tokens_after: number;
+  saved_tokens: number;
+  kv_break_tokens: number;
+  mutation_op: Record<string, any>;
+}
+
+export interface OptimizationStrategyPlan {
+  id: string;
+  name: string;
+  tagline: string;
+  kv_badge: string;
+  what_and_how: string;
+  expected_quality_impact: string;
+  tokens_before: number;
+  tokens_after: number;
+  saved_tokens: number;
+  saved_pct: number;
+  kv_cache_break_tokens: number;
+  break_even_turns: number;
+  health_score_before: number;
+  health_score_after: number;
+  items: OptimizationCandidateItem[];
+}
+

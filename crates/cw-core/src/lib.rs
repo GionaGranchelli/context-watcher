@@ -2,6 +2,7 @@ pub mod ir;
 pub mod linter;
 pub mod mutation;
 pub mod normalizer;
+pub mod optimizer;
 pub mod radix;
 pub mod tokenizer;
 

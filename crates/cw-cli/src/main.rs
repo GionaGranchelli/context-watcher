@@ -7,6 +7,7 @@ use axum::{
 use clap::{Parser, Subcommand};
 use cw_core::{
     ir::{HarnessKind, KvNodeStatus, MutationOp, MutationRule, MutationStatus},
+    optimizer::build_optimization_plans,
     radix::build_radix_graph,
 };
 use cw_harnesses::{
@@ -79,6 +80,23 @@ enum Commands {
         /// Automatically apply suggested mutations for all findings
         #[arg(long)]
         fix: bool,
+    },
+    /// Interactive Optimization & Cut Studio: preview or apply the 5 context optimization strategies
+    Optimize {
+        /// Strategy ID: cache_safe_boost | clean_code_state | surgical_log_diet | deep_trajectory_fold | max_token_diet
+        #[arg(long, short = 's')]
+        strategy: Option<String>,
+        /// Only show the Before -> After simulation without applying mutations
+        #[arg(long)]
+        dry_run: bool,
+        /// Show detailed per-node explanations (What we do & Why it matters)
+        #[arg(long)]
+        explain: bool,
+        /// Stage optimizations into the Cache-Safe Draft Queue instead of committing immediately
+        #[arg(long)]
+        draft: bool,
+        #[arg(long)]
+        session: Option<String>,
     },
     /// Fold a range of turns into a single concise outcome summary
     Fold {
@@ -310,6 +328,114 @@ async fn main() -> Result<()> {
                         println!("    ✓ Applied suggested fix: {:?}", op);
                     }
             }
+        }
+        Commands::Optimize {
+            strategy,
+            dry_run,
+            explain,
+            draft,
+            session,
+        } => {
+            let store = CwStore::open(&db_path)?;
+            let Some(sess_id) = resolve_session(&store, session)? else {
+                println!("No active sessions found.");
+                return Ok(());
+            };
+            let Some(turn) = store.get_latest_turn(&sess_id)? else {
+                println!("No turns recorded for session {sess_id}.");
+                return Ok(());
+            };
+            let plans = build_optimization_plans(&turn);
+
+            if strategy.is_none() || dry_run {
+                println!("┌──────────────────────────────────────────────────────────────────────────────────────────┐");
+                println!("│ ⚡ contextWatcher Optimization & Cut Studio — Session: {sess_id:<33} │");
+                println!("│    Current Context: {} tok | Health Score: {}/100 | Active Lints: {}                     │",
+                    turn.token_usage.input_tokens, turn.health_score, turn.lint_findings.len());
+                println!("└──────────────────────────────────────────────────────────────────────────────────────────┘");
+
+                for p in &plans {
+                    if let Some(ref filter) = strategy
+                        && p.id != *filter {
+                            continue;
+                        }
+                    println!("\n{}  [id: {}]", p.name, p.id);
+                    println!("  • Tagline         : {}", p.tagline);
+                    println!("  • What & How      : {}", p.what_and_how);
+                    println!("  • Expected Impact : {}", p.expected_quality_impact);
+                    println!(
+                        "  • Expected Results: {} -> {} tok (-{} tok / -{:.1}%) | Health: {}/100 -> {}/100",
+                        p.tokens_before,
+                        p.tokens_after,
+                        p.saved_tokens,
+                        p.saved_pct,
+                        p.health_score_before,
+                        p.health_score_after
+                    );
+                    println!(
+                        "  • KV Cache Impact : {} ({} break-even turns) | {} candidate operations",
+                        p.kv_badge,
+                        p.break_even_turns,
+                        p.items.len()
+                    );
+
+                    if explain || strategy.is_some() {
+                        for item in &p.items {
+                            println!(
+                                "      - [T{}] {} ({} -> {} tok, -{} tok)",
+                                item.turn_seq,
+                                item.title,
+                                item.tokens_before,
+                                item.tokens_after,
+                                item.saved_tokens.max(0)
+                            );
+                            println!("        What we do    : {}", item.what_we_do);
+                            println!("        Why it matters: {}", item.why_it_matters);
+                        }
+                    }
+                }
+
+                if strategy.is_none() {
+                    println!("\n💡 Tip: Run `cw optimize --strategy <id>` to apply a strategy, or add `--explain` to inspect every node.");
+                    return Ok(());
+                }
+            }
+
+            if !dry_run
+                && let Some(strat_id) = strategy {
+                    let Some(plan) = plans.iter().find(|p| p.id == strat_id) else {
+                        anyhow::bail!(
+                            "Unknown strategy '{}'. Valid IDs: cache_safe_boost, clean_code_state, surgical_log_diet, deep_trajectory_fold, max_token_diet",
+                            strat_id
+                        );
+                    };
+                    for item in &plan.items {
+                        let rule = MutationRule {
+                            id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
+                            session_id: sess_id.clone(),
+                            op: item.mutation_op.clone(),
+                            status: if draft {
+                                MutationStatus::Draft
+                            } else {
+                                MutationStatus::Committed
+                            },
+                            estimated_saved_tokens: item.saved_tokens.max(0),
+                            estimated_kv_break_tokens: item.kv_break_tokens,
+                            created_at: chrono::Utc::now(),
+                        };
+                        store.save_mutation(&rule)?;
+                    }
+                    println!(
+                        "\n✅ {} {} optimization operations from '{}' on session {} (Est. saved: {} tok, Health: {} -> {}/100).",
+                        if draft { "Staged" } else { "Committed" },
+                        plan.items.len(),
+                        plan.name,
+                        sess_id,
+                        plan.saved_tokens,
+                        plan.health_score_before,
+                        plan.health_score_after
+                    );
+                }
         }
         Commands::Fold {
             start_turn,

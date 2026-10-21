@@ -4,7 +4,10 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use cw_core::ir::{ContextTurn, KvNodeStatus, MutationOp, MutationRule, Session};
+use cw_core::{
+    ir::{ContextTurn, KvNodeStatus, MutationOp, MutationRule, Session},
+    optimizer::{OptimizationStrategyPlan, build_optimization_plans},
+};
 use cw_store::CwStore;
 use ratatui::{
     Frame, Terminal,
@@ -23,6 +26,8 @@ pub struct TuiApp {
     session_idx: usize,
     latest_turn: Option<ContextTurn>,
     mutations: Vec<MutationRule>,
+    optimization_plans: Vec<OptimizationStrategyPlan>,
+    strategy_idx: Option<usize>,
     node_state: ListState,
     status_msg: String,
 }
@@ -35,8 +40,10 @@ impl TuiApp {
             session_idx: 0,
             latest_turn: None,
             mutations: Vec::new(),
+            optimization_plans: Vec::new(),
+            strategy_idx: None,
             node_state: ListState::default(),
-            status_msg: "Ready. Use ↑/↓ to navigate nodes, [p] Prune, [d] Dedupe, [f] Fold, [Space] Pin, [o] Optimize, [q] Quit".to_string(),
+            status_msg: "↑/↓ Nodes | [o] Optimization Studio (1-5) | [Enter] Apply Strategy | [p] Prune | [d] Dedupe | [f] Fold | [q] Quit".to_string(),
         };
         app.reload(initial_session.as_deref());
         app
@@ -54,12 +61,18 @@ impl TuiApp {
         if let Some(sess) = self.sessions.get(self.session_idx) {
             self.latest_turn = self.store.get_latest_turn(&sess.id).ok().flatten();
             self.mutations = self.store.list_mutations(&sess.id).unwrap_or_default();
+            self.optimization_plans = self
+                .latest_turn
+                .as_ref()
+                .map(build_optimization_plans)
+                .unwrap_or_default();
             if self.node_state.selected().is_none() {
                 self.node_state.select(Some(0));
             }
         } else {
             self.latest_turn = None;
             self.mutations.clear();
+            self.optimization_plans.clear();
         }
     }
 
@@ -185,13 +198,53 @@ pub fn run_tui(store: CwStore, session_id: Option<String>) -> Result<()> {
                                 }
                     }
                     KeyCode::Char('o') => {
-                        if let Some(turn) = app.latest_turn.clone() {
-                            for f in &turn.lint_findings {
-                                if let Some(op) = &f.suggested_mutation {
-                                    app.apply_op(op.clone(), &f.title);
+                        if !app.optimization_plans.is_empty() {
+                            app.strategy_idx = match app.strategy_idx {
+                                None => Some(0),
+                                Some(i) if i + 1 < app.optimization_plans.len() => Some(i + 1),
+                                Some(_) => None,
+                            };
+                            if let Some(i) = app.strategy_idx
+                                && let Some(plan) = app.optimization_plans.get(i) {
+                                    app.status_msg = format!(
+                                        "Optimization Studio [{}/{}]: {} — Press [Enter] to Apply ({} ops, -{} tok) or [o] for Next Strategy",
+                                        i + 1,
+                                        app.optimization_plans.len(),
+                                        plan.name,
+                                        plan.items.len(),
+                                        plan.saved_tokens
+                                    );
+                                } else {
+                                    app.status_msg = "Closed Optimization Studio. Press [o] to reopen or 1-5 to select a strategy.".to_string();
                                 }
-                            }
                         }
+                    }
+                    KeyCode::Char(c @ '1'..='5') => {
+                        let idx = (c as usize) - ('1' as usize);
+                        if idx < app.optimization_plans.len() {
+                            app.strategy_idx = Some(idx);
+                            let plan = &app.optimization_plans[idx];
+                            app.status_msg = format!(
+                                "Selected Strategy #{}: {} — Press [Enter] to Apply (-{} tok)",
+                                idx + 1,
+                                plan.name,
+                                plan.saved_tokens
+                            );
+                        }
+                    }
+                    KeyCode::Enter | KeyCode::Char('a') => {
+                        if let Some(idx) = app.strategy_idx
+                            && let Some(plan) = app.optimization_plans.get(idx).cloned() {
+                                for item in &plan.items {
+                                    app.apply_op(item.mutation_op.clone(), &item.title);
+                                }
+                                app.status_msg = format!(
+                                    "⚡ Applied '{}' ({} operations, saved ~{} tokens)!",
+                                    plan.name,
+                                    plan.items.len(),
+                                    plan.saved_tokens
+                                );
+                            }
                     }
                     _ => {}
                 }
@@ -317,33 +370,79 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(body_chunks[1]);
 
-    let inspector_text = if let Some(turn) = &app.latest_turn {
-        if let Some(sel) = app.node_state.selected().and_then(|i| turn.nodes.get(i)) {
+    let (inspector_title, inspector_text) = if let Some(idx) = app.strategy_idx
+        && let Some(plan) = app.optimization_plans.get(idx)
+    {
+        let mut ops_preview = String::new();
+        for (i, item) in plan.items.iter().take(6).enumerate() {
+            ops_preview.push_str(&format!(
+                "  {}. [T{}] {} ({} -> {} tok, -{} tok)\n     • What we do: {}\n",
+                i + 1,
+                item.turn_seq,
+                item.title,
+                item.tokens_before,
+                item.tokens_after,
+                item.saved_tokens.max(0),
+                item.what_we_do
+            ));
+        }
+        (
+            format!(" [2] ⚡ Optimization & Cut Studio ({}/{}) — Press [Enter] to Apply or [o]/[1-5] to Switch ", idx + 1, app.optimization_plans.len()),
             format!(
-                "Node ID: {}  |  Fingerprint: {}\nJSON Pointer: {}\nRole: {:?}  |  Tokens: {} ({}..{})  |  Attention Salience: {:.0}%\nKV Status: {:?}\n────────────────────────────────────────────────────────\n{}",
-                sel.id,
-                sel.fingerprint.0,
-                sel.raw_json_pointer,
-                sel.role,
-                sel.token_span.count,
-                sel.token_span.start,
-                sel.token_span.end,
-                sel.attention_salience * 100.0,
-                sel.kv_status,
-                sel.kind.text_for_tokenization()
+                "{}\nKV Cache Badge: {}\n\n📖 WHAT & HOW WE DO IT:\n{}\n\n🎯 EXPECTED QUALITY IMPACT:\n{}\n\n📊 EXPECTED RESULTS (DRY-RUN):\n• Tokens: {} -> {} tok (-{} tok / -{:.1}%)\n• Health Score: {}/100 -> {}/100\n• KV Cache Rebuild: {} tok (Break-even: ~{} turns)\n────────────────────────────────────────────────────────\nCANDIDATE OPERATIONS ({}):\n{}",
+                plan.name,
+                plan.kv_badge,
+                plan.what_and_how,
+                plan.expected_quality_impact,
+                plan.tokens_before,
+                plan.tokens_after,
+                plan.saved_tokens,
+                plan.saved_pct,
+                plan.health_score_before,
+                plan.health_score_after,
+                plan.kv_cache_break_tokens,
+                plan.break_even_turns,
+                plan.items.len(),
+                if ops_preview.is_empty() {
+                    "  ✓ Context is already fully optimized for this strategy!".to_string()
+                } else {
+                    ops_preview
+                }
+            ),
+        )
+    } else if let Some(turn) = &app.latest_turn {
+        if let Some(sel) = app.node_state.selected().and_then(|i| turn.nodes.get(i)) {
+            (
+                " [2] Node Inspector & Payload (Press [o] or [1-5] for Optimization Studio) ".to_string(),
+                format!(
+                    "Node ID: {}  |  Fingerprint: {}\nJSON Pointer: {}\nRole: {:?}  |  Tokens: {} ({}..{})  |  Attention Salience: {:.0}%\nKV Status: {:?}\n────────────────────────────────────────────────────────\n{}",
+                    sel.id,
+                    sel.fingerprint.0,
+                    sel.raw_json_pointer,
+                    sel.role,
+                    sel.token_span.count,
+                    sel.token_span.start,
+                    sel.token_span.end,
+                    sel.attention_salience * 100.0,
+                    sel.kv_status,
+                    sel.kind.text_for_tokenization()
+                ),
             )
         } else {
-            "Select a node on the left to inspect its payload.".to_string()
+            (
+                " [2] Node Inspector ".to_string(),
+                "Select a node on the left to inspect its payload.".to_string(),
+            )
         }
     } else {
-        "No turn loaded.".to_string()
+        (" [2] Node Inspector ".to_string(), "No turn loaded.".to_string())
     };
 
     let inspector = Paragraph::new(inspector_text)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" [2] Node Inspector & Payload "),
+                .title(inspector_title),
         )
         .wrap(Wrap { trim: false });
     f.render_widget(inspector, right_chunks[0]);

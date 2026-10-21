@@ -9,7 +9,8 @@
     RadixGraphEdge,
     MutationRule,
     FileContextState,
-    PendingInterceptInfo
+    PendingInterceptInfo,
+    OptimizationStrategyPlan
   } from './lib/types';
 
   let sessions = $state<Session[]>([]);
@@ -21,8 +22,11 @@
   let mutations = $state<MutationRule[]>([]);
   let fileStates = $state<FileContextState[]>([]);
   let intercepts = $state<PendingInterceptInfo[]>([]);
+  let optimizationPlans = $state<OptimizationStrategyPlan[]>([]);
+  let selectedStrategyId = $state<string>('max_token_diet');
+  let uncheckedItemIds = $state<Record<string, boolean>>({});
 
-  let activeTab = $state<'story' | 'radix' | 'treemap' | 'tools' | 'replay'>('story');
+  let activeTab = $state<'story' | 'optimize' | 'radix' | 'treemap' | 'tools' | 'replay'>('story');
   let selectedNodeId = $state<string | null>(null);
   let wsConnected = $state<boolean>(false);
   let statusBanner = $state<string>('');
@@ -374,6 +378,52 @@
       }));
   });
 
+  let activeStrategyPlan = $derived<OptimizationStrategyPlan | null>(
+    optimizationPlans.find((p) => p.id === selectedStrategyId) ?? optimizationPlans[0] ?? null
+  );
+
+  let checkedStrategyItems = $derived.by(() => {
+    if (!activeStrategyPlan) return [];
+    return activeStrategyPlan.items.filter((i) => !uncheckedItemIds[i.item_id]);
+  });
+
+  let liveStrategyScoreboard = $derived.by(() => {
+    if (!activeStrategyPlan) {
+      return {
+        tokensBefore: 0,
+        tokensAfter: 0,
+        savedTokens: 0,
+        savedPct: '0.0',
+        kvBreakTokens: 0,
+        breakEvenTurns: 0,
+        healthBefore: 100,
+        healthAfter: 100
+      };
+    }
+    const before = activeStrategyPlan.tokens_before;
+    const rawSaved = checkedStrategyItems.reduce((acc, i) => acc + i.saved_tokens, 0);
+    const saved = Math.max(0, rawSaved);
+    const after = Math.max(0, before - rawSaved);
+    const pct = before > 0 ? ((saved / before) * 100).toFixed(1) : '0.0';
+    const kvBreak = checkedStrategyItems.reduce((acc, i) => Math.max(acc, i.kv_break_tokens), 0);
+    const breakEven = kvBreak === 0 ? 0 : Math.ceil(kvBreak / Math.max(1, saved));
+    const ratio = activeStrategyPlan.items.length > 0 ? checkedStrategyItems.length / activeStrategyPlan.items.length : 0;
+    const healthAfter = Math.round(
+      activeStrategyPlan.health_score_before +
+        (activeStrategyPlan.health_score_after - activeStrategyPlan.health_score_before) * ratio
+    );
+    return {
+      tokensBefore: before,
+      tokensAfter: after,
+      savedTokens: saved,
+      savedPct: pct,
+      kvBreakTokens: kvBreak,
+      breakEvenTurns: breakEven,
+      healthBefore: activeStrategyPlan.health_score_before,
+      healthAfter
+    };
+  });
+
   async function fetchSessions() {
     try {
       const res = await fetch('/api/v1/sessions');
@@ -402,6 +452,12 @@
     graphEdges = data.radix_graph?.edges || [];
     mutations = data.mutations || [];
     fileStates = data.file_states || [];
+    optimizationPlans = data.optimization_plans || [];
+    uncheckedItemIds = {};
+    if (optimizationPlans.length > 0 && !optimizationPlans.some((p) => p.id === selectedStrategyId)) {
+      const nonEmpty = optimizationPlans.find((p) => p.items.length > 0);
+      selectedStrategyId = nonEmpty ? nonEmpty.id : optimizationPlans[0].id;
+    }
     if (latestTurn && latestTurn.nodes.length > 0 && !selectedNodeId) {
       selectedNodeId = latestTurn.nodes[0].id;
     }
@@ -433,10 +489,30 @@
   }
 
   async function oneClickOptimize() {
-    if (!activeSessionId) return;
-    await fetch(`/api/v1/sessions/${activeSessionId}/optimize`, { method: 'POST' });
-    statusBanner = 'Applied 1-Click Context Optimization (Shadow-Dedupe + Prefix Normalization + Loop Folding).';
-    await fetchSessionGraph(activeSessionId);
+    activeTab = 'optimize';
+  }
+
+  async function executeSelectedStrategy(status: 'committed' | 'draft' = 'committed') {
+    if (!activeSessionId || !activeStrategyPlan) return;
+    const selectedIds = checkedStrategyItems.map((i) => i.item_id);
+    if (selectedIds.length === 0) return;
+    const res = await fetch(`/api/v1/sessions/${activeSessionId}/optimize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        strategy_id: activeStrategyPlan.id,
+        selected_item_ids: selectedIds,
+        status
+      })
+    });
+    if (res.ok) {
+      const result = await res.json();
+      statusBanner =
+        status === 'draft'
+          ? `🕒 Staged ${result.applied_count} optimizations from "${activeStrategyPlan.name}" into Cache-Safe Draft Queue (~${result.estimated_saved_tokens.toLocaleString()} tok).`
+          : `⚡ Applied ${result.applied_count} optimizations from "${activeStrategyPlan.name}"! Saved ~${result.estimated_saved_tokens.toLocaleString()} tokens.`;
+      await fetchSessionGraph(activeSessionId);
+    }
   }
 
   async function bulkCutSafeItems() {
@@ -718,9 +794,9 @@
             onclick={oneClickOptimize}
             style="background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; font-weight: 600; cursor: pointer;"
           >
-            ⚡ 1-Click Optimize ({latestTurn.lint_findings.length})
+            ⚡ Optimize & Cut Studio ({latestTurn.lint_findings.length})
           </button>
-          <HelpTip position="left" text="Automatically fixes all detected Context Health issues: replaces older duplicate/stale file reads with lightweight pointers, folds failed debugging loops, and stabilizes prefix ordering." />
+          <HelpTip position="left" text="Opens the Interactive Optimization & Cut Studio where you can compare 5 optimization strategies, read what & how each strategy works, preview exact Before → After token and KV cache results, and check/uncheck individual nodes." />
         </div>
       </div>
     {/if}
@@ -822,10 +898,11 @@
       <nav style="display: flex; align-items: center; gap: 6px; padding: 8px 14px; background: #0f172a; border-bottom: 1px solid #1e293b; flex-wrap: wrap;">
         {#each [
           ['story', '📖 1. Human Trace Story', 'Chronological, human-readable timeline of every turn: what you asked, what the model thought, which files/commands it ran, and when it happened.'],
-          ['radix', '🌿 2. Context Radix Tree', 'Low-level token prefix tree showing exact JSON pointers, KV cache hits/breaks, and lint warnings on every block in the context window.'],
-          ['treemap', '📊 3. Treemap & Attention', 'Visual breakdown of where your tokens are spent (MCP tools vs File Reads vs Thinking) and the U-shaped Lost-in-the-Middle attention curve.'],
-          ['tools', '🛠️ 4. Tool Gate & Files', 'Toggle off unused MCP tools to save tokens, and check which project files in the LLM context are Fresh vs Stale.'],
-          ['replay', '⏪ 5. Overlays & Replay', 'Manage active context mutations and fork any turn to run an A/B comparison replay.']
+          ['optimize', '⚡ 2. Optimize & Cut Studio', 'Interactive dry-run simulator for 5 context optimization strategies: explains What & How each cut works, shows Expected Results (Tokens, KV Cache break-even, Health Score), and lets you check/uncheck individual items.'],
+          ['radix', '🌿 3. Context Radix Tree', 'Low-level token prefix tree showing exact JSON pointers, KV cache hits/breaks, and lint warnings on every block in the context window.'],
+          ['treemap', '📊 4. Treemap & Attention', 'Visual breakdown of where your tokens are spent (MCP tools vs File Reads vs Thinking) and the U-shaped Lost-in-the-Middle attention curve.'],
+          ['tools', '🛠️ 5. Tool Gate & Files', 'Toggle off unused MCP tools to save tokens, and check which project files in the LLM context are Fresh vs Stale.'],
+          ['replay', '⏪ 6. Overlays & Replay', 'Manage active context mutations and fork any turn to run an A/B comparison replay.']
         ] as [id, label, tip]}
           <div style="display: flex; align-items: center;">
             <button
@@ -983,6 +1060,256 @@
               </div>
             {/each}
           </div>
+        {:else if activeTab === 'optimize'}
+          <!-- Interactive Optimization & Cut Studio -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div style="display: flex; align-items: center;">
+              <h3 style="margin: 0; font-size: 16px; color: #f8fafc;">⚡ Interactive Optimization & Cut Studio (Dry-Run Simulator)</h3>
+              <HelpTip text="Choose from 5 specialized optimization strategies below. Every strategy explains What & How it mutates your context, calculates Expected Results (Before → After tokens, KV Cache break-even turns, and Health Score), and lets you check or uncheck individual blocks before applying." />
+            </div>
+            <span style="font-size: 12px; color: #94a3b8;">
+              Available across Web UI, CLI (<code>cw optimize</code>), and TUI (<code>[o]</code>)
+            </span>
+          </div>
+
+          <!-- 1. 5 Strategy Selector Cards -->
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 16px;">
+            {#each optimizationPlans as plan}
+              <button
+                onclick={() => {
+                  selectedStrategyId = plan.id;
+                  uncheckedItemIds = {};
+                }}
+                style="text-align: left; padding: 11px 12px; border-radius: 10px; border: 2px solid {selectedStrategyId === plan.id ? '#38bdf8' : '#1f2937'}; background: {selectedStrategyId === plan.id ? '#1e293b' : '#111827'}; color: #f8fafc; cursor: pointer; display: flex; flex-direction: column; justify-content: space-between; gap: 8px;"
+              >
+                <div>
+                  <div style="font-size: 13px; font-weight: 700; color: {selectedStrategyId === plan.id ? '#38bdf8' : '#f1f5f9'}; margin-bottom: 4px;">
+                    {plan.name}
+                  </div>
+                  <div style="font-size: 11px; color: #94a3b8; line-height: 1.35;">
+                    {plan.tagline}
+                  </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 4px; border-top: 1px solid #334155; padding-top: 7px; font-size: 11px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: #cbd5e1;">Items: <strong>{plan.items.length}</strong></span>
+                    {#if plan.saved_tokens > 0}
+                      <span style="color: #34d399; font-weight: 700;">-{plan.saved_tokens.toLocaleString()} tok (-{plan.saved_pct.toFixed(1)}%)</span>
+                    {:else}
+                      <span style="color: #60a5fa; font-weight: 700;">+Attention Boost</span>
+                    {/if}
+                  </div>
+                  <div style="font-size: 10.5px; color: {plan.kv_cache_break_tokens === 0 ? '#4ade80' : '#fbbf24'};">
+                    {plan.kv_badge}
+                  </div>
+                </div>
+              </button>
+            {/each}
+          </div>
+
+          {#if activeStrategyPlan}
+            <!-- 2. Strategy Blueprint: What & How We Do It + Expected Results Scoreboard -->
+            <div style="background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 14px 16px; margin-bottom: 16px;">
+              <div style="display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; align-items: start;">
+                <!-- Left: What & How We Do It -->
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                  <div>
+                    <div style="font-size: 12px; font-weight: 700; color: #38bdf8; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 4px;">
+                      📖 What & How We Do It ({activeStrategyPlan.name})
+                    </div>
+                    <div style="font-size: 12.5px; color: #e2e8f0; line-height: 1.5; background: #0b0f19; padding: 10px 12px; border-radius: 8px; border: 1px solid #1e293b;">
+                      {activeStrategyPlan.what_and_how}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style="font-size: 12px; font-weight: 700; color: #34d399; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 4px;">
+                      🎯 Expected Quality & Model Impact
+                    </div>
+                    <div style="font-size: 12.5px; color: #cbd5e1; line-height: 1.45; background: #0b0f19; padding: 10px 12px; border-radius: 8px; border: 1px solid #1e293b;">
+                      {activeStrategyPlan.expected_quality_impact}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Right: Live Recalculated Expected Results Scoreboard -->
+                <div style="background: #0b0f19; border: 1px solid #334155; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; padding-bottom: 6px;">
+                    <strong style="font-size: 13px; color: #f8fafc;">📊 Expected Results (Before → After)</strong>
+                    <span style="font-size: 11px; color: #38bdf8;">
+                      {checkedStrategyItems.length} of {activeStrategyPlan.items.length} items checked
+                    </span>
+                  </div>
+
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                    <div style="background: #111827; padding: 8px 10px; border-radius: 6px; border: 1px solid #1f2937;">
+                      <div style="font-size: 11px; color: #94a3b8;">Context Tokens</div>
+                      <div style="font-size: 13.5px; font-weight: 700; color: #f8fafc; margin-top: 2px;">
+                        {liveStrategyScoreboard.tokensBefore.toLocaleString()} → <span style="color: #34d399;">{liveStrategyScoreboard.tokensAfter.toLocaleString()} tok</span>
+                      </div>
+                      <div style="font-size: 11px; color: #34d399;">
+                        {#if liveStrategyScoreboard.savedTokens > 0}
+                          -{liveStrategyScoreboard.savedTokens.toLocaleString()} tok (-{liveStrategyScoreboard.savedPct}%)
+                        {:else}
+                          Tail Attention Pin (+35 tok)
+                        {/if}
+                      </div>
+                    </div>
+
+                    <div style="background: #111827; padding: 8px 10px; border-radius: 6px; border: 1px solid #1f2937;">
+                      <div style="font-size: 11px; color: #94a3b8;">Context Health Score</div>
+                      <div style="font-size: 13.5px; font-weight: 700; color: #f8fafc; margin-top: 2px;">
+                        {liveStrategyScoreboard.healthBefore}/100 → <span style="color: #34d399;">{liveStrategyScoreboard.healthAfter}/100</span>
+                      </div>
+                      <div style="font-size: 11px; color: #93c5fd;">
+                        +{Math.max(0, liveStrategyScoreboard.healthAfter - liveStrategyScoreboard.healthBefore)} pts improvement
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="background: #111827; padding: 8px 10px; border-radius: 6px; border: 1px solid #1f2937; font-size: 12px;">
+                    <div style="color: #94a3b8; font-size: 11px; margin-bottom: 2px;">KV Cache Prefix Impact & Break-Even</div>
+                    {#if liveStrategyScoreboard.kvBreakTokens === 0}
+                      <div style="color: #4ade80; font-weight: 700;">
+                        🟢 0 Cached Tokens Invalidated (100% KV Cache-Safe!)
+                      </div>
+                    {:else}
+                      <div style="color: #fbbf24; font-weight: 700;">
+                        🟡 Rebuilds ~{liveStrategyScoreboard.kvBreakTokens.toLocaleString()} cached prefix tokens once (Break-even in ~{liveStrategyScoreboard.breakEvenTurns} turn{liveStrategyScoreboard.breakEvenTurns === 1 ? '' : 's'})
+                      </div>
+                    {/if}
+                  </div>
+
+                  <div style="display: flex; gap: 8px; margin-top: 2px;">
+                    <div style="display: flex; align-items: center; flex: 1;">
+                      <button
+                        disabled={checkedStrategyItems.length === 0}
+                        onclick={() => executeSelectedStrategy('committed')}
+                        style="flex: 1; background: {checkedStrategyItems.length === 0 ? '#334155' : '#2563eb'}; color: white; border: none; border-radius: 6px; padding: 8px 12px; font-size: 12.5px; font-weight: 700; cursor: {checkedStrategyItems.length === 0 ? 'not-allowed' : 'pointer'};"
+                      >
+                        ⚡ Apply {checkedStrategyItems.length} Checked Now
+                      </button>
+                      <HelpTip position="left" text="Immediately commits the checked optimization overlays to this session so the very next LLM turn uses the compacted context." />
+                    </div>
+
+                    <div style="display: flex; align-items: center;">
+                      <button
+                        disabled={checkedStrategyItems.length === 0}
+                        onclick={() => executeSelectedStrategy('draft')}
+                        style="background: {checkedStrategyItems.length === 0 ? '#334155' : '#d97706'}; color: white; border: none; border-radius: 6px; padding: 8px 12px; font-size: 12px; font-weight: 600; cursor: {checkedStrategyItems.length === 0 ? 'not-allowed' : 'pointer'};"
+                      >
+                        🕒 Stage as Draft
+                      </button>
+                      <HelpTip position="left" text="Queues these optimizations in the Cache-Safe Draft Queue so you can keep inspecting or wait until your next natural cache breakpoint before committing." />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 3. Granular Per-Node Checklist -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <div style="display: flex; align-items: center;">
+                <h4 style="margin: 0; font-size: 14px; color: #f8fafc;">
+                  ☑️ Granular Operations in "{activeStrategyPlan.name}" ({activeStrategyPlan.items.length} items)
+                </h4>
+                <HelpTip text="Uncheck any specific file read, tool output, or turn below if you want to exclude it from this optimization pass. The Expected Results scoreboard above updates live as you toggle checkboxes!" />
+              </div>
+
+              {#if activeStrategyPlan.items.length > 0}
+                <div style="display: flex; gap: 8px;">
+                  <button
+                    onclick={() => (uncheckedItemIds = {})}
+                    style="background: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 5px; padding: 3px 9px; font-size: 11px; cursor: pointer;"
+                  >
+                    Check All
+                  </button>
+                  <button
+                    onclick={() => {
+                      const next: Record<string, boolean> = {};
+                      for (const item of activeStrategyPlan!.items) next[item.item_id] = true;
+                      uncheckedItemIds = next;
+                    }}
+                    style="background: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 5px; padding: 3px 9px; font-size: 11px; cursor: pointer;"
+                  >
+                    Uncheck All
+                  </button>
+                </div>
+              {/if}
+            </div>
+
+            {#if activeStrategyPlan.items.length === 0}
+              <div style="background: #064e3b; color: #a7f3d0; padding: 14px; border-radius: 8px; font-size: 13px;">
+                ✅ Nothing left to cut or compact for this strategy! Your context is already fully optimized for "{activeStrategyPlan.name}".
+              </div>
+            {:else}
+              <div style="display: flex; flex-direction: column; gap: 8px;">
+                {#each activeStrategyPlan.items as item}
+                  {@const isChecked = !uncheckedItemIds[item.item_id]}
+                  <div
+                    style="background: {isChecked ? '#111827' : '#0b0f19'}; border: 1px solid {isChecked ? '#334155' : '#1e293b'}; border-left: 4px solid {isChecked ? '#38bdf8' : '#475569'}; border-radius: 8px; padding: 10px 14px; display: flex; align-items: flex-start; gap: 12px; opacity: {isChecked ? '1' : '0.6'};"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onchange={() => {
+                        uncheckedItemIds = {
+                          ...uncheckedItemIds,
+                          [item.item_id]: isChecked
+                        };
+                      }}
+                      style="margin-top: 3px; width: 16px; height: 16px; cursor: pointer;"
+                    />
+
+                    <div style="flex: 1; overflow: hidden;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                          <span style="font-size: 11px; padding: 2px 7px; border-radius: 4px; background: #1e293b; color: #93c5fd; font-weight: 700;">
+                            Turn #{item.turn_seq}
+                          </span>
+                          <strong style="font-size: 13px; color: #f8fafc;">{item.title}</strong>
+                          {#if item.timestamp}
+                            <span style="font-size: 11px; color: #64748b;">🕒 {formatTimestamp(item.timestamp)}</span>
+                          {/if}
+                        </div>
+
+                        <div style="display: flex; align-items: center; gap: 10px; font-size: 12px;">
+                          <span style="color: #cbd5e1;">
+                            {item.tokens_before.toLocaleString()} → <strong>{item.tokens_after.toLocaleString()} tok</strong>
+                          </span>
+                          {#if item.saved_tokens > 0}
+                            <span style="color: #34d399; font-weight: 700;">(-{item.saved_tokens.toLocaleString()} tok)</span>
+                          {:else}
+                            <span style="color: #60a5fa; font-weight: 700;">(+Attention Pin)</span>
+                          {/if}
+                        </div>
+                      </div>
+
+                      <div style="font-size: 12px; color: #e2e8f0; margin-top: 5px;">
+                        🛠️ <strong>What we do:</strong> {item.what_we_do}
+                      </div>
+                      <div style="font-size: 11.5px; color: #94a3b8; margin-top: 3px;">
+                        💡 <strong>Why it matters:</strong> {item.why_it_matters}
+                      </div>
+                      <div style="font-size: 11px; color: #64748b; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        Preview: <code>{item.content_preview}</code>
+                      </div>
+                    </div>
+
+                    {#if item.node_id}
+                      <button
+                        onclick={() => (selectedNodeId = item.node_id)}
+                        style="background: #1e293b; color: #93c5fd; border: 1px solid #334155; border-radius: 5px; padding: 4px 8px; font-size: 11px; cursor: pointer; flex-shrink: 0;"
+                      >
+                        Inspect →
+                      </button>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {/if}
         {:else if activeTab === 'radix'}
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">

@@ -1,10 +1,12 @@
 export interface Session {
   id: string;
+  parent_session_id?: string | null;
   harness: string;
   workspace_root: string | null;
   model: string;
   provider: string;
   title: string | null;
+  created_at: string;
   updated_at: string;
 }
 
@@ -26,6 +28,7 @@ export interface ContextNode {
   token_span: TokenSpan;
   kv_status: KvNodeStatus;
   attention_salience: number;
+  timestamp?: string | null;
 }
 
 export interface KvCacheReport {
@@ -80,6 +83,7 @@ export interface ContextTurn {
   category_breakdown: CategoryBreakdown;
   lint_findings: LintFinding[];
   health_score: number;
+  created_at: string;
 }
 
 export interface RadixGraphNode {
@@ -92,6 +96,7 @@ export interface RadixGraphNode {
   lint_badges: string[];
   node_id: string | null;
   raw_json_pointer: string | null;
+  timestamp?: string | null;
 }
 
 export interface RadixGraphEdge {

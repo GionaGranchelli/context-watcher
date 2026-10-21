@@ -164,9 +164,10 @@ impl CwStore {
             "INSERT INTO sessions (id, parent_session_id, harness, workspace_root, model, provider, title, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(id) DO UPDATE SET
-                workspace_root = COALESCE(excluded.workspace_root, sessions.workspace_root),
+                workspace_root = excluded.workspace_root,
                 model = excluded.model,
                 title = COALESCE(excluded.title, sessions.title),
+                created_at = excluded.created_at,
                 updated_at = excluded.updated_at",
             params![
                 session.id,
@@ -259,7 +260,7 @@ impl CwStore {
         )?;
         conn.execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
-            params![Utc::now().to_rfc3339(), turn.session_id],
+            params![turn.created_at.to_rfc3339(), turn.session_id],
         )?;
         Ok(())
     }

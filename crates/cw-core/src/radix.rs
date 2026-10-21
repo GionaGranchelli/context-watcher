@@ -180,6 +180,7 @@ pub struct RadixGraphNode {
     pub lint_badges: Vec<String>,
     pub node_id: Option<String>,
     pub raw_json_pointer: Option<String>,
+    pub timestamp: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,6 +218,7 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
         lint_badges: vec![],
         node_id: None,
         raw_json_pointer: None,
+        timestamp: Some(latest_turn.created_at.to_rfc3339()),
     });
 
     // Aggregate MCP tool schemas into one collapsible group node so 50 tools don't clutter the canvas
@@ -250,6 +252,7 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
             },
             node_id: None,
             raw_json_pointer: Some("/tools".to_string()),
+            timestamp: None,
         });
         graph_edges.push(RadixGraphEdge {
             id: format!("e_{prev_spine_id}_{mcp_id}"),
@@ -286,6 +289,7 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
             lint_badges: badges,
             node_id: Some(node.id.clone()),
             raw_json_pointer: Some(node.raw_json_pointer.clone()),
+            timestamp: node.timestamp.clone(),
         });
         graph_edges.push(RadixGraphEdge {
             id: format!("e_{prev_spine_id}_{g_id}"),
@@ -313,6 +317,7 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
                 lint_badges: vec![],
                 node_id: None,
                 raw_json_pointer: None,
+                timestamp: Some(turn.created_at.to_rfc3339()),
             });
             graph_edges.push(RadixGraphEdge {
                 id: format!("e_root_{fork_id}"),

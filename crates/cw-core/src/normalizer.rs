@@ -136,7 +136,16 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
             };
             let msg_pointer = format!("/messages/{msg_idx}");
             let msg_cache = extract_cache_control(msg);
-            let approx_turn = (msg_idx as u32 / 2) + 1;
+            let approx_turn = msg
+                .get("cw_turn_seq")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32)
+                .unwrap_or((msg_idx as u32 / 2) + 1);
+            let msg_ts = msg
+                .get("cw_timestamp")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let before_len = nodes.len();
 
             match msg.get("content") {
                 Some(Value::String(text)) => {
@@ -260,6 +269,11 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
                     }
                 }
                 _ => {}
+            }
+            if let Some(ref ts) = msg_ts {
+                for node in &mut nodes[before_len..] {
+                    node.timestamp = Some(ts.clone());
+                }
             }
         }
     }
@@ -703,6 +717,7 @@ fn push_node(
         attention_salience: 1.0,
         cache_control,
         active_mutation: None,
+        timestamp: None,
     });
 }
 

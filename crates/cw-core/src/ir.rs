@@ -325,6 +325,7 @@ pub struct ContextNode {
     pub attention_salience: f32,
     pub cache_control: Option<CacheControlBreakpoint>,
     pub active_mutation: Option<AppliedMutation>,
+    pub timestamp: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

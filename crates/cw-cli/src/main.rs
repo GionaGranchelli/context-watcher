@@ -7,11 +7,13 @@ use axum::{
 use clap::{Parser, Subcommand};
 use cw_core::{
     ir::{HarnessKind, KvNodeStatus, MutationOp, MutationRule, MutationStatus},
+    local_llm::{analyze_local_model_kv, calculate_cost_and_perf},
     optimizer::build_optimization_plans,
     radix::build_radix_graph,
 };
 use cw_harnesses::{
     import_agy_transcript, import_generic_jsonl_transcript, spawn_transcript_watcher,
+    sync_mutations_to_transcript_on_disk,
 };
 use cw_mcp::run_mcp_stdio_server;
 use cw_proxy::{DaemonState, build_api_router, build_proxy_router};
@@ -153,6 +155,27 @@ enum Commands {
         #[arg(long, default_value = "http://127.0.0.1:4400")]
         daemon_url: String,
     },
+    /// Safely write committed compactions back to the harness's on-disk .jsonl transcript (.bak backup created automatically)
+    SyncBack {
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Local LLM & KV-Cache Slot Studio (Ollama, llama.cpp, vLLM, SGLang, LM Studio): inspect VRAM, n_keep/num_keep pinning, and slot affinity
+    Local {
+        #[arg(long)]
+        session: Option<String>,
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// View or configure hands-free Auto-Pilot background optimization policies
+    Autopilot {
+        #[arg(long)]
+        enable: bool,
+        #[arg(long)]
+        disable: bool,
+    },
+    /// Install contextWatcher Skill & MCP config for Antigravity, Claude Code, Codex, OpenCode & Pi
+    InstallIntegrations,
 }
 
 fn default_db_path() -> PathBuf {
@@ -206,6 +229,9 @@ async fn main() -> Result<()> {
             println!("│   - Anthropic Base URL : http://{proxy_addr}/anthropic          │");
             println!("│   - OpenAI Base URL    : http://{proxy_addr}/openai/v1          │");
             println!("│   - Gemini Base URL    : http://{proxy_addr}/gemini             │");
+            println!("│   - Ollama Local Proxy : http://{proxy_addr}/ollama             │");
+            println!("│   - llama.cpp Proxy    : http://{proxy_addr}/llamacpp           │");
+            println!("│   - vLLM Local Proxy   : http://{proxy_addr}/vllm/v1            │");
             println!("└──────────────────────────────────────────────────────────────────┘");
 
             let proxy_listener = tokio::net::TcpListener::bind(&proxy_addr).await?;
@@ -272,6 +298,26 @@ async fn main() -> Result<()> {
                 turn.kv_cache_report.invalidated_tokens
             );
             println!("Health Score : {}/100 ({} lints, {} active overlays)", turn.health_score, turn.lint_findings.len(), mutations.len());
+            let cost = calculate_cost_and_perf(&turn, &sess.model, sess.provider);
+            if cost.is_local_model {
+                let loc = analyze_local_model_kv(&turn, &sess.id, &sess.model, sess.provider);
+                println!(
+                    "Local KV VRAM: {:.0} MB (FP16) | {:.0} MB (Q8_0) | {:.0} MB (Q4_0) | Recommended n_keep/num_keep: {} tok | Slot #{}",
+                    loc.vram_fp16_mb,
+                    loc.vram_q8_0_mb,
+                    loc.vram_q4_0_mb,
+                    loc.recommended_n_keep_tokens,
+                    loc.recommended_slot_id
+                );
+            } else {
+                println!(
+                    "Turn Cost ($): ${:.4} [Saved ${:.4} via KV Cache + ${:.4} via cw Overlays] ({})",
+                    cost.turn_cost_usd,
+                    cost.saved_by_kv_cache_usd,
+                    cost.saved_by_cw_overlays_usd,
+                    cost.model_family
+                );
+            }
         }
         Commands::Tree { session } => {
             let store = CwStore::open(&db_path)?;
@@ -546,6 +592,125 @@ async fn main() -> Result<()> {
                 import_generic_jsonl_transcript(&path, h, &store, workspace)?
             };
             println!("Imported transcript into session: {sess_id}");
+        }
+        Commands::SyncBack { session } => {
+            let store = CwStore::open(&db_path)?;
+            let Some(sess_id) = resolve_session(&store, session)? else {
+                anyhow::bail!("No active session found");
+            };
+            let report = sync_mutations_to_transcript_on_disk(&store, &sess_id)?;
+            println!("✅ Synced compacted context back to harness transcript on disk!");
+            println!("  • Session         : {}", report.session_id);
+            println!("  • Transcript Path : {}", report.transcript_path);
+            println!("  • Safe Backup     : {}", report.backup_path);
+            println!("  • Steps Compacted : {}", report.steps_compacted);
+            println!(
+                "  • Disk Size       : {} bytes -> {} bytes (-{} bytes)",
+                report.bytes_before,
+                report.bytes_after,
+                report.bytes_before.saturating_sub(report.bytes_after)
+            );
+        }
+        Commands::Local { session, model } => {
+            let store = CwStore::open(&db_path)?;
+            let Some(sess_id) = resolve_session(&store, session)? else {
+                println!("No active sessions found.");
+                return Ok(());
+            };
+            let sess = store.get_session(&sess_id)?.unwrap();
+            let Some(turn) = store.get_latest_turn(&sess_id)? else {
+                println!("No turns recorded for session {sess_id}.");
+                return Ok(());
+            };
+            let model_str = model.unwrap_or_else(|| sess.model.clone());
+            let loc = analyze_local_model_kv(&turn, &sess_id, &model_str, sess.provider);
+
+            println!("┌──────────────────────────────────────────────────────────────────────────────────────────┐");
+            println!("│ 🖥️  contextWatcher Local LLM & KV-Cache Slot Studio — Session: {sess_id:<25} │");
+            println!("└──────────────────────────────────────────────────────────────────────────────────────────┘");
+            println!("  • Engine & Model           : {} ({})", loc.model_name, loc.engine_kind);
+            println!(
+                "  • Context Window Usage     : {} / {} tok ({:.1}%) [Recommended num_ctx: {}]",
+                turn.token_usage.input_tokens,
+                loc.num_ctx_limit,
+                loc.used_ctx_pct,
+                loc.recommended_num_ctx
+            );
+            println!(
+                "  • Pin System Prefix (VRAM) : n_keep / num_keep = {} tokens (System Prompt + Rules + Tools)",
+                loc.recommended_n_keep_tokens
+            );
+            println!(
+                "  • Deterministic KV Slot    : Slot #{} (prevents subagent KV slot thrashing)",
+                loc.recommended_slot_id
+            );
+            println!(
+                "  • PagedAttention Alignment : {}-tok blocks ({} aligned tok, {} tail waste tok)",
+                loc.paged_attention_block_size,
+                loc.prefix_block_aligned_tokens,
+                loc.prefix_block_waste_tokens
+            );
+            println!(
+                "  • KV Cache VRAM Footprint  : {:.1} MB (FP16) | {:.1} MB (Q8_0) | {:.1} MB (Q4_0)",
+                loc.vram_fp16_mb, loc.vram_q8_0_mb, loc.vram_q4_0_mb
+            );
+            println!(
+                "  • Local GPU Prefill Time   : ~{} ms (Saved ~{} ms via KV Cache hits @ {} tok/s)",
+                loc.prefill_latency_ms, loc.prefill_saved_by_kv_ms, loc.estimated_prefill_tps
+            );
+            println!("\n🔧 RECOMMENDATIONS & ENGINE PARAMETERS:");
+            for rec in &loc.recommendations {
+                println!("  • [{}] {}", rec.severity.to_uppercase(), rec.title);
+                println!("    {}", rec.explanation);
+                println!("    Fix / Config: {}", rec.cli_or_api_fix);
+            }
+        }
+        Commands::Autopilot { enable, disable } => {
+            let store = CwStore::open(&db_path)?;
+            let mut cfg = store.get_autopilot_config()?;
+            if enable {
+                cfg.enabled = true;
+                store.set_autopilot_config(&cfg)?;
+            } else if disable {
+                cfg.enabled = false;
+                store.set_autopilot_config(&cfg)?;
+            }
+            println!(
+                "Auto-Pilot Status: {}",
+                if cfg.enabled { "🟢 ENABLED" } else { "🔴 DISABLED" }
+            );
+            println!(
+                "  1. Zero-Break Tail Hygiene : {} (spill >{} tok tool outputs to /tmp/cw_logs/)",
+                cfg.zero_break_tail_hygiene, cfg.tail_max_tool_tokens
+            );
+            println!(
+                "  2. Auto Cache-Safe Pin     : {} (pin rules <42% salience when context >{} tok)",
+                cfg.auto_cache_safe_pin, cfg.pin_min_context_tokens
+            );
+            println!(
+                "  3. Auto Diet at Breakpoint : {} (dedupe when context >{} tok)",
+                cfg.auto_diet_at_breakpoint, cfg.breakpoint_tokens
+            );
+            println!(
+                "  4. Local Window Guard      : {} (protect local models >{} tok before num_ctx shift)",
+                cfg.local_model_window_guard, cfg.local_window_threshold_tokens
+            );
+        }
+        Commands::InstallIntegrations => {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cw"));
+            let agy_skill_dir = PathBuf::from(&home).join(".gemini/config/skills/context-watcher");
+            let _ = std::fs::create_dir_all(&agy_skill_dir);
+            let skill_src = PathBuf::from("plugins/agy/skills/context-watcher/SKILL.md");
+            if skill_src.exists() {
+                let _ = std::fs::copy(&skill_src, agy_skill_dir.join("SKILL.md"));
+            }
+            println!("✅ Installed Antigravity skill to: {}", agy_skill_dir.join("SKILL.md").display());
+            println!("\n📌 Add this MCP server block to your harness config (Antigravity / Claude Code / Codex / OpenCode):");
+            println!(
+                "{{\n  \"mcpServers\": {{\n    \"context-watcher\": {{\n      \"command\": \"{}\",\n      \"args\": [\"mcp\", \"--daemon-url\", \"http://127.0.0.1:4400\"]\n    }}\n  }}\n}}",
+                exe.display()
+            );
         }
     }
 

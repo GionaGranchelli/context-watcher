@@ -1,7 +1,10 @@
 use chrono::{DateTime, Utc};
-use cw_core::ir::{
-    ContextTurn, FileContextState, FirewallAction, FirewallRule, FirewallTrigger, HarnessKind,
-    MutationRule, MutationStatus, ProviderKind, Session,
+use cw_core::{
+    autopilot::AutoPilotConfig,
+    ir::{
+        ContextTurn, FileContextState, FirewallAction, FirewallRule, FirewallTrigger, HarnessKind,
+        MutationRule, MutationStatus, ProviderKind, Session,
+    },
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -107,6 +110,18 @@ impl CwStore {
                 session_id TEXT PRIMARY KEY,
                 states_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS session_sources (
+                session_id TEXT PRIMARY KEY,
+                transcript_path TEXT NOT NULL,
+                last_byte_offset INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value_json TEXT NOT NULL
             );",
         )?;
         Ok(())
@@ -423,6 +438,66 @@ impl CwStore {
             out.push(serde_json::from_str(&r?)?);
         }
         Ok(out)
+    }
+
+    pub fn set_session_source_path(
+        &self,
+        session_id: &str,
+        transcript_path: &str,
+        last_byte_offset: u64,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO session_sources (session_id, transcript_path, last_byte_offset, updated_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                session_id,
+                transcript_path,
+                last_byte_offset as i64,
+                Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_session_source_path(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<(String, u64)>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let row: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT transcript_path, last_byte_offset FROM session_sources WHERE session_id = ?1",
+                params![session_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.map(|(p, off)| (p, off.max(0) as u64)))
+    }
+
+    pub fn get_autopilot_config(&self) -> Result<AutoPilotConfig, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT value_json FROM settings WHERE key = 'autopilot_config'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match raw {
+            Some(s) => Ok(serde_json::from_str(&s).unwrap_or_default()),
+            None => Ok(AutoPilotConfig::default()),
+        }
+    }
+
+    pub fn set_autopilot_config(&self, cfg: &AutoPilotConfig) -> Result<(), StoreError> {
+        let json_str = serde_json::to_string(cfg)?;
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value_json) VALUES ('autopilot_config', ?1)",
+            params![json_str],
+        )?;
+        Ok(())
     }
 }
 

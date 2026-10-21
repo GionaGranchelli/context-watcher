@@ -168,3 +168,60 @@ export interface OptimizationStrategyPlan {
   items: OptimizationCandidateItem[];
 }
 
+export interface CostAndPerfReport {
+  model_family: string;
+  is_local_model: boolean;
+  turn_cost_usd: number;
+  unoptimized_cost_usd: number;
+  saved_by_kv_cache_usd: number;
+  saved_by_cw_overlays_usd: number;
+  estimated_prefill_ms: number;
+  saved_prefill_ms_by_kv: number;
+  saved_prefill_ms_by_overlays: number;
+}
+
+export interface LocalEngineRecommendation {
+  id: string;
+  severity: string;
+  title: string;
+  explanation: string;
+  cli_or_api_fix: string;
+}
+
+export interface LocalModelAnalysis {
+  is_local_model: boolean;
+  engine_kind: string;
+  model_name: string;
+  num_ctx_limit: number;
+  used_ctx_pct: number;
+  recommended_n_keep_tokens: number;
+  recommended_num_ctx: number;
+  recommended_slot_id: number;
+  paged_attention_block_size: number;
+  prefix_block_aligned_tokens: number;
+  prefix_block_waste_tokens: number;
+  vram_fp16_mb: number;
+  vram_q8_0_mb: number;
+  vram_q4_0_mb: number;
+  vram_saved_by_overlays_fp16_mb: number;
+  sliding_window_overflow_risk: boolean;
+  sliding_window_overflow_tokens: number;
+  estimated_prefill_tps: number;
+  prefill_latency_ms: number;
+  prefill_saved_by_kv_ms: number;
+  recommendations: LocalEngineRecommendation[];
+}
+
+export interface AutoPilotConfig {
+  enabled: boolean;
+  zero_break_tail_hygiene: boolean;
+  tail_max_tool_tokens: number;
+  auto_cache_safe_pin: boolean;
+  pin_min_context_tokens: number;
+  auto_diet_at_breakpoint: boolean;
+  breakpoint_tokens: number;
+  local_model_window_guard: boolean;
+  local_window_threshold_tokens: number;
+}
+
+

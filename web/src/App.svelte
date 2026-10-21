@@ -10,7 +10,10 @@
     MutationRule,
     FileContextState,
     PendingInterceptInfo,
-    OptimizationStrategyPlan
+    OptimizationStrategyPlan,
+    CostAndPerfReport,
+    LocalModelAnalysis,
+    AutoPilotConfig
   } from './lib/types';
 
   let sessions = $state<Session[]>([]);
@@ -25,8 +28,12 @@
   let optimizationPlans = $state<OptimizationStrategyPlan[]>([]);
   let selectedStrategyId = $state<string>('max_token_diet');
   let uncheckedItemIds = $state<Record<string, boolean>>({});
+  let costAndPerf = $state<CostAndPerfReport | null>(null);
+  let localModelAnalysis = $state<LocalModelAnalysis | null>(null);
+  let autopilotConfig = $state<AutoPilotConfig | null>(null);
+  let transcriptSourcePath = $state<string | null>(null);
 
-  let activeTab = $state<'story' | 'optimize' | 'radix' | 'treemap' | 'tools' | 'replay'>('story');
+  let activeTab = $state<'story' | 'optimize' | 'local' | 'radix' | 'treemap' | 'tools' | 'replay'>('story');
   let selectedNodeId = $state<string | null>(null);
   let wsConnected = $state<boolean>(false);
   let statusBanner = $state<string>('');
@@ -453,6 +460,10 @@
     mutations = data.mutations || [];
     fileStates = data.file_states || [];
     optimizationPlans = data.optimization_plans || [];
+    costAndPerf = data.cost_and_perf || null;
+    localModelAnalysis = data.local_model_analysis || null;
+    autopilotConfig = data.autopilot_config || null;
+    transcriptSourcePath = data.transcript_source_path || null;
     uncheckedItemIds = {};
     if (optimizationPlans.length > 0 && !optimizationPlans.some((p) => p.id === selectedStrategyId)) {
       const nonEmpty = optimizationPlans.find((p) => p.items.length > 0);
@@ -654,6 +665,108 @@
     statusBanner = 'Loaded interactive multi-turn demo session under Project "contextWatcher".';
   }
 
+  async function seedLocalLlmDemoSession() {
+    const sessId = 'demo_ollama_qwen32b';
+    const payload = {
+      model: 'ollama/qwen2.5-coder:32b',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are OpenCode running on local Ollama (qwen2.5-coder:32b).\n<RULE[/home/gionag/Development/contextWatcher/AGENTS.md]>\nPreserve KV cache prefix and keep prompt under local num_ctx window.\n</RULE[/home/gionag/Development/contextWatcher/AGENTS.md]>'
+        },
+        {
+          role: 'user',
+          content: 'Read crates/cw-core/src/local_llm.rs and run cargo test to check KV slot alignment.',
+          cw_timestamp: new Date(Date.now() - 120000).toISOString(),
+          cw_turn_seq: 1
+        },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call_local_1',
+              type: 'function',
+              function: {
+                name: 'read_file',
+                arguments: JSON.stringify({ Path: 'crates/cw-core/src/local_llm.rs', StartLine: 1, EndLine: 90 })
+              }
+            },
+            {
+              id: 'call_local_2',
+              type: 'function',
+              function: {
+                name: 'run_command',
+                arguments: JSON.stringify({ CommandLine: 'cargo test --workspace' })
+              }
+            }
+          ],
+          cw_timestamp: new Date(Date.now() - 95000).toISOString(),
+          cw_turn_seq: 1
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_local_1',
+          content: 'pub fn analyze_local_model_kv() {\n  // initial version\n}\n'.repeat(25),
+          cw_timestamp: new Date(Date.now() - 90000).toISOString(),
+          cw_turn_seq: 1
+        },
+        {
+          role: 'tool',
+          tool_call_id: 'call_local_2',
+          content: 'running 18 tests\ntest result: ok. 18 passed; 0 failed;\n'.repeat(40),
+          cw_timestamp: new Date(Date.now() - 85000).toISOString(),
+          cw_turn_seq: 1
+        }
+      ]
+    };
+
+    await fetch('/api/v1/ingest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessId,
+        harness: 'opencode-local',
+        provider: 'ollama',
+        workspace_root: '/home/gionag/Development/contextWatcher',
+        model: 'ollama/qwen2.5-coder:32b',
+        payload
+      })
+    });
+    activeSessionId = sessId;
+    activeTab = 'local';
+    await fetchSessions();
+    statusBanner = '🖥️ Loaded Local LLM session (Ollama qwen2.5-coder:32b) — inspect n_keep, KV VRAM & Auto-Pilot below!';
+  }
+
+  async function syncTranscriptToDisk() {
+    if (!activeSessionId) return;
+    const res = await fetch(`/api/v1/sessions/${activeSessionId}/sync-back`, {
+      method: 'POST'
+    });
+    const data = await res.json();
+    if (res.ok) {
+      statusBanner = `💾 Synced ${data.applied_mutations} mutation overlays back to disk! Backup saved at ${data.backup_path}`;
+      await fetchSessionGraph(activeSessionId);
+    } else {
+      statusBanner = `⚠️ Sync-back note: ${data.error || 'Session is proxy-only or has no on-disk transcript.'}`;
+    }
+  }
+
+  async function saveAutoPilotConfig(updated: AutoPilotConfig) {
+    const res = await fetch('/api/v1/autopilot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updated)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      autopilotConfig = data.autopilot_config;
+      statusBanner = '🤖 Updated Hands-Free Auto-Pilot background policy configuration.';
+    }
+  }
+
   $effect(() => {
     fetchSessions();
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -738,19 +851,27 @@
         </div>
       {/if}
 
-      <div style="display: flex; align-items: center;">
+      <div style="display: flex; align-items: center; gap: 6px;">
         <button
           onclick={seedRichDemoSession}
           style="background: #1e293b; color: #93c5fd; border: 1px solid #3b82f6; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;"
         >
-          + Load Demo Session
+          + Cloud Demo
         </button>
-        <HelpTip text="Creates a sample multi-turn coding session with Stale File Reads, Duplicate Reads, and MCP Tool schemas so you can safely test every button and view." />
+        <HelpTip text="Creates a sample multi-turn cloud coding session (Claude Sonnet 4) with Stale File Reads, Duplicate Reads, and MCP Tool schemas." />
+
+        <button
+          onclick={seedLocalLlmDemoSession}
+          style="background: #1e293b; color: #c4b5fd; border: 1px solid #8b5cf6; border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;"
+        >
+          🖥️ + Local LLM Demo
+        </button>
+        <HelpTip text="Creates a sample Local LLM session (Ollama qwen2.5-coder:32b) so you can inspect KV-Cache Slot Pinning (n_keep), Quantized KV VRAM (FP16/Q8_0/Q4_0), and Prefill Latency savings." />
       </div>
     </div>
 
     {#if latestTurn}
-      <div style="display: flex; align-items: center; gap: 16px; font-size: 13px;">
+      <div style="display: flex; align-items: center; gap: 14px; font-size: 12.5px; flex-wrap: wrap;">
         <div style="display: flex; align-items: center;">
           <span style="color: #94a3b8; margin-right: 4px;">Context:</span>
           <strong style="color: #f8fafc;">{latestTurn.token_usage.input_tokens.toLocaleString()}</strong>
@@ -767,15 +888,46 @@
           {#if latestTurn.kv_cache_report.invalidated_tokens > 0}
             <span style="color: #ef4444; font-weight: 700;">🔴 {latestTurn.kv_cache_report.invalidated_tokens.toLocaleString()} Brk</span>
           {/if}
-          <HelpTip text="KV Cache X-Ray: Green = tokens reused from the provider's memory cache (fast & up to 90% cheaper). Yellow = new tokens added this turn. Red = previously cached tokens that were evicted because an earlier part of the prompt changed." />
+          <HelpTip text="KV Cache X-Ray: Green = tokens reused from the provider's or local GPU's KV cache. Yellow = new tokens prefilled this turn. Red = previously cached tokens evicted because an earlier prefix changed." />
         </div>
+
+        {#if costAndPerf}
+          <div style="display: flex; align-items: center; background: #1e293b; padding: 3px 9px; border-radius: 6px; border: 1px solid #334155;">
+            {#if costAndPerf.is_local_model && localModelAnalysis}
+              <span style="color: #c4b5fd; font-weight: 700;">
+                🖥️ KV VRAM: {localModelAnalysis.vram_q8_0_mb.toFixed(0)} MB (Q8) • Prefill: {costAndPerf.estimated_prefill_ms}ms (-{costAndPerf.saved_prefill_ms_by_kv + costAndPerf.saved_prefill_ms_by_overlays}ms saved)
+              </span>
+              <HelpTip text="Local GPU Metrics: Shows estimated KV-cache VRAM footprint (Q8_0 quantized), active prefill latency in milliseconds, and prefill time saved via KV slot reuse + cw compaction." />
+            {:else}
+              <span style="color: #34d399; font-weight: 700;">
+                💲 Turn: ${costAndPerf.turn_cost_usd.toFixed(4)}
+              </span>
+              <span style="color: #94a3b8; margin-left: 6px; font-size: 11.5px;">
+                (Saved ${(costAndPerf.saved_by_kv_cache_usd + costAndPerf.saved_by_cw_overlays_usd).toFixed(4)})
+              </span>
+              <HelpTip text="Live Cost & Savings Calculator: Shows the exact USD cost of this turn and how much money you saved via 90%-discounted KV Cache Hits + contextWatcher token cuts." />
+            {/if}
+          </div>
+        {/if}
 
         <div style="display: flex; align-items: center;">
           <div style="padding: 4px 10px; border-radius: 6px; font-weight: 700; background: {latestTurn.health_score >= 80 ? '#064e3b' : latestTurn.health_score >= 55 ? '#78350f' : '#7f1d1d'};">
             Health: {latestTurn.health_score}/100
           </div>
-          <HelpTip text="Context Health Score (0–100): Penalizes context rot such as stale file reads (where the file on disk changed after the LLM read it), duplicate file reads, failed command loops, and bloated MCP tool schemas." />
+          <HelpTip text="Context Health Score (0–100): Penalizes context rot such as stale file reads (including external edits on disk!), duplicate file reads, failed command loops, and bloated MCP tool schemas." />
         </div>
+
+        {#if transcriptSourcePath}
+          <div style="display: flex; align-items: center;">
+            <button
+              onclick={syncTranscriptToDisk}
+              style="background: #059669; color: #fff; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; cursor: pointer;"
+            >
+              💾 Sync to Disk (.bak)
+            </button>
+            <HelpTip position="left" text="Writes your active contextWatcher mutations back to the harness's on-disk .jsonl transcript (after creating a safe .jsonl.bak backup) so resuming the session in Antigravity, Claude Code, Codex, or OpenCode immediately uses the smaller context!" />
+          </div>
+        {/if}
 
         {#if draftMutations.length > 0}
           <div style="display: flex; align-items: center;">
@@ -899,10 +1051,11 @@
         {#each [
           ['story', '📖 1. Human Trace Story', 'Chronological, human-readable timeline of every turn: what you asked, what the model thought, which files/commands it ran, and when it happened.'],
           ['optimize', '⚡ 2. Optimize & Cut Studio', 'Interactive dry-run simulator for 5 context optimization strategies: explains What & How each cut works, shows Expected Results (Tokens, KV Cache break-even, Health Score), and lets you check/uncheck individual items.'],
-          ['radix', '🌿 3. Context Radix Tree', 'Low-level token prefix tree showing exact JSON pointers, KV cache hits/breaks, and lint warnings on every block in the context window.'],
-          ['treemap', '📊 4. Treemap & Attention', 'Visual breakdown of where your tokens are spent (MCP tools vs File Reads vs Thinking) and the U-shaped Lost-in-the-Middle attention curve.'],
-          ['tools', '🛠️ 5. Tool Gate & Files', 'Toggle off unused MCP tools to save tokens, and check which project files in the LLM context are Fresh vs Stale.'],
-          ['replay', '⏪ 6. Overlays & Replay', 'Manage active context mutations and fork any turn to run an A/B comparison replay.']
+          ['local', '🖥️ 3. Local LLM & Auto-Pilot', 'Deep KV-cache slot optimization for Ollama, llama.cpp, vLLM, SGLang & LM Studio (n_keep system prefix lock, VRAM calculator, sliding-window guard), Hands-Free Auto-Pilot policies, and Disk Transcript Sync-Back.'],
+          ['radix', '🌿 4. Context Radix Tree', 'Low-level token prefix tree showing exact JSON pointers, KV cache hits/breaks, and lint warnings on every block in the context window.'],
+          ['treemap', '📊 5. Treemap & Attention', 'Visual breakdown of where your tokens are spent (MCP tools vs File Reads vs Thinking) and the U-shaped Lost-in-the-Middle attention curve.'],
+          ['tools', '🛠️ 6. Tool Gate & Files', 'Toggle off unused MCP tools to save tokens, and check which project files in the LLM context are Fresh vs Stale.'],
+          ['replay', '⏪ 7. Overlays & Replay', 'Manage active context mutations and fork any turn to run an A/B comparison replay.']
         ] as [id, label, tip]}
           <div style="display: flex; align-items: center;">
             <button
@@ -1310,6 +1463,273 @@
               </div>
             {/if}
           {/if}
+        {:else if activeTab === 'local'}
+          <!-- 🖥️ Local LLM KV-Cache Slot Studio, Auto-Pilot Policies & Disk Sync-Back -->
+          <div style="display: flex; flex-direction: column; gap: 18px;">
+            <!-- 1. Local Model Engine & KV-Cache Slot Studio -->
+            <div style="background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 14px 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <div style="display: flex; align-items: center;">
+                  <h3 style="margin: 0; font-size: 15.5px; color: #f8fafc;">
+                    🖥️ 1. Local Model Engine & KV-Cache Slot Optimization (Ollama / llama.cpp / vLLM / SGLang / LM Studio)
+                  </h3>
+                  <HelpTip text="Local inference engines have limited GPU VRAM and relatively slow prompt prefill speeds (150–800 tok/sec). If an edit or sliding-window shift evicts the system prompt or MCP tool schemas from the KV cache slot, local GPUs freeze for 15–60 seconds re-evaluating the prompt. contextWatcher automatically injects n_keep / num_keep, cache_prompt: true, and deterministic id_slot affinity into local proxy requests!" />
+                </div>
+                <span style="font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: #1e1b4b; color: #c4b5fd; font-weight: 700;">
+                  CLI: <code>cw local</code>
+                </span>
+              </div>
+
+              {#if localModelAnalysis}
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin-bottom: 14px;">
+                  <!-- Card A: Engine & Slot Affinity -->
+                  <div style="background: #0b0f19; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 12px;">
+                    <div style="font-size: 11px; color: #94a3b8; display: flex; align-items: center;">
+                      <span>Engine & Slot Affinity</span>
+                      <HelpTip text="Pins this conversation to a deterministic llama.cpp / Ollama KV slot (id_slot) so concurrent background requests never evict your coding session's KV cache." />
+                    </div>
+                    <div style="font-size: 14px; font-weight: 700; color: #c4b5fd; margin-top: 4px;">
+                      {localModelAnalysis.engine_kind.toUpperCase()} • Slot #{localModelAnalysis.recommended_slot_id}
+                    </div>
+                    <div style="font-size: 11px; color: #64748b; margin-top: 3px;">
+                      PagedAttention Block: {localModelAnalysis.paged_attention_block_size} tok ({localModelAnalysis.prefix_block_aligned_tokens.toLocaleString()} aligned)
+                    </div>
+                  </div>
+
+                  <!-- Card B: System Prefix Pin (n_keep / num_keep) -->
+                  <div style="background: #0b0f19; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 12px;">
+                    <div style="font-size: 11px; color: #94a3b8; display: flex; align-items: center;">
+                      <span>System Prefix Lock (<code>n_keep</code>)</span>
+                      <HelpTip text="Exact number of leading tokens (System Prompt + Rules + MCP Tool Schemas) that contextWatcher locks via options.num_keep / n_keep so context-shift never evicts your system prompt!" />
+                    </div>
+                    <div style="font-size: 14px; font-weight: 700; color: #38bdf8; margin-top: 4px;">
+                      {localModelAnalysis.recommended_n_keep_tokens.toLocaleString()} tokens pinned
+                    </div>
+                    <div style="font-size: 11px; color: #34d399; margin-top: 3px;">
+                      Auto-injected on <code>/ollama</code> & <code>/llamacpp</code> proxy routes
+                    </div>
+                  </div>
+
+                  <!-- Card C: KV Cache VRAM Footprint -->
+                  <div style="background: #0b0f19; border: 1px solid #1e293b; border-radius: 8px; padding: 10px 12px;">
+                    <div style="font-size: 11px; color: #94a3b8; display: flex; align-items: center;">
+                      <span>KV Cache GPU VRAM Footprint</span>
+                      <HelpTip text="Estimated GPU/Unified Memory consumed solely by the KV cache tensors for this conversation across FP16, Q8_0 (-kvu q8_0), and Q4_0 quantizations." />
+                    </div>
+                    <div style="font-size: 13px; font-weight: 700; color: #f8fafc; margin-top: 4px;">
+                      FP16: <span style="color: #fbbf24;">{localModelAnalysis.vram_fp16_mb.toFixed(0)} MB</span> •
+                      Q8_0: <span style="color: #34d399;">{localModelAnalysis.vram_q8_0_mb.toFixed(0)} MB</span> •
+                      Q4_0: <span style="color: #38bdf8;">{localModelAnalysis.vram_q4_0_mb.toFixed(0)} MB</span>
+                    </div>
+                    <div style="font-size: 11px; color: #94a3b8; margin-top: 3px;">
+                      Tip: Set <code>OLLAMA_KV_CACHE_TYPE=q8_0</code> to halve VRAM
+                    </div>
+                  </div>
+
+                  <!-- Card D: Sliding Window & Prefill Speed -->
+                  <div style="background: #0b0f19; border: 1px solid {localModelAnalysis.sliding_window_overflow_risk ? '#ef4444' : '#1e293b'}; border-radius: 8px; padding: 10px 12px;">
+                    <div style="font-size: 11px; color: #94a3b8; display: flex; align-items: center;">
+                      <span>Window Utilization & Prefill</span>
+                      <HelpTip text="When a prompt exceeds 85% of num_ctx, local engines perform a brute-force context shift unless old turns are folded cleanly first." />
+                    </div>
+                    <div style="font-size: 14px; font-weight: 700; color: {localModelAnalysis.sliding_window_overflow_risk ? '#ef4444' : '#34d399'}; margin-top: 4px;">
+                      {localModelAnalysis.used_ctx_pct.toFixed(1)}% of {localModelAnalysis.num_ctx_limit.toLocaleString()} tok
+                    </div>
+                    {#if costAndPerf}
+                      <div style="font-size: 11px; color: #cbd5e1; margin-top: 3px;">
+                        Prefill: <strong>{costAndPerf.estimated_prefill_ms}ms</strong> (Saved <strong>{costAndPerf.saved_prefill_ms_by_kv + costAndPerf.saved_prefill_ms_by_overlays}ms</strong>)
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+
+                <!-- Actionable Local Engine Recommendations -->
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                  {#each localModelAnalysis.recommendations as rec}
+                    <div style="background: #0b0f19; border: 1px solid #1e293b; border-left: 4px solid #8b5cf6; border-radius: 8px; padding: 10px 14px;">
+                      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <strong style="font-size: 13px; color: #f8fafc;">⚡ {rec.title}</strong>
+                        <span style="font-size: 11.5px; color: #34d399; font-weight: 700;">{rec.severity.toUpperCase()}</span>
+                      </div>
+                      <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px;">
+                        🛠️ <strong>What & How:</strong> {rec.explanation}
+                      </div>
+                      <div style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center; gap: 10px; background: #111827; padding: 6px 10px; border-radius: 6px; border: 1px solid #1f2937;">
+                        <code style="font-size: 11px; color: #93c5fd; overflow-x: auto;">{rec.cli_or_api_fix}</code>
+                        {#if rec.id === 'gate_mcp_for_local' || rec.id === 'local_mcp_schema_bloat'}
+                          <button
+                            onclick={() => {
+                              selectedStrategyId = 'lean_tool_belt';
+                              activeTab = 'optimize';
+                            }}
+                            style="background: #2563eb; color: white; border: none; border-radius: 5px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer; flex-shrink: 0;"
+                          >
+                            Open Lean Tool Belt →
+                          </button>
+                        {:else if rec.id === 'sliding_window_guard' || rec.id === 'local_sliding_window_overflow'}
+                          <button
+                            onclick={() => {
+                              selectedStrategyId = 'surgical_log_diet';
+                              activeTab = 'optimize';
+                            }}
+                            style="background: #dc2626; color: white; border: none; border-radius: 5px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer; flex-shrink: 0;"
+                          >
+                            Compact Before Shift →
+                          </button>
+                        {/if}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+
+              <!-- Quick Proxy Routes Reference for Local Harnesses -->
+              <div style="margin-top: 12px; padding: 10px 12px; background: #0b0f19; border: 1px solid #1e293b; border-radius: 8px; font-size: 11.5px; color: #94a3b8;">
+                <strong style="color: #e2e8f0;">🔌 Zero-Config Local Proxy Routes (Auto-injects <code>n_keep</code>, <code>cache_prompt: true</code> & <code>id_slot</code>):</strong>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin-top: 6px;">
+                  <div>• <strong>Ollama:</strong> <code>OLLAMA_HOST=http://127.0.0.1:4401/ollama</code></div>
+                  <div>• <strong>llama.cpp / LM Studio:</strong> <code>OPENAI_BASE_URL=http://127.0.0.1:4401/llamacpp/v1</code></div>
+                  <div>• <strong>vLLM / SGLang:</strong> <code>OPENAI_BASE_URL=http://127.0.0.1:4401/vllm/v1</code></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Hands-Free Auto-Pilot Background Policies -->
+            {#if autopilotConfig}
+              <div style="background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 14px 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                  <div style="display: flex; align-items: center;">
+                    <h3 style="margin: 0; font-size: 15.5px; color: #f8fafc;">
+                      🤖 2. Hands-Free Auto-Pilot Policies (Background Context Hygiene)
+                    </h3>
+                    <HelpTip text="When enabled, contextWatcher automatically applies safe, deterministic optimizations in the background on every turn so you don't have to click 'Cut' manually during a fast coding loop." />
+                  </div>
+                  <span style="font-size: 11.5px; padding: 3px 9px; border-radius: 999px; background: #064e3b; color: #6ee7b7; font-weight: 700;">
+                    CLI: <code>cw autopilot</code>
+                  </span>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                  <!-- Policy 1: Zero-Break Tail Hygiene -->
+                  <label style="display: flex; align-items: flex-start; gap: 10px; background: #0b0f19; border: 1px solid {autopilotConfig.zero_break_tail_hygiene ? '#38bdf8' : '#1e293b'}; border-radius: 8px; padding: 10px 12px; cursor: pointer;">
+                    <input
+                      type="checkbox"
+                      checked={autopilotConfig.zero_break_tail_hygiene}
+                      onchange={(e) =>
+                        saveAutoPilotConfig({
+                          ...autopilotConfig!,
+                          zero_break_tail_hygiene: (e.currentTarget as HTMLInputElement).checked
+                        })}
+                      style="margin-top: 3px; width: 16px; height: 16px;"
+                    />
+                    <div>
+                      <div style="font-size: 13px; font-weight: 700; color: #f8fafc;">
+                        1. Zero-Break Tail Hygiene (&gt;{autopilotConfig.tail_max_tool_tokens.toLocaleString()} tok → <code>/tmp/cw_logs/</code>)
+                      </div>
+                      <div style="font-size: 11.5px; color: #94a3b8; margin-top: 3px;">
+                        Automatically truncates massive single command outputs to <code>head -n 30 ... tail -n 45</code> before they enter the KV cache, while saving the full raw output to <code>/tmp/cw_logs/&lt;call_id&gt;.log</code> so the agent can still grep it!
+                      </div>
+                    </div>
+                  </label>
+
+                  <!-- Policy 2: Local Model Sliding-Window Guard -->
+                  <label style="display: flex; align-items: flex-start; gap: 10px; background: #0b0f19; border: 1px solid {autopilotConfig.local_model_window_guard ? '#38bdf8' : '#1e293b'}; border-radius: 8px; padding: 10px 12px; cursor: pointer;">
+                    <input
+                      type="checkbox"
+                      checked={autopilotConfig.local_model_window_guard}
+                      onchange={(e) =>
+                        saveAutoPilotConfig({
+                          ...autopilotConfig!,
+                          local_model_window_guard: (e.currentTarget as HTMLInputElement).checked
+                        })}
+                      style="margin-top: 3px; width: 16px; height: 16px;"
+                    />
+                    <div>
+                      <div style="font-size: 13px; font-weight: 700; color: #f8fafc;">
+                        2. Local Model Sliding-Window Guard (&gt;85% <code>num_ctx</code>)
+                      </div>
+                      <div style="font-size: 11.5px; color: #94a3b8; margin-top: 3px;">
+                        Automatically folds older debugging turns and deduplicates stale file reads before a local model hits its <code>num_ctx</code> ceiling—preventing catastrophic KV-cache context shifts.
+                      </div>
+                    </div>
+                  </label>
+
+                  <!-- Policy 3: Auto Cache-Safe Pin -->
+                  <label style="display: flex; align-items: flex-start; gap: 10px; background: #0b0f19; border: 1px solid {autopilotConfig.auto_cache_safe_pin ? '#38bdf8' : '#1e293b'}; border-radius: 8px; padding: 10px 12px; cursor: pointer;">
+                    <input
+                      type="checkbox"
+                      checked={autopilotConfig.auto_cache_safe_pin}
+                      onchange={(e) =>
+                        saveAutoPilotConfig({
+                          ...autopilotConfig!,
+                          auto_cache_safe_pin: (e.currentTarget as HTMLInputElement).checked
+                        })}
+                      style="margin-top: 3px; width: 16px; height: 16px;"
+                    />
+                    <div>
+                      <div style="font-size: 13px; font-weight: 700; color: #f8fafc;">
+                        3. Auto Cache-Safe Rule Pin (&gt;{autopilotConfig.pin_min_context_tokens.toLocaleString()} tok &amp; Attention &lt;40%)
+                      </div>
+                      <div style="font-size: 11.5px; color: #94a3b8; margin-top: 3px;">
+                        When project rules (<code>AGENTS.md</code> / <code>CLAUDE.md</code>) sink into the Lost-in-the-Middle attention trough, appends a lightweight reminder at the prompt tail with 0% KV cache break.
+                      </div>
+                    </div>
+                  </label>
+
+                  <!-- Policy 4: Auto Diet at Breakpoint -->
+                  <label style="display: flex; align-items: flex-start; gap: 10px; background: #0b0f19; border: 1px solid {autopilotConfig.auto_diet_at_breakpoint ? '#38bdf8' : '#1e293b'}; border-radius: 8px; padding: 10px 12px; cursor: pointer;">
+                    <input
+                      type="checkbox"
+                      checked={autopilotConfig.auto_diet_at_breakpoint}
+                      onchange={(e) =>
+                        saveAutoPilotConfig({
+                          ...autopilotConfig!,
+                          auto_diet_at_breakpoint: (e.currentTarget as HTMLInputElement).checked
+                        })}
+                      style="margin-top: 3px; width: 16px; height: 16px;"
+                    />
+                    <div>
+                      <div style="font-size: 13px; font-weight: 700; color: #f8fafc;">
+                        4. Auto Diet at Breakpoint (&gt;{autopilotConfig.breakpoint_tokens.toLocaleString()} tok)
+                      </div>
+                      <div style="font-size: 11.5px; color: #94a3b8; margin-top: 3px;">
+                        Triggers <em>Surgical Log Diet</em> + <em>Clean Code State</em> automatically when a session crosses {autopilotConfig.breakpoint_tokens.toLocaleString()} tokens.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            {/if}
+
+            <!-- 3. Closing the Loop: Safe Transcript Disk Write-Back & Harness Integrations -->
+            <div style="background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 14px 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="display: flex; align-items: center;">
+                  <h3 style="margin: 0; font-size: 15.5px; color: #f8fafc;">
+                    💾 3. Non-Proxy Harness Transcript Sync-Back &amp; MCP Self-Compaction
+                  </h3>
+                  <HelpTip text="For harnesses that read/resume sessions from disk transcripts (Antigravity, Claude Code --resume, Codex, OpenCode, Pi), 'Sync to Disk' writes a timestamped .jsonl.bak backup and applies your active contextWatcher cuts directly to the .jsonl transcript file on disk!" />
+                </div>
+                <button
+                  onclick={syncTranscriptToDisk}
+                  style="background: #059669; color: white; border: none; border-radius: 6px; padding: 7px 14px; font-size: 12.5px; font-weight: 700; cursor: pointer;"
+                >
+                  💾 Sync Active Mutations to Disk (.bak)
+                </button>
+              </div>
+
+              <div style="font-size: 12px; color: #cbd5e1; display: flex; flex-direction: column; gap: 6px;">
+                <div>
+                  <strong>On-Disk Source Transcript:</strong>
+                  <code>{transcriptSourcePath || 'In-memory / Proxy Session (Run cw install-integrations for MCP & Hooks)'}</code>
+                </div>
+                <div>
+                  <strong>Install Live MCP &amp; PreToolUse/Stop Hooks across Antigravity, Claude Code, Codex, OpenCode, Pi &amp; Aider:</strong>
+                  <code style="margin-left: 6px; color: #38bdf8;">cw install-integrations</code>
+                </div>
+              </div>
+            </div>
+          </div>
         {:else if activeTab === 'radix'}
           <div style="display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">

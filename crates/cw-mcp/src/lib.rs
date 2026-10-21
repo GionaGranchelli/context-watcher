@@ -156,6 +156,25 @@ pub fn mcp_tool_definitions() -> Value {
                     "disable_tools": { "type": "array", "items": { "type": "string" } }
                 }
             }
+        },
+        {
+            "name": "cw_optimize_strategy",
+            "description": "Applies one of the 5 named Optimization Strategies (`cache_safe_boost`, `clean_code_state`, `surgical_log_diet`, `deep_trajectory_fold`, `max_token_diet`) and optionally syncs the compacted context back to the harness's disk transcript.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "strategy_id": {
+                        "type": "string",
+                        "description": "Strategy ID: cache_safe_boost | clean_code_state | surgical_log_diet | deep_trajectory_fold | max_token_diet"
+                    },
+                    "sync_to_disk": {
+                        "type": "boolean",
+                        "description": "If true, writes compacted steps back to the session's .jsonl transcript on disk (creating a .bak backup first)."
+                    }
+                },
+                "required": ["strategy_id"]
+            }
         }
     ])
 }
@@ -200,6 +219,8 @@ async fn execute_mcp_tool(
                 "session_id": session_id,
                 "health_score": turn.get("health_score"),
                 "token_usage": turn.get("token_usage"),
+                "cost_and_perf": graph.get("cost_and_perf"),
+                "local_model_analysis": graph.get("local_model_analysis"),
                 "kv_cache_report": turn.get("kv_cache_report"),
                 "category_breakdown": turn.get("category_breakdown"),
                 "lint_findings": turn.get("lint_findings"),
@@ -298,6 +319,42 @@ async fn execute_mcp_tool(
             };
             post_mutation(client, base, &session_id, op).await
         }
+        "cw_optimize_strategy" => {
+            let strategy_id = args
+                .get("strategy_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("max_token_diet");
+            let sync_to_disk = args
+                .get("sync_to_disk")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let opt_resp: Value = client
+                .post(format!("{base}/api/v1/sessions/{session_id}/optimize"))
+                .json(&json!({
+                    "strategy_id": strategy_id,
+                    "status": "committed"
+                }))
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            if sync_to_disk {
+                let sync_resp: Value = client
+                    .post(format!("{base}/api/v1/sessions/{session_id}/sync-back"))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                Ok(serde_json::to_string_pretty(&json!({
+                    "optimize": opt_resp,
+                    "disk_sync": sync_resp
+                }))?)
+            } else {
+                Ok(serde_json::to_string_pretty(&opt_resp)?)
+            }
+        }
         other => Ok(format!("Unknown tool: {other}")),
     }
 }
@@ -352,6 +409,6 @@ mod tests {
         .await
         .unwrap();
         let tools = list_resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
     }
 }

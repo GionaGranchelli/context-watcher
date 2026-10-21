@@ -13,15 +13,21 @@ use bytes::Bytes;
 use chrono::Utc;
 use cw_core::{
     analyze_turn_from_payload,
+    autopilot::{AutoPilotConfig, evaluate_autopilot_policies},
     ir::{
         ContextTurn, FileContextState, FirewallRule, HarnessKind, MutationOp, MutationRule,
         MutationStatus, ProviderKind, Session,
+    },
+    local_llm::{
+        CostAndPerfReport, LocalModelAnalysis, analyze_local_model_kv, calculate_cost_and_perf,
+        detect_local_engine, inject_local_engine_kv_optimizations, strip_internal_cw_fields,
     },
     mutation::{apply_mutations_to_payload, estimate_mutation_impact, evaluate_firewall},
     normalizer::detect_provider,
     optimizer::{OptimizationStrategyPlan, build_optimization_plans},
     radix::{RadixGraph, build_radix_graph},
 };
+use cw_harnesses::sync_mutations_to_transcript_on_disk;
 use cw_store::CwStore;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -91,6 +97,9 @@ pub struct DaemonState {
     pub anthropic_upstream: String,
     pub openai_upstream: String,
     pub gemini_upstream: String,
+    pub ollama_upstream: String,
+    pub llamacpp_upstream: String,
+    pub vllm_upstream: String,
     intercepts: Arc<Mutex<HashMap<String, ActiveIntercept>>>,
 }
 
@@ -112,6 +121,12 @@ impl DaemonState {
                 .unwrap_or_else(|_| "https://api.openai.com".to_string()),
             gemini_upstream: std::env::var("CW_GEMINI_UPSTREAM")
                 .unwrap_or_else(|_| "https://generativelanguage.googleapis.com".to_string()),
+            ollama_upstream: std::env::var("CW_OLLAMA_UPSTREAM")
+                .unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()),
+            llamacpp_upstream: std::env::var("CW_LLAMACPP_UPSTREAM")
+                .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string()),
+            vllm_upstream: std::env::var("CW_VLLM_UPSTREAM")
+                .unwrap_or_else(|_| "http://127.0.0.1:8000".to_string()),
             intercepts: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -156,8 +171,16 @@ pub fn build_api_router(state: DaemonState) -> Router {
             delete(api_delete_mutation),
         )
         .route("/api/v1/sessions/:id/optimize", post(api_auto_optimize))
+        .route(
+            "/api/v1/sessions/:id/sync-back",
+            post(api_sync_transcript_back),
+        )
         .route("/api/v1/sessions/:id/replay", post(api_fork_replay))
         .route("/api/v1/ingest", post(api_ingest_payload))
+        .route(
+            "/api/v1/autopilot",
+            get(api_get_autopilot).post(api_set_autopilot),
+        )
         .route(
             "/api/v1/firewall/rules",
             get(api_list_firewall_rules).post(api_upsert_firewall_rule),
@@ -183,43 +206,70 @@ async fn handle_proxy_request(
     let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
     let path = uri.path();
 
-    // Determine target upstream base URL and stripped path
-    let (upstream_base, forward_path, default_provider) =
+    // Determine target upstream base URL, stripped path, and optional local engine hint
+    let (upstream_base, forward_path, default_provider, local_engine_route) =
         if let Some(rest) = path_and_query.strip_prefix("/anthropic") {
             (
                 state.anthropic_upstream.clone(),
                 if rest.is_empty() { "/" } else { rest },
                 ProviderKind::Anthropic,
+                None,
             )
         } else if let Some(rest) = path_and_query.strip_prefix("/openai") {
             (
                 state.openai_upstream.clone(),
                 if rest.is_empty() { "/" } else { rest },
                 ProviderKind::OpenAI,
+                None,
             )
         } else if let Some(rest) = path_and_query.strip_prefix("/gemini") {
             (
                 state.gemini_upstream.clone(),
                 if rest.is_empty() { "/" } else { rest },
                 ProviderKind::Gemini,
+                None,
+            )
+        } else if let Some(rest) = path_and_query.strip_prefix("/ollama") {
+            (
+                state.ollama_upstream.clone(),
+                if rest.is_empty() { "/" } else { rest },
+                ProviderKind::OpenAICompatible,
+                Some("ollama"),
+            )
+        } else if let Some(rest) = path_and_query.strip_prefix("/llamacpp") {
+            (
+                state.llamacpp_upstream.clone(),
+                if rest.is_empty() { "/" } else { rest },
+                ProviderKind::OpenAICompatible,
+                Some("llamacpp"),
+            )
+        } else if let Some(rest) = path_and_query.strip_prefix("/vllm") {
+            (
+                state.vllm_upstream.clone(),
+                if rest.is_empty() { "/" } else { rest },
+                ProviderKind::OpenAICompatible,
+                Some("vllm"),
             )
         } else if path.contains("v1beta") || path.contains("generateContent") {
             (
                 state.gemini_upstream.clone(),
                 path_and_query,
                 ProviderKind::Gemini,
+                None,
             )
         } else if path.ends_with("/v1/messages") {
             (
                 state.anthropic_upstream.clone(),
                 path_and_query,
                 ProviderKind::Anthropic,
+                None,
             )
         } else {
             (
                 state.openai_upstream.clone(),
                 path_and_query,
                 ProviderKind::OpenAI,
+                None,
             )
         };
 
@@ -285,8 +335,9 @@ async fn handle_proxy_request(
     let mut_report =
         apply_mutations_to_payload(&mut mutated_payload, provider, &active_mutations, seq_num);
 
-    // 2. Analyze turn & run Context Firewall
+    // 2. Analyze turn, run Auto-Pilot Policies, inject Local Engine KV settings & run Context Firewall
     let turn_id = format!("turn_{}_{}", session_id, seq_num);
+    let mut autopilot_saved = 0u32;
     if let Ok((preflight_turn, _)) = analyze_turn_from_payload(
         turn_id.clone(),
         session_id.clone(),
@@ -298,6 +349,39 @@ async fn handle_proxy_request(
         None,
         workspace_root.as_deref(),
     ) {
+        // 2a. Auto-Pilot Policies
+        let ap_cfg = state.store.get_autopilot_config().unwrap_or_default();
+        let ap_rep = evaluate_autopilot_policies(
+            &ap_cfg,
+            &session_id,
+            &session.model,
+            provider,
+            seq_num,
+            &preflight_turn.nodes,
+            &mut mutated_payload,
+        );
+        for rule in &ap_rep.generated_mutations {
+            if rule.estimated_saved_tokens > 0 {
+                autopilot_saved += rule.estimated_saved_tokens as u32;
+            }
+            let _ = state.store.save_mutation(rule);
+        }
+
+        // 2b. Local LLM Engine KV Cache Pinning (`n_keep`, `num_keep`, `cache_prompt`, `id_slot`)
+        let (is_local, detected_engine) = detect_local_engine(&session.model, provider);
+        if let Some(eng) = local_engine_route.or(if is_local {
+            Some(detected_engine)
+        } else {
+            None
+        }) {
+            inject_local_engine_kv_optimizations(
+                &mut mutated_payload,
+                &session_id,
+                &preflight_turn.nodes,
+                eng,
+            );
+        }
+
         let fw_rules = state
             .store
             .list_firewall_rules(Some(&session_id))
@@ -372,8 +456,9 @@ async fn handle_proxy_request(
             workspace_root.as_deref(),
         )
         .unwrap();
-        final_turn.token_usage.saved_by_mutations = mut_report.saved_tokens;
+        final_turn.token_usage.saved_by_mutations = mut_report.saved_tokens + autopilot_saved;
         final_turn.latency_ms = Some(start_instant.elapsed().as_millis() as u64);
+        strip_internal_cw_fields(&mut mutated_payload);
         let _ = state.store.save_turn(
             &final_turn,
             Some(&raw_payload),
@@ -398,15 +483,24 @@ async fn handle_proxy_request(
         .into_response();
     }
 
+    // Strip any internal `cw_*` helper tags before sending to strict upstream APIs
+    let mut outbound_payload = mutated_payload.clone();
+    strip_internal_cw_fields(&mut outbound_payload);
+
     let target_url = format!("{}{}", upstream_base.trim_end_matches('/'), forward_path);
-    let body_bytes = serde_json::to_vec(&mutated_payload).unwrap_or_else(|_| body.to_vec());
+    let body_bytes = serde_json::to_vec(&outbound_payload).unwrap_or_else(|_| body.to_vec());
 
     let mut req_builder = state.http_client.request(method, &target_url);
     for (k, v) in &headers {
         let name = k.as_str().to_lowercase();
         if !matches!(
             name.as_str(),
-            "host" | "content-length" | "x-cw-session-id" | "x-cw-harness" | "x-cw-workspace"
+            "host"
+                | "content-length"
+                | "accept-encoding"
+                | "x-cw-session-id"
+                | "x-cw-harness"
+                | "x-cw-workspace"
         ) {
             req_builder = req_builder.header(k, v);
         }
@@ -560,7 +654,21 @@ fn resolve_or_create_session_id(
 }
 
 fn extract_cached_tokens_from_json(resp: &Value) -> Option<u32> {
-    let usage = resp.get("usage").or_else(|| resp.get("usageMetadata"))?;
+    // Support llama.cpp `timings.cache_n`
+    if let Some(cache_n) = resp
+        .get("timings")
+        .and_then(|t| t.get("cache_n"))
+        .and_then(|v| v.as_u64())
+    {
+        return Some(cache_n as u32);
+    }
+
+    // Support Anthropic SSE `message_start.message.usage`
+    let usage = resp
+        .get("usage")
+        .or_else(|| resp.get("usageMetadata"))
+        .or_else(|| resp.get("message").and_then(|m| m.get("usage")))?;
+
     usage
         .get("cache_read_input_tokens")
         .or_else(|| {
@@ -617,6 +725,10 @@ struct SessionGraphResponse {
     mutations: Vec<MutationRule>,
     file_states: Vec<FileContextState>,
     optimization_plans: Vec<OptimizationStrategyPlan>,
+    cost_and_perf: Option<CostAndPerfReport>,
+    local_model_analysis: Option<LocalModelAnalysis>,
+    autopilot_config: AutoPilotConfig,
+    transcript_source_path: Option<String>,
 }
 
 async fn api_get_session_graph(
@@ -624,28 +736,92 @@ async fn api_get_session_graph(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let session = state.store.get_session(&id).ok().flatten();
-    let turns = state.store.list_turns(&id).unwrap_or_default();
-    let latest_turn = turns.last().cloned();
+    let full_turns = state.store.list_turns(&id).unwrap_or_default();
+    let latest_turn = full_turns.last().cloned();
     let radix_graph = match &latest_turn {
-        Some(lt) => build_radix_graph(lt, &turns),
+        Some(lt) => build_radix_graph(lt, &full_turns),
         None => RadixGraph::default(),
     };
     let optimization_plans = match &latest_turn {
         Some(lt) => build_optimization_plans(lt),
         None => Vec::new(),
     };
+
+    let model_str = session
+        .as_ref()
+        .map(|s| s.model.as_str())
+        .unwrap_or("claude-sonnet-4");
+    let provider_kind = session
+        .as_ref()
+        .map(|s| s.provider)
+        .unwrap_or(ProviderKind::Anthropic);
+
+    let cost_and_perf = latest_turn
+        .as_ref()
+        .map(|lt| calculate_cost_and_perf(lt, model_str, provider_kind));
+    let local_model_analysis = latest_turn
+        .as_ref()
+        .map(|lt| analyze_local_model_kv(lt, &id, model_str, provider_kind));
+
+    // Pillar 6: Lightweight historical turns (strip heavy `nodes` array from older turns so 350k+ token sessions load in <5ms)
+    let turns_lightweight: Vec<ContextTurn> = full_turns
+        .into_iter()
+        .map(|mut t| {
+            t.nodes.clear();
+            t
+        })
+        .collect();
+
     let mutations = state.store.list_mutations(&id).unwrap_or_default();
     let file_states = state.store.get_file_states(&id).unwrap_or_default();
+    let autopilot_config = state.store.get_autopilot_config().unwrap_or_default();
+    let transcript_source_path = state
+        .store
+        .get_session_source_path(&id)
+        .ok()
+        .flatten()
+        .map(|(p, _)| p);
 
     Json(SessionGraphResponse {
         session,
         latest_turn,
-        turns,
+        turns: turns_lightweight,
         radix_graph,
         mutations,
         file_states,
         optimization_plans,
+        cost_and_perf,
+        local_model_analysis,
+        autopilot_config,
+        transcript_source_path,
     })
+}
+
+async fn api_sync_transcript_back(
+    State(state): State<DaemonState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match sync_mutations_to_transcript_on_disk(&state.store, &id) {
+        Ok(report) => Json(json!(report)).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_get_autopilot(State(state): State<DaemonState>) -> impl IntoResponse {
+    let cfg = state.store.get_autopilot_config().unwrap_or_default();
+    Json(cfg)
+}
+
+async fn api_set_autopilot(
+    State(state): State<DaemonState>,
+    Json(cfg): Json<AutoPilotConfig>,
+) -> impl IntoResponse {
+    let _ = state.store.set_autopilot_config(&cfg);
+    Json(cfg)
 }
 
 async fn api_list_turns(

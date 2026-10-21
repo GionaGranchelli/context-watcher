@@ -63,10 +63,19 @@
 * [x] **CW-039** `[P1]` `[ide/cw-intellij]` Implement IntelliJ **Editor Notification Banner & Gutter Line Markers** (`CwEditorNotificationProvider`, `CwLineMarkerProvider`).
 * [x] **CW-040** `[P1]` `[ide/cw-intellij]` Implement IntelliJ **ContextWatcher Tool Window** & Editor Actions (`PinSelectionToContextAction`, `EvictStaleFileAction`).
 
+### Epic 7: Production Hardening, Multi-Harness Sync & Local Model Engine Optimization
+* [x] **CW-041** `[P0]` `[cw-harnesses/cw-mcp/cw-cli]` Implement **Safe Transcript Write-Back (`cw sync-back`)** with `.bak` backups for Antigravity, Claude Code, Codex, OpenCode, Pi & Aider + `cw install-integrations` + `cw_optimize_strategy` MCP tool.
+* [x] **CW-042** `[P0]` `[cw-proxy]` **Proxy Production Hardening**: Strip internal `cw_*` fields before upstream forwarding, normalize `Accept-Encoding`, and add async **SSE Stream Parser Tap** for Anthropic, OpenAI, Gemini, Ollama & llama.cpp usage/KV metrics.
+* [x] **CW-043** `[P0]` `[cw-core]` **Real Disk `mtime` & Line-Slice Hash Verification (`CW-L001`)**: Detect external IDE/git edits on both full and partial (`StartLine..EndLine`) file reads and support 1-click Fresh Disk Diff tail injection.
+* [x] **CW-044** `[P0]` `[cw-core/cw-proxy]` **Auto-Pilot Background Policies**: Hands-free policies (`zero_break_tail_hygiene` with `/tmp/cw_logs/` spillover, `auto_cache_safe_pin`, `auto_diet_at_breakpoint`, `local_model_window_guard`) with REST API, CLI & Web UI controls.
+* [x] **CW-045** `[P0]` `[cw-core/web]` **Model Pricing, Cost ($) Ledger & Prefill Time Calculator**: Compute live turn cost (`$`), KV cache `$` savings, `cw` overlay `$` savings, and local prefill milliseconds saved across cloud and local models.
+* [x] **CW-046** `[P0]` `[cw-harnesses/cw-proxy]` **Incremental Watcher & Lightweight Graph API**: Track file `(mtime, byte_len)` state across all harness directories and serve lightweight historical turn summaries on `/api/v1/sessions/:id/graph` for instant rendering on 350k+ token sessions.
+* [x] **CW-047** `[P0]` `[cw-core/cw-proxy/web/cw-cli]` **Local Model Engine & KV-Cache Slot Controller (`Ollama`, `llama.cpp`, `vLLM`, `SGLang`, `LM Studio`)**: Automatic `n_keep` / `num_keep` system-prompt pinning, `cache_prompt: true` + `id_slot` session affinity, PagedAttention block alignment, KV VRAM calculator (`FP16`/`Q8_0`/`Q4_0`), sliding-window overflow guard, and Web UI **`🖥️ Local LLM & Auto-Pilot`** tab + `cw local` CLI.
+
 ---
 
 ## 🚧 In Progress
-*(None — all planned phases complete!)*
+*(None)*
 
 ---
 

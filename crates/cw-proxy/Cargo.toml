@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 cw-core.workspace = true
 cw-store.workspace = true
+cw-harnesses.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 serde.workspace = true

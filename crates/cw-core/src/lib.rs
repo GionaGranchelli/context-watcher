@@ -1,5 +1,7 @@
+pub mod autopilot;
 pub mod ir;
 pub mod linter;
+pub mod local_llm;
 pub mod mutation;
 pub mod normalizer;
 pub mod optimizer;
@@ -321,5 +323,70 @@ mod tests {
         let last_msg = payload["messages"][0]["content"].as_str().unwrap();
         assert!(last_msg.contains("<cw_pinned_context>"));
         assert!(last_msg.contains("Never use .unwrap() in cw-core"));
+    }
+
+    #[test]
+    fn test_local_llm_kv_optimization_and_cw_field_stripping() {
+        use crate::local_llm::{
+            analyze_local_model_kv, calculate_cost_and_perf, inject_local_engine_kv_optimizations,
+            strip_internal_cw_fields,
+        };
+
+        let mut payload = json!({
+            "model": "qwen2.5-coder:32b",
+            "system": "You are a local coding agent.\n<RULE[AGENTS.md]>\nKeep KV cache pinned.\n</RULE[AGENTS.md]>",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "Optimize my local Ollama KV cache",
+                    "cw_timestamp": "2026-10-21T22:00:00Z",
+                    "cw_turn_seq": 1
+                }
+            ]
+        });
+
+        let (turn, _) = analyze_turn_from_payload(
+            "t_local".into(),
+            "sess_local".into(),
+            None,
+            1,
+            &payload,
+            ProviderKind::OpenAICompatible,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let local_analysis = analyze_local_model_kv(
+            &turn,
+            "sess_local",
+            "qwen2.5-coder:32b",
+            ProviderKind::OpenAICompatible,
+        );
+        assert!(local_analysis.is_local_model);
+        assert_eq!(local_analysis.engine_kind, "ollama");
+        assert!(local_analysis.recommended_n_keep_tokens >= 256);
+
+        let cost = calculate_cost_and_perf(
+            &turn,
+            "qwen2.5-coder:32b",
+            ProviderKind::OpenAICompatible,
+        );
+        assert!(cost.is_local_model);
+
+        let injected = inject_local_engine_kv_optimizations(
+            &mut payload,
+            "sess_local",
+            &turn.nodes,
+            "ollama",
+        );
+        assert!(!injected.is_empty());
+        assert_eq!(payload["keep_alive"], "30m");
+        assert!(payload["options"]["num_keep"].as_u64().unwrap() >= 256);
+
+        strip_internal_cw_fields(&mut payload);
+        assert!(payload["messages"][0].get("cw_timestamp").is_none());
+        assert!(payload["messages"][0].get("cw_turn_seq").is_none());
     }
 }

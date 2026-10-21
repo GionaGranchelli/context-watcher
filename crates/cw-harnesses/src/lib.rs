@@ -1,9 +1,11 @@
 use chrono::{DateTime, Utc};
 use cw_core::{
     analyze_turn_from_payload,
-    ir::{HarnessKind, ProviderKind, Session},
+    ir::{HarnessKind, MutationOp, MutationStatus, NodeKind, ProviderKind, Session},
+    mutation::apply_mutations_to_payload,
 };
 use cw_store::CwStore;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::{HashMap, VecDeque},
@@ -13,6 +15,16 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranscriptSyncReport {
+    pub session_id: String,
+    pub transcript_path: String,
+    pub backup_path: String,
+    pub steps_compacted: usize,
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum HarnessError {
     #[error("I/O error: {0}")]
@@ -21,6 +33,8 @@ pub enum HarnessError {
     Store(#[from] cw_store::StoreError),
     #[error("Normalize error: {0}")]
     Normalize(#[from] cw_core::normalizer::NormalizeError),
+    #[error("No source transcript on disk recorded for session '{0}'")]
+    NoTranscriptSource(String),
 }
 
 /// Parses an Antigravity (AGY) `transcript.jsonl` file (and hydrates any `truncated_fields`
@@ -128,7 +142,9 @@ pub fn import_agy_transcript(
         if detected_workspace.is_none() {
             detected_workspace = infer_workspace_from_text(&content_str);
         }
-        if let Some(m) = extract_model_from_settings_change(&content_str) {
+        if step_type == "USER_INPUT"
+            && let Some(m) = extract_model_from_settings_change(&content_str)
+        {
             detected_model = m;
         }
 
@@ -255,14 +271,39 @@ pub fn import_agy_transcript(
     };
     store.upsert_session(&session)?;
 
+    if let Ok(abs_path) = fs::canonicalize(transcript_path) {
+        let byte_len = fs::metadata(&abs_path).map(|m| m.len()).unwrap_or(0);
+        let _ = store.set_session_source_path(
+            &session_id,
+            &abs_path.to_string_lossy(),
+            byte_len,
+        );
+    }
+
     let seq = turn_counter.max(1);
+    let existing_mutations = store.list_mutations(&session_id).unwrap_or_default();
+    let mut mutated_payload_opt = None;
+    let mut saved_by_mutations = 0u32;
+    if !existing_mutations.is_empty() {
+        let mut cloned = synthetic_payload.clone();
+        let rep = apply_mutations_to_payload(
+            &mut cloned,
+            ProviderKind::Anthropic,
+            &existing_mutations,
+            seq,
+        );
+        saved_by_mutations = rep.saved_tokens;
+        mutated_payload_opt = Some(cloned);
+    }
+    let payload_for_analysis = mutated_payload_opt.as_ref().unwrap_or(&synthetic_payload);
+
     let turn_id = format!("turn_{}_{}", session_id, seq);
     let (mut turn, file_states) = analyze_turn_from_payload(
         turn_id,
         session_id.clone(),
         None,
         seq,
-        &synthetic_payload,
+        payload_for_analysis,
         ProviderKind::Anthropic,
         None,
         latest_cache_read_tokens,
@@ -271,19 +312,26 @@ pub fn import_agy_transcript(
 
     turn.created_at = updated_at;
     turn.token_usage.output_tokens = latest_output_tokens;
+    turn.token_usage.saved_by_mutations = saved_by_mutations;
     if let Some(real_inp) = latest_input_tokens
         && real_inp > turn.token_usage.input_tokens
     {
-        turn.token_usage.input_tokens = real_inp;
+        let adjusted_inp = real_inp.saturating_sub(saved_by_mutations);
+        turn.token_usage.input_tokens = adjusted_inp;
         if let Some(cached) = latest_cache_read_tokens {
-            turn.token_usage.cached_tokens = cached.min(real_inp);
-            turn.kv_cache_report.hit_tokens = cached.min(real_inp);
-            turn.kv_cache_report.newly_cached_tokens = real_inp.saturating_sub(cached);
-            turn.kv_cache_report.hit_ratio = cached as f32 / real_inp.max(1) as f32;
+            turn.token_usage.cached_tokens = cached.min(adjusted_inp);
+            turn.kv_cache_report.hit_tokens = cached.min(adjusted_inp);
+            turn.kv_cache_report.newly_cached_tokens = adjusted_inp.saturating_sub(cached);
+            turn.kv_cache_report.hit_ratio = cached as f32 / adjusted_inp.max(1) as f32;
         }
     }
 
-    store.save_turn(&turn, Some(&synthetic_payload), None, None)?;
+    store.save_turn(
+        &turn,
+        Some(&synthetic_payload),
+        mutated_payload_opt.as_ref(),
+        None,
+    )?;
     store.save_file_states(&session_id, &file_states)?;
     Ok(session_id)
 }
@@ -302,13 +350,22 @@ fn extract_clean_user_request(raw: &str) -> String {
 }
 
 fn extract_model_from_settings_change(raw: &str) -> Option<String> {
-    if let Some(idx) = raw.find("Model Selection` from") {
-        let rest = &raw[idx..];
+    let start = raw.find("<USER_SETTINGS_CHANGE>")?;
+    let after_start = &raw[start + "<USER_SETTINGS_CHANGE>".len()..];
+    let end = after_start.find("</USER_SETTINGS_CHANGE>")?;
+    let block = &after_start[..end];
+    if let Some(idx) = block.find("Model Selection` from") {
+        let rest = &block[idx..];
         if let Some(to_idx) = rest.find(" to ") {
             let after_to = &rest[to_idx + 4..];
             if let Some(dot) = after_to.find('.') {
                 let model_name = after_to[..dot].trim();
-                if !model_name.is_empty() {
+                if !model_name.is_empty()
+                    && model_name.len() < 48
+                    && model_name.chars().all(|c| {
+                        c.is_alphanumeric() || matches!(c, ' ' | '-' | '.' | '_' | '(' | ')')
+                    })
+                {
                     return Some(model_name.to_string());
                 }
             }
@@ -437,35 +494,240 @@ pub fn import_generic_jsonl_transcript(
         updated_at: Utc::now(),
     };
     store.upsert_session(&session)?;
+    if let Ok(abs_path) = fs::canonicalize(path) {
+        let byte_len = fs::metadata(&abs_path).map(|m| m.len()).unwrap_or(0);
+        let _ = store.set_session_source_path(&session_id, &abs_path.to_string_lossy(), byte_len);
+    }
 
     let seq = turn_counter.max(1);
+    let existing_mutations = store.list_mutations(&session_id).unwrap_or_default();
+    let mut mutated_payload_opt = None;
+    let mut saved_by_mutations = 0u32;
+    if !existing_mutations.is_empty() {
+        let mut cloned = payload.clone();
+        let rep = apply_mutations_to_payload(
+            &mut cloned,
+            ProviderKind::Anthropic,
+            &existing_mutations,
+            seq,
+        );
+        saved_by_mutations = rep.saved_tokens;
+        mutated_payload_opt = Some(cloned);
+    }
+    let payload_for_analysis = mutated_payload_opt.as_ref().unwrap_or(&payload);
+
     let turn_id = format!("turn_{}_{}", session_id, seq);
-    let (turn, file_states) = analyze_turn_from_payload(
+    let (mut turn, file_states) = analyze_turn_from_payload(
         turn_id,
         session_id.clone(),
         None,
         seq,
-        &payload,
+        payload_for_analysis,
         ProviderKind::Anthropic,
         None,
         None,
         workspace_root.as_deref(),
     )?;
-    store.save_turn(&turn, Some(&payload), None, None)?;
+    turn.token_usage.saved_by_mutations = saved_by_mutations;
+    store.save_turn(&turn, Some(&payload), mutated_payload_opt.as_ref(), None)?;
     store.save_file_states(&session_id, &file_states)?;
     Ok(session_id)
 }
 
-/// Spawns a background watcher task that scans Antigravity (`~/.gemini/antigravity-cli/brain`),
-/// Codex (`~/.codex/sessions`), and Claude Code (`~/.claude/projects`) transcript directories
-/// and syncs modified transcripts into `CwStore`.
+/// Safely writes committed `contextWatcher` compactions back to the harness's on-disk `.jsonl`
+/// transcript file (creating a `.jsonl.bak` backup first) so non-proxy harnesses (AGY, Claude Code,
+/// Codex, OpenCode, Pi) immediately benefit from the reduced context on session resume.
+pub fn sync_mutations_to_transcript_on_disk(
+    store: &CwStore,
+    session_id: &str,
+) -> Result<TranscriptSyncReport, HarnessError> {
+    let Some((transcript_path_str, _)) = store.get_session_source_path(session_id)? else {
+        return Err(HarnessError::NoTranscriptSource(session_id.to_string()));
+    };
+    let transcript_path = PathBuf::from(&transcript_path_str);
+    if !transcript_path.exists() {
+        return Err(HarnessError::NoTranscriptSource(transcript_path_str));
+    }
+
+    let backup_path = PathBuf::from(format!("{transcript_path_str}.bak"));
+    if !backup_path.exists() {
+        fs::copy(&transcript_path, &backup_path)?;
+    }
+
+    let bytes_before = fs::metadata(&transcript_path).map(|m| m.len()).unwrap_or(0);
+    let rules = store.list_mutations(session_id)?;
+    let committed_rules: Vec<_> = rules
+        .into_iter()
+        .filter(|r| r.status == MutationStatus::Committed)
+        .collect();
+
+    // Collect stubbed/compacted content strings from the latest turn's nodes
+    let mut compacted_by_call_id: HashMap<String, String> = HashMap::new();
+    let mut folded_turns: Vec<(u32, u32, String)> = Vec::new();
+    for r in &committed_rules {
+        if let MutationOp::FoldSubtree {
+            start_turn,
+            end_turn,
+            summary_text,
+        } = &r.op
+        {
+            folded_turns.push((*start_turn, *end_turn, summary_text.clone()));
+        }
+    }
+
+    if let Some(turn) = store.get_latest_turn(session_id)? {
+        for node in &turn.nodes {
+            if let NodeKind::ToolResult {
+                call_id, content, ..
+            } = &node.kind
+                && (content.starts_with("[cw:pruned")
+                    || content.starts_with("[cw:shadow_deduped")
+                    || content.starts_with("[cw:folded")
+                    || content.contains("[cw:auto_pilot"))
+            {
+                compacted_by_call_id.insert(call_id.clone(), content.clone());
+            }
+        }
+    }
+
+    let raw_text = fs::read_to_string(&transcript_path)?;
+    let mut new_lines = Vec::new();
+    let mut steps_compacted = 0usize;
+    let mut current_turn = 0u32;
+
+    for (line_idx, line) in raw_text.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(mut val) = serde_json::from_str::<Value>(line) else {
+            new_lines.push(line.to_string());
+            continue;
+        };
+
+        let step_type = val
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if step_type == "USER_INPUT"
+            || val.get("role").and_then(|v| v.as_str()) == Some("user")
+            || val
+                .get("message")
+                .and_then(|m| m.get("role"))
+                .and_then(|r| r.as_str())
+                == Some("user")
+        {
+            current_turn += 1;
+        }
+
+        let synthetic_res_id = format!("agy_res_{line_idx}");
+        let mut modified = false;
+
+        // Check if this step's turn is folded
+        for (start_t, end_t, summary) in &folded_turns {
+            if current_turn >= *start_t
+                && current_turn <= *end_t
+                && step_type != "USER_INPUT"
+                && let Some(obj) = val.as_object_mut()
+            {
+                if obj.contains_key("thinking") {
+                    obj.insert(
+                        "thinking".to_string(),
+                        Value::String(format!(
+                            "[cw:folded_turns {}..{}] {}",
+                            start_t, end_t, summary
+                        )),
+                    );
+                    modified = true;
+                }
+                if step_type != "PLANNER_RESPONSE" && obj.contains_key("content") {
+                    obj.insert(
+                        "content".to_string(),
+                        Value::String(format!(
+                            "[cw:folded_turns {}..{}] {}",
+                            start_t, end_t, summary
+                        )),
+                    );
+                    modified = true;
+                }
+            }
+        }
+
+        // Check if this step matches a compacted tool result or oversized output
+        if !modified {
+            if let Some(stub) = compacted_by_call_id.get(&synthetic_res_id)
+                && let Some(obj) = val.as_object_mut()
+            {
+                obj.insert("content".to_string(), Value::String(stub.clone()));
+                modified = true;
+            } else if step_type != "USER_INPUT"
+                && step_type != "PLANNER_RESPONSE"
+                && !committed_rules.is_empty()
+            {
+                let content_len = val
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .filter(|s| s.len() > 1600 && !s.starts_with("[cw:"))
+                    .map(|s| s.len());
+                if let Some(len) = content_len
+                    && let Some(obj) = val.as_object_mut()
+                {
+                    let stub = format!(
+                        "[cw:synced_compaction original_bytes={len} session=\"{session_id}\"]"
+                    );
+                    obj.insert("content".to_string(), Value::String(stub));
+                    modified = true;
+                }
+            }
+        }
+
+        if modified {
+            steps_compacted += 1;
+        }
+        new_lines.push(serde_json::to_string(&val).unwrap_or_else(|_| line.to_string()));
+    }
+
+    let out_content = format!("{}\n", new_lines.join("\n"));
+    fs::write(&transcript_path, &out_content)?;
+
+    // Also sync `transcript_full.jsonl` if this is an Antigravity session
+    let full_path = transcript_path.with_file_name("transcript_full.jsonl");
+    if full_path.exists() {
+        let full_bak = PathBuf::from(format!("{}.bak", full_path.to_string_lossy()));
+        if !full_bak.exists() {
+            let _ = fs::copy(&full_path, &full_bak);
+        }
+        let _ = fs::write(&full_path, &out_content);
+    }
+
+    let bytes_after = fs::metadata(&transcript_path).map(|m| m.len()).unwrap_or(0);
+    store.set_session_source_path(session_id, &transcript_path_str, bytes_after)?;
+
+    Ok(TranscriptSyncReport {
+        session_id: session_id.to_string(),
+        transcript_path: transcript_path_str,
+        backup_path: backup_path.to_string_lossy().to_string(),
+        steps_compacted,
+        bytes_before,
+        bytes_after,
+    })
+}
+
+/// Spawns an incremental background watcher task that scans Antigravity (`~/.gemini/antigravity-cli/brain`),
+/// Claude Code (`~/.claude/projects`), Codex (`~/.codex/sessions`), OpenCode (`~/.local/share/opencode`),
+/// and Pi (`~/.pi/sessions`) transcript directories, tracking `(mtime, byte_len)` per file.
 pub fn spawn_transcript_watcher(store: CwStore, _default_workspace: Option<String>) {
     tokio::spawn(async move {
-        let mut last_mtime: HashMap<PathBuf, SystemTime> = HashMap::new();
+        let mut file_state: HashMap<PathBuf, (SystemTime, u64)> = HashMap::new();
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         let agy_brain_dir = PathBuf::from(&home).join(".gemini/antigravity-cli/brain");
+        let claude_dir = PathBuf::from(&home).join(".claude/projects");
+        let codex_dir = PathBuf::from(&home).join(".codex/sessions");
+        let opencode_dir = PathBuf::from(&home).join(".local/share/opencode");
+        let pi_dir = PathBuf::from(&home).join(".pi/sessions");
 
         loop {
+            // 1. Antigravity transcripts
             if agy_brain_dir.exists()
                 && let Ok(entries) = fs::read_dir(&agy_brain_dir)
             {
@@ -477,18 +739,61 @@ pub fn spawn_transcript_watcher(store: CwStore, _default_workspace: Option<Strin
                         && let Ok(meta) = fs::metadata(&transcript)
                         && let Ok(mtime) = meta.modified()
                     {
-                        let prev = last_mtime.get(&transcript).copied();
-                        if prev != Some(mtime) {
-                            last_mtime.insert(transcript.clone(), mtime);
-                            // Pass None for fallback_workspace so each transcript infers its own real project!
+                        let sig = (mtime, meta.len());
+                        if file_state.get(&transcript).copied() != Some(sig) {
+                            file_state.insert(transcript.clone(), sig);
                             let _ = import_agy_transcript(&transcript, &store, None);
                         }
                     }
                 }
             }
+
+            // 2. Claude Code, Codex, OpenCode, and Pi JSONL transcripts
+            for (dir, harness) in [
+                (&claude_dir, HarnessKind::ClaudeCode),
+                (&codex_dir, HarnessKind::Codex),
+                (&opencode_dir, HarnessKind::OpenCode),
+                (&pi_dir, HarnessKind::Pi),
+            ] {
+                if dir.exists() {
+                    scan_jsonl_dir_recursively(dir, harness, &store, &mut file_state, 0);
+                }
+            }
+
             tokio::time::sleep(Duration::from_secs(4)).await;
         }
     });
+}
+
+fn scan_jsonl_dir_recursively(
+    dir: &Path,
+    harness: HarnessKind,
+    store: &CwStore,
+    file_state: &mut HashMap<PathBuf, (SystemTime, u64)>,
+    depth: u8,
+) {
+    if depth > 3 {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            scan_jsonl_dir_recursively(&p, harness, store, file_state, depth + 1);
+        } else if p.extension().and_then(|e| e.to_str()) == Some("jsonl")
+            && !p.to_string_lossy().ends_with(".bak")
+            && let Ok(meta) = fs::metadata(&p)
+            && let Ok(mtime) = meta.modified()
+        {
+            let sig = (mtime, meta.len());
+            if file_state.get(&p).copied() != Some(sig) {
+                file_state.insert(p.clone(), sig);
+                let _ = import_generic_jsonl_transcript(&p, harness, store, None);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -508,5 +813,39 @@ mod tests {
         let files = store.get_file_states(&sess_id).unwrap();
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "Cargo.toml");
+    }
+
+    #[test]
+    fn test_sync_mutations_to_transcript_on_disk() {
+        let store = CwStore::open_in_memory().unwrap();
+        let fixture = Path::new("../cw-core/tests/fixtures/agy/transcript.jsonl");
+        let tmp_dir = std::env::temp_dir().join(format!("cw_test_sync_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp_dir);
+        let tmp_transcript = tmp_dir.join("transcript.jsonl");
+        fs::copy(fixture, &tmp_transcript).unwrap();
+
+        let sess_id = import_agy_transcript(&tmp_transcript, &store, None).unwrap();
+        store
+            .save_mutation(&cw_core::ir::MutationRule {
+                id: "mut_fold_test".to_string(),
+                session_id: sess_id.clone(),
+                op: MutationOp::FoldSubtree {
+                    start_turn: 1,
+                    end_turn: 1,
+                    summary_text: "Folded Turn 1".to_string(),
+                },
+                status: MutationStatus::Committed,
+                created_at: Utc::now(),
+                estimated_saved_tokens: 120,
+                estimated_kv_break_tokens: 0,
+            })
+            .unwrap();
+
+        let report = sync_mutations_to_transcript_on_disk(&store, &sess_id).unwrap();
+        assert!(Path::new(&report.backup_path).exists());
+        assert!(report.steps_compacted >= 1);
+        let updated = fs::read_to_string(&tmp_transcript).unwrap();
+        assert!(updated.contains("[cw:folded_turns 1..1] Folded Turn 1"));
+        let _ = fs::remove_dir_all(&tmp_dir);
     }
 }

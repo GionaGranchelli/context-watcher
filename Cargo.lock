@@ -561,6 +561,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cw-core",
+ "cw-harnesses",
  "cw-store",
  "futures",
  "reqwest",

@@ -82,7 +82,8 @@ pub fn analyze_context_health(
 
     for (path, reads) in &file_reads {
         let write_info = latest_file_write_turn.get(path).copied();
-        let disk_modified = is_file_modified_on_disk(path, workspace_root, reads.last());
+        let disk_modified_reason = check_file_modified_on_disk(path, workspace_root, reads.last(), nodes);
+        let disk_modified = disk_modified_reason.is_some();
 
         // CW-L001: Stale File in Context
         let mut stale_nodes = Vec::new();
@@ -102,13 +103,23 @@ pub fn analyze_context_health(
         }
 
         if !stale_nodes.is_empty() {
+            let detail_msg = match &disk_modified_reason {
+                Some(reason) => format!(
+                    "File '{path}' was modified on disk ({reason}) after being read into context ({stale_tokens} stale tokens). The model may hallucinate outdated code."
+                ),
+                None => format!(
+                    "File '{path}' was modified after being read into context ({stale_tokens} stale tokens). The model may hallucinate outdated code."
+                ),
+            };
             findings.push(LintFinding {
                 rule_id: LintRuleId::StaleFileInContext,
                 severity: LintSeverity::Warning,
-                title: format!("Stale File Read: {path}"),
-                message: format!(
-                    "File '{path}' was modified after being read into context ({stale_tokens} stale tokens). The model may hallucinate outdated code."
-                ),
+                title: if disk_modified {
+                    format!("Stale File Read (Modified on Disk): {path}")
+                } else {
+                    format!("Stale File Read: {path}")
+                },
+                message: detail_msg,
                 affected_node_ids: stale_nodes,
                 wasted_tokens: stale_tokens,
                 suggested_mutation: Some(MutationOp::ShadowDedupe {
@@ -448,32 +459,126 @@ fn emit_failed_loop_finding(
     });
 }
 
-fn is_file_modified_on_disk(
+fn check_file_modified_on_disk(
     path: &str,
     workspace_root: Option<&str>,
     last_read: Option<&FileReadEntry>,
-) -> bool {
-    let Some(&(_, _, _, ref read_hash, read_range)) = last_read else {
-        return false;
-    };
-    if read_hash.is_empty() {
-        return false;
-    }
-    // Only compare whole-file reads if line range wasn't restricted
-    if let Some((start, end)) = read_range
-        && (start > 1 || end < 800) {
-            return false;
-        }
+    nodes: &[ContextNode],
+) -> Option<String> {
+    let &(node_idx, _, _, ref read_hash, read_range) = last_read?;
     let resolved = if Path::new(path).is_absolute() {
         std::path::PathBuf::from(path)
     } else if let Some(root) = workspace_root {
         Path::new(root).join(path)
     } else {
-        return false;
+        return None;
     };
-    if let Ok(disk_content) = std::fs::read_to_string(&resolved) {
-        let disk_hash = blake3::hash(disk_content.trim().as_bytes()).to_hex()[..16].to_string();
-        return &disk_hash != read_hash;
+
+    let Ok(disk_content) = std::fs::read_to_string(&resolved) else {
+        return None;
+    };
+
+    // 1. Check mtime against node timestamp if available
+    if let Some(node) = nodes.get(node_idx)
+        && let Some(ref ts_str) = node.timestamp
+        && let Ok(read_dt) = chrono::DateTime::parse_from_rfc3339(ts_str)
+        && let Ok(meta) = std::fs::metadata(&resolved)
+        && let Ok(mtime) = meta.modified()
+    {
+        let mtime_dt: chrono::DateTime<chrono::Utc> = mtime.into();
+        if mtime_dt.signed_duration_since(read_dt.with_timezone(&chrono::Utc)).num_seconds() > 2 {
+            // Confirm content actually differs before flagging
+            let raw_node_text = node.kind.text_for_tokenization();
+            if !disk_contains_read_snippet(&disk_content, &raw_node_text, read_range) {
+                return Some("disk mtime & content changed externally".to_string());
+            }
+        }
     }
-    false
+
+    // 2. Direct content hash / line-slice comparison
+    if !read_hash.is_empty() {
+        if let Some((start, end)) = read_range
+            && (start > 1 || end < 800)
+        {
+            if let Some(node) = nodes.get(node_idx) {
+                let raw_node_text = node.kind.text_for_tokenization();
+                if !disk_contains_read_snippet(&disk_content, &raw_node_text, Some((start, end))) {
+                    return Some(format!("lines {start}..{end} modified on disk"));
+                }
+            }
+            return None;
+        }
+
+        let disk_hash = blake3::hash(disk_content.trim().as_bytes()).to_hex()[..16].to_string();
+        if &disk_hash != read_hash {
+            if let Some(node) = nodes.get(node_idx) {
+                let raw_node_text = node.kind.text_for_tokenization();
+                if disk_contains_read_snippet(&disk_content, &raw_node_text, read_range) {
+                    return None;
+                }
+            }
+            return Some("BLAKE3 hash differs from on-disk file".to_string());
+        }
+    }
+
+    None
+}
+
+fn disk_contains_read_snippet(
+    disk_content: &str,
+    node_text: &str,
+    read_range: Option<(u32, u32)>,
+) -> bool {
+    if node_text.starts_with("[cw:") {
+        return true;
+    }
+    let disk_lines: Vec<&str> = disk_content.lines().collect();
+    if let Some((start, end)) = read_range {
+        let s_idx = (start.saturating_sub(1) as usize).min(disk_lines.len());
+        let e_idx = (end as usize).min(disk_lines.len());
+        if s_idx < e_idx {
+            let slice_str = disk_lines[s_idx..e_idx].join("\n");
+            let slice_hash = blake3::hash(slice_str.trim().as_bytes()).to_hex()[..16].to_string();
+            let node_hash = blake3::hash(node_text.trim().as_bytes()).to_hex()[..16].to_string();
+            if slice_hash == node_hash {
+                return true;
+            }
+        }
+    }
+
+    // Strip optional line-number prefixes (e.g. `12: code` or `   12→code`) and check sample lines
+    let mut checked = 0usize;
+    let mut matched = 0usize;
+    for line in node_text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with("Created At:")
+            || trimmed.starts_with("Completed At:")
+            || trimmed.starts_with("Showing lines ")
+            || trimmed.starts_with("Partial read ")
+        {
+            continue;
+        }
+        let code_part = if let Some((num_prefix, rest)) = trimmed.split_once(": ")
+            && num_prefix.chars().all(|c| c.is_ascii_digit())
+        {
+            rest.trim()
+        } else {
+            trimmed
+        };
+        if code_part.len() < 8 {
+            continue;
+        }
+        checked += 1;
+        if disk_content.contains(code_part) {
+            matched += 1;
+        }
+        if checked >= 12 {
+            break;
+        }
+    }
+    if checked == 0 {
+        return disk_content.trim() == node_text.trim();
+    }
+    matched * 4 >= checked * 3
 }

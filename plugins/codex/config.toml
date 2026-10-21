@@ -1,0 +1,4 @@
+# Codex CLI config.toml snippet for contextWatcher MCP & Proxy integration
+[mcp_servers.contextWatcher]
+command = "cw"
+args = ["mcp", "--daemon-url", "http://127.0.0.1:4400"]

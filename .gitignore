@@ -1,0 +1,12 @@
+/target
+/web/node_modules
+/web/.svelte-kit
+/web/build
+/ide/cw-intellij/.gradle
+/ide/cw-intellij/build
+/ide/cw-intellij/.intellijPlatform
+*.db
+*.db-shm
+*.db-wal
+.cw/
+.DS_Store

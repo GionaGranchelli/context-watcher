@@ -1,0 +1,41 @@
+{
+  "model": "o3-mini",
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "run_command",
+        "description": "Run shell command",
+        "parameters": { "type": "object", "properties": { "command": { "type": "string" } } }
+      }
+    }
+  ],
+  "messages": [
+    { "role": "developer", "content": "Follow project rules." },
+    { "role": "user", "content": "Run cargo test" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "id": "call_1", "type": "function", "function": { "name": "run_command", "arguments": "{\"command\":\"cargo test\"}" } }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "call_1", "content": "Command exited with code 1\nerror: test failed" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "id": "call_2", "type": "function", "function": { "name": "run_command", "arguments": "{\"command\":\"cargo test\"}" } }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "call_2", "content": "Command exited with code 1\nerror: test failed" },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        { "id": "call_3", "type": "function", "function": { "name": "run_command", "arguments": "{\"command\":\"cargo test\"}" } }
+      ]
+    },
+    { "role": "tool", "tool_call_id": "call_3", "content": "Command exited with code 1\nerror: test failed" }
+  ]
+}

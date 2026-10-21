@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "contextWatcher": {
+      "type": "local",
+      "command": ["cw", "mcp", "--daemon-url", "http://127.0.0.1:4400"],
+      "enabled": true
+    }
+  }
+}

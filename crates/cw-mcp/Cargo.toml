@@ -1,0 +1,14 @@
+[package]
+name = "cw-mcp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cw-core.workspace = true
+cw-store.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+tracing.workspace = true

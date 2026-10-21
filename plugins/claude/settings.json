@@ -1,0 +1,11 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:4401/anthropic"
+  },
+  "mcpServers": {
+    "contextWatcher": {
+      "command": "cw",
+      "args": ["mcp", "--daemon-url", "http://127.0.0.1:4400"]
+    }
+  }
+}

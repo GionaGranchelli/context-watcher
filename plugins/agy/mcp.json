@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "contextWatcher": {
+      "command": "cw",
+      "args": ["mcp", "--daemon-url", "http://127.0.0.1:4400"],
+      "env": {}
+    }
+  }
+}

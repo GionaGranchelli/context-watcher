@@ -1,0 +1,31 @@
+{
+  "systemInstruction": {
+    "parts": [{ "text": "You are Antigravity powered by Gemini.\n<skills>\n- ponytail (/skills/ponytail/SKILL.md): Keep code minimal.\n</skills>" }]
+  },
+  "tools": [
+    {
+      "functionDeclarations": [
+        { "name": "read_file", "description": "Read a file", "parameters": { "type": "OBJECT" } }
+      ]
+    }
+  ],
+  "contents": [
+    {
+      "role": "user",
+      "parts": [{ "text": "Inspect Cargo.toml" }]
+    },
+    {
+      "role": "model",
+      "parts": [
+        { "thought": true, "text": "Let me read Cargo.toml", "thoughtSignature": "gem_sig_42" },
+        { "functionCall": { "name": "read_file", "args": { "Path": "Cargo.toml" } } }
+      ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        { "functionResponse": { "name": "read_file", "response": { "output": "[workspace]\nresolver = \"2\"" } } }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+<idea-plugin>
+    <id>dev.contextwatcher.intellij</id>
+    <name>contextWatcher — LLM Context &amp; KV Cache Inspector</name>
+    <vendor email="dev@contextwatcher.dev" url="https://github.com/contextWatcher">contextWatcher</vendor>
+    <description><![CDATA[
+        Bridges your IDE editor with the local <code>contextWatcher (cw)</code> daemon.
+        <ul>
+            <li><b>Editor Tab Context Badges:</b> See whether the open file is Fresh 🟢, Stale 🟠, Duplicate 🔁, or Pinned 📌 in the active LLM harness context window.</li>
+            <li><b>Gutter Line-Range Highlights:</b> Visualizes the exact line ranges read by the agent via <code>read_file</code>.</li>
+            <li><b>1-Click Surgical Actions:</b> Evict stale file reads or pin selected code snippets to the high-attention tail without breaking the KV cache prefix.</li>
+            <li><b>ContextWatcher Tool Window:</b> Live Radix Tree, Treemap, KV Cache gauge, and Firewall alerts right inside IntelliJ.</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <editorNotificationProvider implementation="dev.contextwatcher.intellij.CwEditorNotificationProvider"/>
+        <codeInsight.lineMarkerProvider language="" implementationClass="dev.contextwatcher.intellij.CwLineMarkerProvider"/>
+        <toolWindow id="contextWatcher"
+                    anchor="right"
+                    factoryClass="dev.contextwatcher.intellij.CwToolWindowFactory"/>
+    </extensions>
+
+    <actions>
+        <action id="contextWatcher.PinSelection"
+                class="dev.contextwatcher.intellij.PinSelectionToContextAction"
+                text="contextWatcher: Pin Selection to LLM Context"
+                description="Pins the selected code snippet to the high-attention tail of the active LLM prompt">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action id="contextWatcher.EvictStaleFile"
+                class="dev.contextwatcher.intellij.EvictStaleFileAction"
+                text="contextWatcher: Shadow-Dedupe / Evict Stale File Reads"
+                description="Replaces older stale or duplicate reads of this file in the LLM context window">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

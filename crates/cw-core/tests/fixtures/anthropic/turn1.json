@@ -1,0 +1,42 @@
+{
+  "model": "claude-sonnet-4-20250514",
+  "max_tokens": 4096,
+  "system": [
+    {
+      "type": "text",
+      "text": "You are an expert Rust developer.\n<RULE[AGENTS.md]>\nZero-Drop Proxy Transparency.\n</RULE[AGENTS.md]>",
+      "cache_control": { "type": "ephemeral" }
+    }
+  ],
+  "tools": [
+    {
+      "name": "mcp_github_get_issue",
+      "description": "Fetch GitHub issue",
+      "input_schema": { "type": "object", "properties": { "id": { "type": "number" } } }
+    },
+    {
+      "name": "read_file",
+      "description": "Read file contents",
+      "input_schema": { "type": "object", "properties": { "Path": { "type": "string" } } }
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": "Read src/lib.rs"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        { "type": "thinking", "thinking": "Reading src/lib.rs first.", "signature": "anth_sig_999" },
+        { "type": "tool_use", "id": "toolu_01", "name": "read_file", "input": { "Path": "src/lib.rs", "StartLine": 1, "EndLine": 50 } }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        { "type": "tool_result", "tool_use_id": "toolu_01", "content": "pub mod ir;\npub mod radix;\n" }
+      ]
+    }
+  ]
+}

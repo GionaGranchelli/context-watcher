@@ -14,13 +14,13 @@
     e.stopPropagation();
     visible = !visible;
   }}
-  style="position: relative; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border-radius: 999px; background: #334155; color: #38bdf8; font-size: 11px; font-weight: 800; cursor: help; margin-left: 5px; user-select: none; border: 1px solid #475569; flex-shrink: 0;"
+  style="position: relative; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; border-radius: 999px; background: {visible ? '#27272a' : 'transparent'}; color: {visible ? '#e4e4e7' : '#71717a'}; font-size: 10px; font-weight: 600; cursor: help; margin-left: 5px; user-select: none; border: 1px solid {visible ? '#52525b' : '#27272a'}; flex-shrink: 0; transition: all 0.15s;"
 >
   ?
   {#if visible}
     <div
       role="tooltip"
-      style="position: absolute; z-index: 9999; width: 270px; padding: 9px 11px; border-radius: 8px; background: #0f172a; color: #f1f5f9; border: 1px solid #38bdf8; box-shadow: 0 10px 25px rgba(0,0,0,0.65); font-size: 11.5px; font-weight: 400; line-height: 1.45; text-align: left; pointer-events: none; {position === 'top' ? 'bottom: 24px; left: 50%; transform: translateX(-50%);' : position === 'left' ? 'right: 24px; top: -4px;' : 'top: 24px; left: 50%; transform: translateX(-50%);'}"
+      style="position: absolute; z-index: 9999; width: 260px; padding: 10px 12px; border-radius: 8px; background: #18181b; color: #e4e4e7; border: 1px solid #3f3f46; box-shadow: 0 12px 28px rgba(0,0,0,0.7); font-size: 11.5px; font-weight: 400; line-height: 1.5; text-align: left; pointer-events: none; {position === 'top' ? 'bottom: 22px; left: 50%; transform: translateX(-50%);' : position === 'left' ? 'right: 22px; top: -4px;' : 'top: 22px; left: 50%; transform: translateX(-50%);'}"
     >
       {text}
     </div>

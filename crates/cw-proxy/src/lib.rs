@@ -1242,21 +1242,17 @@ async fn handle_ws_client(mut socket: WebSocket, state: DaemonState) {
     }
 }
 
-fn recompute_latest_turn_with_mutations(state: &DaemonState, session_id: &str) {
-    let Some(latest) = state.store.get_latest_turn(session_id).ok().flatten() else {
-        return;
-    };
-    let Some(mut raw_payload) = state.store.get_turn_raw_payload(&latest.id).ok().flatten() else {
-        return;
-    };
-    let session = state.store.get_session(session_id).ok().flatten();
+pub fn recompute_latest_turn_in_store(store: &CwStore, session_id: &str) -> Option<ContextTurn> {
+    let latest = store.get_latest_turn(session_id).ok().flatten()?;
+    let mut raw_payload = store.get_turn_raw_payload(&latest.id).ok().flatten()?;
+    let session = store.get_session(session_id).ok().flatten();
     let provider = session
         .as_ref()
         .map(|s| s.provider)
         .unwrap_or(ProviderKind::Anthropic);
     let workspace_root = session.as_ref().and_then(|s| s.workspace_root.clone());
 
-    let rules = state.store.list_mutations(session_id).unwrap_or_default();
+    let rules = store.list_mutations(session_id).unwrap_or_default();
     let mut_report =
         apply_mutations_to_payload(&mut raw_payload, provider, &rules, latest.sequence_number);
 
@@ -1272,13 +1268,18 @@ fn recompute_latest_turn_with_mutations(state: &DaemonState, session_id: &str) {
         workspace_root.as_deref(),
     ) {
         updated_turn.token_usage.saved_by_mutations = mut_report.saved_tokens;
-        let _ = state.store.save_turn(
-            &updated_turn,
-            None,
-            Some(&raw_payload),
-            None,
-        );
-        let _ = state.store.save_file_states(session_id, &file_states);
+        let _ = store.save_turn(&updated_turn, None, Some(&raw_payload), None);
+        let _ = store.save_file_states(session_id, &file_states);
+        return Some(updated_turn);
+    }
+    None
+}
+
+fn recompute_latest_turn_with_mutations(state: &DaemonState, session_id: &str) {
+    if let Some(updated_turn) = recompute_latest_turn_in_store(&state.store, session_id) {
+        let session = state.store.get_session(session_id).ok().flatten();
+        let workspace_root = session.as_ref().and_then(|s| s.workspace_root.clone());
+        let file_states = state.store.get_file_states(session_id).unwrap_or_default();
         state.broadcast(WsEvent::TurnCompleted {
             session_id: session_id.to_string(),
             turn: Box::new(updated_turn),

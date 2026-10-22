@@ -16,7 +16,9 @@ use cw_harnesses::{
     spawn_transcript_watcher, sync_mutations_to_transcript_on_disk,
 };
 use cw_mcp::run_mcp_stdio_server;
-use cw_proxy::{DaemonState, build_api_router, build_proxy_router};
+use cw_proxy::{
+    DaemonState, build_api_router, build_proxy_router, recompute_latest_turn_in_store,
+};
 use cw_store::CwStore;
 use cw_tui::run_tui;
 use rust_embed::Embed;
@@ -97,8 +99,21 @@ enum Commands {
         /// Stage optimizations into the Cache-Safe Draft Queue instead of committing immediately
         #[arg(long)]
         draft: bool,
+        /// Target a specific session ID (defaults to the most recent session unless --all / --project / --agent is set)
         #[arg(long)]
         session: Option<String>,
+        /// Apply the strategy across ALL sessions across all projects and agents
+        #[arg(long)]
+        all: bool,
+        /// Apply the strategy across all sessions belonging to a specific project name (e.g. `aurora`, `android-agent`)
+        #[arg(long)]
+        project: Option<String>,
+        /// Apply the strategy across all sessions belonging to a specific agent harness (`antigravity`, `codex`, `hermes`, `claude_code`)
+        #[arg(long)]
+        agent: Option<String>,
+        /// Also sync compacted overlays back to on-disk .jsonl transcripts (.bak created automatically)
+        #[arg(long)]
+        sync_back: bool,
     },
     /// Fold a range of turns into a single concise outcome summary
     Fold {
@@ -403,8 +418,123 @@ async fn main() -> Result<()> {
             explain,
             draft,
             session,
+            all,
+            project,
+            agent,
+            sync_back,
         } => {
             let store = CwStore::open(&db_path)?;
+            let is_batch = all || project.is_some() || agent.is_some();
+
+            if is_batch {
+                let strat_id = strategy
+                    .clone()
+                    .unwrap_or_else(|| "max_token_diet".to_string());
+                let all_sessions = store.list_sessions()?;
+                let target_sessions: Vec<_> = all_sessions
+                    .into_iter()
+                    .filter(|s| {
+                        if let Some(ref p_filter) = project {
+                            let proj = project_label_from_workspace(s.workspace_root.as_deref());
+                            if !proj.eq_ignore_ascii_case(p_filter)
+                                && !s
+                                    .workspace_root
+                                    .as_deref()
+                                    .unwrap_or("")
+                                    .to_lowercase()
+                                    .contains(&p_filter.to_lowercase())
+                            {
+                                return false;
+                            }
+                        }
+                        if let Some(ref a_filter) = agent
+                            && !s.harness.as_str().eq_ignore_ascii_case(a_filter)
+                        {
+                            return false;
+                        }
+                        true
+                    })
+                    .collect();
+
+                if target_sessions.is_empty() {
+                    println!("No matching sessions found for the specified filter.");
+                    return Ok(());
+                }
+
+                let mut sessions_compacted = 0usize;
+                let mut total_ops = 0usize;
+                let mut total_saved_tok = 0u64;
+                let mut total_synced = 0usize;
+
+                for s in &target_sessions {
+                    let Some(turn) = store.get_latest_turn(&s.id)? else {
+                        continue;
+                    };
+                    let plans = build_optimization_plans(&turn);
+                    let Some(plan) = plans.iter().find(|p| p.id == strat_id) else {
+                        anyhow::bail!(
+                            "Unknown strategy '{}'. Valid IDs: cache_safe_boost, clean_code_state, surgical_log_diet, deep_trajectory_fold, max_token_diet",
+                            strat_id
+                        );
+                    };
+                    if plan.items.is_empty() {
+                        continue;
+                    }
+                    sessions_compacted += 1;
+                    total_ops += plan.items.len();
+                    total_saved_tok += plan.saved_tokens as u64;
+
+                    if !dry_run {
+                        for item in &plan.items {
+                            let rule = MutationRule {
+                                id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
+                                session_id: s.id.clone(),
+                                op: item.mutation_op.clone(),
+                                status: if draft {
+                                    MutationStatus::Draft
+                                } else {
+                                    MutationStatus::Committed
+                                },
+                                estimated_saved_tokens: item.saved_tokens,
+                                estimated_kv_break_tokens: item.kv_break_tokens,
+                                created_at: chrono::Utc::now(),
+                            };
+                            store.save_mutation(&rule)?;
+                        }
+                        if !draft {
+                            let _ = recompute_latest_turn_in_store(&store, &s.id);
+                            if sync_back
+                                && sync_mutations_to_transcript_on_disk(&store, &s.id).is_ok()
+                            {
+                                total_synced += 1;
+                            }
+                        }
+                    }
+                }
+
+                println!(
+                    "✅ BatchOptimize ({}) [strategy: '{}'] — Matched {} sessions, compacted {} sessions ({} operations, -{} tokens{}).",
+                    if dry_run {
+                        "DRY RUN"
+                    } else if draft {
+                        "DRAFT"
+                    } else {
+                        "COMMITTED"
+                    },
+                    strat_id,
+                    target_sessions.len(),
+                    sessions_compacted,
+                    total_ops,
+                    total_saved_tok,
+                    if total_synced > 0 {
+                        format!(", synced {total_synced} transcripts to disk")
+                    } else {
+                        String::new()
+                    }
+                );
+                return Ok(());
+            }
+
             let Some(sess_id) = resolve_session(&store, session)? else {
                 println!("No active sessions found.");
                 return Ok(());
@@ -464,7 +594,7 @@ async fn main() -> Result<()> {
                 }
 
                 if strategy.is_none() {
-                    println!("\n💡 Tip: Run `cw optimize --strategy <id>` to apply a strategy, or add `--explain` to inspect every node.");
+                    println!("\n💡 Tip: Run `cw optimize -s <id>` (single session) or `cw optimize -s <id> --all` / `--project <name>` / `--agent <name>`.");
                     return Ok(());
                 }
             }
@@ -492,6 +622,12 @@ async fn main() -> Result<()> {
                             created_at: chrono::Utc::now(),
                         };
                         store.save_mutation(&rule)?;
+                    }
+                    if !draft {
+                        let _ = recompute_latest_turn_in_store(&store, &sess_id);
+                        if sync_back {
+                            let _ = sync_mutations_to_transcript_on_disk(&store, &sess_id);
+                        }
                     }
                     println!(
                         "\n✅ {} {} optimization operations from '{}' on session {} (Est. saved: {} tok, Health: {} -> {}/100).",

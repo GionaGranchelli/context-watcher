@@ -174,7 +174,29 @@ enum Commands {
         #[arg(long)]
         disable: bool,
     },
-    /// Install contextWatcher Skill & MCP config for Antigravity, Claude Code, Codex, OpenCode & Pi
+    /// Show token, KV-cache, and dollar ($) savings analytics across all sessions, agents, and projects (like `rtk gain`)
+    Gain {
+        /// Show detailed mutation overlay history
+        #[arg(long)]
+        history: bool,
+    },
+    /// One-command plugin, MCP, hook & systemd installer for Antigravity, Codex, Claude Code & Hermes (like `rtk init`)
+    Init {
+        /// Only preview what files will be created or modified without writing to disk
+        #[arg(long)]
+        dry_run: bool,
+        /// Also enable and start the background systemd user service (`contextwatcher.service`)
+        #[arg(long)]
+        service: bool,
+    },
+    /// Fast PostToolUse / PreCompact hook invoked by harnesses to enforce Auto-Pilot context hygiene
+    Hook {
+        #[arg(long)]
+        quiet: bool,
+        #[arg(long)]
+        session: Option<String>,
+    },
+    /// Alias for `cw init`: install contextWatcher Skill & MCP config for Antigravity, Claude Code, Codex, OpenCode & Pi
     InstallIntegrations,
 }
 
@@ -709,21 +731,19 @@ async fn main() -> Result<()> {
                 cfg.local_model_window_guard, cfg.local_window_threshold_tokens
             );
         }
+        Commands::Gain { history } => {
+            let store = CwStore::open(&db_path)?;
+            run_gain_report(&store, history)?;
+        }
+        Commands::Init { dry_run, service } => {
+            run_init_installer(dry_run, service)?;
+        }
+        Commands::Hook { quiet, session } => {
+            let store = CwStore::open(&db_path)?;
+            run_hook_check(&store, quiet, session)?;
+        }
         Commands::InstallIntegrations => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cw"));
-            let agy_skill_dir = PathBuf::from(&home).join(".gemini/config/skills/context-watcher");
-            let _ = std::fs::create_dir_all(&agy_skill_dir);
-            let skill_src = PathBuf::from("plugins/agy/skills/context-watcher/SKILL.md");
-            if skill_src.exists() {
-                let _ = std::fs::copy(&skill_src, agy_skill_dir.join("SKILL.md"));
-            }
-            println!("✅ Installed Antigravity skill to: {}", agy_skill_dir.join("SKILL.md").display());
-            println!("\n📌 Add this MCP server block to your harness config (Antigravity / Claude Code / Codex / OpenCode):");
-            println!(
-                "{{\n  \"mcpServers\": {{\n    \"context-watcher\": {{\n      \"command\": \"{}\",\n      \"args\": [\"mcp\", \"--daemon-url\", \"http://127.0.0.1:4400\"]\n    }}\n  }}\n}}",
-                exe.display()
-            );
+            run_init_installer(false, false)?;
         }
     }
 
@@ -776,3 +796,417 @@ async fn serve_embedded_web_ui(uri: Uri) -> impl IntoResponse {
         None => (StatusCode::NOT_FOUND, "Web UI asset not found").into_response(),
     }
 }
+
+fn project_label_from_workspace(ws: Option<&str>) -> String {
+    let Some(w) = ws.map(str::trim).filter(|s| !s.is_empty()) else {
+        return "General Chat".to_string();
+    };
+    w.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(w)
+        .to_string()
+}
+
+fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
+    let sessions = store.list_sessions()?;
+    if sessions.is_empty() {
+        println!("No sessions recorded yet. Run `cw serve` to import local transcripts.");
+        return Ok(());
+    }
+
+    #[derive(Default)]
+    struct Bucket {
+        sessions: usize,
+        input_tokens: u64,
+        saved_by_overlays: u64,
+        cuttable_tokens: u64,
+        kv_hit_tokens: u64,
+        saved_usd: f64,
+        cuttable_usd: f64,
+        health_sum: u64,
+    }
+
+    let mut total = Bucket::default();
+    let mut by_agent: std::collections::BTreeMap<String, Bucket> =
+        std::collections::BTreeMap::new();
+    let mut by_project: std::collections::BTreeMap<String, Bucket> =
+        std::collections::BTreeMap::new();
+    let mut recent_mutations = Vec::new();
+
+    for s in &sessions {
+        let Some(turn) = store.get_latest_turn(&s.id)? else {
+            continue;
+        };
+        let plans = build_optimization_plans(&turn);
+        let max_cut = plans
+            .iter()
+            .find(|p| p.id == "max_token_diet")
+            .map(|p| p.saved_tokens)
+            .unwrap_or(0);
+        let cost = calculate_cost_and_perf(&turn, &s.model, s.provider);
+        let cut_usd = (max_cut as f64 / 1_000_000.0) * 3.0; // Conservative $3/1M base input estimate
+
+        let agent_key = s.harness.as_str().to_string();
+        let proj_key = project_label_from_workspace(s.workspace_root.as_deref());
+
+        for b in [
+            &mut total,
+            by_agent.entry(agent_key).or_default(),
+            by_project.entry(proj_key).or_default(),
+        ] {
+            b.sessions += 1;
+            b.input_tokens += turn.token_usage.input_tokens as u64;
+            b.saved_by_overlays += turn.token_usage.saved_by_mutations as u64;
+            b.cuttable_tokens += max_cut as u64;
+            b.kv_hit_tokens += turn.kv_cache_report.hit_tokens as u64;
+            b.saved_usd += cost.saved_by_kv_cache_usd + cost.saved_by_cw_overlays_usd;
+            b.cuttable_usd += cut_usd;
+            b.health_sum += turn.health_score as u64;
+        }
+
+        if show_history
+            && let Ok(muts) = store.list_mutations(&s.id)
+        {
+            for m in muts {
+                recent_mutations.push((s.id.clone(), s.harness.as_str().to_string(), m));
+            }
+        }
+    }
+
+    let avg_health = if total.sessions > 0 {
+        total.health_sum / total.sessions as u64
+    } else {
+        100
+    };
+    let kv_ratio = if total.input_tokens > 0 {
+        (total.kv_hit_tokens as f64 / total.input_tokens as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    println!("┌──────────────────────────────────────────────────────────────────────────────────┐");
+    println!("│ contextWatcher (`cw gain`) — Token, KV Cache & Cost Savings Analytics           │");
+    println!("├──────────────────────────────────────────────────────────────────────────────────┤");
+    println!(
+        "│ Sessions Analyzed   : {:<10} │ Active Context Volume : {:>12} tok     │",
+        total.sessions, total.input_tokens
+    );
+    println!(
+        "│ Active Overlay Cut  : {:<10} │ Ready-to-Cut Bloat    : {:>12} tok     │",
+        format!("-{} tok", total.saved_by_overlays),
+        format!("-{}", total.cuttable_tokens)
+    );
+    println!(
+        "│ KV Cache Hit Ratio  : {:<9.1}% │ Avg Context Health    : {:>12}/100     │",
+        kv_ratio, avg_health
+    );
+    println!(
+        "│ Active Saved ($)    : ${:<9.2} │ Cuttable Potential ($) : ${:>11.2}/turn   │",
+        total.saved_usd, total.cuttable_usd
+    );
+    println!("└──────────────────────────────────────────────────────────────────────────────────┘");
+
+    println!("\nBY AGENT HARNESS:");
+    println!(
+        "  {:<16} {:>8} {:>14} {:>14} {:>14} {:>10}",
+        "AGENT", "SESSIONS", "CONTEXT TOK", "ACTIVE SAVED", "CUTTABLE BLOAT", "AVG HEALTH"
+    );
+    println!("  {}", "─".repeat(78));
+    for (agent, b) in &by_agent {
+        let h = if b.sessions > 0 {
+            b.health_sum / b.sessions as u64
+        } else {
+            100
+        };
+        println!(
+            "  {:<16} {:>8} {:>14} {:>14} {:>14} {:>9}/100",
+            agent,
+            b.sessions,
+            b.input_tokens,
+            format!("-{}", b.saved_by_overlays),
+            format!("-{}", b.cuttable_tokens),
+            h
+        );
+    }
+
+    let mut proj_vec: Vec<_> = by_project.into_iter().collect();
+    proj_vec.sort_by_key(|b| std::cmp::Reverse(b.1.input_tokens));
+
+    println!("\nTOP PROJECTS BY CONTEXT VOLUME:");
+    println!(
+        "  {:<22} {:>8} {:>14} {:>14} {:>10}",
+        "PROJECT", "SESSIONS", "CONTEXT TOK", "CUTTABLE BLOAT", "AVG HEALTH"
+    );
+    println!("  {}", "─".repeat(72));
+    for (proj, b) in proj_vec.into_iter().take(12) {
+        let h = if b.sessions > 0 {
+            b.health_sum / b.sessions as u64
+        } else {
+            100
+        };
+        let p_short: String = proj.chars().take(21).collect();
+        println!(
+            "  {:<22} {:>8} {:>14} {:>14} {:>9}/100",
+            p_short,
+            b.sessions,
+            b.input_tokens,
+            format!("-{}", b.cuttable_tokens),
+            h
+        );
+    }
+
+    if show_history && !recent_mutations.is_empty() {
+        println!("\nACTIVE MUTATION OVERLAY LEDGER ({} rules):", recent_mutations.len());
+        for (sid, h, m) in recent_mutations.into_iter().take(20) {
+            println!(
+                "  • [{}] {:<12} {:<24} {:?} ({:?})",
+                m.id, h, sid, m.status, m.op
+            );
+        }
+    }
+
+    println!("\nTip: Run `cw optimize -s max_token_diet` or `cw sync-back` to apply compactions.");
+    Ok(())
+}
+
+fn run_hook_check(store: &CwStore, quiet: bool, explicit_session: Option<String>) -> Result<()> {
+    let Some(sid) = resolve_session(store, explicit_session)? else {
+        return Ok(());
+    };
+    let Some(turn) = store.get_latest_turn(&sid)? else {
+        return Ok(());
+    };
+
+    let cfg = store.get_autopilot_config()?;
+    if cfg.enabled && turn.token_usage.input_tokens >= cfg.breakpoint_tokens {
+        let op = MutationOp::ShadowDedupe { file_path: None };
+        let _ = save_cli_mutation(store, &sid, op, false);
+        if !quiet {
+            println!(
+                "[cw] Auto-Pilot triggered on session '{}' ({} tok >= {} breakpoint): deduplicated stale reads.",
+                sid, turn.token_usage.input_tokens, cfg.breakpoint_tokens
+            );
+        }
+    } else if !quiet && (turn.health_score < 65 || turn.token_usage.input_tokens > 100_000) {
+        println!(
+            "[cw] Context alert for '{}': {} tok, Health {}/100 ({} lints). Run `cw optimize` or call `cw_optimize_strategy`.",
+            sid,
+            turn.token_usage.input_tokens,
+            turn.health_score,
+            turn.lint_findings.len()
+        );
+    }
+    Ok(())
+}
+
+fn run_init_installer(dry_run: bool, enable_service: bool) -> Result<()> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let home_path = PathBuf::from(&home);
+    let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cw"));
+    let local_bin_dir = home_path.join(".local/bin");
+    let installed_cw_bin = local_bin_dir.join("cw");
+
+    println!("┌──────────────────────────────────────────────────────────────────────────────┐");
+    println!(
+        "│ contextWatcher (`cw init`) — Multi-Harness Plugin & Hook Installer {}│",
+        if dry_run { "(DRY RUN)" } else { "         " }
+    );
+    println!("└──────────────────────────────────────────────────────────────────────────────┘");
+
+    // 1. Install `cw` binary into ~/.local/bin/cw
+    if !dry_run {
+        let _ = std::fs::create_dir_all(&local_bin_dir);
+        if current_exe != installed_cw_bin && current_exe.exists() {
+            let tmp_bin = local_bin_dir.join("cw.tmp");
+            if std::fs::copy(&current_exe, &tmp_bin).is_ok() {
+                let _ = std::fs::rename(&tmp_bin, &installed_cw_bin);
+            }
+        }
+    }
+    let cw_cmd_str = if installed_cw_bin.exists() || !dry_run {
+        installed_cw_bin.to_string_lossy().to_string()
+    } else {
+        current_exe.to_string_lossy().to_string()
+    };
+    println!("  [1/5] Global CLI Binary      : {}", cw_cmd_str);
+
+    // 2. Antigravity Plugin (~/.gemini/config/plugins/contextwatcher/)
+    let agy_plugin_dir = home_path.join(".gemini/config/plugins/contextwatcher");
+    let agy_skill_dir = agy_plugin_dir.join("skills/context-watcher");
+    let agy_global_skill_dir = home_path.join(".gemini/config/skills/context-watcher");
+    let skill_md = r#"---
+name: context-watcher
+description: Inspects and compacts the active LLM context window, KV cache prefix, stale file reads, and noisy tool outputs via contextWatcher (`cw`). Use when context exceeds 80k tokens, health score drops, or the user asks to optimize/compact context.
+---
+
+# contextWatcher (`cw`) — Context & KV-Cache Optimization Skill
+
+When the conversation grows large or contains repeated `read_file` / command outputs:
+
+1. **Check Context Health:** Call `cw_context_status` (or run `cw status` / `cw gain`).
+2. **One-Shot Strategy Compaction:** Call `cw_optimize_strategy` with:
+   - `cache_safe_boost` (0% KV cache break — pins rules to tail)
+   - `clean_code_state` (shadow-deduplicates stale/duplicate file reads)
+   - `surgical_log_diet` (compacts oversized command & test outputs from earlier turns)
+   - `deep_trajectory_fold` (collapses completed debugging turn ranges into a 1-line summary)
+   - `max_token_diet` (maximum token & VRAM reduction)
+3. **Sync to Disk:** Pass `"sync_to_disk": true` or run `cw sync-back` so resumed sessions inherit the compacted transcript.
+"#;
+
+    let agy_mcp_json = serde_json::to_string_pretty(&serde_json::json!({
+        "mcpServers": {
+            "contextwatcher": {
+                "command": cw_cmd_str,
+                "args": ["mcp"],
+                "cwd": "",
+                "env": null
+            }
+        }
+    }))?;
+
+    if !dry_run {
+        let _ = std::fs::create_dir_all(&agy_skill_dir);
+        let _ = std::fs::create_dir_all(&agy_global_skill_dir);
+        let _ = std::fs::write(
+            agy_plugin_dir.join("plugin.json"),
+            "{\n  \"name\": \"contextwatcher\"\n}\n",
+        );
+        let _ = std::fs::write(agy_plugin_dir.join("mcp_config.json"), &agy_mcp_json);
+        let _ = std::fs::write(agy_skill_dir.join("SKILL.md"), skill_md);
+        let _ = std::fs::write(agy_global_skill_dir.join("SKILL.md"), skill_md);
+    }
+    println!(
+        "  [2/5] Antigravity Plugin     : {} (MCP + context-watcher skill)",
+        agy_plugin_dir.display()
+    );
+
+    // 3. Codex CLI (~/.codex/config.toml + ~/.codex/CW.md + ~/.codex/AGENTS.md)
+    let codex_dir = home_path.join(".codex");
+    if codex_dir.exists() {
+        let codex_cfg = codex_dir.join("config.toml");
+        let codex_cw_md = codex_dir.join("CW.md");
+        let codex_agents_md = codex_dir.join("AGENTS.md");
+
+        let cw_md_content = format!(
+            "# contextWatcher (`cw`) — Context & KV-Cache Optimizer\n\n\
+             `cw` monitors and compacts context bloat (stale file reads, old tool outputs, reasoning blocks) across turns.\n\n\
+             ## Commands & MCP Tools\n\n\
+             - MCP tools: `cw_context_status`, `cw_optimize_strategy`, `cw_evict_stale_reads`, `cw_fold_turns`, `cw_pin_context`\n\
+             - CLI commands: `{cw_cmd_str} gain`, `{cw_cmd_str} status`, `{cw_cmd_str} optimize -s max_token_diet`\n"
+        );
+
+        if !dry_run {
+            let _ = std::fs::write(&codex_cw_md, cw_md_content);
+            if codex_cfg.exists()
+                && let Ok(existing) = std::fs::read_to_string(&codex_cfg)
+                && !existing.contains("[mcp_servers.contextwatcher]")
+            {
+                let _ = std::fs::copy(&codex_cfg, codex_dir.join("config.toml.cw.bak"));
+                let appended = format!(
+                    "{existing}\n\n[mcp_servers.contextwatcher]\ncommand = \"{cw_cmd_str}\"\nargs = [\"mcp\"]\n"
+                );
+                let _ = std::fs::write(&codex_cfg, appended);
+            }
+            if codex_agents_md.exists()
+                && let Ok(existing_agents) = std::fs::read_to_string(&codex_agents_md)
+            {
+                let ref_line = format!("@{}", codex_cw_md.display());
+                if !existing_agents.contains(&ref_line) {
+                    let updated = format!("{}\n{}\n", existing_agents.trim_end(), ref_line);
+                    let _ = std::fs::write(&codex_agents_md, updated);
+                }
+            }
+        }
+        println!(
+            "  [3/5] Codex CLI Integration  : {} ([mcp_servers.contextwatcher] + CW.md)",
+            codex_cfg.display()
+        );
+    }
+
+    // 4. Claude Code (~/.claude/settings.json + ~/.claude/commands/cw-diet.md)
+    let claude_dir = home_path.join(".claude");
+    if claude_dir.exists() {
+        let settings_path = claude_dir.join("settings.json");
+        let commands_dir = claude_dir.join("commands");
+        if !dry_run {
+            let _ = std::fs::create_dir_all(&commands_dir);
+            let _ = std::fs::write(
+                commands_dir.join("cw-diet.md"),
+                "Run `cw_context_status` and `cw_optimize_strategy` (with `clean_code_state` or `surgical_log_diet`) to compact stale file reads and oversized tool outputs.",
+            );
+
+            let mut root: serde_json::Value = if settings_path.exists() {
+                let _ = std::fs::copy(&settings_path, claude_dir.join("settings.json.cw.bak"));
+                std::fs::read_to_string(&settings_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_else(|| serde_json::json!({}))
+            } else {
+                serde_json::json!({})
+            };
+
+            if let Some(obj) = root.as_object_mut() {
+                let mcp_servers = obj
+                    .entry("mcpServers")
+                    .or_insert_with(|| serde_json::json!({}));
+                if let Some(mcp_obj) = mcp_servers.as_object_mut() {
+                    mcp_obj.insert(
+                        "contextwatcher".to_string(),
+                        serde_json::json!({
+                            "command": cw_cmd_str,
+                            "args": ["mcp"]
+                        }),
+                    );
+                }
+            }
+            if let Ok(pretty) = serde_json::to_string_pretty(&root) {
+                let _ = std::fs::write(&settings_path, format!("{pretty}\n"));
+            }
+        }
+        println!(
+            "  [4/5] Claude Code Config     : {} (mcpServers.contextwatcher + /cw-diet)",
+            settings_path.display()
+        );
+    }
+
+    // 5. Systemd User Service (~/.config/systemd/user/contextwatcher.service)
+    let systemd_dir = home_path.join(".config/systemd/user");
+    let service_path = systemd_dir.join("contextwatcher.service");
+    let service_unit = format!(
+        "[Unit]\n\
+         Description=contextWatcher Daemon (Web UI :4400 + LLM Proxy :4401 + Transcript Watcher)\n\
+         After=network.target\n\n\
+         [Service]\n\
+         Type=simple\n\
+         ExecStart={cw_cmd_str} serve --port 4400 --proxy-port 4401\n\
+         Restart=on-failure\n\
+         RestartSec=3\n\n\
+         [Install]\n\
+         WantedBy=default.target\n"
+    );
+    if !dry_run {
+        let _ = std::fs::create_dir_all(&systemd_dir);
+        let _ = std::fs::write(&service_path, service_unit);
+        if enable_service {
+            let _ = std::process::Command::new("systemctl")
+                .args(["--user", "daemon-reload"])
+                .status();
+            let _ = std::process::Command::new("systemctl")
+                .args(["--user", "enable", "--now", "contextwatcher.service"])
+                .status();
+        }
+    }
+    println!(
+        "  [5/5] Systemd User Service   : {}",
+        service_path.display()
+    );
+
+    println!("\n✅ contextWatcher integration complete! Verify anytime with:");
+    println!("   cw gain              # Show token & dollar ($) savings across all agents & projects");
+    println!("   cw status            # Inspect latest active session health & KV cache hit ratio");
+    println!("   cw optimize          # Run or preview the 5 compaction strategies");
+    Ok(())
+}
+

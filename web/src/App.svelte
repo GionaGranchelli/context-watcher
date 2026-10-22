@@ -39,9 +39,11 @@
   let statusBanner = $state<string>('');
   let replayComparison = $state<{ original_turn: ContextTurn; forked_turn: ContextTurn; saved_tokens: number } | null>(null);
 
-  // Project & Session Sidebar filters
+  // Project & Harness Sidebar filters + 2-level Grouping Mode
   let searchQuery = $state<string>('');
   let selectedProjectFilter = $state<string>('ALL');
+  let selectedHarnessFilter = $state<string>('ALL');
+  let groupByMode = $state<'project_first' | 'harness_first'>('project_first');
   let collapsedProjects = $state<Record<string, boolean>>({});
 
   // Interactive hover states for Treemap & Attention Candles
@@ -87,45 +89,109 @@
     return `${Math.floor(diffSec / 86400)}d ago`;
   }
 
-  // Group sessions by project name
-  let projectGroups = $derived.by(() => {
+  function harnessBadgeColor(h: string): { bg: string; fg: string; icon: string } {
+    switch (h) {
+      case 'hermes':
+        return { bg: '#78350f', fg: '#fde68a', icon: '🪽' };
+      case 'codex':
+        return { bg: '#064e3b', fg: '#6ee7b7', icon: '🟢' };
+      case 'antigravity':
+        return { bg: '#1e3a8a', fg: '#93c5fd', icon: '🚀' };
+      case 'claude_code':
+        return { bg: '#7c2d12', fg: '#fdba74', icon: '🟠' };
+      default:
+        return { bg: '#3b0764', fg: '#d8b4fe', icon: '🤖' };
+    }
+  }
+
+  // 2-Level Sidebar Hierarchy: supports both `Project -> Harness` and `Harness -> Project`
+  let sidebarGroups = $derived.by(() => {
     const q = searchQuery.trim().toLowerCase();
-    const groups = new Map<string, { projectName: string; workspacePath: string | null; sessions: Session[]; latestUpdated: string }>();
+    const topMap = new Map<
+      string,
+      {
+        topKey: string;
+        topLabel: string;
+        topSubtitle: string | null;
+        latestUpdated: string;
+        totalSessions: number;
+        subGroups: Map<string, { subKey: string; subLabel: string; sessions: Session[] }>;
+      }
+    >();
 
     for (const s of sessions) {
       const proj = projectNameFromWorkspace(s.workspace_root);
+      const h = s.harness || 'generic_proxy';
       if (selectedProjectFilter !== 'ALL' && proj !== selectedProjectFilter) continue;
+      if (selectedHarnessFilter !== 'ALL' && h !== selectedHarnessFilter) continue;
       if (q) {
-        const hay = `${s.title || ''} ${proj} ${s.workspace_root || ''} ${s.id} ${s.model} ${s.harness}`.toLowerCase();
+        const hay = `${s.title || ''} ${proj} ${s.workspace_root || ''} ${s.id} ${s.model} ${h}`.toLowerCase();
         if (!hay.includes(q)) continue;
       }
-      if (!groups.has(proj)) {
-        groups.set(proj, {
-          projectName: proj,
-          workspacePath: s.workspace_root,
-          sessions: [],
-          latestUpdated: s.updated_at
+
+      const topKey = groupByMode === 'project_first' ? proj : h;
+      const topLabel = groupByMode === 'project_first' ? proj : h.toUpperCase();
+      const topSubtitle =
+        groupByMode === 'project_first'
+          ? s.workspace_root
+          : h === 'hermes'
+            ? '~/.hermes/state.db (Multi-Channel Agent)'
+            : h === 'codex'
+              ? '~/.codex/sessions (OpenAI Codex CLI)'
+              : h === 'antigravity'
+                ? '~/.gemini/antigravity-cli/brain'
+                : h === 'claude_code'
+                  ? '~/.claude/projects'
+                  : 'Local / Proxy Harness';
+      const subKey = groupByMode === 'project_first' ? h : proj;
+      const subLabel = groupByMode === 'project_first' ? h : proj;
+
+      if (!topMap.has(topKey)) {
+        topMap.set(topKey, {
+          topKey,
+          topLabel,
+          topSubtitle,
+          latestUpdated: s.updated_at,
+          totalSessions: 0,
+          subGroups: new Map()
         });
       }
-      const g = groups.get(proj)!;
-      g.sessions.push(s);
-      if (s.updated_at > g.latestUpdated) {
-        g.latestUpdated = s.updated_at;
+      const tg = topMap.get(topKey)!;
+      tg.totalSessions += 1;
+      if (s.updated_at > tg.latestUpdated) tg.latestUpdated = s.updated_at;
+
+      if (!tg.subGroups.has(subKey)) {
+        tg.subGroups.set(subKey, { subKey, subLabel, sessions: [] });
       }
+      tg.subGroups.get(subKey)!.sessions.push(s);
     }
 
-    return Array.from(groups.values()).sort((a, b) => {
-      // Put real project folders before "General Chat (No Project)"
-      if (a.projectName === 'General Chat (No Project)' && b.projectName !== 'General Chat (No Project)') return 1;
-      if (b.projectName === 'General Chat (No Project)' && a.projectName !== 'General Chat (No Project)') return -1;
-      return b.latestUpdated.localeCompare(a.latestUpdated);
-    });
+    return Array.from(topMap.values())
+      .map((tg) => ({
+        ...tg,
+        subGroupsList: Array.from(tg.subGroups.values()).sort((a, b) =>
+          (b.sessions[0]?.updated_at || '').localeCompare(a.sessions[0]?.updated_at || '')
+        )
+      }))
+      .sort((a, b) => {
+        if (a.topKey === 'General Chat (No Project)' && b.topKey !== 'General Chat (No Project)') return 1;
+        if (b.topKey === 'General Chat (No Project)' && a.topKey !== 'General Chat (No Project)') return -1;
+        return b.latestUpdated.localeCompare(a.latestUpdated);
+      });
   });
 
   let allProjectNames = $derived.by(() => {
     const set = new Set<string>();
     for (const s of sessions) {
       set.add(projectNameFromWorkspace(s.workspace_root));
+    }
+    return Array.from(set).sort();
+  });
+
+  let allHarnessNames = $derived.by(() => {
+    const set = new Set<string>();
+    for (const s of sessions) {
+      set.add(s.harness);
     }
     return Array.from(set).sort();
   });
@@ -963,80 +1029,128 @@
 
   <!-- Main 3-Column Layout: [1] Left Project/Session Explorer | [2] Center Trace Views | [3] Right Inspector -->
   <div style="display: grid; grid-template-columns: 310px 1fr 410px; flex: 1; overflow: hidden;">
-    <!-- [1] Left Sidebar: Project & Session Explorer -->
+    <!-- [1] Left Sidebar: Project & Harness Explorer -->
     <aside style="background: #0f172a; border-right: 1px solid #1e293b; display: flex; flex-direction: column; overflow: hidden;">
       <div style="padding: 12px; border-bottom: 1px solid #1e293b; display: flex; flex-direction: column; gap: 8px;">
         <div style="display: flex; align-items: center; justify-content: space-between;">
-          <strong style="font-size: 13px; color: #f8fafc;">Projects & Sessions ({sessions.length})</strong>
-          <HelpTip text="Sessions are automatically grouped by the project folder they touched on disk, and sorted by when the conversation happened. Click any conversation to inspect its trace." />
+          <strong style="font-size: 13px; color: #f8fafc;">Sessions Explorer ({sessions.length})</strong>
+          <HelpTip text="Switch between '📁 Project → Harness' (best when comparing multiple agents working on the same git repo) and '🤖 Harness → Project' (best when browsing all Hermes Agent channels, Codex sessions, or Antigravity sessions)." />
+        </div>
+
+        <!-- 1-Click Grouping Mode Switcher: Project -> Harness vs Harness -> Project -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: #111827; padding: 3px; border-radius: 7px; border: 1px solid #1e293b;">
+          <button
+            onclick={() => (groupByMode = 'project_first')}
+            style="padding: 5px 6px; font-size: 11px; font-weight: 700; border-radius: 5px; border: none; cursor: pointer; background: {groupByMode === 'project_first' ? '#2563eb' : 'transparent'}; color: {groupByMode === 'project_first' ? '#ffffff' : '#94a3b8'};"
+          >
+            📁 Project → Harness
+          </button>
+          <button
+            onclick={() => (groupByMode = 'harness_first')}
+            style="padding: 5px 6px; font-size: 11px; font-weight: 700; border-radius: 5px; border: none; cursor: pointer; background: {groupByMode === 'harness_first' ? '#2563eb' : 'transparent'}; color: {groupByMode === 'harness_first' ? '#ffffff' : '#94a3b8'};"
+          >
+            🤖 Harness → Project
+          </button>
         </div>
 
         <input
           type="text"
           bind:value={searchQuery}
-          placeholder="🔍 Search by prompt, project, or ID..."
+          placeholder="🔍 Search prompt, project, harness, ID..."
           style="width: 100%; box-sizing: border-box; background: #1e293b; color: #f8fafc; border: 1px solid #334155; border-radius: 6px; padding: 6px 10px; font-size: 12px;"
         />
 
-        <select
-          bind:value={selectedProjectFilter}
-          style="width: 100%; background: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 6px; padding: 5px 8px; font-size: 12px;"
-        >
-          <option value="ALL">📁 All Projects ({allProjectNames.length})</option>
-          {#each allProjectNames as proj}
-            <option value={proj}>📁 {proj}</option>
-          {/each}
-        </select>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+          <select
+            bind:value={selectedHarnessFilter}
+            style="width: 100%; background: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 6px; padding: 5px 6px; font-size: 11.5px;"
+          >
+            <option value="ALL">🤖 All Harnesses ({allHarnessNames.length})</option>
+            {#each allHarnessNames as h}
+              <option value={h}>{harnessBadgeColor(h).icon} {h}</option>
+            {/each}
+          </select>
+
+          <select
+            bind:value={selectedProjectFilter}
+            style="width: 100%; background: #1e293b; color: #cbd5e1; border: 1px solid #334155; border-radius: 6px; padding: 5px 6px; font-size: 11.5px;"
+          >
+            <option value="ALL">📁 All Projects ({allProjectNames.length})</option>
+            {#each allProjectNames as proj}
+              <option value={proj}>📁 {proj}</option>
+            {/each}
+          </select>
+        </div>
       </div>
 
       <div style="flex: 1; overflow-y: auto; padding: 8px;">
-        {#each projectGroups as group}
+        {#each sidebarGroups as group}
           <div style="margin-bottom: 10px; border: 1px solid #1e293b; border-radius: 8px; overflow: hidden; background: #111827;">
-            <!-- Project Folder Header -->
+            <!-- Level 1 Group Header (Project or Harness) -->
             <button
-              onclick={() => (collapsedProjects[group.projectName] = !collapsedProjects[group.projectName])}
+              onclick={() => (collapsedProjects[group.topKey] = !collapsedProjects[group.topKey])}
               style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; background: #1e293b; color: #f8fafc; border: none; cursor: pointer; text-align: left;"
             >
               <div style="overflow: hidden;">
                 <div style="font-size: 12.5px; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
-                  <span>{collapsedProjects[group.projectName] ? '▸' : '▾'}</span>
-                  <span>{group.projectName === 'General Chat (No Project)' ? '💬' : '📁'} {group.projectName}</span>
+                  <span>{collapsedProjects[group.topKey] ? '▸' : '▾'}</span>
+                  {#if groupByMode === 'harness_first'}
+                    <span>{harnessBadgeColor(group.topKey).icon} {group.topLabel}</span>
+                  {:else}
+                    <span>{group.topKey === 'General Chat (No Project)' ? '💬' : '📁'} {group.topLabel}</span>
+                  {/if}
                 </div>
-                {#if group.workspacePath}
+                {#if group.topSubtitle}
                   <div style="font-size: 10px; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 16px;">
-                    {group.workspacePath}
+                    {group.topSubtitle}
                   </div>
                 {/if}
               </div>
               <span style="font-size: 11px; padding: 2px 7px; border-radius: 999px; background: #0f172a; color: #94a3b8;">
-                {group.sessions.length}
+                {group.totalSessions}
               </span>
             </button>
 
-            <!-- Sessions inside this Project -->
-            {#if !collapsedProjects[group.projectName]}
+            <!-- Level 2 Sub-Groups (Harness inside Project, or Project/Channel inside Harness) -->
+            {#if !collapsedProjects[group.topKey]}
               <div style="display: flex; flex-direction: column;">
-                {#each group.sessions as s}
-                  <button
-                    onclick={() => {
-                      activeSessionId = s.id;
-                      selectedNodeId = null;
-                      fetchSessionGraph(s.id);
-                    }}
-                    style="width: 100%; text-align: left; padding: 9px 10px; border: none; border-top: 1px solid #1f2937; cursor: pointer; background: {activeSessionId === s.id ? '#1e3a8a' : 'transparent'}; color: #f1f5f9;"
-                  >
-                    <div style="font-size: 12.5px; font-weight: 600; color: {activeSessionId === s.id ? '#ffffff' : '#e2e8f0'}; line-height: 1.35; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
-                      {s.title || `Session ${s.id}`}
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: {activeSessionId === s.id ? '#bfdbfe' : '#94a3b8'};">
-                      <span>🕒 {formatTimestamp(s.updated_at)}</span>
-                      <span>{formatRelativeTime(s.updated_at)}</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #64748b; margin-top: 3px;">
-                      <span>{s.harness} • {s.model}</span>
-                      <code>{s.id}</code>
-                    </div>
-                  </button>
+                {#each group.subGroupsList as sub}
+                  <!-- Level 2 Subheader Pill Bar -->
+                  <div style="padding: 4px 10px; background: #0b0f19; border-top: 1px solid #1f2937; font-size: 10.5px; font-weight: 700; color: #94a3b8; display: flex; justify-content: space-between; align-items: center;">
+                    {#if groupByMode === 'project_first'}
+                      {@const hb = harnessBadgeColor(sub.subKey)}
+                      <span style="color: {hb.fg};">{hb.icon} {sub.subLabel.toUpperCase()}</span>
+                    {:else}
+                      <span style="color: #93c5fd;">📁 {sub.subLabel}</span>
+                    {/if}
+                    <span style="color: #64748b;">{sub.sessions.length} session{sub.sessions.length === 1 ? '' : 's'}</span>
+                  </div>
+
+                  {#each sub.sessions as s}
+                    {@const hBadge = harnessBadgeColor(s.harness)}
+                    <button
+                      onclick={() => {
+                        activeSessionId = s.id;
+                        selectedNodeId = null;
+                        fetchSessionGraph(s.id);
+                      }}
+                      style="width: 100%; text-align: left; padding: 9px 10px; border: none; border-top: 1px solid #1f2937; cursor: pointer; background: {activeSessionId === s.id ? '#1e3a8a' : 'transparent'}; color: #f1f5f9;"
+                    >
+                      <div style="font-size: 12.5px; font-weight: 600; color: {activeSessionId === s.id ? '#ffffff' : '#e2e8f0'}; line-height: 1.35; margin-bottom: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                        {s.title || `Session ${s.id}`}
+                      </div>
+                      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: {activeSessionId === s.id ? '#bfdbfe' : '#94a3b8'};">
+                        <span>🕒 {formatTimestamp(s.updated_at)}</span>
+                        <span>{formatRelativeTime(s.updated_at)}</span>
+                      </div>
+                      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #64748b; margin-top: 4px; gap: 4px;">
+                        <span style="padding: 1px 6px; border-radius: 4px; background: {hBadge.bg}; color: {hBadge.fg}; font-weight: 700;">
+                          {hBadge.icon} {s.harness}
+                        </span>
+                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{s.model}</span>
+                      </div>
+                    </button>
+                  {/each}
                 {/each}
               </div>
             {/if}

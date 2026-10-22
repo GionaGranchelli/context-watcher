@@ -13,6 +13,7 @@ pub type RuleId = String;
 pub enum HarnessKind {
     Antigravity,
     Codex,
+    Hermes,
     Pi,
     OpenCode,
     Aider,
@@ -25,6 +26,7 @@ impl HarnessKind {
         match self {
             Self::Antigravity => "antigravity",
             Self::Codex => "codex",
+            Self::Hermes => "hermes",
             Self::Pi => "pi",
             Self::OpenCode => "opencode",
             Self::Aider => "aider",
@@ -37,6 +39,7 @@ impl HarnessKind {
         match s.to_lowercase().as_str() {
             "antigravity" | "agy" => Self::Antigravity,
             "codex" => Self::Codex,
+            "hermes" | "hermes_agent" | "hermes-agent" => Self::Hermes,
             "pi" => Self::Pi,
             "opencode" => Self::OpenCode,
             "aider" => Self::Aider,

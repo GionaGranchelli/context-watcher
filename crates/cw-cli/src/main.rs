@@ -12,8 +12,8 @@ use cw_core::{
     radix::build_radix_graph,
 };
 use cw_harnesses::{
-    import_agy_transcript, import_generic_jsonl_transcript, spawn_transcript_watcher,
-    sync_mutations_to_transcript_on_disk,
+    import_agy_transcript, import_generic_jsonl_transcript, import_hermes_state_db,
+    spawn_transcript_watcher, sync_mutations_to_transcript_on_disk,
 };
 use cw_mcp::run_mcp_stdio_server;
 use cw_proxy::{DaemonState, build_api_router, build_proxy_router};
@@ -586,12 +586,25 @@ async fn main() -> Result<()> {
         } => {
             let store = CwStore::open(&db_path)?;
             let h = HarnessKind::from_str_lossy(&harness);
-            let sess_id = if h == HarnessKind::Antigravity {
-                import_agy_transcript(&path, &store, workspace)?
+            if h == HarnessKind::Hermes
+                || path.extension().and_then(|e| e.to_str()) == Some("db")
+                || path.extension().and_then(|e| e.to_str()) == Some("sqlite")
+            {
+                let ids = import_hermes_state_db(&path, &store, 20)?;
+                println!(
+                    "Imported {} Hermes Agent sessions from {}: {}",
+                    ids.len(),
+                    path.display(),
+                    ids.join(", ")
+                );
             } else {
-                import_generic_jsonl_transcript(&path, h, &store, workspace)?
-            };
-            println!("Imported transcript into session: {sess_id}");
+                let sess_id = if h == HarnessKind::Antigravity {
+                    import_agy_transcript(&path, &store, workspace)?
+                } else {
+                    import_generic_jsonl_transcript(&path, h, &store, workspace)?
+                };
+                println!("Imported transcript into session: {sess_id}");
+            }
         }
         Commands::SyncBack { session } => {
             let store = CwStore::open(&db_path)?;

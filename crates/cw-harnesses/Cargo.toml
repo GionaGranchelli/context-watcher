@@ -15,3 +15,4 @@ chrono.workspace = true
 uuid.workspace = true
 blake3.workspace = true
 tracing.workspace = true
+rusqlite.workspace = true

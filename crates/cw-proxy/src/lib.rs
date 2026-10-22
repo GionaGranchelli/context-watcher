@@ -24,7 +24,7 @@ use cw_core::{
     },
     mutation::{apply_mutations_to_payload, estimate_mutation_impact, evaluate_firewall},
     normalizer::detect_provider,
-    optimizer::{OptimizationStrategyPlan, build_optimization_plans},
+    optimizer::{OptimizationStrategyPlan, build_optimization_plans, resolve_strategy_alias},
     radix::{RadixGraph, build_radix_graph},
 };
 use cw_harnesses::sync_mutations_to_transcript_on_disk;
@@ -951,7 +951,8 @@ async fn api_auto_optimize(
     let mut created = Vec::new();
 
     if let Ok(Some(latest)) = state.store.get_latest_turn(&id) {
-        if let Some(strat_id) = req.strategy_id {
+        if let Some(raw_strat_id) = req.strategy_id {
+            let strat_id = resolve_strategy_alias(&raw_strat_id);
             let plans = build_optimization_plans(&latest);
             if let Some(plan) = plans.into_iter().find(|p| p.id == strat_id) {
                 for item in plan.items {

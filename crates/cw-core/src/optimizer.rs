@@ -510,3 +510,15 @@ fn finalize_plan(
         items,
     }
 }
+
+/// Maps short human/slash-command intensity levels (`min`, `mid`, `max`) to canonical strategy IDs.
+pub fn resolve_strategy_alias(input: &str) -> &str {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "min" | "lite" | "safe" => "clean_code_state",
+        "mid" | "medium" | "balanced" | "log" => "surgical_log_diet",
+        "max" | "ultra" | "full" | "deep" => "max_token_diet",
+        "boost" | "pin" => "cache_safe_boost",
+        "fold" => "deep_trajectory_fold",
+        _ => input.trim(),
+    }
+}

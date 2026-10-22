@@ -159,14 +159,14 @@ pub fn mcp_tool_definitions() -> Value {
         },
         {
             "name": "cw_optimize_strategy",
-            "description": "Applies one of the 5 named Optimization Strategies (`cache_safe_boost`, `clean_code_state`, `surgical_log_diet`, `deep_trajectory_fold`, `max_token_diet`) and optionally syncs the compacted context back to the harness's disk transcript.",
+            "description": "Applies a context optimization intensity level (`min`, `mid`, `max`) or named strategy (`cache_safe_boost`, `clean_code_state`, `surgical_log_diet`, `deep_trajectory_fold`, `max_token_diet`) and optionally syncs the compacted context back to the harness's disk transcript.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "session_id": { "type": "string" },
                     "strategy_id": {
                         "type": "string",
-                        "description": "Strategy ID: cache_safe_boost | clean_code_state | surgical_log_diet | deep_trajectory_fold | max_token_diet"
+                        "description": "Intensity level (`min` | `mid` | `max`) or Strategy ID (`cache_safe_boost` | `clean_code_state` | `surgical_log_diet` | `deep_trajectory_fold` | `max_token_diet`)"
                     },
                     "sync_to_disk": {
                         "type": "boolean",

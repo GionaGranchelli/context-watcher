@@ -87,7 +87,10 @@ enum Commands {
     },
     /// Interactive Optimization & Cut Studio: preview or apply the 5 context optimization strategies
     Optimize {
-        /// Strategy ID: cache_safe_boost | clean_code_state | surgical_log_diet | deep_trajectory_fold | max_token_diet
+        /// Optional positional intensity level (`min`, `mid`, `max`) or strategy name
+        #[arg(value_name = "LEVEL_OR_STRATEGY")]
+        level: Option<String>,
+        /// Strategy ID: min | mid | max | cache_safe_boost | clean_code_state | surgical_log_diet | deep_trajectory_fold | max_token_diet
         #[arg(long, short = 's')]
         strategy: Option<String>,
         /// Only show the Before -> After simulation without applying mutations
@@ -413,6 +416,7 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Optimize {
+            level,
             strategy,
             dry_run,
             explain,
@@ -424,6 +428,11 @@ async fn main() -> Result<()> {
             sync_back,
         } => {
             let store = CwStore::open(&db_path)?;
+            let raw_strategy = level.or(strategy);
+            let strategy = raw_strategy
+                .as_deref()
+                .map(cw_core::optimizer::resolve_strategy_alias)
+                .map(|s| s.to_string());
             let is_batch = all || project.is_some() || agent.is_some();
 
             if is_batch {
@@ -1172,6 +1181,7 @@ fn run_init_installer(dry_run: bool, enable_service: bool) -> Result<()> {
     let agy_plugin_dir = home_path.join(".gemini/config/plugins/contextwatcher");
     let agy_skill_dir = agy_plugin_dir.join("skills/context-watcher");
     let agy_global_skill_dir = home_path.join(".gemini/config/skills/context-watcher");
+    let agy_commands_dir = agy_plugin_dir.join("commands");
     let skill_md = r#"---
 name: context-watcher
 description: Inspects and compacts the active LLM context window, KV cache prefix, stale file reads, and noisy tool outputs via contextWatcher (`cw`). Use when context exceeds 80k tokens, health score drops, or the user asks to optimize/compact context.
@@ -1179,16 +1189,14 @@ description: Inspects and compacts the active LLM context window, KV cache prefi
 
 # contextWatcher (`cw`) — Context & KV-Cache Optimization Skill
 
-When the conversation grows large or contains repeated `read_file` / command outputs:
+Supports the `/cw` command suite:
+- `/cw optimize min` — Safe diet (deduplicates duplicate/stale file reads, 0% KV break)
+- `/cw optimize mid` — Balanced diet (stale files + truncates large old tool & command outputs)
+- `/cw optimize max` — Maximum compaction (stale files + tool outputs + old reasoning + folded turns)
+- `/cw gain` — Displays token and dollar ($) savings scoreboard across all sessions
+- `/cw status` — Checks active context fullness, KV cache hit ratio, and health score
 
-1. **Check Context Health:** Call `cw_context_status` (or run `cw status` / `cw gain`).
-2. **One-Shot Strategy Compaction:** Call `cw_optimize_strategy` with:
-   - `cache_safe_boost` (0% KV cache break — pins rules to tail)
-   - `clean_code_state` (shadow-deduplicates stale/duplicate file reads)
-   - `surgical_log_diet` (compacts oversized command & test outputs from earlier turns)
-   - `deep_trajectory_fold` (collapses completed debugging turn ranges into a 1-line summary)
-   - `max_token_diet` (maximum token & VRAM reduction)
-3. **Sync to Disk:** Pass `"sync_to_disk": true` or run `cw sync-back` so resumed sessions inherit the compacted transcript.
+To run optimization: call MCP tool `cw_optimize_strategy` with `strategy_id`: "min" | "mid" | "max" and pass `"sync_to_disk": true` so resumed sessions inherit the compacted transcript.
 "#;
 
     let agy_mcp_json = serde_json::to_string_pretty(&serde_json::json!({
@@ -1205,6 +1213,7 @@ When the conversation grows large or contains repeated `read_file` / command out
     if !dry_run {
         let _ = std::fs::create_dir_all(&agy_skill_dir);
         let _ = std::fs::create_dir_all(&agy_global_skill_dir);
+        let _ = std::fs::create_dir_all(&agy_commands_dir);
         let _ = std::fs::write(
             agy_plugin_dir.join("plugin.json"),
             "{\n  \"name\": \"contextwatcher\"\n}\n",
@@ -1212,29 +1221,43 @@ When the conversation grows large or contains repeated `read_file` / command out
         let _ = std::fs::write(agy_plugin_dir.join("mcp_config.json"), &agy_mcp_json);
         let _ = std::fs::write(agy_skill_dir.join("SKILL.md"), skill_md);
         let _ = std::fs::write(agy_global_skill_dir.join("SKILL.md"), skill_md);
+        let _ = std::fs::write(
+            agy_commands_dir.join("cw.toml"),
+            "description = \"Run contextWatcher compaction: /cw optimize min|mid|max, /cw gain, or /cw status\"\n\
+             prompt = \"Execute contextWatcher optimization with intensity {{args}} (min, mid, or max). Call tool cw_optimize_strategy with strategy_id: '{{args}}' and sync_to_disk: true to compact context bloat.\"\n",
+        );
+        let _ = std::fs::write(
+            agy_commands_dir.join("cw-gain.toml"),
+            "description = \"Show contextWatcher token and dollar ($) savings scoreboard\"\n\
+             prompt = \"Run the shell command `cw gain` using run_command and display the savings scoreboard.\"\n",
+        );
     }
     println!(
-        "  [2/5] Antigravity Plugin     : {} (MCP + context-watcher skill)",
+        "  [2/6] Antigravity Plugin     : {} (MCP + /cw optimize min|mid|max slash commands)",
         agy_plugin_dir.display()
     );
 
-    // 3. Codex CLI (~/.codex/config.toml + ~/.codex/CW.md + ~/.codex/AGENTS.md)
+    // 3. Codex CLI (~/.codex/config.toml + ~/.codex/CW.md + ~/.codex/AGENTS.md + ~/.codex/skills/cw/)
     let codex_dir = home_path.join(".codex");
     if codex_dir.exists() {
         let codex_cfg = codex_dir.join("config.toml");
         let codex_cw_md = codex_dir.join("CW.md");
         let codex_agents_md = codex_dir.join("AGENTS.md");
+        let codex_skill_dir = codex_dir.join("skills/cw");
 
         let cw_md_content = format!(
             "# contextWatcher (`cw`) — Context & KV-Cache Optimizer\n\n\
              `cw` monitors and compacts context bloat (stale file reads, old tool outputs, reasoning blocks) across turns.\n\n\
              ## Commands & MCP Tools\n\n\
+             - Slash commands: `/cw optimize min|mid|max`, `/cw gain`, `/cw status`\n\
              - MCP tools: `cw_context_status`, `cw_optimize_strategy`, `cw_evict_stale_reads`, `cw_fold_turns`, `cw_pin_context`\n\
-             - CLI commands: `{cw_cmd_str} gain`, `{cw_cmd_str} status`, `{cw_cmd_str} optimize -s max_token_diet`\n"
+             - CLI commands: `{cw_cmd_str} gain`, `{cw_cmd_str} status`, `{cw_cmd_str} optimize min|mid|max`\n"
         );
 
         if !dry_run {
+            let _ = std::fs::create_dir_all(&codex_skill_dir);
             let _ = std::fs::write(&codex_cw_md, cw_md_content);
+            let _ = std::fs::write(codex_skill_dir.join("SKILL.md"), skill_md);
             if codex_cfg.exists()
                 && let Ok(existing) = std::fs::read_to_string(&codex_cfg)
                 && !existing.contains("[mcp_servers.contextwatcher]")
@@ -1256,12 +1279,12 @@ When the conversation grows large or contains repeated `read_file` / command out
             }
         }
         println!(
-            "  [3/5] Codex CLI Integration  : {} ([mcp_servers.contextwatcher] + CW.md)",
+            "  [3/6] Codex CLI Integration  : {} ([mcp_servers.contextwatcher] + /cw skill)",
             codex_cfg.display()
         );
     }
 
-    // 4. Claude Code (~/.claude/settings.json + ~/.claude/commands/cw-diet.md)
+    // 4. Claude Code (~/.claude/settings.json + ~/.claude/commands/cw.md)
     let claude_dir = home_path.join(".claude");
     if claude_dir.exists() {
         let settings_path = claude_dir.join("settings.json");
@@ -1269,8 +1292,12 @@ When the conversation grows large or contains repeated `read_file` / command out
         if !dry_run {
             let _ = std::fs::create_dir_all(&commands_dir);
             let _ = std::fs::write(
-                commands_dir.join("cw-diet.md"),
-                "Run `cw_context_status` and `cw_optimize_strategy` (with `clean_code_state` or `surgical_log_diet`) to compact stale file reads and oversized tool outputs.",
+                commands_dir.join("cw.md"),
+                "# /cw [optimize min|mid|max | gain | status]\n\n\
+                 Execute contextWatcher optimization with arguments: `$ARGUMENTS`.\n\
+                 - If `$ARGUMENTS` starts with `optimize` or `opt`: call tool `cw_optimize_strategy` with `strategy_id` set to the level (defaulting to `\"mid\"`) and `sync_to_disk: true`.\n\
+                 - If `$ARGUMENTS` is `gain`: run `cw gain` via Bash.\n\
+                 - If `$ARGUMENTS` is `status`: call tool `cw_context_status`.\n",
             );
 
             let mut root: serde_json::Value = if settings_path.exists() {
@@ -1302,8 +1329,37 @@ When the conversation grows large or contains repeated `read_file` / command out
             }
         }
         println!(
-            "  [4/5] Claude Code Config     : {} (mcpServers.contextwatcher + /cw-diet)",
+            "  [4/6] Claude Code Config     : {} (mcpServers.contextwatcher + /cw slash command)",
             settings_path.display()
+        );
+    }
+
+    // 5. Hermes Agent (~/.hermes/skills/cw/)
+    let hermes_dir = home_path.join(".hermes");
+    if hermes_dir.exists() {
+        let hermes_skill_dir = hermes_dir.join("skills/cw");
+        if !dry_run {
+            let _ = std::fs::create_dir_all(&hermes_skill_dir);
+            let _ = std::fs::write(hermes_skill_dir.join("SKILL.md"), skill_md);
+        }
+        println!(
+            "  [5/6] Hermes Agent Skill     : {} (/cw optimize min|mid|max skill)",
+            hermes_skill_dir.display()
+        );
+    }
+
+    // 6. Native Pi Agent (~/.pi/agent/settings.json + plugins/pi-opencode)
+    let pi_agent_dir = home_path.join(".pi/agent");
+    if pi_agent_dir.exists() {
+        let pi_ext_dir = home_path.join("Development/contextWatcher/plugins/pi-opencode");
+        if !dry_run && pi_ext_dir.exists() {
+            let _ = std::process::Command::new("pi")
+                .args(["install", &pi_ext_dir.to_string_lossy()])
+                .status();
+        }
+        println!(
+            "  [6/6] Native Pi Agent Ext    : {} (Native /cw optimize [min|mid|max] command)",
+            pi_ext_dir.display()
         );
     }
 

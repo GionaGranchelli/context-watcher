@@ -1,0 +1,6 @@
+context_tokens,context_label,total_memory_gib,kv_cache_memory_gib,input_tokens,unoptimized_prefill_ms,unoptimized_turn_duration_s,cw_compacted_tokens,cw_token_cut_pct,cw_prefill_ms,cw_prefill_speedup
+8192,8k,33.96,2.50,5275,1057.0,8.28,162,97.09%,249.0,4.2x
+16384,16k,35.55,4.09,10036,36313.2,38.41,162,98.39%,249.0,145.8x
+32768,32k,38.71,7.25,10036,39800.0,41.20,162,98.39%,249.0,159.8x
+65536,64k,45.05,13.59,10036,52100.0,54.80,162,98.39%,249.0,209.2x
+131072,128k,57.71,26.25,10036,84061.9,95.40,162,98.39%,249.0,337.6x

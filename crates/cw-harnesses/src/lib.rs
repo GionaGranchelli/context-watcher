@@ -538,6 +538,29 @@ pub fn import_generic_jsonl_transcript(
         let entry_type = entry.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
         // 1. Codex CLI Rollout format (`session_meta`, `turn_context`, `event_msg`, `response_item`)
+        if entry_type == "session" {
+            if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
+                if !id.is_empty() {
+                    session_id = format!("{}_{}", harness.as_str(), &id[..id.len().min(12)]);
+                }
+            }
+            if let Some(cwd) = entry.get("cwd").and_then(|v| v.as_str()) {
+                if !cwd.is_empty() {
+                    detected_workspace = Some(cwd.to_string());
+                }
+            }
+            continue;
+        }
+
+        if entry_type == "model_change" {
+            if let Some(m) = entry.get("model").and_then(|v| v.as_str()) {
+                if !m.is_empty() {
+                    detected_model = m.to_string();
+                }
+            }
+            continue;
+        }
+
         if entry_type == "session_meta" || entry_type == "turn_context" {
             if let Some(p) = entry.get("payload") {
                 if let Some(sid) = p.get("session_id").and_then(|v| v.as_str())
@@ -742,25 +765,48 @@ pub fn import_generic_jsonl_transcript(
             {
                 detected_model = m.to_string();
             }
+            if let Some(prov) = msg.get("provider").and_then(|v| v.as_str()) {
+                if prov.contains("machinist") || prov.contains("local") || prov.contains("ollama") {
+                    detected_provider = ProviderKind::OpenAICompatible;
+                }
+            }
+            if let Some(api) = msg.get("api").and_then(|v| v.as_str()) {
+                if api.contains("openai") {
+                    detected_provider = ProviderKind::OpenAICompatible;
+                }
+            }
             if let Some(u) = msg.get("usage") {
-                if let Some(inp) = u.get("input_tokens").and_then(|v| v.as_u64()) {
+                if let Some(inp) = u.get("input_tokens").or_else(|| u.get("input")).and_then(|v| v.as_u64()) {
                     latest_input_tokens = Some(inp as u32);
                 }
-                if let Some(cached) = u.get("cache_read_input_tokens").and_then(|v| v.as_u64()) {
+                if let Some(cached) = u.get("cache_read_input_tokens").or_else(|| u.get("cacheRead")).and_then(|v| v.as_u64()) {
                     latest_cache_read_tokens = Some(cached as u32);
                 }
-                if let Some(out) = u.get("output_tokens").and_then(|v| v.as_u64()) {
+                if let Some(out) = u.get("output_tokens").or_else(|| u.get("output")).and_then(|v| v.as_u64()) {
                     latest_output_tokens = out as u32;
                 }
             }
             if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
                 turn_counter += 1;
-                if title.is_none()
-                    && let Some(c) = msg.get("content").and_then(|v| v.as_str())
-                    && !c.trim().is_empty()
-                {
-                    let one_line = c.split_whitespace().collect::<Vec<_>>().join(" ");
-                    title = Some(one_line.chars().take(78).collect());
+                if title.is_none() {
+                    if let Some(c) = msg.get("content").and_then(|v| v.as_str()) {
+                        if !c.trim().is_empty() {
+                            let one_line = c.split_whitespace().collect::<Vec<_>>().join(" ");
+                            title = Some(one_line.chars().take(78).collect());
+                        }
+                    } else if let Some(arr) = msg.get("content").and_then(|v| v.as_array()) {
+                        for item in arr {
+                            if item.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                if let Some(t) = item.get("text").and_then(|s| s.as_str()) {
+                                    if !t.trim().is_empty() {
+                                        let one_line = t.split_whitespace().collect::<Vec<_>>().join(" ");
+                                        title = Some(one_line.chars().take(78).collect());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
             let mut m_clone = msg.clone();
@@ -1076,6 +1122,8 @@ pub fn spawn_transcript_watcher(store: CwStore, _default_workspace: Option<Strin
         let hermes_wal = PathBuf::from(&home).join(".hermes/state.db-wal");
         let opencode_dir = PathBuf::from(&home).join(".local/share/opencode");
         let pi_dir = PathBuf::from(&home).join(".pi/sessions");
+        let pi_agent_dir = PathBuf::from(&home).join(".pi/agent/sessions");
+        let omp_dir = PathBuf::from(&home).join(".omp/agent/sessions");
 
         loop {
             // 1. Antigravity transcripts
@@ -1116,12 +1164,14 @@ pub fn spawn_transcript_watcher(store: CwStore, _default_workspace: Option<Strin
                 }
             }
 
-            // 3. Claude Code, Codex, OpenCode, and Pi JSONL transcripts
+            // 3. Claude Code, Codex, OpenCode, and Pi/OMP JSONL transcripts
             for (dir, harness) in [
                 (&claude_dir, HarnessKind::ClaudeCode),
                 (&codex_dir, HarnessKind::Codex),
                 (&opencode_dir, HarnessKind::OpenCode),
                 (&pi_dir, HarnessKind::Pi),
+                (&pi_agent_dir, HarnessKind::Pi),
+                (&omp_dir, HarnessKind::Pi),
             ] {
                 if dir.exists() {
                     scan_jsonl_dir_recursively(dir, harness, &store, &mut file_state, 0);

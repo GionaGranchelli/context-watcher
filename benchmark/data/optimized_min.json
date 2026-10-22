@@ -1,0 +1,28 @@
+{
+  "session_id": "pi_01a163cd-a64",
+  "tier": "min",
+  "command": "/cw optimize min",
+  "strategy": "cache_safe_boost / clean_code_state",
+  "tagline": "Zero KV-Cache Invalidation & High-Attention Tail Pinning",
+  "tokens_before": 5571,
+  "tokens_after": 5571,
+  "tokens_saved": 0,
+  "tokens_saved_pct": 0.0,
+  "kv_cache": {
+    "hit_tokens": 5571,
+    "new_tokens": 0,
+    "invalidated_tokens": 0,
+    "prefix_retained_pct": 100.0,
+    "vram_fp16_mb": 1393.0
+  },
+  "impact": {
+    "speedup": "1.0x (100% prefix cache hit)",
+    "instruction_retention": "High (early constraints pinned to prompt tail)",
+    "context_break_even_turns": 0
+  },
+  "code_quality": {
+    "tests_total": 7,
+    "tests_passed": 7,
+    "pass_rate": "100%"
+  }
+}

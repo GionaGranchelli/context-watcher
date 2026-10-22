@@ -1,0 +1,35 @@
+{
+  "session_id": "pi_01a163cd-a64",
+  "tier": "baseline",
+  "harness": "pi / omp",
+  "model": "qwen3.8-27b-ud",
+  "context_size_limit": 8192,
+  "turn": 2,
+  "nodes_count": 11,
+  "tokens": 5571,
+  "health_score": 100,
+  "stale_thinking_tokens": 5397,
+  "kv_cache": {
+    "hit_tokens": 0,
+    "new_tokens": 5571,
+    "invalidated_tokens": 0,
+    "vram_fp16_mb": 1393.0,
+    "vram_q8_mb": 738.0,
+    "vram_q4_mb": 418.0
+  },
+  "turn_latency": {
+    "ttft_ms": 1057.0,
+    "generation_duration_s": 134.93
+  },
+  "artifacts": [
+    "lru_cache.py",
+    "test_lru_cache.py"
+  ],
+  "verification": {
+    "test_command": "python3 -m unittest discover -s benchmark/artifacts -p 'test_*.py'",
+    "tests_total": 7,
+    "tests_passed": 7,
+    "test_duration_s": 0.121,
+    "status": "PASSED"
+  }
+}

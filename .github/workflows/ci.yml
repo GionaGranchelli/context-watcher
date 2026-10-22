@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test Workspace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          
+      - name: Build Web UI Assets
+        run: |
+          cd web
+          npm ci
+          npm run build
+          
+      - name: Format Check
+        run: cargo fmt --all -- --check
+        
+      - name: Clippy Linter
+        run: cargo clippy --workspace --all-targets -- -D warnings
+        
+      - name: Run Tests
+        run: cargo test --workspace --verbose

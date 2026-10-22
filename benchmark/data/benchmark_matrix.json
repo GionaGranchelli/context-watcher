@@ -1,0 +1,83 @@
+{
+  "test_environment": {
+    "host": "192.168.1.156:1234",
+    "model_id": "qwen3.8-27b-ud",
+    "model_params": "27B quantized",
+    "harness": "omp (oh-my-pi / Pi Agent v18.12.2)",
+    "context_size_limit": 8192,
+    "framework": "contextWatcher (cw v0.1.0)",
+    "date": "2026-10-22"
+  },
+  "task": {
+    "description": "Multi-turn coding workflow: Implement Thread-Safe LRUCache with TTL expiration, stats tracking, and unit tests in Python",
+    "unit_tests_run": 7,
+    "unit_tests_passed": 7,
+    "execution_time_s": 0.121,
+    "test_pass_rate": "100%"
+  },
+  "metrics": {
+    "baseline": {
+      "level": "none",
+      "strategy": "raw_harness_history",
+      "tokens": 5571,
+      "context_window_usage_pct": 68.0,
+      "stale_thinking_tokens": 5397,
+      "stale_thinking_pct": 96.88,
+      "kv_vram_fp16_mb": 1393.0,
+      "kv_vram_q8_mb": 738.0,
+      "kv_vram_q4_mb": 418.0,
+      "time_to_first_token_ms": 1057.0,
+      "generation_duration_s": 134.9,
+      "health_score": 100,
+      "context_status": "Near overflow (8192 limit) on turn 2"
+    },
+    "min": {
+      "level": "min",
+      "strategy": "cache_safe_boost / clean_code_state",
+      "tagline": "Zero KV-Cache Invalidation & High-Attention Tail Pinning",
+      "tokens": 5571,
+      "context_window_usage_pct": 68.0,
+      "tokens_saved": 0,
+      "tokens_saved_pct": 0.0,
+      "kv_cache_invalidation_tokens": 0,
+      "kv_cache_hit_ratio_pct": 100.0,
+      "kv_vram_fp16_mb": 1393.0,
+      "time_to_first_token_ms": 1057.0,
+      "code_quality_retained": "100%",
+      "attention_salience_boost": "Early rules pinned from 30% salience to 98% recency"
+    },
+    "mid": {
+      "level": "mid",
+      "strategy": "surgical_log_diet",
+      "tagline": "Surgical Compaction of Raw Monologues, Verbose Logs & Completed Thinking Blocks",
+      "tokens": 162,
+      "context_window_usage_pct": 1.97,
+      "tokens_saved": 5409,
+      "tokens_saved_pct": 97.1,
+      "kv_cache_invalidation_tokens": 0,
+      "kv_vram_fp16_mb": 40.5,
+      "kv_vram_saved_mb": 1352.5,
+      "kv_vram_saved_pct": 97.1,
+      "local_prefill_time_ms": 249.0,
+      "prefill_speedup": "8.5x faster prefill",
+      "code_quality_retained": "100% (7/7 tests pass in 0.121s)",
+      "context_headroom_freed": "Freed 5,409 tokens for 15+ additional turns"
+    },
+    "max": {
+      "level": "max",
+      "strategy": "max_token_diet",
+      "tagline": "Full All-In-One: Thinking Diet + Stale File Dedupe + Unused Tool Gate + Tail Pinning",
+      "tokens": 254,
+      "context_window_usage_pct": 3.1,
+      "tokens_saved": 5317,
+      "tokens_saved_pct": 95.4,
+      "kv_vram_fp16_mb": 63.5,
+      "kv_vram_saved_mb": 1329.5,
+      "kv_vram_saved_pct": 95.4,
+      "local_prefill_time_ms": 390.0,
+      "prefill_speedup": "7.2x faster prefill",
+      "code_quality_retained": "100% (7/7 tests pass in 0.121s)",
+      "pinned_rules_preserved": true
+    }
+  }
+}

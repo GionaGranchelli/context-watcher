@@ -2,6 +2,11 @@
 name = "cw-cli"
 version.workspace = true
 edition.workspace = true
+description = "Universal context & KV-cache optimization engine for AI coding harnesses"
+repository = "https://github.com/context-watcher/contextWatcher"
+license.workspace = true
+keywords = ["llm", "ai", "context", "kv-cache", "proxy"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "cw"

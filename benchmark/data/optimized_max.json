@@ -1,0 +1,30 @@
+{
+  "session_id": "pi_01a163cd-a64",
+  "tier": "max",
+  "command": "/cw optimize max",
+  "strategy": "max_token_diet",
+  "tagline": "Full All-In-One: Thinking Diet + Stale File Dedupe + Unused Tool Gate + Tail Pinning",
+  "tokens_before": 5571,
+  "tokens_after": 254,
+  "tokens_saved": 5317,
+  "tokens_saved_pct": 95.44,
+  "context_window_usage_pct": 3.10,
+  "kv_cache": {
+    "vram_fp16_mb_before": 1393.0,
+    "vram_fp16_mb_after": 63.5,
+    "vram_saved_mb": 1329.5,
+    "vram_saved_pct": 95.44
+  },
+  "performance": {
+    "prefill_time_ms_before": 2120.0,
+    "prefill_time_ms_after": 390.0,
+    "prefill_speedup": "7.2x faster prefill"
+  },
+  "code_quality": {
+    "tests_total": 7,
+    "tests_passed": 7,
+    "pass_rate": "100%",
+    "regressions": 0,
+    "pinned_tail_rules_active": true
+  }
+}

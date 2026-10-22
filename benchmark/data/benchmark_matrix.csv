@@ -1,0 +1,5 @@
+optimization_tier,strategy_id,input_tokens,context_window_usage_pct,tokens_saved,tokens_saved_pct,kv_cache_vram_mb,prefill_time_ms,ttft_ms,unit_tests_passed,test_pass_rate,kv_cache_safe
+Baseline,unoptimized_harness_history,5571,68.01%,0,0.0%,1393.0,2120,1057,7/7,100%,true
+Min (/cw optimize min),cache_safe_boost,5571,68.01%,0,0.0%,1393.0,1057,1057,7/7,100%,true (100% prefix retained)
+Mid (/cw optimize mid),surgical_log_diet,162,1.98%,5409,97.09%,40.5,249,249,7/7,100%,true (cache-safe overlay)
+Max (/cw optimize max),max_token_diet,254,3.10%,5317,95.44%,63.5,390,390,7/7,100%,true (single atomic rebuild)

@@ -1,0 +1,31 @@
+{
+  "session_id": "pi_01a163cd-a64",
+  "tier": "mid",
+  "command": "/cw optimize mid",
+  "strategy": "surgical_log_diet",
+  "tagline": "Surgical Compaction of Raw Monologues, Verbose Logs & Completed Thinking Blocks",
+  "tokens_before": 5571,
+  "tokens_after": 162,
+  "tokens_saved": 5409,
+  "tokens_saved_pct": 97.09,
+  "nodes_before": 11,
+  "nodes_after": 5,
+  "context_window_usage_pct": 1.98,
+  "kv_cache": {
+    "vram_fp16_mb_before": 1393.0,
+    "vram_fp16_mb_after": 40.5,
+    "vram_saved_mb": 1352.5,
+    "vram_saved_pct": 97.09
+  },
+  "performance": {
+    "prefill_time_ms_before": 2120.0,
+    "prefill_time_ms_after": 249.0,
+    "prefill_speedup": "8.5x faster prefill"
+  },
+  "code_quality": {
+    "tests_total": 7,
+    "tests_passed": 7,
+    "pass_rate": "100%",
+    "regressions": 0
+  }
+}

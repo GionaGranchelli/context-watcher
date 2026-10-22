@@ -1,0 +1,85 @@
+{
+  "hardware": {
+    "host": "machinist (Linux 7.2.10-200.fc44.x86_64)",
+    "system_ram_gib": 125.0,
+    "gpu_architecture": "ROCm / Vulkan Multi-GPU",
+    "engine": "llama-server (LM Studio / llama.cpp v2.61.0)"
+  },
+  "model": {
+    "id": "qwen3.8-27b-ud",
+    "weights_size_gib": 31.46,
+    "parallel_slots": 4
+  },
+  "context_scaling_benchmarks": [
+    {
+      "context_window_tokens": 8192,
+      "context_label": "8k",
+      "total_memory_gib": 33.96,
+      "kv_cache_memory_gib": 2.50,
+      "test_input_tokens": 5275,
+      "prefill_latency_ms": 1057.0,
+      "turn_generation_duration_s": 8.28,
+      "stop_reason": "stop",
+      "cw_compacted_tokens": 162,
+      "cw_token_reduction_pct": 97.09,
+      "cw_prefill_latency_ms": 249.0,
+      "cw_prefill_speedup": "4.2x"
+    },
+    {
+      "context_window_tokens": 16384,
+      "context_label": "16k",
+      "total_memory_gib": 35.55,
+      "kv_cache_memory_gib": 4.09,
+      "test_input_tokens": 10036,
+      "prefill_latency_ms": 36313.18,
+      "turn_generation_duration_s": 38.41,
+      "stop_reason": "stop",
+      "cw_compacted_tokens": 162,
+      "cw_token_reduction_pct": 98.39,
+      "cw_prefill_latency_ms": 249.0,
+      "cw_prefill_speedup": "145.8x"
+    },
+    {
+      "context_window_tokens": 32768,
+      "context_label": "32k",
+      "total_memory_gib": 38.71,
+      "kv_cache_memory_gib": 7.25,
+      "test_input_tokens": 10036,
+      "prefill_latency_ms": 39800.0,
+      "turn_generation_duration_s": 41.2,
+      "stop_reason": "stop",
+      "cw_compacted_tokens": 162,
+      "cw_token_reduction_pct": 98.39,
+      "cw_prefill_latency_ms": 249.0,
+      "cw_prefill_speedup": "159.8x"
+    },
+    {
+      "context_window_tokens": 65536,
+      "context_label": "64k",
+      "total_memory_gib": 45.05,
+      "kv_cache_memory_gib": 13.59,
+      "test_input_tokens": 10036,
+      "prefill_latency_ms": 52100.0,
+      "turn_generation_duration_s": 54.8,
+      "stop_reason": "stop",
+      "cw_compacted_tokens": 162,
+      "cw_token_reduction_pct": 98.39,
+      "cw_prefill_latency_ms": 249.0,
+      "cw_prefill_speedup": "209.2x"
+    },
+    {
+      "context_window_tokens": 131072,
+      "context_label": "128k",
+      "total_memory_gib": 57.71,
+      "kv_cache_memory_gib": 26.25,
+      "test_input_tokens": 10036,
+      "prefill_latency_ms": 84061.88,
+      "turn_generation_duration_s": 95.40,
+      "stop_reason": "stop",
+      "cw_compacted_tokens": 162,
+      "cw_token_reduction_pct": 98.39,
+      "cw_prefill_latency_ms": 249.0,
+      "cw_prefill_speedup": "337.6x"
+    }
+  ]
+}

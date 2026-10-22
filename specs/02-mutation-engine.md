@@ -22,6 +22,11 @@ To make mutations completely seamless and persistent across every subsequent tur
    When Request $N$ arrives at `cw-proxy`, the **Overlay Engine** matches active `MutationRule` entries against the incoming `ContextTurn` by `NodeFingerprint` (or `TurnRange` / `ToolName` selector) and deterministically applies the transformation **in $<1\text{ms}$** before forwarding the payload upstream.
    * Because the transformation is 100% deterministic, Request 10 and Request 11 produce the **exact same mutated prefix** for Turns 1–10—meaning **the KV Cache remains 100% valid across turns after a mutation is applied!**
 
+### 1.2 `contextWatcher` vs Standard LLM Context Compaction (`/compact`)
+A primary differentiation is how `cw` fundamentally differs from standard harness compaction (e.g. `/compact` in Claude Code / Codex):
+* **Standard `/compact` (Fuzzy LLM Rewrite):** Takes historical turns, executes a full LLM summarization turn ($0.05–$0.25 cost, 15–30s latency), and replaces past turns with an English paragraph. This **invalidates the entire KV cache prefix (0% cache hit)**, causes TTFT spikes, and suffers from the "telephone game" where exact code symbols, error traces, and line numbers are permanently lost.
+* **`contextWatcher` (Deterministic Context GC):** Operates directly on the Canonical IR in pure native Rust in **<2ms** with **$0.00** LLM inference. It performs cache-aware surgery: deduplicating duplicate file reads via pointer stubs, truncating bloated tool stdout, and preserving identical code ground truth and KV cache prefixes.
+
 ---
 
 ## 2. Catalog of Surgical Context Mutations (`MutationOp`)

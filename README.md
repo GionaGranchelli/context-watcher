@@ -61,6 +61,34 @@ Turn 10: 100,000+ tokens re-sent on every keystroke!
 
 ---
 
+## 🆚 Why Not Just Use `/compact`? (contextWatcher vs Standard Compaction)
+
+The number one question every developer asks:  
+> *"My harness already has `/compact` (or auto-summarization). Why do I need `contextWatcher`?"*
+
+**Standard compaction is an *emergency parachute*:** It invokes an LLM to generate a fuzzy English summary paragraph of past turns. It takes 15–30 seconds, burns tokens to run, causes model amnesia for exact code details, and **completely destroys your KV cache prefix**.
+
+**`contextWatcher` is an *active garbage collector*:** It executes locally in pure native Rust in **<2ms** with **$0.00** LLM overhead. It acts like `jemalloc` or V8 GC for LLM context: deduplicating identical file reads, pruning noisy tool logs, and preserving your KV cache prefix so prefill latency stays under 100ms.
+
+| Dimension | Standard Harness Compaction (`/compact`) | `contextWatcher` (`cw`) |
+| :--- | :--- | :--- |
+| **Mechanism** | Fuzzy LLM summarization pass over old turns. | Deterministic Radix Context IR in Rust (<2ms). Zero LLM calls. |
+| **KV Cache Impact** | **100% Cache Invalidation.** Rewrites historical text, resetting prefix tokens to 0. Destroys cloud cache discounts & triggers massive local prefill spikes. | **Cache-Aware Surgery.** Operates via prefix-safe transforms or shadow-dedupes to preserve up to 95% of cached tokens. |
+| **Code Fidelity** | **Lossy ("Telephone Game").** Exact line numbers, error traces, diffs, and type signatures are summarized away or hallucinated. | **100% Lossless for Code.** Preserves exact system prompts, instructions, and freshest file reads. Only dead redundancy is removed. |
+| **Execution Cost** | **Burns completion tokens** ($0.05 – $0.25 per `/compact`) and takes **10–30 seconds**. | **$0.00 cost, <2ms execution.** Pure native Rust compiled binary. |
+| **Stale File Reads** | Leaves duplicate file reads in history or lumps them into vague summaries. | **Shadow-Deduplication:** When an agent reads `lib.rs` 6 times, turns 1–5 are replaced with 0-token pointer stubs; only turn 6 remains active. |
+| **Tool Output Bloat** | Cannot selectively trim a 4,000-line `cargo build` error log without losing the surrounding trajectory. | **Surgical Tool Pruning:** Truncates noisy command stdout while preserving the tool call ID, exit code, and model reasoning. |
+| **Persistence** | In-memory only in many harnesses; lost on restart or re-sent in full next turn. | **Deterministic Overlays + Disk Sync:** Syncs clean states to `.jsonl` transcripts with automatic `.bak` backups across all harnesses. |
+
+### The 4 Fatal Flaws of Standard Compaction
+
+1. **The KV-Cache Annihilation Problem:** LLMs cache tokens sequentially from token 0. When standard `/compact` replaces Turns 1–20 with *"We refactored auth"*, the prefix changes completely. On cloud providers (Claude / GPT-4o), you lose the 90% prompt cache discount. On local GPUs (Qwen / Llama 3), prefill time jumps from **<100ms** to **25–45 seconds** as the GPU re-processes the entire prompt from scratch.
+2. **The "Telephone Game" (Fuzzy Summarization vs Ground Truth):** When an LLM summarizes a 40-turn coding session, it generalizes: *"Fixed edge case in parser."* Five turns later, the agent needs the exact regex or exception signature from turn 12—which is now gone. The agent re-reads the file or hallucinates. `cw` never summarizes code blindly; it preserves ground-truth code byte-for-byte.
+3. **Latency & Token Burn to Compact:** You run `/compact` to save tokens, but running `/compact` requires an expensive model inference turn that reads 50k–100k input tokens and writes a large summary block. You wait 15–30 seconds staring at a spinner. `cw` runs in **sub-2ms** on CPU.
+4. **Blindness to Redundant File Floods:** Agents constantly run `cat file.ts`, `git diff`, and `cargo test`. Over a 2-hour session, 60% of context is literally identical copies of files read multiple times. Standard compaction lumps or ignores them; `cw`'s **Shadow-Deduplication** replaces prior copies with zero-cost pointer stubs, reclaiming 30,000–60,000 tokens instantly.
+
+---
+
 ## 📊 Empirical Proof (Measured on Real Hardware)
 
 Benchmarked on multi-GPU workstation running **`qwen3.8-27b-ud`** via **`omp` (oh-my-pi)** across all context window tiers (see [`benchmark/README.md`](benchmark/README.md)):

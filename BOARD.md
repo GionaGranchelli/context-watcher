@@ -72,6 +72,17 @@
 * [x] **CW-046** `[P0]` `[cw-harnesses/cw-proxy]` **Incremental Watcher & Lightweight Graph API**: Track file `(mtime, byte_len)` state across all harness directories and serve lightweight historical turn summaries on `/api/v1/sessions/:id/graph` for instant rendering on 350k+ token sessions.
 * [x] **CW-047** `[P0]` `[cw-core/cw-proxy/web/cw-cli]` **Local Model Engine & KV-Cache Slot Controller (`Ollama`, `llama.cpp`, `vLLM`, `SGLang`, `LM Studio`)**: Automatic `n_keep` / `num_keep` system-prompt pinning, `cache_prompt: true` + `id_slot` session affinity, PagedAttention block alignment, KV VRAM calculator (`FP16`/`Q8_0`/`Q4_0`), sliding-window overflow guard, and Web UI **`🖥️ Local LLM & Auto-Pilot`** tab + `cw local` CLI.
 
+### Epic 8: Pre-Forward Validation Gate, Mutation Reliability & Taxonomy
+* [x] **CW-048** `[P0]` `[cw-proxy/cw-core]` **Post-Mutation Pre-Forward Validation Gate & Fail-Open Fallback**:
+  - Re-parse mutated outgoing JSON through `cw-core::ir` protocol normalizer before upstream dispatch.
+  - Assert structural invariants: strict role alternation, `tool_use` <-> `tool_result` ID 1:1 pairing, thinking signature integrity.
+  - Fail-Open Guarantee: On any validation error, log diagnostic warning, revert payload to raw unmutated clone, and forward safely so upstream never returns HTTP 400.
+* [x] **CW-049** `[P1]` `[cw-store/cw-proxy]` **Closed-Loop Mutation Effectiveness & Telemetry Tracker**:
+  - Correlate applied `MutationLedgerId` with subsequent turn metrics (TTFT ms, provider cache hit/miss tokens, follow-up read frequency).
+  - Surface per-mutation effectiveness scores in `cw gain --history` and Web UI.
+* [x] **CW-050** `[P2]` `[cw-core/cw-mcp]` **Taxonomy Reconciliation (`ShadowDedupe`)**:
+  - Align `CW-L001` linter fix name, MCP tool description, and `MutationOp` onto unified `ShadowDedupe` taxonomy.
+
 ---
 
 ## 🚧 In Progress

@@ -539,24 +539,24 @@ pub fn import_generic_jsonl_transcript(
 
         // 1. Codex CLI Rollout format (`session_meta`, `turn_context`, `event_msg`, `response_item`)
         if entry_type == "session" {
-            if let Some(id) = entry.get("id").and_then(|v| v.as_str()) {
-                if !id.is_empty() {
-                    session_id = format!("{}_{}", harness.as_str(), &id[..id.len().min(12)]);
-                }
+            if let Some(id) = entry.get("id").and_then(|v| v.as_str())
+                && !id.is_empty()
+            {
+                session_id = format!("{}_{}", harness.as_str(), &id[..id.len().min(12)]);
             }
-            if let Some(cwd) = entry.get("cwd").and_then(|v| v.as_str()) {
-                if !cwd.is_empty() {
-                    detected_workspace = Some(cwd.to_string());
-                }
+            if let Some(cwd) = entry.get("cwd").and_then(|v| v.as_str())
+                && !cwd.is_empty()
+            {
+                detected_workspace = Some(cwd.to_string());
             }
             continue;
         }
 
         if entry_type == "model_change" {
-            if let Some(m) = entry.get("model").and_then(|v| v.as_str()) {
-                if !m.is_empty() {
-                    detected_model = m.to_string();
-                }
+            if let Some(m) = entry.get("model").and_then(|v| v.as_str())
+                && !m.is_empty()
+            {
+                detected_model = m.to_string();
             }
             continue;
         }
@@ -765,15 +765,15 @@ pub fn import_generic_jsonl_transcript(
             {
                 detected_model = m.to_string();
             }
-            if let Some(prov) = msg.get("provider").and_then(|v| v.as_str()) {
-                if prov.contains("machinist") || prov.contains("local") || prov.contains("ollama") {
-                    detected_provider = ProviderKind::OpenAICompatible;
-                }
+            if let Some(prov) = msg.get("provider").and_then(|v| v.as_str())
+                && (prov.contains("machinist") || prov.contains("local") || prov.contains("ollama"))
+            {
+                detected_provider = ProviderKind::OpenAICompatible;
             }
-            if let Some(api) = msg.get("api").and_then(|v| v.as_str()) {
-                if api.contains("openai") {
-                    detected_provider = ProviderKind::OpenAICompatible;
-                }
+            if let Some(api) = msg.get("api").and_then(|v| v.as_str())
+                && api.contains("openai")
+            {
+                detected_provider = ProviderKind::OpenAICompatible;
             }
             if let Some(u) = msg.get("usage") {
                 if let Some(inp) = u.get("input_tokens").or_else(|| u.get("input")).and_then(|v| v.as_u64()) {
@@ -789,21 +789,20 @@ pub fn import_generic_jsonl_transcript(
             if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
                 turn_counter += 1;
                 if title.is_none() {
-                    if let Some(c) = msg.get("content").and_then(|v| v.as_str()) {
-                        if !c.trim().is_empty() {
-                            let one_line = c.split_whitespace().collect::<Vec<_>>().join(" ");
-                            title = Some(one_line.chars().take(78).collect());
-                        }
+                    if let Some(c) = msg.get("content").and_then(|v| v.as_str())
+                        && !c.trim().is_empty()
+                    {
+                        let one_line = c.split_whitespace().collect::<Vec<_>>().join(" ");
+                        title = Some(one_line.chars().take(78).collect());
                     } else if let Some(arr) = msg.get("content").and_then(|v| v.as_array()) {
                         for item in arr {
-                            if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                                if let Some(t) = item.get("text").and_then(|s| s.as_str()) {
-                                    if !t.trim().is_empty() {
-                                        let one_line = t.split_whitespace().collect::<Vec<_>>().join(" ");
-                                        title = Some(one_line.chars().take(78).collect());
-                                        break;
-                                    }
-                                }
+                            if item.get("type").and_then(|t| t.as_str()) == Some("text")
+                                && let Some(t) = item.get("text").and_then(|s| s.as_str())
+                                && !t.trim().is_empty()
+                            {
+                                let one_line = t.split_whitespace().collect::<Vec<_>>().join(" ");
+                                title = Some(one_line.chars().take(78).collect());
+                                break;
                             }
                         }
                     }

@@ -95,8 +95,19 @@ pub fn mcp_tool_definitions() -> Value {
             }
         },
         {
-            "name": "cw_evict_stale_reads",
+            "name": "cw_shadow_dedupe",
             "description": "Shadow-deduplicates all stale or duplicate file reads in the context window so only the freshest read remains.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "file_path": { "type": "string", "description": "Optional specific file path to deduplicate" }
+                }
+            }
+        },
+        {
+            "name": "cw_evict_stale_reads",
+            "description": "Alias for cw_shadow_dedupe: shadow-deduplicates all stale or duplicate file reads in context.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -227,7 +238,7 @@ async fn execute_mcp_tool(
                 "file_states": graph.get("file_states")
             }))?)
         }
-        "cw_evict_stale_reads" => {
+        "cw_shadow_dedupe" | "cw_evict_stale_reads" => {
             let file_path = args
                 .get("file_path")
                 .and_then(|v| v.as_str())
@@ -409,6 +420,8 @@ mod tests {
         .await
         .unwrap();
         let tools = list_resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 8);
+        assert!(tools.iter().any(|t| t["name"] == "cw_shadow_dedupe"));
+        assert!(tools.iter().any(|t| t["name"] == "cw_evict_stale_reads"));
     }
 }

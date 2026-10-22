@@ -7,6 +7,7 @@ use cw_core::{
     },
 };
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -122,6 +123,17 @@ impl CwStore {
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS mutation_effectiveness (
+                mutation_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                turn_id TEXT NOT NULL,
+                tokens_saved INTEGER NOT NULL,
+                kv_cache_hit_rate REAL NOT NULL,
+                ttft_ms INTEGER,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );",
         )?;
         Ok(())
@@ -499,6 +511,85 @@ impl CwStore {
         )?;
         Ok(())
     }
+
+    pub fn record_mutation_effectiveness(
+        &self,
+        record: &MutationEffectivenessRecord,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO mutation_effectiveness (
+                mutation_id, session_id, turn_id, tokens_saved, kv_cache_hit_rate, ttft_ms, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                record.mutation_id,
+                record.session_id,
+                record.turn_id,
+                record.tokens_saved,
+                record.kv_cache_hit_rate,
+                record.ttft_ms.map(|v| v as i64),
+                record.created_at.to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_mutation_effectiveness(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Vec<MutationEffectivenessRecord>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut res = Vec::new();
+        if let Some(sid) = session_id {
+            let mut stmt = conn.prepare(
+                "SELECT mutation_id, session_id, turn_id, tokens_saved, kv_cache_hit_rate, ttft_ms, created_at
+                 FROM mutation_effectiveness WHERE session_id = ?1 ORDER BY created_at DESC"
+            )?;
+            let rows = stmt.query_map(params![sid], Self::row_to_effectiveness)?;
+            for r in rows.flatten() {
+                res.push(r);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT mutation_id, session_id, turn_id, tokens_saved, kv_cache_hit_rate, ttft_ms, created_at
+                 FROM mutation_effectiveness ORDER BY created_at DESC LIMIT 100"
+            )?;
+            let rows = stmt.query_map([], Self::row_to_effectiveness)?;
+            for r in rows.flatten() {
+                res.push(r);
+            }
+        }
+        Ok(res)
+    }
+
+    fn row_to_effectiveness(row: &rusqlite::Row) -> rusqlite::Result<MutationEffectivenessRecord> {
+        let created_str: String = row.get(6)?;
+        let created_at = DateTime::parse_from_rfc3339(&created_str)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        let ttft_raw: Option<i64> = row.get(5)?;
+
+        Ok(MutationEffectivenessRecord {
+            mutation_id: row.get(0)?,
+            session_id: row.get(1)?,
+            turn_id: row.get(2)?,
+            tokens_saved: row.get(3)?,
+            kv_cache_hit_rate: row.get(4)?,
+            ttft_ms: ttft_raw.map(|v| v as u64),
+            created_at,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MutationEffectivenessRecord {
+    pub mutation_id: String,
+    pub session_id: String,
+    pub turn_id: String,
+    pub tokens_saved: u32,
+    pub kv_cache_hit_rate: f64,
+    pub ttft_ms: Option<u64>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[cfg(test)]

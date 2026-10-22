@@ -57,7 +57,7 @@ On every turn, `cw-core` runs a fast pass over `ContextTurn` and produces a **Co
 
 | Rule ID | Name | Detection Logic | One-Click Fix (`MutationOp`) |
 | :--- | :--- | :--- | :--- |
-| **`CW-L001`** | **Stale File in Context** | A `ToolResult(FileRead { path, line_range, hash })` at Turn $k$ is followed by a later `edit_file`/`write_file` on `path`, OR the file on disk (`workspace_root/path`) now has a different BLAKE3 hash. | `ShadowDedupe` or `EvictStaleRead` |
+| **`CW-L001`** | **Stale File in Context** | A `ToolResult(FileRead { path, line_range, hash })` at Turn $k$ is followed by a later `edit_file`/`write_file` on `path`, OR the file on disk (`workspace_root/path`) now has a different BLAKE3 hash. | `ShadowDedupe` |
 | **`CW-L002`** | **Duplicate File Read** | The same file (and overlapping line range) is read in multiple turns ($k_1 < k_2$). | `ShadowDedupe` (keep $k_2$, stub $k_1$ with pointer) |
 | **`CW-L003`** | **Massive Tool Output Bloat** | A single `ToolResult` exceeds `3,000` tokens (or $>10\%$ of total context). | `PruneOrStub` / `HeadTailTruncate` |
 | **`CW-L004`** | **Failed Debugging Loop (Subtree Noise)** | $\ge 3$ consecutive turns contain tool errors (`is_error == true` or non-zero bash exit codes) followed by a successful fix. | `FoldSubtree` into a single outcome summary |

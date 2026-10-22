@@ -7,6 +7,7 @@ pub mod normalizer;
 pub mod optimizer;
 pub mod radix;
 pub mod tokenizer;
+pub mod validator;
 
 use chrono::Utc;
 use ir::{ContextNode, ContextTurn, ProviderKind, SessionId, TokenUsageSummary, TurnId};

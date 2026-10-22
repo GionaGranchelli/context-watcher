@@ -26,9 +26,10 @@ use cw_core::{
     normalizer::detect_provider,
     optimizer::{OptimizationStrategyPlan, build_optimization_plans, resolve_strategy_alias},
     radix::{RadixGraph, build_radix_graph},
+    validator::validate_protocol_invariants,
 };
 use cw_harnesses::sync_mutations_to_transcript_on_disk;
-use cw_store::CwStore;
+use cw_store::{CwStore, MutationEffectivenessRecord};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -171,6 +172,11 @@ pub fn build_api_router(state: DaemonState) -> Router {
             delete(api_delete_mutation),
         )
         .route("/api/v1/sessions/:id/optimize", post(api_auto_optimize))
+        .route(
+            "/api/v1/sessions/:id/effectiveness",
+            get(api_get_session_effectiveness),
+        )
+        .route("/api/v1/effectiveness", get(api_get_all_effectiveness))
         .route(
             "/api/v1/sessions/:id/sync-back",
             post(api_sync_transcript_back),
@@ -487,6 +493,24 @@ async fn handle_proxy_request(
     let mut outbound_payload = mutated_payload.clone();
     strip_internal_cw_fields(&mut outbound_payload);
 
+    // CW-048: Post-Mutation Pre-Forward Validation Gate & Fail-Open Guarantee
+    // Re-verify structural invariants: role alternation, tool_use <-> tool_result pairing, thinking order
+    let raw_is_valid = validate_protocol_invariants(&raw_payload, provider).is_ok();
+    if let Err(violation) = validate_protocol_invariants(&outbound_payload, provider) {
+        if raw_is_valid {
+            tracing::warn!(
+                "[cw-proxy] Post-mutation validation gate caught protocol violation: {violation}. Triggering Fail-Open fallback to raw unmutated payload for session '{}'.",
+                session_id
+            );
+            outbound_payload = raw_payload.clone();
+            strip_internal_cw_fields(&mut outbound_payload);
+        } else {
+            tracing::debug!(
+                "[cw-proxy] Protocol violation was already present in raw payload from client: {violation}."
+            );
+        }
+    }
+
     let target_url = format!("{}{}", upstream_base.trim_end_matches('/'), forward_path);
     let body_bytes = serde_json::to_vec(&outbound_payload).unwrap_or_else(|_| body.to_vec());
 
@@ -556,6 +580,20 @@ async fn handle_proxy_request(
                             None,
                         );
                         let _ = state_clone.store.save_file_states(&session_id, &file_states);
+
+                        // CW-049: Record closed-loop mutation effectiveness telemetry
+                        for rule in &active_mutations {
+                            let _ = state_clone.store.record_mutation_effectiveness(&MutationEffectivenessRecord {
+                                mutation_id: rule.id.clone(),
+                                session_id: session_id.clone(),
+                                turn_id: turn.id.clone(),
+                                tokens_saved: rule.estimated_saved_tokens.max(0) as u32,
+                                kv_cache_hit_rate: turn.kv_cache_report.hit_ratio as f64,
+                                ttft_ms: turn.latency_ms,
+                                created_at: Utc::now(),
+                            });
+                        }
+
                         state_clone.broadcast(WsEvent::TurnCompleted {
                             session_id: session_id.clone(),
                             turn: Box::new(turn),
@@ -594,6 +632,20 @@ async fn handle_proxy_request(
                 resp_json.as_ref(),
             );
             let _ = state.store.save_file_states(&session_id, &file_states);
+
+            // CW-049: Record closed-loop mutation effectiveness telemetry
+            for rule in &active_mutations {
+                let _ = state.store.record_mutation_effectiveness(&MutationEffectivenessRecord {
+                    mutation_id: rule.id.clone(),
+                    session_id: session_id.clone(),
+                    turn_id: turn.id.clone(),
+                    tokens_saved: rule.estimated_saved_tokens.max(0) as u32,
+                    kv_cache_hit_rate: turn.kv_cache_report.hit_ratio as f64,
+                    ttft_ms: turn.latency_ms,
+                    created_at: Utc::now(),
+                });
+            }
+
             state.broadcast(WsEvent::TurnCompleted {
                 session_id: session_id.clone(),
                 turn: Box::new(turn),
@@ -997,6 +1049,31 @@ async fn api_auto_optimize(
     Json(json!({ "applied_mutations": created }))
 }
 
+async fn api_get_session_effectiveness(
+    State(state): State<DaemonState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.store.list_mutation_effectiveness(Some(&id)) {
+        Ok(records) => Json(json!({ "effectiveness": records })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
+async fn api_get_all_effectiveness(State(state): State<DaemonState>) -> impl IntoResponse {
+    match state.store.list_mutation_effectiveness(None) {
+        Ok(records) => Json(json!({ "effectiveness": records })).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 #[derive(Deserialize)]
 struct ReplayRequest {
     from_turn_id: Option<String>,
@@ -1374,5 +1451,47 @@ mod tests {
         let bytes = to_bytes(replay_resp.into_body(), 1_000_000).await.unwrap();
         let val: Value = serde_json::from_slice(&bytes).unwrap();
         assert!(val.get("forked_turn").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_pre_forward_validation_gate_fail_open_fallback() {
+        use cw_core::validator::validate_protocol_invariants;
+
+        let valid_raw = json!({
+            "model": "claude-3-7-sonnet",
+            "messages": [
+                { "role": "user", "content": "Hello" },
+                { "role": "assistant", "content": [{ "type": "text", "text": "Hi" }] }
+            ]
+        });
+
+        // Corrupted mutation payload with orphan tool result
+        let invalid_mutated = json!({
+            "model": "claude-3-7-sonnet",
+            "messages": [
+                { "role": "user", "content": "Hello" },
+                { "role": "assistant", "content": [{ "type": "text", "text": "Hi" }] },
+                {
+                    "role": "user",
+                    "content": [
+                        { "type": "tool_result", "tool_use_id": "orphan_c99", "content": "bad" }
+                    ]
+                }
+            ]
+        });
+
+        assert!(validate_protocol_invariants(&valid_raw, ProviderKind::Anthropic).is_ok());
+        assert!(validate_protocol_invariants(&invalid_mutated, ProviderKind::Anthropic).is_err());
+
+        // In cw-proxy, the fail-open fallback replaces invalid_mutated with valid_raw
+        let mut outbound = invalid_mutated.clone();
+        if validate_protocol_invariants(&outbound, ProviderKind::Anthropic).is_err()
+            && validate_protocol_invariants(&valid_raw, ProviderKind::Anthropic).is_ok()
+        {
+            outbound = valid_raw.clone();
+        }
+
+        assert_eq!(outbound, valid_raw);
+        assert!(validate_protocol_invariants(&outbound, ProviderKind::Anthropic).is_ok());
     }
 }

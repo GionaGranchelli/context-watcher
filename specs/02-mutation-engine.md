@@ -27,6 +27,22 @@ A primary differentiation is how `cw` fundamentally differs from standard harnes
 * **Standard `/compact` (Fuzzy LLM Rewrite):** Takes historical turns, executes a full LLM summarization turn ($0.05–$0.25 cost, 15–30s latency), and replaces past turns with an English paragraph. This **invalidates the entire KV cache prefix (0% cache hit)**, causes TTFT spikes, and suffers from the "telephone game" where exact code symbols, error traces, and line numbers are permanently lost.
 * **`contextWatcher` (Deterministic Context GC):** Operates directly on the Canonical IR in pure native Rust in **<2ms** with **$0.00** LLM inference. It performs cache-aware surgery: deduplicating duplicate file reads via pointer stubs, truncating bloated tool stdout, and preserving identical code ground truth and KV cache prefixes.
 
+### 1.3 Mechanical Optimization Execution Pipeline
+When an optimization is triggered (via `/cw optimize min|mid|max`, MCP `cw_optimize_strategy`, CLI `cw optimize`, or Proxy Overlays):
+
+1. **IR Ingestion & Normalization:** Ingests the raw provider payload or session transcript (`.jsonl`) and parses it into a strongly-typed `ContextDAG` with `BLAKE3` hashed `ContextNode` blocks.
+2. **Linter & KV Boundary Profiling:**
+   - Detects all stale/duplicate file reads (`ToolResult` where file was read multiple times or overwritten).
+   - Identifies runaway tool output nodes (>2,000 chars) and expired thinking blocks.
+   - Computes the KV cache invalidation prefix index ($k$).
+3. **Plan Formulation (`build_optimization_plans`):**
+   - **`min` (`cache_safe_boost`):** Prefix-safe. Retains 100% of historical tokens; pins critical rules from the middle attention trough (<45%) to the high-attention tail.
+   - **`mid` (`surgical_log_diet`):** Performs shadow-deduplication of stale file reads, strips completed thinking monologues, and applies surgical truncation to older tool outputs (preserving header, exit code, and error stack).
+   - **`max` (`max_token_diet`):** Executes an atomic composite batch: stale read shadow-deduplication, deep tool pruning, folding of failed subtrees, and unused MCP tool schema gating.
+4. **Execution Channels & Persistence:**
+   - **Wire-Level Proxy Overlay:** Applies the mutation rules in $<1\text{ms}$ on outgoing HTTP/SSE streams.
+   - **Safe Transcript Write-Back (`sync-back`):** Writes the compacted turns directly to the harness's disk transcript (`.jsonl`, Codex rollout, Pi session) after creating a timestamped `.bak` backup, ensuring resumed sessions inherit the compacted context.
+
 ---
 
 ## 2. Catalog of Surgical Context Mutations (`MutationOp`)

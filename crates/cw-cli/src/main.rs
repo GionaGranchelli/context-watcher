@@ -899,7 +899,29 @@ fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<S
     if let Some(s) = explicit {
         return Ok(Some(s));
     }
+    if let Ok(env_sess) = std::env::var("CW_SESSION_ID")
+        && !env_sess.trim().is_empty()
+    {
+        return Ok(Some(env_sess.trim().to_string()));
+    }
+
     let sessions = store.list_sessions()?;
+    if sessions.is_empty() {
+        return Ok(None);
+    }
+
+    // Prioritize sessions matching the current working directory / project workspace
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd_str = cwd.to_string_lossy();
+        for s in &sessions {
+            if let Some(ref ws) = s.workspace_root {
+                if ws == &cwd_str || cwd_str.starts_with(ws) || ws.starts_with(cwd_str.as_ref()) {
+                    return Ok(Some(s.id.clone()));
+                }
+            }
+        }
+    }
+
     Ok(sessions.first().map(|s| s.id.clone()))
 }
 
@@ -1410,6 +1432,9 @@ To run optimization:
         if !dry_run && pi_ext_dir.exists() {
             let _ = std::process::Command::new("pi")
                 .args(["install", &pi_ext_dir.to_string_lossy()])
+                .status();
+            let _ = std::process::Command::new("omp")
+                .args(["plugin", "install", &pi_ext_dir.to_string_lossy()])
                 .status();
         }
         if !dry_run && omp_agent_dir.exists() {

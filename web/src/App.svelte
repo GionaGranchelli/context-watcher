@@ -66,6 +66,7 @@
   // Interactive hover states for Treemap & Attention Candles
   let hoveredTreemapName = $state<string | null>(null);
   let hoveredCandleNodeId = $state<string | null>(null);
+  let hoveredTabId = $state<string | null>(null);
 
   // Fold form state
   let foldStart = $state<number>(1);
@@ -1047,18 +1048,18 @@
   <div style="display: grid; grid-template-columns: 280px 1fr {inspectorOpen ? '380px' : '0px'}; flex: 1; overflow: hidden; transition: grid-template-columns 0.15s ease;">
     <!-- [1] Left Sidebar: Clean Session Explorer -->
     <aside style="background: #0f0f12; border-right: 1px solid #1f1f26; display: flex; flex-direction: column; overflow: hidden;">
-      <div style="padding: 12px; border-bottom: 1px solid #1f1f26; display: flex; flex-direction: column; gap: 8px; background: #12131a;">
+      <div style="padding: 12px; border-bottom: 1px solid #1f1f26; display: flex; flex-direction: column; gap: 8px; background: #0f0f12;">
         <!-- Segmented Control: By Project vs By Agent -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3px; background: #0b0c10; padding: 3px; border-radius: 7px; border: 1px solid #272732;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2px; background: #18181b; padding: 3px; border-radius: 6px; border: 1px solid #27272a;">
           <button
             onclick={() => (groupByMode = 'project_first')}
-            style="padding: 5px 8px; font-size: 11.5px; font-weight: 600; border-radius: 5px; border: none; cursor: pointer; background: {groupByMode === 'project_first' ? '#1e293b' : 'transparent'}; color: {groupByMode === 'project_first' ? '#93c5fd' : '#94a3b8'};"
+            style="padding: 5px 8px; font-size: 11.5px; font-weight: {groupByMode === 'project_first' ? '600' : '500'}; border-radius: 4px; border: none; cursor: pointer; background: {groupByMode === 'project_first' ? '#27272a' : '#18181b'}; color: {groupByMode === 'project_first' ? '#ffffff' : '#a1a1aa'};"
           >
             By Project
           </button>
           <button
             onclick={() => (groupByMode = 'harness_first')}
-            style="padding: 5px 8px; font-size: 11.5px; font-weight: 600; border-radius: 5px; border: none; cursor: pointer; background: {groupByMode === 'harness_first' ? '#1e293b' : 'transparent'}; color: {groupByMode === 'harness_first' ? '#93c5fd' : '#94a3b8'};"
+            style="padding: 5px 8px; font-size: 11.5px; font-weight: {groupByMode === 'harness_first' ? '600' : '500'}; border-radius: 4px; border: none; cursor: pointer; background: {groupByMode === 'harness_first' ? '#27272a' : '#18181b'}; color: {groupByMode === 'harness_first' ? '#ffffff' : '#a1a1aa'};"
           >
             By Agent
           </button>
@@ -1068,13 +1069,13 @@
           type="text"
           bind:value={searchQuery}
           placeholder="Search project, prompt, or agent..."
-          style="width: 100%; box-sizing: border-box; background: #0b0c10; color: #f4f4f5; border: 1px solid #272732; border-radius: 6px; padding: 6px 10px; font-size: 12px; outline: none;"
+          style="width: 100%; box-sizing: border-box; background: #18181b; color: #f4f4f5; border: 1px solid #27272a; border-radius: 6px; padding: 6px 10px; font-size: 12px; outline: none;"
         />
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
           <select
             bind:value={selectedHarnessFilter}
-            style="width: 100%; background: #0b0c10; color: #cbd5e1; border: 1px solid #272732; border-radius: 5px; padding: 4px 6px; font-size: 11px;"
+            style="width: 100%; background: #18181b; color: #a1a1aa; border: 1px solid #27272a; border-radius: 5px; padding: 4px 6px; font-size: 11px;"
           >
             <option value="ALL">All Agents ({allHarnessNames.length})</option>
             {#each allHarnessNames as h}
@@ -1084,7 +1085,7 @@
 
           <select
             bind:value={selectedProjectFilter}
-            style="width: 100%; background: #0b0c10; color: #cbd5e1; border: 1px solid #272732; border-radius: 5px; padding: 4px 6px; font-size: 11px;"
+            style="width: 100%; background: #18181b; color: #a1a1aa; border: 1px solid #27272a; border-radius: 5px; padding: 4px 6px; font-size: 11px;"
           >
             <option value="ALL">All Projects ({allProjectNames.length})</option>
             {#each allProjectNames as proj}
@@ -1094,42 +1095,41 @@
         </div>
       </div>
 
-      <!-- Session Tree with Clear Color Hierarchy -->
+      <!-- Session Tree: Grey Container + Selected/Unselected Contrast (Matching By Project / By Agent) -->
       <div style="flex: 1; overflow-y: auto; padding: 10px 8px;">
         {#each sidebarGroups as group}
-          {@const groupAccent = groupByMode === 'project_first' ? projectAccentColor(group.topLabel) : harnessBadgeStyle(group.topKey).dot}
           {@const isCollapsed = collapsedProjects[group.topKey]}
-          <div style="margin-bottom: 12px;">
-            <!-- Top-Level Group Header Card -->
+          {@const isGroupActive = group.subGroupsList.some((sg) => sg.sessions.some((s) => s.id === activeSessionId))}
+          <div style="margin-bottom: 10px; background: #18181b; padding: 4px; border-radius: 7px; border: 1px solid #27272a;">
+            <!-- Top-Level Project / Agent Button (Selected = #27272a + white text, Unselected = #18181b + light grey text) -->
             <button
               onclick={() => (collapsedProjects[group.topKey] = !isCollapsed)}
-              style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: #151720; color: #f4f4f5; border: 1px solid #232634; border-left: 3px solid {groupAccent}; border-radius: 6px; cursor: pointer; text-align: left;"
+              style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; background: {isGroupActive ? '#27272a' : '#18181b'}; color: {isGroupActive ? '#ffffff' : '#a1a1aa'}; border: none; border-radius: 5px; cursor: pointer; text-align: left;"
             >
               <div style="display: flex; align-items: center; gap: 7px; min-width: 0;">
-                <span style="font-size: 10px; color: {groupAccent};">{isCollapsed ? '▸' : '▾'}</span>
-                <span style="font-size: 12.5px; font-weight: 600; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                <span style="font-size: 10px; color: {isGroupActive ? '#ffffff' : '#a1a1aa'};">{isCollapsed ? '▸' : '▾'}</span>
+                <span style="font-size: 12.5px; font-weight: {isGroupActive ? '600' : '500'}; color: {isGroupActive ? '#ffffff' : '#a1a1aa'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                   {group.topLabel}
                 </span>
               </div>
-              <span style="font-size: 10.5px; background: rgba(255,255,255,0.06); color: {groupAccent}; padding: 1px 7px; border-radius: 999px; font-weight: 600; flex-shrink: 0;">
+              <span style="font-size: 10.5px; background: {isGroupActive ? '#3f3f46' : '#27272a'}; color: {isGroupActive ? '#ffffff' : '#a1a1aa'}; padding: 1px 7px; border-radius: 999px; font-weight: 600; flex-shrink: 0;">
                 {group.totalSessions}
               </span>
             </button>
 
             {#if !isCollapsed}
-              <div style="display: flex; flex-direction: column; gap: 5px; padding-left: 8px; margin-left: 6px; border-left: 1px solid #232634; margin-top: 6px;">
+              <div style="display: flex; flex-direction: column; gap: 4px; padding: 4px 2px 2px 6px; margin-top: 4px; border-top: 1px solid #27272a;">
                 {#each group.subGroupsList as sub}
                   {#if group.subGroupsList.length > 1 || groupByMode === 'harness_first'}
                     {@const subStyle = groupByMode === 'project_first' ? harnessBadgeStyle(sub.subKey) : null}
                     <div style="display: flex; align-items: center; gap: 6px; padding: 3px 6px 1px 4px;">
                       {#if subStyle}
                         <span style="width: 6px; height: 6px; border-radius: 999px; background: {subStyle.dot};"></span>
-                        <span style="font-size: 10.5px; color: {subStyle.fg}; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">
+                        <span style="font-size: 10.5px; color: #a1a1aa; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;">
                           {sub.subLabel}
                         </span>
                       {:else}
-                        <span style="width: 6px; height: 6px; border-radius: 2px; background: {projectAccentColor(sub.subLabel)};"></span>
-                        <span style="font-size: 11px; color: #cbd5e1; font-weight: 600;">
+                        <span style="font-size: 11px; color: #a1a1aa; font-weight: 600;">
                           {sub.subLabel}
                         </span>
                       {/if}
@@ -1139,31 +1139,30 @@
                   {#each sub.sessions as s}
                     {@const hb = harnessBadgeStyle(s.harness)}
                     {@const isSelected = activeSessionId === s.id}
-                    {@const recent = isRecentSession(s.updated_at)}
                     <button
                       onclick={() => {
                         activeSessionId = s.id;
                         selectedNodeId = null;
                         fetchSessionGraph(s.id);
                       }}
-                      style="width: 100%; text-align: left; padding: 8px 10px; border: 1px solid {isSelected ? '#3b82f6' : '#1e202b'}; border-left: 3px solid {isSelected ? '#60a5fa' : hb.dot}; border-radius: 6px; cursor: pointer; background: {isSelected ? '#172033' : '#111218'}; color: #f4f4f5; transition: all 0.12s;"
+                      style="width: 100%; text-align: left; padding: 8px 10px; border: 1px solid {isSelected ? '#3f3f46' : 'transparent'}; border-radius: 5px; cursor: pointer; background: {isSelected ? '#27272a' : '#18181b'}; color: {isSelected ? '#ffffff' : '#a1a1aa'}; transition: background 0.1s;"
                     >
-                      <div style="font-size: 12px; font-weight: {isSelected ? '600' : '500'}; color: {isSelected ? '#ffffff' : '#e2e8f0'}; line-height: 1.38; margin-bottom: 6px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                      <div style="font-size: 12px; font-weight: {isSelected ? '600' : '400'}; color: {isSelected ? '#ffffff' : '#a1a1aa'}; line-height: 1.38; margin-bottom: 5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
                         {s.title || s.id}
                       </div>
                       <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 10.5px;">
                         <div style="display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden;">
-                          <span style="display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 4px; background: {hb.bg}; color: {hb.fg}; border: 1px solid {hb.border}; font-weight: 600; font-size: 10px; flex-shrink: 0;">
+                          <span style="display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 4px; background: {isSelected ? '#3f3f46' : '#27272a'}; color: {isSelected ? '#ffffff' : '#d4d4d8'}; font-weight: 500; font-size: 10px; flex-shrink: 0;">
                             <span style="width: 5px; height: 5px; border-radius: 999px; background: {hb.dot};"></span>
                             {hb.label}
                           </span>
                           {#if s.model}
-                            <span style="color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px;">
+                            <span style="color: {isSelected ? '#d4d4d8' : '#71717a'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px;">
                               {shortModelName(s.model)}
                             </span>
                           {/if}
                         </div>
-                        <span style="color: {recent ? '#38bdf8' : '#71717a'}; font-weight: {recent ? '500' : '400'}; flex-shrink: 0;">
+                        <span style="color: {isSelected ? '#e4e4e7' : '#71717a'}; flex-shrink: 0;">
                           {formatRelativeTime(s.updated_at)}
                         </span>
                       </div>
@@ -1198,7 +1197,7 @@
 
     <!-- [2] Center Workspace: 4 Clean Views -->
     <div style="display: flex; flex-direction: column; overflow: hidden; background: #09090b;">
-      <!-- Clean 4-Tab Navigation Bar -->
+      <!-- Clean 4-Tab Navigation Bar (Hover shows help text without '?' icon) -->
       <nav style="display: flex; align-items: center; justify-content: space-between; padding: 0 24px; height: 44px; background: #0f0f12; border-bottom: 1px solid #1f1f26; flex-shrink: 0;">
         <div style="display: flex; align-items: center; gap: 20px; height: 100%;">
           {#each [
@@ -1207,14 +1206,25 @@
             ['analytics', 'Analytics & Tree', 'Token treemap, U-shaped attention curve, prunability advisor, and Radix prefix tree.'],
             ['settings', 'Local GPU & Settings', 'Local LLM KV-cache slot studio (Ollama/llama.cpp), Auto-Pilot policies, Tool Gate, and Overlays.']
           ] as [id, label, tip]}
-            <div style="display: flex; align-items: center; height: 100%; border-bottom: 2px solid {activeTab === id ? '#3b82f6' : 'transparent'};">
+            <div
+              role="presentation"
+              onmouseenter={() => (hoveredTabId = id)}
+              onmouseleave={() => (hoveredTabId = null)}
+              style="position: relative; display: flex; align-items: center; height: 100%; border-bottom: 2px solid {activeTab === id ? '#3b82f6' : 'transparent'};"
+            >
               <button
                 onclick={() => (activeTab = id as any)}
-                style="padding: 0 2px; border: none; background: transparent; font-size: 13px; font-weight: {activeTab === id ? '600' : '400'}; color: {activeTab === id ? '#f4f4f5' : '#71717a'}; cursor: pointer;"
+                style="padding: 0 4px; height: 100%; border: none; background: transparent; font-size: 13px; font-weight: {activeTab === id ? '600' : '400'}; color: {activeTab === id ? '#f4f4f5' : '#a1a1aa'}; cursor: pointer;"
               >
                 {label}
               </button>
-              <HelpTip text={tip} />
+              {#if hoveredTabId === id}
+                <div
+                  style="position: absolute; top: 46px; left: 0; width: 260px; background: #18181b; color: #e4e4e7; border: 1px solid #27272a; border-radius: 6px; padding: 8px 10px; font-size: 11.5px; line-height: 1.4; box-shadow: 0 10px 25px rgba(0,0,0,0.65); z-index: 9999; pointer-events: none;"
+                >
+                  {tip}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -1419,8 +1429,16 @@
 
         {:else if activeTab === 'optimize'}
           <!-- VIEW 2: CLEAN OPTIMIZATION STUDIO -->
-          <!-- 5 Strategy Cards -->
-          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px;">
+          <!-- Section 1: Strategy Presets -->
+          <div style="margin-bottom: 10px;">
+            <h3 style="margin: 0; font-size: 13.5px; font-weight: 600; color: #f4f4f5;">
+              1. Select an Optimization Strategy
+            </h3>
+            <p style="margin: 2px 0 0 0; font-size: 11.5px; color: #a1a1aa;">
+              Choose a compaction preset below to preview how many tokens can be cut and how it impacts your KV cache.
+            </p>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 22px;">
             {#each optimizationPlans as plan}
               {@const isSel = selectedStrategyId === plan.id}
               <button
@@ -1452,8 +1470,16 @@
           </div>
 
           {#if activeStrategyPlan}
-            <!-- Compact Scoreboard & Action Bar -->
-            <div style="background: #141418; border: 1px solid #1f1f26; border-radius: 10px; padding: 16px; margin-bottom: 18px;">
+            <!-- Section 2: Scoreboard & Action Bar -->
+            <div style="margin-bottom: 10px;">
+              <h3 style="margin: 0; font-size: 13.5px; font-weight: 600; color: #f4f4f5;">
+                2. Projected Impact & Execution
+              </h3>
+              <p style="margin: 2px 0 0 0; font-size: 11.5px; color: #a1a1aa;">
+                Live simulation of your context window, health score, and KV cache prefix before and after applying the selected items.
+              </p>
+            </div>
+            <div style="background: #141418; border: 1px solid #1f1f26; border-radius: 10px; padding: 16px; margin-bottom: 22px;">
               <div style="display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap;">
                 <div style=" display: flex; align-items: center; gap: 24px;">
                   <div>
@@ -1527,11 +1553,16 @@
               {/if}
             </div>
 
-            <!-- Compact 1-Line Checklist Rows (Expandable on click) -->
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <span style="font-size: 12.5px; font-weight: 600; color: #a1a1aa;">
-                Operations ({checkedStrategyItems.length} of {activeStrategyPlan.items.length} selected)
-              </span>
+            <!-- Section 3: Compact 1-Line Checklist Rows (Expandable on click) -->
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 10px;">
+              <div>
+                <h3 style="margin: 0; font-size: 13.5px; font-weight: 600; color: #f4f4f5;">
+                  3. Candidate Operations Breakdown ({checkedStrategyItems.length} of {activeStrategyPlan.items.length} selected)
+                </h3>
+                <p style="margin: 2px 0 0 0; font-size: 11.5px; color: #a1a1aa;">
+                  Uncheck any individual item you want to keep untouched, or click Details to inspect its exact content.
+                </p>
+              </div>
               {#if activeStrategyPlan.items.length > 0}
                 <div style="display: flex; gap: 6px;">
                   <button
@@ -1602,7 +1633,7 @@
                       <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #1f1f26; font-size: 12px; color: #a1a1aa; display: flex; flex-direction: column; gap: 4px;">
                         <div><strong style="color: #d4d4d8;">Action:</strong> {item.what_we_do}</div>
                         <div><strong style="color: #d4d4d8;">Reason:</strong> {item.why_it_matters}</div>
-                        <div style="color: #71717a; font-family: monospace; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        <div style="color: #71717a; font-family: monospace; font-size: 11px; white-space: pre-wrap; word-break: break-word;">
                           {item.content_preview}
                         </div>
                       </div>
@@ -1678,57 +1709,76 @@
               </div>
             </div>
 
-            <!-- KV Cache Tape & Attention Curve -->
+            <!-- KV Cache Tape & Attention Curve (Click-Only Selection + Wrapping Detail Card) -->
             <div style="background: #141418; padding: 16px; border-radius: 10px; border: 1px solid #1f1f26;">
               <div style="font-size: 13px; font-weight: 600; color: #e4e4e7; margin-bottom: 10px;">
-                KV Cache Prefix Tape & Positional Attention Curve (Hover any bar to inspect)
+                KV Cache Prefix Tape & Positional Attention Curve (Click any bar to select and inspect below)
               </div>
 
-              <div style="display: flex; height: 18px; border-radius: 4px; overflow: hidden; margin-bottom: 14px;">
+              <div style="display: flex; height: 22px; border-radius: 4px; overflow: hidden; margin-bottom: 14px;">
                 {#each latestTurn.nodes as n}
                   <div
                     role="button"
                     tabindex="0"
-                    onmouseenter={() => (hoveredCandleNodeId = n.id)}
-                    onclick={() => inspectNode(n.id)}
-                    onkeydown={(e) => e.key === 'Enter' && inspectNode(n.id)}
-                    style="flex: {Math.max(1, n.token_span.count)}; background: {kvColor(n.kv_status)}; border-right: 1px solid #09090b; opacity: {activeCandleNode?.id === n.id ? '1' : '0.8'}; cursor: pointer;"
+                    onclick={() => {
+                      hoveredCandleNodeId = n.id;
+                      selectedNodeId = n.id;
+                    }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        hoveredCandleNodeId = n.id;
+                        selectedNodeId = n.id;
+                      }
+                    }}
+                    title={`${humanToolActionLabel(n)} (${n.token_span.count} tok)`}
+                    style="flex: {Math.max(1, n.token_span.count)}; background: {kvColor(n.kv_status)}; border-right: 1px solid #09090b; outline: {activeCandleNode?.id === n.id ? '2px solid #ffffff' : 'none'}; opacity: {activeCandleNode?.id === n.id ? '1' : '0.78'}; cursor: pointer;"
                   ></div>
                 {/each}
               </div>
 
-              <div style="display: flex; align-items: flex-end; height: 68px; gap: 2px; border-bottom: 1px solid #27272a;">
+              <div style="display: flex; align-items: flex-end; height: 74px; gap: 2px; border-bottom: 1px solid #27272a;">
                 {#each latestTurn.nodes as n}
                   <div
                     role="button"
                     tabindex="0"
-                    onmouseenter={() => (hoveredCandleNodeId = n.id)}
-                    onclick={() => inspectNode(n.id)}
-                    onkeydown={(e) => e.key === 'Enter' && inspectNode(n.id)}
-                    style="flex: 1; height: {Math.max(6, Math.round(n.attention_salience * 64))}px; background: {activeCandleNode?.id === n.id ? '#ffffff' : n.attention_salience < 0.4 ? '#d97706' : '#3b82f6'}; border-radius: 2px 2px 0 0; cursor: pointer;"
+                    onclick={() => {
+                      hoveredCandleNodeId = n.id;
+                      selectedNodeId = n.id;
+                    }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        hoveredCandleNodeId = n.id;
+                        selectedNodeId = n.id;
+                      }
+                    }}
+                    title={`Turn ${n.turn_seq}: ${humanToolActionLabel(n)} (${n.token_span.count} tok · Salience ${(n.attention_salience * 100).toFixed(0)}%)`}
+                    style="flex: 1; height: {Math.max(8, Math.round(n.attention_salience * 68))}px; background: {activeCandleNode?.id === n.id ? '#ffffff' : n.attention_salience < 0.4 ? '#d97706' : '#3b82f6'}; border-radius: 2px 2px 0 0; cursor: pointer;"
                   ></div>
                 {/each}
               </div>
 
               {#if activeCandleNode}
-                <div style="margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: #0f0f12; border: 1px solid #27272a; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px;">
-                  <div style="min-width: 0; flex: 1;">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 3px;">
-                      <span style="color: #71717a;">Turn {activeCandleNode.turn_seq}</span>
-                      <strong style="color: #e4e4e7;">{humanToolActionLabel(activeCandleNode)}</strong>
-                      <span style="color: #60a5fa;">{activeCandleNode.token_span.count.toLocaleString()} tok</span>
+                <div style="margin-top: 14px; padding: 14px 16px; border-radius: 8px; background: #0f0f12; border: 1px solid #27272a; display: flex; flex-direction: column; gap: 10px; font-size: 12.5px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid #1f1f26; padding-bottom: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                      <span style="padding: 2px 7px; border-radius: 4px; background: #27272a; color: #f4f4f5; font-size: 11px; font-weight: 600;">
+                        Turn {activeCandleNode.turn_seq}
+                      </span>
+                      <strong style="color: #ffffff; font-size: 13px;">{humanToolActionLabel(activeCandleNode)}</strong>
+                      <span style="color: #60a5fa; font-weight: 600;">{activeCandleNode.token_span.count.toLocaleString()} tok</span>
                       <span style="color: #a1a1aa;">· Salience {(activeCandleNode.attention_salience * 100).toFixed(0)}%</span>
+                      <span style="color: {kvColor(activeCandleNode.kv_status)}; font-size: 11.5px;">· {activeCandleNode.kv_status}</span>
                     </div>
-                    <div style="color: #71717a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                      {nodeDisplayText(activeCandleNode).slice(0, 160)}
-                    </div>
+                    <button
+                      onclick={() => inspectNode(activeCandleNode!.id)}
+                      style="background: #27272a; color: #ffffff; border: 1px solid #3f3f46; border-radius: 5px; padding: 5px 10px; font-size: 11.5px; cursor: pointer; flex-shrink: 0;"
+                    >
+                      Open in Inspector Drawer
+                    </button>
                   </div>
-                  <button
-                    onclick={() => inspectNode(activeCandleNode!.id)}
-                    style="background: #18181b; color: #e4e4e7; border: 1px solid #27272a; border-radius: 5px; padding: 5px 10px; font-size: 11.5px; cursor: pointer; flex-shrink: 0;"
-                  >
-                    Open in Inspector
-                  </button>
+                  <div style="color: #d4d4d8; line-height: 1.55; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;">
+                    <MarkdownText text={nodeDisplayText(activeCandleNode)} rawMode={rawMarkdownMode} maxHeight="none" compact={true} />
+                  </div>
                 </div>
               {/if}
             </div>

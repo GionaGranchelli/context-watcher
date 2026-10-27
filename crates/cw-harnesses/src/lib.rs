@@ -2,7 +2,10 @@ use chrono::{DateTime, Utc};
 use cw_core::{
     analyze_turn_from_payload,
     autopilot::{generate_ambient_savings_pulse, should_emit_savings_pulse},
-    ir::{ContextTurn, HarnessKind, MutationOp, MutationRule, MutationStatus, NodeKind, ProviderKind, Session},
+    ir::{
+        ContextTurn, HarnessKind, MutationOp, MutationRule, MutationStatus, NodeKind, ProviderKind,
+        Session,
+    },
     mutation::apply_mutations_to_payload,
     optimizer::{build_optimization_plans, resolve_strategy_alias},
 };
@@ -157,7 +160,10 @@ pub fn import_agy_transcript(
                 turn_counter += 1;
                 let clean_user_req = extract_clean_user_request(&content_str);
                 if title.is_none() && !clean_user_req.is_empty() {
-                    let one_line = clean_user_req.split_whitespace().collect::<Vec<_>>().join(" ");
+                    let one_line = clean_user_req
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ");
                     title = Some(one_line.chars().take(78).collect());
                 }
                 messages.push(json!({
@@ -277,11 +283,7 @@ pub fn import_agy_transcript(
 
     if let Ok(abs_path) = fs::canonicalize(transcript_path) {
         let byte_len = fs::metadata(&abs_path).map(|m| m.len()).unwrap_or(0);
-        let _ = store.set_session_source_path(
-            &session_id,
-            &abs_path.to_string_lossy(),
-            byte_len,
-        );
+        let _ = store.set_session_source_path(&session_id, &abs_path.to_string_lossy(), byte_len);
     }
 
     let seq = turn_counter.max(1);
@@ -415,11 +417,14 @@ fn infer_workspace_from_text(text: &str) -> Option<String> {
 
 fn extract_project_root_from_path_str(s: &str) -> Option<String> {
     // Match `/home/<user>/<Category>/<ProjectName>` or `/Users/<user>/<Category>/<ProjectName>`
-    for token in s.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '(' | ')' | '[' | ']'))
+    for token in
+        s.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '(' | ')' | '[' | ']'))
     {
         let clean = token.strip_prefix("file://").unwrap_or(token);
         if clean.starts_with("/home/") || clean.starts_with("/Users/") {
-            if clean.contains("/.gemini/") || clean.contains("/.claude/") || clean.contains("/.local/")
+            if clean.contains("/.gemini/")
+                || clean.contains("/.claude/")
+                || clean.contains("/.local/")
             {
                 continue;
             }
@@ -438,7 +443,10 @@ fn extract_project_root_from_path_str(s: &str) -> Option<String> {
                         | "git"
                 )
             {
-                return Some(format!("/{}/{}/{}/{}", parts[0], parts[1], parts[2], parts[3]));
+                return Some(format!(
+                    "/{}/{}/{}/{}",
+                    parts[0], parts[1], parts[2], parts[3]
+                ));
             } else if parts.len() >= 3 {
                 return Some(format!("/{}/{}/{}", parts[0], parts[1], parts[2]));
             }
@@ -496,10 +504,7 @@ pub fn import_generic_jsonl_transcript(
         }
         selected
     } else {
-        BufReader::new(file)
-            .lines()
-            .map_while(Result::ok)
-            .collect()
+        BufReader::new(file).lines().map_while(Result::ok).collect()
     };
 
     let mut messages = Vec::new();
@@ -650,7 +655,9 @@ pub fn import_generic_jsonl_transcript(
                 if let Some(inp) = last_usage.get("input_tokens").and_then(|v| v.as_u64()) {
                     latest_input_tokens = Some(inp as u32);
                 }
-                if let Some(cached) = last_usage.get("cached_input_tokens").and_then(|v| v.as_u64())
+                if let Some(cached) = last_usage
+                    .get("cached_input_tokens")
+                    .and_then(|v| v.as_u64())
                 {
                     latest_cache_read_tokens = Some(cached as u32);
                 }
@@ -727,11 +734,12 @@ pub fn import_generic_jsonl_transcript(
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| format!("codex_call_{line_idx}"));
-                    let name = p
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("exec");
-                    let raw_args = p.get("arguments").or_else(|| p.get("input")).cloned().unwrap_or(Value::Null);
+                    let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("exec");
+                    let raw_args = p
+                        .get("arguments")
+                        .or_else(|| p.get("input"))
+                        .cloned()
+                        .unwrap_or(Value::Null);
                     let input_val = match raw_args {
                         Value::String(ref s) => serde_json::from_str::<Value>(s)
                             .unwrap_or_else(|_| json!({ "CommandLine": s })),
@@ -769,7 +777,10 @@ pub fn import_generic_jsonl_transcript(
                     }));
                 }
                 "agent_message" => {
-                    let author = p.get("author").and_then(|v| v.as_str()).unwrap_or("subagent");
+                    let author = p
+                        .get("author")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("subagent");
                     let text = extract_codex_content_text(p.get("content"));
                     if !text.trim().is_empty() {
                         messages.push(json!({
@@ -1030,11 +1041,17 @@ fn check_and_apply_auto_heal(
 
             let cur_saved = updated_turn.token_usage.saved_by_mutations as u64;
             if cur_saved > 0 {
-                let last_pulse = store.get_latest_pulse_for_session(session_id).ok().flatten();
+                let last_pulse = store
+                    .get_latest_pulse_for_session(session_id)
+                    .ok()
+                    .flatten();
                 let last_saved = last_pulse.map(|p| p.cumulative_tokens_saved).unwrap_or(0);
                 if should_emit_savings_pulse(cur_saved, last_saved, 100) {
                     let session = store.get_session(session_id).ok().flatten();
-                    let model = session.as_ref().map(|s| s.model.as_str()).unwrap_or("claude-sonnet-4");
+                    let model = session
+                        .as_ref()
+                        .map(|s| s.model.as_str())
+                        .unwrap_or("claude-sonnet-4");
                     let pulse = generate_ambient_savings_pulse(
                         session_id,
                         &updated_turn,
@@ -1228,11 +1245,16 @@ pub fn sync_mutations_to_transcript_on_disk(
 
             if let Some(stub) = matched_stub {
                 if let Some(msg) = val.get_mut("message").and_then(|m| m.as_object_mut()) {
-                    if let Some(content_arr) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
-                        if let Some(first) = content_arr.first_mut().and_then(|f| f.as_object_mut()) {
+                    if let Some(content_arr) = msg.get_mut("content").and_then(|c| c.as_array_mut())
+                    {
+                        if let Some(first) = content_arr.first_mut().and_then(|f| f.as_object_mut())
+                        {
                             first.insert("text".to_string(), Value::String(stub.clone()));
                         } else {
-                            msg.insert("content".to_string(), json!([{"type": "text", "text": stub}]));
+                            msg.insert(
+                                "content".to_string(),
+                                json!([{"type": "text", "text": stub}]),
+                            );
                         }
                     } else {
                         msg.insert("content".to_string(), Value::String(stub.clone()));
@@ -1273,7 +1295,11 @@ pub fn sync_mutations_to_transcript_on_disk(
     }
 
     let out_content = format!("{}\n", new_lines.join("\n"));
-    let tmp_path = format!("{}.cw_tmp_{}", transcript_path.display(), std::process::id());
+    let tmp_path = format!(
+        "{}.cw_tmp_{}",
+        transcript_path.display(),
+        std::process::id()
+    );
     fs::write(&tmp_path, &out_content)?;
     fs::rename(&tmp_path, &transcript_path)?;
 
@@ -1326,9 +1352,7 @@ pub fn spawn_transcript_watcher(store: CwStore, _default_workspace: Option<Strin
                 && let Ok(entries) = fs::read_dir(&agy_brain_dir)
             {
                 for entry in entries.flatten() {
-                    let transcript = entry
-                        .path()
-                        .join(".system_generated/logs/transcript.jsonl");
+                    let transcript = entry.path().join(".system_generated/logs/transcript.jsonl");
                     if transcript.exists()
                         && let Ok(meta) = fs::metadata(&transcript)
                         && let Ok(mtime) = meta.modified()
@@ -1572,7 +1596,8 @@ pub fn import_hermes_state_db(
                         }));
                     }
                     if !tool_calls_str.trim().is_empty()
-                        && let Ok(Value::Array(tcs)) = serde_json::from_str::<Value>(&tool_calls_str)
+                        && let Ok(Value::Array(tcs)) =
+                            serde_json::from_str::<Value>(&tool_calls_str)
                     {
                         for (tc_i, tc) in tcs.iter().enumerate() {
                             let cid = tc
@@ -1660,7 +1685,9 @@ pub fn import_hermes_state_db(
         let system_text = if !sys_prompt.trim().is_empty() {
             sys_prompt
         } else {
-            format!("Hermes Agent ({source} channel)\n<RULE[SOUL.md]>\nHermes autonomous multi-channel agent.\n</RULE[SOUL.md]>")
+            format!(
+                "Hermes Agent ({source} channel)\n<RULE[SOUL.md]>\nHermes autonomous multi-channel agent.\n</RULE[SOUL.md]>"
+            )
         };
 
         let payload = json!({
@@ -1797,7 +1824,8 @@ mod tests {
         let store = CwStore::open_in_memory().unwrap();
         let tmp_dir = std::env::temp_dir().join(format!("cw_test_omp_{}", std::process::id()));
         let _ = fs::create_dir_all(&tmp_dir);
-        let transcript = tmp_dir.join("2026-10-22T19-57-33-217Z_01a16530-b4a1-71cb-b159-96200fb07f14.jsonl");
+        let transcript =
+            tmp_dir.join("2026-10-22T19-57-33-217Z_01a16530-b4a1-71cb-b159-96200fb07f14.jsonl");
         let content = r#"{"type":"title","v":1,"title":"Determine Chrome Install Method","source":"auto"}
 {"type":"session","version":3,"id":"01a16530-b4a1-71cb-b159-96200fb07f14","cwd":"/home/gionag/Development/contextWatcher"}
 {"type":"message","message":{"role":"user","content":[{"type":"text","text":"How did I install chrome?"}]}}
@@ -1806,20 +1834,31 @@ mod tests {
 "#;
         fs::write(&transcript, content).unwrap();
 
-        let sess_id = import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
+        let sess_id =
+            import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
         assert!(sess_id.starts_with("omp_01a16530-b4a"));
         let sess = store.get_session(&sess_id).unwrap().unwrap();
         assert_eq!(sess.harness, HarnessKind::Omp);
-        assert_eq!(sess.title.as_deref(), Some("Determine Chrome Install Method"));
-        assert_eq!(sess.workspace_root.as_deref(), Some("/home/gionag/Development/contextWatcher"));
+        assert_eq!(
+            sess.title.as_deref(),
+            Some("Determine Chrome Install Method")
+        );
+        assert_eq!(
+            sess.workspace_root.as_deref(),
+            Some("/home/gionag/Development/contextWatcher")
+        );
 
         let turn = store.get_latest_turn(&sess_id).unwrap().unwrap();
         assert_eq!(turn.token_usage.input_tokens, 9084);
         assert_eq!(turn.token_usage.cached_tokens, 9000);
 
         // Verify tool call and tool result nodes are properly extracted
-        let has_tool_call = turn.nodes.iter().any(|n| matches!(&n.kind, NodeKind::ToolCall { call_id, .. } if call_id == "call_123"));
-        let has_tool_res = turn.nodes.iter().any(|n| matches!(&n.kind, NodeKind::ToolResult { call_id, .. } if call_id == "call_123"));
+        let has_tool_call = turn.nodes.iter().any(
+            |n| matches!(&n.kind, NodeKind::ToolCall { call_id, .. } if call_id == "call_123"),
+        );
+        let has_tool_res = turn.nodes.iter().any(
+            |n| matches!(&n.kind, NodeKind::ToolResult { call_id, .. } if call_id == "call_123"),
+        );
         assert!(has_tool_call, "ToolCall node should exist in IR");
         assert!(has_tool_res, "ToolResult node should exist in IR");
 
@@ -1853,16 +1892,23 @@ mod tests {
 "#;
         fs::write(&transcript, content).unwrap();
 
-        let sess_id = import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
+        let sess_id =
+            import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
         let turn = store.get_latest_turn(&sess_id).unwrap().unwrap();
         assert!(turn.health_score > 0);
         let mutations = store.list_mutations(&sess_id).unwrap();
-        assert!(!mutations.is_empty(), "Auto-heal should automatically generate committed mutations for duplicate file reads");
+        assert!(
+            !mutations.is_empty(),
+            "Auto-heal should automatically generate committed mutations for duplicate file reads"
+        );
         assert!(mutations.iter().any(|m| m.id.starts_with("ap_heal_")));
 
         // Check that the transcript file on disk was automatically synced
         let updated_content = fs::read_to_string(&transcript).unwrap();
-        assert!(updated_content.contains("[cw:shadow_deduped"), "Transcript on disk should contain shadow deduped content");
+        assert!(
+            updated_content.contains("[cw:shadow_deduped"),
+            "Transcript on disk should contain shadow deduped content"
+        );
 
         let _ = fs::remove_dir_all(&tmp_dir);
     }

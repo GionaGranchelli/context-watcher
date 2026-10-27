@@ -165,7 +165,10 @@ pub fn build_proxy_router(state: DaemonState) -> Router {
 /// Builds the Control & REST/WS API Router (`/api/v1/*` on `127.0.0.1:4400`).
 pub fn build_api_router(state: DaemonState) -> Router {
     Router::new()
-        .route("/api/v1/health", get(|| async { Json(json!({ "status": "ok" })) }))
+        .route(
+            "/api/v1/health",
+            get(|| async { Json(json!({ "status": "ok" })) }),
+        )
         .route("/api/v1/sessions", get(api_list_sessions))
         .route("/api/v1/sessions/:id", get(api_get_session))
         .route("/api/v1/sessions/:id/graph", get(api_get_session_graph))
@@ -198,7 +201,10 @@ pub fn build_api_router(state: DaemonState) -> Router {
         .route("/api/v1/swarms", get(api_list_swarms))
         .route("/api/v1/swarms/:group_id/graph", get(api_get_swarm_graph))
         .route("/api/v1/engine/slots", get(api_get_engine_slots))
-        .route("/api/v1/engine/slots/:slot_id/splice", post(api_splice_engine_slot))
+        .route(
+            "/api/v1/engine/slots/:slot_id/splice",
+            post(api_splice_engine_slot),
+        )
         .route("/api/v1/hud", get(api_get_active_hud))
         .route("/api/v1/sessions/:id/hud", get(api_get_session_hud))
         .route("/api/v1/sessions/:id/ecg", get(api_get_session_ecg))
@@ -306,8 +312,15 @@ async fn handle_proxy_request(
 
     // Parse JSON payload if POST/PUT
     let Ok(raw_payload) = serde_json::from_slice::<Value>(&body) else {
-        return forward_raw_passthrough(&state, method, &upstream_base, forward_path, headers, body)
-            .await;
+        return forward_raw_passthrough(
+            &state,
+            method,
+            &upstream_base,
+            forward_path,
+            headers,
+            body,
+        )
+        .await;
     };
 
     let provider = detect_provider(path, &raw_payload);
@@ -359,10 +372,7 @@ async fn handle_proxy_request(
 
     // 1. Apply active deterministic mutations from the Session's Mutation Ledger
     let mut mutated_payload = raw_payload.clone();
-    let active_mutations = state
-        .store
-        .list_mutations(&session_id)
-        .unwrap_or_default();
+    let active_mutations = state.store.list_mutations(&session_id).unwrap_or_default();
     let mut_report =
         apply_mutations_to_payload(&mut mutated_payload, provider, &active_mutations, seq_num);
 
@@ -441,11 +451,13 @@ async fn handle_proxy_request(
                 payload_preview: mutated_payload.clone(),
                 created_at: Utc::now(),
             };
-            state
-                .intercepts
-                .lock()
-                .await
-                .insert(intercept_id.clone(), ActiveIntercept { info: info.clone(), tx });
+            state.intercepts.lock().await.insert(
+                intercept_id.clone(),
+                ActiveIntercept {
+                    info: info.clone(),
+                    tx,
+                },
+            );
             state.broadcast(WsEvent::FirewallIntercepted { intercept: info });
 
             let timeout_secs = match paused_rule.action {
@@ -455,9 +467,7 @@ async fn handle_proxy_request(
                 _ => 120,
             };
 
-            if let Ok(Ok(res)) =
-                tokio::time::timeout(Duration::from_secs(timeout_secs), rx).await
-            {
+            if let Ok(Ok(res)) = tokio::time::timeout(Duration::from_secs(timeout_secs), rx).await {
                 if res.action == "abort" {
                     return (
                         StatusCode::FORBIDDEN,
@@ -642,25 +652,34 @@ async fn handle_proxy_request(
                                 Some(&mutated_payload_bg),
                                 None,
                             );
-                            let _ = state_bg.store.save_file_states(&session_id_bg, &file_states);
+                            let _ = state_bg
+                                .store
+                                .save_file_states(&session_id_bg, &file_states);
 
                             // CW-049: Record closed-loop mutation effectiveness telemetry
                             for rule in &active_mutations_bg {
-                                let _ = state_bg.store.record_mutation_effectiveness(&MutationEffectivenessRecord {
-                                    mutation_id: rule.id.clone(),
-                                    session_id: session_id_bg.clone(),
-                                    turn_id: turn.id.clone(),
-                                    tokens_saved: rule.estimated_saved_tokens.max(0) as u32,
-                                    kv_cache_hit_rate: turn.kv_cache_report.hit_ratio as f64,
-                                    ttft_ms: turn.latency_ms,
-                                    created_at: Utc::now(),
-                                });
+                                let _ = state_bg.store.record_mutation_effectiveness(
+                                    &MutationEffectivenessRecord {
+                                        mutation_id: rule.id.clone(),
+                                        session_id: session_id_bg.clone(),
+                                        turn_id: turn.id.clone(),
+                                        tokens_saved: rule.estimated_saved_tokens.max(0) as u32,
+                                        kv_cache_hit_rate: turn.kv_cache_report.hit_ratio as f64,
+                                        ttft_ms: turn.latency_ms,
+                                        created_at: Utc::now(),
+                                    },
+                                );
                             }
 
                             if mut_saved > 0 {
                                 let cur_saved = mut_saved as u64;
-                                let last_pulse = state_bg.store.get_latest_pulse_for_session(&session_id_bg).ok().flatten();
-                                let last_saved = last_pulse.map(|p| p.cumulative_tokens_saved).unwrap_or(0);
+                                let last_pulse = state_bg
+                                    .store
+                                    .get_latest_pulse_for_session(&session_id_bg)
+                                    .ok()
+                                    .flatten();
+                                let last_saved =
+                                    last_pulse.map(|p| p.cumulative_tokens_saved).unwrap_or(0);
                                 if should_emit_savings_pulse(cur_saved, last_saved, 200) {
                                     let pulse = generate_ambient_savings_pulse(
                                         &session_id_bg,
@@ -720,15 +739,17 @@ async fn handle_proxy_request(
 
             // CW-049: Record closed-loop mutation effectiveness telemetry
             for rule in &active_mutations {
-                let _ = state.store.record_mutation_effectiveness(&MutationEffectivenessRecord {
-                    mutation_id: rule.id.clone(),
-                    session_id: session_id.clone(),
-                    turn_id: turn.id.clone(),
-                    tokens_saved: rule.estimated_saved_tokens.max(0) as u32,
-                    kv_cache_hit_rate: turn.kv_cache_report.hit_ratio as f64,
-                    ttft_ms: turn.latency_ms,
-                    created_at: Utc::now(),
-                });
+                let _ = state
+                    .store
+                    .record_mutation_effectiveness(&MutationEffectivenessRecord {
+                        mutation_id: rule.id.clone(),
+                        session_id: session_id.clone(),
+                        turn_id: turn.id.clone(),
+                        tokens_saved: rule.estimated_saved_tokens.max(0) as u32,
+                        kv_cache_hit_rate: turn.kv_cache_report.hit_ratio as f64,
+                        ttft_ms: turn.latency_ms,
+                        created_at: Utc::now(),
+                    });
             }
 
             state.broadcast(WsEvent::TurnCompleted {
@@ -784,9 +805,10 @@ fn resolve_or_create_session_id(
     _payload: &Value,
 ) -> String {
     if let Ok(sessions) = store.list_sessions()
-        && let Some(latest) = sessions.iter().find(|s| s.provider == provider) {
-            return latest.id.clone();
-        }
+        && let Some(latest) = sessions.iter().find(|s| s.provider == provider)
+    {
+        return latest.id.clone();
+    }
     format!("sess_{}", &Uuid::new_v4().to_string()[..8])
 }
 
@@ -827,9 +849,10 @@ pub fn extract_cached_tokens_from_sse(chunk_text: &str) -> Option<u32> {
     for line in chunk_text.lines() {
         if let Some(data) = line.strip_prefix("data: ")
             && let Ok(val) = serde_json::from_str::<Value>(data)
-                && let Some(c) = extract_cached_tokens_from_json(&val) {
-                    return Some(c);
-                }
+            && let Some(c) = extract_cached_tokens_from_json(&val)
+        {
+            return Some(c);
+        }
     }
     None
 }
@@ -874,7 +897,11 @@ async fn api_get_session(
 ) -> impl IntoResponse {
     match state.store.get_session(&id) {
         Ok(Some(s)) => Json(json!(s)).into_response(),
-        _ => (StatusCode::NOT_FOUND, Json(json!({ "error": "Session not found" }))).into_response(),
+        _ => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Session not found" })),
+        )
+            .into_response(),
     }
 }
 
@@ -1000,7 +1027,11 @@ async fn api_get_turn_raw(
 ) -> impl IntoResponse {
     match state.store.get_turn_raw_payload(&turn_id) {
         Ok(Some(v)) => Json(v).into_response(),
-        _ => (StatusCode::NOT_FOUND, Json(json!({ "error": "Payload not found" }))).into_response(),
+        _ => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Payload not found" })),
+        )
+            .into_response(),
     }
 }
 
@@ -1185,7 +1216,10 @@ async fn api_get_all_effectiveness(State(state): State<DaemonState>) -> impl Int
 }
 
 async fn api_list_recent_pulses(State(state): State<DaemonState>) -> impl IntoResponse {
-    let pulses = state.store.list_recent_ambient_pulses(50).unwrap_or_default();
+    let pulses = state
+        .store
+        .list_recent_ambient_pulses(50)
+        .unwrap_or_default();
     Json(json!({ "pulses": pulses }))
 }
 
@@ -1216,19 +1250,17 @@ async fn api_list_swarms(
             let ws = sess
                 .workspace_root
                 .as_deref()
-                .map(|w| {
-                    w.trim_end_matches('/')
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or(w)
-                })
+                .map(|w| w.trim_end_matches('/').rsplit('/').next().unwrap_or(w))
                 .unwrap_or("default_workspace");
             if !ws.to_lowercase().contains(&proj.to_lowercase()) {
                 continue;
             }
         }
         if let Some(ref mod_filter) = params.model
-            && !sess.model.to_lowercase().contains(&mod_filter.to_lowercase())
+            && !sess
+                .model
+                .to_lowercase()
+                .contains(&mod_filter.to_lowercase())
         {
             continue;
         }
@@ -1238,10 +1270,8 @@ async fn api_list_swarms(
         }
     }
 
-    let items: Vec<(&Session, &ContextTurn)> = sessions_with_turns
-        .iter()
-        .map(|(s, t)| (*s, t))
-        .collect();
+    let items: Vec<(&Session, &ContextTurn)> =
+        sessions_with_turns.iter().map(|(s, t)| (*s, t)).collect();
 
     let mut swarms = analyze_swarm_prefix_sharing(&items);
     if let Some(min_m) = params.min_members {
@@ -1263,10 +1293,8 @@ async fn api_get_swarm_graph(
         }
     }
 
-    let items: Vec<(&Session, &ContextTurn)> = sessions_with_turns
-        .iter()
-        .map(|(s, t)| (*s, t))
-        .collect();
+    let items: Vec<(&Session, &ContextTurn)> =
+        sessions_with_turns.iter().map(|(s, t)| (*s, t)).collect();
 
     let swarms = analyze_swarm_prefix_sharing(&items);
     if let Some(swarm) = swarms.into_iter().find(|s| s.group_id == group_id) {
@@ -1516,13 +1544,8 @@ async fn api_get_session_hud(
         .find(|p| p.id == "max_token_diet")
         .map(|p| p.saved_tokens)
         .unwrap_or(0);
-    let hud = generate_context_hud_summary(
-        &s.id,
-        s.harness.as_str(),
-        &s.model,
-        turn.as_ref(),
-        cuttable,
-    );
+    let hud =
+        generate_context_hud_summary(&s.id, s.harness.as_str(), &s.model, turn.as_ref(), cuttable);
     Json(hud).into_response()
 }
 
@@ -1602,7 +1625,11 @@ async fn api_fork_replay(
 
     let mut_report =
         apply_mutations_to_payload(&mut payload, provider, &rules, source_turn.sequence_number);
-    let fork_turn_id = format!("fork_{}_{}", source_turn.sequence_number, &Uuid::new_v4().to_string()[..6]);
+    let fork_turn_id = format!(
+        "fork_{}_{}",
+        source_turn.sequence_number,
+        &Uuid::new_v4().to_string()[..6]
+    );
 
     match analyze_turn_from_payload(
         fork_turn_id,
@@ -1705,12 +1732,9 @@ async fn api_ingest_payload(
     ) {
         Ok((mut turn, file_states)) => {
             turn.token_usage.saved_by_mutations = mut_report.saved_tokens;
-            let _ = state.store.save_turn(
-                &turn,
-                Some(&req.payload),
-                Some(&mutated_payload),
-                None,
-            );
+            let _ = state
+                .store
+                .save_turn(&turn, Some(&req.payload), Some(&mutated_payload), None);
             let _ = state.store.save_file_states(&req.session_id, &file_states);
             state.broadcast(WsEvent::TurnCompleted {
                 session_id: req.session_id.clone(),
@@ -1782,9 +1806,10 @@ async fn handle_ws_client(mut socket: WebSocket, state: DaemonState) {
     let mut rx = state.ws_tx.subscribe();
     while let Ok(ev) = rx.recv().await {
         if let Ok(txt) = serde_json::to_string(&ev)
-            && socket.send(Message::Text(txt)).await.is_err() {
-                break;
-            }
+            && socket.send(Message::Text(txt)).await.is_err()
+        {
+            break;
+        }
     }
 }
 
@@ -1826,12 +1851,22 @@ fn recompute_latest_turn_with_mutations(state: &DaemonState, session_id: &str) {
         let session = state.store.get_session(session_id).ok().flatten();
         let workspace_root = session.as_ref().and_then(|s| s.workspace_root.clone());
         let file_states = state.store.get_file_states(session_id).unwrap_or_default();
-        let model = session.as_ref().map(|s| s.model.as_str()).unwrap_or("claude-sonnet-4");
-        let provider = session.as_ref().map(|s| s.provider).unwrap_or(ProviderKind::Anthropic);
+        let model = session
+            .as_ref()
+            .map(|s| s.model.as_str())
+            .unwrap_or("claude-sonnet-4");
+        let provider = session
+            .as_ref()
+            .map(|s| s.provider)
+            .unwrap_or(ProviderKind::Anthropic);
 
         let cur_saved = updated_turn.token_usage.saved_by_mutations as u64;
         if cur_saved > 0 {
-            let last_pulse = state.store.get_latest_pulse_for_session(session_id).ok().flatten();
+            let last_pulse = state
+                .store
+                .get_latest_pulse_for_session(session_id)
+                .ok()
+                .flatten();
             let last_saved = last_pulse.map(|p| p.cumulative_tokens_saved).unwrap_or(0);
             if should_emit_savings_pulse(cur_saved, last_saved, 100) {
                 let pulse = generate_ambient_savings_pulse(
@@ -1992,7 +2027,8 @@ mod tests {
         let mut acc = SseChunkAccumulator::default();
 
         // Chunk 1: Partial SSE event split right in the middle of json key
-        let chunk1 = b"event: message_delta\ndata: {\"type\": \"message_delta\", \"usage\": {\"cache_";
+        let chunk1 =
+            b"event: message_delta\ndata: {\"type\": \"message_delta\", \"usage\": {\"cache_";
         let res1 = acc.push_chunk(chunk1);
         assert_eq!(res1, None); // Not ready yet
 

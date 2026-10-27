@@ -7,7 +7,9 @@ use axum::{
 use clap::{Parser, Subcommand};
 use cw_core::{
     hud::{evaluate_attention_ecg, generate_context_hud_summary},
-    ir::{ContextTurn, HarnessKind, KvNodeStatus, MutationOp, MutationRule, MutationStatus, Session},
+    ir::{
+        ContextTurn, HarnessKind, KvNodeStatus, MutationOp, MutationRule, MutationStatus, Session,
+    },
     local_llm::{analyze_local_model_kv, calculate_cost_and_perf},
     optimizer::build_optimization_plans,
     radix::build_radix_graph,
@@ -22,9 +24,7 @@ use cw_harnesses::{
     spawn_transcript_watcher, sync_mutations_to_transcript_on_disk,
 };
 use cw_mcp::run_mcp_stdio_server;
-use cw_proxy::{
-    DaemonState, build_api_router, build_proxy_router, recompute_latest_turn_in_store,
-};
+use cw_proxy::{DaemonState, build_api_router, build_proxy_router, recompute_latest_turn_in_store};
 use cw_store::CwStore;
 use cw_tui::run_tui;
 use rust_embed::Embed;
@@ -396,13 +396,24 @@ async fn main() -> Result<()> {
             };
             let mutations = store.list_mutations(&sess_id)?;
 
-            println!("Session      : {} ({} • {})", sess.id, sess.harness.as_str(), sess.model);
-            println!("Turn         : #{} ({} nodes)", turn.sequence_number, turn.nodes.len());
+            println!(
+                "Session      : {} ({} • {})",
+                sess.id,
+                sess.harness.as_str(),
+                sess.model
+            );
+            println!(
+                "Turn         : #{} ({} nodes)",
+                turn.sequence_number,
+                turn.nodes.len()
+            );
             println!(
                 "Tokens       : {} / {} ({:.1}%) [Saved by overlays: {} tok]",
                 turn.token_usage.input_tokens,
                 turn.token_usage.context_limit,
-                (turn.token_usage.input_tokens as f64 / turn.token_usage.context_limit.max(1) as f64) * 100.0,
+                (turn.token_usage.input_tokens as f64
+                    / turn.token_usage.context_limit.max(1) as f64)
+                    * 100.0,
                 turn.token_usage.saved_by_mutations
             );
             println!(
@@ -412,7 +423,12 @@ async fn main() -> Result<()> {
                 turn.kv_cache_report.newly_cached_tokens,
                 turn.kv_cache_report.invalidated_tokens
             );
-            println!("Health Score : {}/100 ({} lints, {} active overlays)", turn.health_score, turn.lint_findings.len(), mutations.len());
+            println!(
+                "Health Score : {}/100 ({} lints, {} active overlays)",
+                turn.health_score,
+                turn.lint_findings.len(),
+                mutations.len()
+            );
             let cost = calculate_cost_and_perf(&turn, &sess.model, sess.provider);
             if cost.is_local_model {
                 let loc = analyze_local_model_kv(&turn, &sess.id, &sess.model, sess.provider);
@@ -448,7 +464,11 @@ async fn main() -> Result<()> {
             let graph = build_radix_graph(latest, &turns);
             println!("Context Radix Tree — Session {sess_id}:");
             for (idx, gnode) in graph.nodes.iter().enumerate() {
-                let branch = if idx + 1 == graph.nodes.len() { "└──" } else { "├──" };
+                let branch = if idx + 1 == graph.nodes.len() {
+                    "└──"
+                } else {
+                    "├──"
+                };
                 let kv = match gnode.kv_status {
                     KvNodeStatus::CachedHit => "🟢 HIT ",
                     KvNodeStatus::NewlyCached => "🟡 NEW ",
@@ -483,11 +503,10 @@ async fn main() -> Result<()> {
                     "  • [{:?}] {:?} — {} (wasted: {} tok)\n    {}",
                     f.severity, f.rule_id, f.title, f.wasted_tokens, f.message
                 );
-                if fix
-                    && let Some(op) = &f.suggested_mutation {
-                        save_cli_mutation(&store, &sess_id, op.clone(), false)?;
-                        println!("    ✓ Applied suggested fix: {:?}", op);
-                    }
+                if fix && let Some(op) = &f.suggested_mutation {
+                    save_cli_mutation(&store, &sess_id, op.clone(), false)?;
+                    println!("    ✓ Applied suggested fix: {:?}", op);
+                }
             }
         }
         Commands::Optimize {
@@ -630,17 +649,28 @@ async fn main() -> Result<()> {
             let plans = build_optimization_plans(&turn);
 
             if strategy.is_none() || dry_run {
-                println!("┌──────────────────────────────────────────────────────────────────────────────────────────┐");
-                println!("│ ⚡ contextWatcher Optimization & Cut Studio — Session: {sess_id:<33} │");
-                println!("│    Current Context: {} tok | Health Score: {}/100 | Active Lints: {}                     │",
-                    turn.token_usage.input_tokens, turn.health_score, turn.lint_findings.len());
-                println!("└──────────────────────────────────────────────────────────────────────────────────────────┘");
+                println!(
+                    "┌──────────────────────────────────────────────────────────────────────────────────────────┐"
+                );
+                println!(
+                    "│ ⚡ contextWatcher Optimization & Cut Studio — Session: {sess_id:<33} │"
+                );
+                println!(
+                    "│    Current Context: {} tok | Health Score: {}/100 | Active Lints: {}                     │",
+                    turn.token_usage.input_tokens,
+                    turn.health_score,
+                    turn.lint_findings.len()
+                );
+                println!(
+                    "└──────────────────────────────────────────────────────────────────────────────────────────┘"
+                );
 
                 for p in &plans {
                     if let Some(ref filter) = strategy
-                        && p.id != *filter {
-                            continue;
-                        }
+                        && p.id != *filter
+                    {
+                        continue;
+                    }
                     println!("\n{}  [id: {}]", p.name, p.id);
                     println!("  • Tagline         : {}", p.tagline);
                     println!("  • What & How      : {}", p.what_and_how);
@@ -678,68 +708,69 @@ async fn main() -> Result<()> {
                 }
 
                 if strategy.is_none() {
-                    println!("\n💡 Tip: Run `cw optimize -s <id>` (single session) or `cw optimize -s <id> --all` / `--project <name>` / `--agent <name>`.");
+                    println!(
+                        "\n💡 Tip: Run `cw optimize -s <id>` (single session) or `cw optimize -s <id> --all` / `--project <name>` / `--agent <name>`."
+                    );
                     return Ok(());
                 }
             }
 
-            if !dry_run
-                && let Some(strat_id) = strategy {
-                    let Some(plan) = plans.iter().find(|p| p.id == strat_id) else {
-                        anyhow::bail!(
-                            "Unknown strategy '{}'. Valid IDs: cache_safe_boost, clean_code_state, surgical_log_diet, deep_trajectory_fold, max_token_diet",
-                            strat_id
-                        );
-                    };
-                    for item in &plan.items {
-                        let rule = MutationRule {
-                            id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
-                            session_id: sess_id.clone(),
-                            op: item.mutation_op.clone(),
-                            status: if draft {
-                                MutationStatus::Draft
-                            } else {
-                                MutationStatus::Committed
-                            },
-                            estimated_saved_tokens: item.saved_tokens.max(0),
-                            estimated_kv_break_tokens: item.kv_break_tokens,
-                            created_at: chrono::Utc::now(),
-                        };
-                        store.save_mutation(&rule)?;
-                    }
-                    if !draft {
-                        let updated_turn = recompute_latest_turn_in_store(&store, &sess_id);
-                        if let Some(mut t) = updated_turn {
-                            if t.token_usage.saved_by_mutations == 0 && plan.saved_tokens > 0 {
-                                t.token_usage.saved_by_mutations = plan.saved_tokens;
-                            }
-                            if let Ok(Some(sess)) = store.get_session(&sess_id) {
-                                let pulse = cw_core::autopilot::generate_ambient_savings_pulse(
-                                    &sess_id,
-                                    &t,
-                                    &sess.model,
-                                    sess.provider,
-                                    t.token_usage.saved_by_mutations as u64,
-                                );
-                                let _ = store.record_ambient_pulse(&pulse);
-                                println!("\n{}", pulse.formatted_message);
-                            }
-                        }
-                        if sync_back {
-                            let _ = sync_mutations_to_transcript_on_disk(&store, &sess_id);
-                        }
-                    }
-                    println!(
-                        "\n✅ {} {} optimization operations from '{}' on session {} (Est. saved: {} tok, Health: {} -> {}/100).",
-                        if draft { "Staged" } else { "Committed" },
-                        plan.items.len(),
-                        plan.name,
-                        sess_id,
-                        plan.saved_tokens,
-                        plan.health_score_before,
-                        plan.health_score_after
+            if !dry_run && let Some(strat_id) = strategy {
+                let Some(plan) = plans.iter().find(|p| p.id == strat_id) else {
+                    anyhow::bail!(
+                        "Unknown strategy '{}'. Valid IDs: cache_safe_boost, clean_code_state, surgical_log_diet, deep_trajectory_fold, max_token_diet",
+                        strat_id
                     );
+                };
+                for item in &plan.items {
+                    let rule = MutationRule {
+                        id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
+                        session_id: sess_id.clone(),
+                        op: item.mutation_op.clone(),
+                        status: if draft {
+                            MutationStatus::Draft
+                        } else {
+                            MutationStatus::Committed
+                        },
+                        estimated_saved_tokens: item.saved_tokens.max(0),
+                        estimated_kv_break_tokens: item.kv_break_tokens,
+                        created_at: chrono::Utc::now(),
+                    };
+                    store.save_mutation(&rule)?;
                 }
+                if !draft {
+                    let updated_turn = recompute_latest_turn_in_store(&store, &sess_id);
+                    if let Some(mut t) = updated_turn {
+                        if t.token_usage.saved_by_mutations == 0 && plan.saved_tokens > 0 {
+                            t.token_usage.saved_by_mutations = plan.saved_tokens;
+                        }
+                        if let Ok(Some(sess)) = store.get_session(&sess_id) {
+                            let pulse = cw_core::autopilot::generate_ambient_savings_pulse(
+                                &sess_id,
+                                &t,
+                                &sess.model,
+                                sess.provider,
+                                t.token_usage.saved_by_mutations as u64,
+                            );
+                            let _ = store.record_ambient_pulse(&pulse);
+                            println!("\n{}", pulse.formatted_message);
+                        }
+                    }
+                    if sync_back {
+                        let _ = sync_mutations_to_transcript_on_disk(&store, &sess_id);
+                    }
+                }
+                println!(
+                    "\n✅ {} {} optimization operations from '{}' on session {} (Est. saved: {} tok, Health: {} -> {}/100).",
+                    if draft { "Staged" } else { "Committed" },
+                    plan.items.len(),
+                    plan.name,
+                    sess_id,
+                    plan.saved_tokens,
+                    plan.health_score_before,
+                    plan.health_score_after
+                );
+            }
         }
         Commands::Fold {
             start_turn,
@@ -792,7 +823,12 @@ async fn main() -> Result<()> {
             let Some(sess_id) = resolve_session(&store, session)? else {
                 anyhow::bail!("No active session found");
             };
-            save_cli_mutation(&store, &sess_id, MutationOp::ShadowDedupe { file_path: file }, false)?;
+            save_cli_mutation(
+                &store,
+                &sess_id,
+                MutationOp::ShadowDedupe { file_path: file },
+                false,
+            )?;
             println!("Applied ShadowDedupe mutation on session {sess_id}.");
         }
         Commands::Gate {
@@ -916,10 +952,19 @@ async fn main() -> Result<()> {
             let model_str = model.unwrap_or_else(|| sess.model.clone());
             let loc = analyze_local_model_kv(&turn, &sess_id, &model_str, sess.provider);
 
-            println!("┌──────────────────────────────────────────────────────────────────────────────────────────┐");
-            println!("│ 🖥️  contextWatcher Local LLM & KV-Cache Slot Studio — Session: {sess_id:<25} │");
-            println!("└──────────────────────────────────────────────────────────────────────────────────────────┘");
-            println!("  • Engine & Model           : {} ({})", loc.model_name, loc.engine_kind);
+            println!(
+                "┌──────────────────────────────────────────────────────────────────────────────────────────┐"
+            );
+            println!(
+                "│ 🖥️  contextWatcher Local LLM & KV-Cache Slot Studio — Session: {sess_id:<25} │"
+            );
+            println!(
+                "└──────────────────────────────────────────────────────────────────────────────────────────┘"
+            );
+            println!(
+                "  • Engine & Model           : {} ({})",
+                loc.model_name, loc.engine_kind
+            );
             println!(
                 "  • Context Window Usage     : {} / {} tok ({:.1}%) [Recommended num_ctx: {}]",
                 turn.token_usage.input_tokens,
@@ -990,7 +1035,11 @@ async fn main() -> Result<()> {
             }
             println!(
                 "Auto-Pilot Status: {}",
-                if cfg.enabled { "🟢 ENABLED" } else { "🔴 DISABLED" }
+                if cfg.enabled {
+                    "🟢 ENABLED"
+                } else {
+                    "🔴 DISABLED"
+                }
             );
             println!(
                 "  1. Zero-Break Tail Hygiene : {} (spill >{} tok tool outputs to /tmp/cw_logs/)",
@@ -1010,7 +1059,10 @@ async fn main() -> Result<()> {
             );
             println!(
                 "  5. Low-Health Self-Healer  : {} (auto-heal with '{}' when health < {}/100, sync_disk={})",
-                cfg.auto_heal_low_health, cfg.heal_strategy, cfg.min_health_score, cfg.auto_sync_to_disk
+                cfg.auto_heal_low_health,
+                cfg.heal_strategy,
+                cfg.min_health_score,
+                cfg.auto_sync_to_disk
             );
         }
         Commands::Gain { history } => {
@@ -1042,11 +1094,20 @@ async fn main() -> Result<()> {
                 let pulses = store.list_recent_ambient_pulses(limit)?;
                 if pulses.is_empty() {
                     println!("No ambient savings pulses recorded yet across sessions.");
-                    println!("💡 Tip: As sessions run or when you optimize, cw automatically records savings pulses.");
+                    println!(
+                        "💡 Tip: As sessions run or when you optimize, cw automatically records savings pulses."
+                    );
                 } else {
-                    println!("\n⚡ contextWatcher Ambient Savings Pulses (Recent {} events):\n", pulses.len());
+                    println!(
+                        "\n⚡ contextWatcher Ambient Savings Pulses (Recent {} events):\n",
+                        pulses.len()
+                    );
                     for p in pulses {
-                        println!("  • [{}] {}", p.timestamp.format("%Y-%m-%d %H:%M:%S"), p.formatted_message);
+                        println!(
+                            "  • [{}] {}",
+                            p.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                            p.formatted_message
+                        );
                     }
                 }
             }
@@ -1206,7 +1267,9 @@ fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<S
     // 1. Direct open file descriptor match: if caller process has an active session file open
     for open_file in &ctx.open_transcripts {
         for (sess_id, src_path) in &sources {
-            if (open_file == src_path || src_path.ends_with(open_file) || open_file.ends_with(src_path))
+            if (open_file == src_path
+                || src_path.ends_with(open_file)
+                || open_file.ends_with(src_path))
                 && let Some(sess) = store.get_session(sess_id).ok().flatten()
             {
                 if let Some(ref caller_h) = ctx.detected_harness
@@ -1217,7 +1280,9 @@ fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<S
                 return Ok(Some(sess_id.clone()));
             }
         }
-        if let Some(file_name) = std::path::Path::new(open_file).file_name().and_then(|n| n.to_str())
+        if let Some(file_name) = std::path::Path::new(open_file)
+            .file_name()
+            .and_then(|n| n.to_str())
             && let Some((_, uuid_part)) = file_name.split_once('_')
         {
             let slug = &uuid_part[..uuid_part.len().min(12)];
@@ -1286,12 +1351,7 @@ fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<S
     Ok(sessions.first().map(|s| s.id.clone()))
 }
 
-fn save_cli_mutation(
-    store: &CwStore,
-    session_id: &str,
-    op: MutationOp,
-    draft: bool,
-) -> Result<()> {
+fn save_cli_mutation(store: &CwStore, session_id: &str, op: MutationOp, draft: bool) -> Result<()> {
     let rule = MutationRule {
         id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
         session_id: session_id.to_string(),
@@ -1394,9 +1454,7 @@ fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
             b.health_sum += turn.health_score as u64;
         }
 
-        if show_history
-            && let Ok(muts) = store.list_mutations(&s.id)
-        {
+        if show_history && let Ok(muts) = store.list_mutations(&s.id) {
             for m in muts {
                 recent_mutations.push((s.id.clone(), s.harness.as_str().to_string(), m));
             }
@@ -1414,9 +1472,13 @@ fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
         0.0
     };
 
-    println!("┌──────────────────────────────────────────────────────────────────────────────────┐");
+    println!(
+        "┌──────────────────────────────────────────────────────────────────────────────────┐"
+    );
     println!("│ contextWatcher (`cw gain`) — Token, KV Cache & Cost Savings Analytics           │");
-    println!("├──────────────────────────────────────────────────────────────────────────────────┤");
+    println!(
+        "├──────────────────────────────────────────────────────────────────────────────────┤"
+    );
     println!(
         "│ Sessions Analyzed   : {:<10} │ Active Context Volume : {:>12} tok     │",
         total.sessions, total.input_tokens
@@ -1434,7 +1496,9 @@ fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
         "│ Active Saved ($)    : ${:<9.2} │ Cuttable Potential ($) : ${:>11.2}/turn   │",
         total.saved_usd, total.cuttable_usd
     );
-    println!("└──────────────────────────────────────────────────────────────────────────────────┘");
+    println!(
+        "└──────────────────────────────────────────────────────────────────────────────────┘"
+    );
 
     println!("\nBY AGENT HARNESS:");
     println!(
@@ -1486,7 +1550,10 @@ fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
     }
 
     if show_history && !recent_mutations.is_empty() {
-        println!("\nACTIVE MUTATION OVERLAY LEDGER ({} rules):", recent_mutations.len());
+        println!(
+            "\nACTIVE MUTATION OVERLAY LEDGER ({} rules):",
+            recent_mutations.len()
+        );
         for (sid, h, m) in recent_mutations.into_iter().take(20) {
             println!(
                 "  • [{}] {:<12} {:<24} {:?} ({:?})",
@@ -1511,7 +1578,9 @@ fn run_swarm_report(
         if output_json {
             println!("[]");
         } else {
-            println!("No sessions recorded yet. Start agent sessions through `cw proxy` or run `cw serve`.");
+            println!(
+                "No sessions recorded yet. Start agent sessions through `cw proxy` or run `cw serve`."
+            );
         }
         return Ok(());
     }
@@ -1535,10 +1604,8 @@ fn run_swarm_report(
         }
     }
 
-    let items: Vec<(&Session, &ContextTurn)> = sessions_with_turns
-        .iter()
-        .map(|(s, t)| (*s, t))
-        .collect();
+    let items: Vec<(&Session, &ContextTurn)> =
+        sessions_with_turns.iter().map(|(s, t)| (*s, t)).collect();
 
     let mut swarms = analyze_swarm_prefix_sharing(&items);
     if min_members > 1 {
@@ -1552,12 +1619,16 @@ fn run_swarm_report(
 
     if swarms.is_empty() {
         println!("\n🔍 No multi-agent swarm clusters found matching filters.");
-        println!("💡 Tip: Multi-agent swarms occur when 2 or more subagents operate on the same workspace project using the same model.");
+        println!(
+            "💡 Tip: Multi-agent swarms occur when 2 or more subagents operate on the same workspace project using the same model."
+        );
         return Ok(());
     }
 
     println!("\n🐝 contextWatcher Multi-Agent Swarm Prefix Multiplexing");
-    println!("════════════════════════════════════════════════════════════════════════════════════");
+    println!(
+        "════════════════════════════════════════════════════════════════════════════════════"
+    );
 
     let mut total_saved_tokens: u64 = 0;
     let mut total_vram_saved_mb: f32 = 0.0;
@@ -1568,10 +1639,7 @@ fn run_swarm_report(
         total_vram_saved_mb += swarm.vram_fp16_mb_saved;
         total_members += swarm.member_count;
 
-        println!(
-            "Cluster: {} | Model: {}",
-            swarm.project_name, swarm.model
-        );
+        println!("Cluster: {} | Model: {}", swarm.project_name, swarm.model);
         println!(
             "  Shared Prefix Trunk: {} tokens (System: {} tok • MCP/Tools: {} tok)",
             swarm.shared_prefix_tokens, swarm.shared_system_tokens, swarm.shared_tool_tokens
@@ -1595,7 +1663,9 @@ fn run_swarm_report(
                 m.session_id, m.harness, m.total_tokens, m.shared_ratio, m.unique_tokens
             );
         }
-        println!("────────────────────────────────────────────────────────────────────────────────");
+        println!(
+            "────────────────────────────────────────────────────────────────────────────────"
+        );
     }
 
     println!(
@@ -1605,7 +1675,9 @@ fn run_swarm_report(
         total_saved_tokens,
         total_vram_saved_mb
     );
-    println!("💡 With Swarm Radix routing, local inference engines (llama.cpp/vLLM) only keep 1 copy of the shared prefix trunk in VRAM!\n");
+    println!(
+        "💡 With Swarm Radix routing, local inference engines (llama.cpp/vLLM) only keep 1 copy of the shared prefix trunk in VRAM!\n"
+    );
 
     Ok(())
 }
@@ -1768,7 +1840,9 @@ async fn run_slot_bridge_report(
     }
 
     println!("\n🧩 contextWatcher Engine-Level PagedAttention & Slot Bridge (Horizon 3)");
-    println!("════════════════════════════════════════════════════════════════════════════════════");
+    println!(
+        "════════════════════════════════════════════════════════════════════════════════════"
+    );
     println!(
         "Upstream Engine : {} ({})",
         upstream_url,
@@ -1875,7 +1949,9 @@ async fn run_slot_bridge_report(
         }
     }
 
-    println!("\n💡 Tip: When pruning intermediate nodes, cw splices physical PagedAttention blocks without invalidating the cached prefix!\n");
+    println!(
+        "\n💡 Tip: When pruning intermediate nodes, cw splices physical PagedAttention blocks without invalidating the cached prefix!\n"
+    );
     Ok(())
 }
 
@@ -1918,13 +1994,8 @@ fn run_hud_report(
         .map(|s| s.model.as_str())
         .unwrap_or("model");
 
-    let summary = generate_context_hud_summary(
-        &sid,
-        harness_str,
-        model_str,
-        latest_turn.as_ref(),
-        cuttable,
-    );
+    let summary =
+        generate_context_hud_summary(&sid, harness_str, model_str, latest_turn.as_ref(), cuttable);
 
     let ecg = latest_turn.as_ref().map(evaluate_attention_ecg);
 
@@ -1939,7 +2010,9 @@ fn run_hud_report(
 
     if show_ecg {
         println!("\n💓 contextWatcher Positional Attention ECG (Lost-in-the-Middle Salience)");
-        println!("════════════════════════════════════════════════════════════════════════════════════");
+        println!(
+            "════════════════════════════════════════════════════════════════════════════════════"
+        );
         println!(
             "Session       : {} ({} • {})",
             summary.session_id, summary.harness, summary.model
@@ -1958,14 +2031,20 @@ fn run_hud_report(
                 "Risk Nodes    : {} critical instruction(s) sinking in Lost-in-the-Middle trough",
                 e.critical_nodes_in_trough
             );
-            println!("────────────────────────────────────────────────────────────────────────────────");
+            println!(
+                "────────────────────────────────────────────────────────────────────────────────"
+            );
             println!(
                 "  {:<6} {:<24} {:>10} {:>12}  {:<14}  {:<8}",
                 "INDEX", "NODE KIND", "SPAN", "SALIENT %", "ZONE", "STATUS"
             );
             println!("  {}", "─".repeat(80));
             for (idx, n) in e.node_breakdown.iter().enumerate() {
-                let status_str = if n.at_risk { "⚠️ AT RISK" } else { "✅ Stable" };
+                let status_str = if n.at_risk {
+                    "⚠️ AT RISK"
+                } else {
+                    "✅ Stable"
+                };
                 let zone_str = match n.zone {
                     cw_core::hud::AttentionZone::Primacy => "Primacy (Top)",
                     cw_core::hud::AttentionZone::Trough => "Trough (Mid)",
@@ -2185,7 +2264,10 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
                 let _ = std::fs::create_dir_all(shared_agents_skills.join("cw"));
                 let _ = std::fs::create_dir_all(shared_agents_skills.join("context-watcher"));
                 let _ = std::fs::write(shared_agents_skills.join("cw/SKILL.md"), skill_cw_md);
-                let _ = std::fs::write(shared_agents_skills.join("context-watcher/SKILL.md"), skill_md);
+                let _ = std::fs::write(
+                    shared_agents_skills.join("context-watcher/SKILL.md"),
+                    skill_md,
+                );
             }
             if codex_cfg.exists()
                 && let Ok(existing) = std::fs::read_to_string(&codex_cfg)
@@ -2347,9 +2429,10 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
     );
 
     println!("\n✅ contextWatcher integration complete! Verify anytime with:");
-    println!("   cw gain              # Show token & dollar ($) savings across all agents & projects");
+    println!(
+        "   cw gain              # Show token & dollar ($) savings across all agents & projects"
+    );
     println!("   cw status            # Inspect latest active session health & KV cache hit ratio");
     println!("   cw optimize          # Run or preview the 5 compaction strategies");
     Ok(())
 }
-

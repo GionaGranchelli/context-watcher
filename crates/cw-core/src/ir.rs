@@ -512,8 +512,13 @@ pub enum FirewallTrigger {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum FirewallAction {
-    PauseForHumanApproval { timeout_secs: u32 },
-    AutoTruncateHeadTail { head_chars: usize, tail_chars: usize },
+    PauseForHumanApproval {
+        timeout_secs: u32,
+    },
+    AutoTruncateHeadTail {
+        head_chars: usize,
+        tail_chars: usize,
+    },
     AutoShadowDedupe,
 }
 

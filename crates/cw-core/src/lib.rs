@@ -373,19 +373,12 @@ mod tests {
         assert_eq!(local_analysis.engine_kind, "ollama");
         assert!(local_analysis.recommended_n_keep_tokens >= 256);
 
-        let cost = calculate_cost_and_perf(
-            &turn,
-            "qwen2.5-coder:32b",
-            ProviderKind::OpenAICompatible,
-        );
+        let cost =
+            calculate_cost_and_perf(&turn, "qwen2.5-coder:32b", ProviderKind::OpenAICompatible);
         assert!(cost.is_local_model);
 
-        let injected = inject_local_engine_kv_optimizations(
-            &mut payload,
-            "sess_local",
-            &turn.nodes,
-            "ollama",
-        );
+        let injected =
+            inject_local_engine_kv_optimizations(&mut payload, "sess_local", &turn.nodes, "ollama");
         assert!(!injected.is_empty());
         assert_eq!(payload["keep_alive"], "30m");
         assert!(payload["options"]["num_keep"].as_u64().unwrap() >= 256);
@@ -431,7 +424,9 @@ mod tests {
         };
         let rep1 = apply_mutations_to_payload(&mut payload, ProviderKind::Gemini, &[sort_rule], 1);
         assert!(!rep1.applied_rule_ids.is_empty());
-        let decls = payload["tools"][0]["function_declarations"].as_array().unwrap();
+        let decls = payload["tools"][0]["function_declarations"]
+            .as_array()
+            .unwrap();
         assert_eq!(decls[0]["name"], "a_tool");
         assert_eq!(decls[1]["name"], "mcp_github_create_issue");
         assert_eq!(decls[2]["name"], "z_tool");
@@ -452,7 +447,9 @@ mod tests {
         };
         let rep2 = apply_mutations_to_payload(&mut payload, ProviderKind::Gemini, &[gate_rule], 1);
         assert!(!rep2.applied_rule_ids.is_empty());
-        let decls_after = payload["tools"][0]["function_declarations"].as_array().unwrap();
+        let decls_after = payload["tools"][0]["function_declarations"]
+            .as_array()
+            .unwrap();
         assert_eq!(decls_after.len(), 1);
         assert_eq!(decls_after[0]["name"], "z_tool");
     }
@@ -481,7 +478,8 @@ mod tests {
             None,
             None,
             None,
-        ).unwrap();
+        )
+        .unwrap();
 
         turn.token_usage.input_tokens = 14488;
         turn.token_usage.saved_by_mutations = 12966;
@@ -498,7 +496,11 @@ mod tests {
 
         assert_eq!(pulse.tokens_saved_this_pulse, 12966);
         assert_eq!(pulse.session_id, "s1");
-        assert!(pulse.formatted_message.contains("⚡ [cw] We saved you 12966 tokens"));
+        assert!(
+            pulse
+                .formatted_message
+                .contains("⚡ [cw] We saved you 12966 tokens")
+        );
         assert!(pulse.formatted_message.contains("KV Cache 98.2% preserved"));
     }
 }

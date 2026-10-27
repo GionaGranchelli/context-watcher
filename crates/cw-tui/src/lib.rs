@@ -52,9 +52,10 @@ impl TuiApp {
     pub fn reload(&mut self, target_session_id: Option<&str>) {
         self.sessions = self.store.list_sessions().unwrap_or_default();
         if let Some(tid) = target_session_id
-            && let Some(pos) = self.sessions.iter().position(|s| s.id == tid) {
-                self.session_idx = pos;
-            }
+            && let Some(pos) = self.sessions.iter().position(|s| s.id == tid)
+        {
+            self.session_idx = pos;
+        }
         if self.session_idx >= self.sessions.len() {
             self.session_idx = 0;
         }
@@ -108,147 +109,155 @@ pub fn run_tui(store: CwStore, session_id: Option<String>) -> Result<()> {
         terminal.draw(|f| draw_ui(f, &mut app))?;
 
         if event::poll(Duration::from_millis(250))?
-            && let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('r') => app.reload(None),
+                KeyCode::Tab => {
+                    if !app.sessions.is_empty() {
+                        app.session_idx = (app.session_idx + 1) % app.sessions.len();
+                        app.node_state.select(Some(0));
+                        app.reload(None);
+                    }
                 }
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => break,
-                    KeyCode::Char('r') => app.reload(None),
-                    KeyCode::Tab => {
-                        if !app.sessions.is_empty() {
-                            app.session_idx = (app.session_idx + 1) % app.sessions.len();
-                            app.node_state.select(Some(0));
-                            app.reload(None);
-                        }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if let Some(turn) = &app.latest_turn
+                        && !turn.nodes.is_empty()
+                    {
+                        let i = app.node_state.selected().unwrap_or(0);
+                        app.node_state.select(Some((i + 1) % turn.nodes.len()));
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        if let Some(turn) = &app.latest_turn
-                            && !turn.nodes.is_empty() {
-                                let i = app.node_state.selected().unwrap_or(0);
-                                app.node_state.select(Some((i + 1) % turn.nodes.len()));
-                            }
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if let Some(turn) = &app.latest_turn
+                        && !turn.nodes.is_empty()
+                    {
+                        let i = app.node_state.selected().unwrap_or(0);
+                        let next = if i == 0 { turn.nodes.len() - 1 } else { i - 1 };
+                        app.node_state.select(Some(next));
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        if let Some(turn) = &app.latest_turn
-                            && !turn.nodes.is_empty() {
-                                let i = app.node_state.selected().unwrap_or(0);
-                                let next = if i == 0 { turn.nodes.len() - 1 } else { i - 1 };
-                                app.node_state.select(Some(next));
-                            }
+                }
+                KeyCode::Char('p') => {
+                    if let Some(turn) = &app.latest_turn
+                        && let Some(idx) = app.node_state.selected()
+                        && let Some(node) = turn.nodes.get(idx)
+                    {
+                        let op = MutationOp::PruneOrStub {
+                            target_fingerprint: Some(node.fingerprint.0.clone()),
+                            target_call_id: None,
+                            target_json_pointer: Some(node.raw_json_pointer.clone()),
+                            stub_text: format!(
+                                "[cw:pruned original_tokens={} label=\"{}\"]",
+                                node.token_span.count,
+                                node.kind.short_label()
+                            ),
+                        };
+                        let label = node.kind.short_label();
+                        app.apply_op(op, &format!("Pruned '{label}'"));
                     }
-                    KeyCode::Char('p') => {
-                        if let Some(turn) = &app.latest_turn
-                            && let Some(idx) = app.node_state.selected()
-                                && let Some(node) = turn.nodes.get(idx) {
-                                    let op = MutationOp::PruneOrStub {
-                                        target_fingerprint: Some(node.fingerprint.0.clone()),
-                                        target_call_id: None,
-                                        target_json_pointer: Some(node.raw_json_pointer.clone()),
-                                        stub_text: format!(
-                                            "[cw:pruned original_tokens={} label=\"{}\"]",
-                                            node.token_span.count,
-                                            node.kind.short_label()
-                                        ),
-                                    };
-                                    let label = node.kind.short_label();
-                                    app.apply_op(op, &format!("Pruned '{label}'"));
-                                }
-                    }
-                    KeyCode::Char('d') => {
+                }
+                KeyCode::Char('d') => {
+                    app.apply_op(
+                        MutationOp::ShadowDedupe { file_path: None },
+                        "Shadow-Deduplicated all stale & duplicate file reads",
+                    );
+                }
+                KeyCode::Char('f') => {
+                    if let Some(turn) = &app.latest_turn
+                        && let Some(idx) = app.node_state.selected()
+                        && let Some(node) = turn.nodes.get(idx)
+                    {
+                        let t = node.turn_seq;
                         app.apply_op(
-                            MutationOp::ShadowDedupe { file_path: None },
-                            "Shadow-Deduplicated all stale & duplicate file reads",
+                            MutationOp::FoldSubtree {
+                                start_turn: t,
+                                end_turn: t,
+                                summary_text: format!("Folded turn {t} via TUI"),
+                            },
+                            &format!("Folded turn {t}"),
                         );
                     }
-                    KeyCode::Char('f') => {
-                        if let Some(turn) = &app.latest_turn
-                            && let Some(idx) = app.node_state.selected()
-                                && let Some(node) = turn.nodes.get(idx) {
-                                    let t = node.turn_seq;
-                                    app.apply_op(
-                                        MutationOp::FoldSubtree {
-                                            start_turn: t,
-                                            end_turn: t,
-                                            summary_text: format!("Folded turn {t} via TUI"),
-                                        },
-                                        &format!("Folded turn {t}"),
-                                    );
-                                }
+                }
+                KeyCode::Char(' ') => {
+                    if let Some(turn) = &app.latest_turn
+                        && let Some(idx) = app.node_state.selected()
+                        && let Some(node) = turn.nodes.get(idx)
+                    {
+                        let label = node.kind.short_label();
+                        let snippet: String = node
+                            .kind
+                            .text_for_tokenization()
+                            .chars()
+                            .take(160)
+                            .collect();
+                        app.apply_op(
+                            MutationOp::PinContext {
+                                label: label.clone(),
+                                content: snippet,
+                                source_node_id: Some(node.id.clone()),
+                            },
+                            &format!("Pinned '{label}' to tail"),
+                        );
                     }
-                    KeyCode::Char(' ') => {
-                        if let Some(turn) = &app.latest_turn
-                            && let Some(idx) = app.node_state.selected()
-                                && let Some(node) = turn.nodes.get(idx) {
-                                    let label = node.kind.short_label();
-                                    let snippet: String = node
-                                        .kind
-                                        .text_for_tokenization()
-                                        .chars()
-                                        .take(160)
-                                        .collect();
-                                    app.apply_op(
-                                        MutationOp::PinContext {
-                                            label: label.clone(),
-                                            content: snippet,
-                                            source_node_id: Some(node.id.clone()),
-                                        },
-                                        &format!("Pinned '{label}' to tail"),
-                                    );
-                                }
-                    }
-                    KeyCode::Char('o') => {
-                        if !app.optimization_plans.is_empty() {
-                            app.strategy_idx = match app.strategy_idx {
-                                None => Some(0),
-                                Some(i) if i + 1 < app.optimization_plans.len() => Some(i + 1),
-                                Some(_) => None,
-                            };
-                            if let Some(i) = app.strategy_idx
-                                && let Some(plan) = app.optimization_plans.get(i) {
-                                    app.status_msg = format!(
-                                        "Optimization Studio [{}/{}]: {} — Press [Enter] to Apply ({} ops, -{} tok) or [o] for Next Strategy",
-                                        i + 1,
-                                        app.optimization_plans.len(),
-                                        plan.name,
-                                        plan.items.len(),
-                                        plan.saved_tokens
-                                    );
-                                } else {
-                                    app.status_msg = "Closed Optimization Studio. Press [o] to reopen or 1-5 to select a strategy.".to_string();
-                                }
-                        }
-                    }
-                    KeyCode::Char(c @ '1'..='5') => {
-                        let idx = (c as usize) - ('1' as usize);
-                        if idx < app.optimization_plans.len() {
-                            app.strategy_idx = Some(idx);
-                            let plan = &app.optimization_plans[idx];
+                }
+                KeyCode::Char('o') => {
+                    if !app.optimization_plans.is_empty() {
+                        app.strategy_idx = match app.strategy_idx {
+                            None => Some(0),
+                            Some(i) if i + 1 < app.optimization_plans.len() => Some(i + 1),
+                            Some(_) => None,
+                        };
+                        if let Some(i) = app.strategy_idx
+                            && let Some(plan) = app.optimization_plans.get(i)
+                        {
                             app.status_msg = format!(
-                                "Selected Strategy #{}: {} — Press [Enter] to Apply (-{} tok)",
-                                idx + 1,
+                                "Optimization Studio [{}/{}]: {} — Press [Enter] to Apply ({} ops, -{} tok) or [o] for Next Strategy",
+                                i + 1,
+                                app.optimization_plans.len(),
                                 plan.name,
+                                plan.items.len(),
                                 plan.saved_tokens
                             );
+                        } else {
+                            app.status_msg = "Closed Optimization Studio. Press [o] to reopen or 1-5 to select a strategy.".to_string();
                         }
                     }
-                    KeyCode::Enter | KeyCode::Char('a') => {
-                        if let Some(idx) = app.strategy_idx
-                            && let Some(plan) = app.optimization_plans.get(idx).cloned() {
-                                for item in &plan.items {
-                                    app.apply_op(item.mutation_op.clone(), &item.title);
-                                }
-                                app.status_msg = format!(
-                                    "⚡ Applied '{}' ({} operations, saved ~{} tokens)!",
-                                    plan.name,
-                                    plan.items.len(),
-                                    plan.saved_tokens
-                                );
-                            }
-                    }
-                    _ => {}
                 }
+                KeyCode::Char(c @ '1'..='5') => {
+                    let idx = (c as usize) - ('1' as usize);
+                    if idx < app.optimization_plans.len() {
+                        app.strategy_idx = Some(idx);
+                        let plan = &app.optimization_plans[idx];
+                        app.status_msg = format!(
+                            "Selected Strategy #{}: {} — Press [Enter] to Apply (-{} tok)",
+                            idx + 1,
+                            plan.name,
+                            plan.saved_tokens
+                        );
+                    }
+                }
+                KeyCode::Enter | KeyCode::Char('a') => {
+                    if let Some(idx) = app.strategy_idx
+                        && let Some(plan) = app.optimization_plans.get(idx).cloned()
+                    {
+                        for item in &plan.items {
+                            app.apply_op(item.mutation_op.clone(), &item.title);
+                        }
+                        app.status_msg = format!(
+                            "⚡ Applied '{}' ({} operations, saved ~{} tokens)!",
+                            plan.name,
+                            plan.items.len(),
+                            plan.saved_tokens
+                        );
+                    }
+                }
+                _ => {}
             }
+        }
     }
 
     disable_raw_mode()?;
@@ -295,7 +304,9 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
     let top_info = Paragraph::new(Line::from(vec![
         Span::styled(
             format!(" Tokens: {input_tok} "),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw("│"),
         Span::styled(
@@ -318,7 +329,11 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
     f.render_widget(top_info, header_chunks[0]);
 
     let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title(" KV Cache Hit Ratio "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" KV Cache Hit Ratio "),
+        )
         .gauge_style(Style::default().fg(Color::Green))
         .percent(((hit_ratio * 100.0) as u16).min(100));
     f.render_widget(gauge, header_chunks[1]);
@@ -387,7 +402,11 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
             ));
         }
         (
-            format!(" [2] ⚡ Optimization & Cut Studio ({}/{}) — Press [Enter] to Apply or [o]/[1-5] to Switch ", idx + 1, app.optimization_plans.len()),
+            format!(
+                " [2] ⚡ Optimization & Cut Studio ({}/{}) — Press [Enter] to Apply or [o]/[1-5] to Switch ",
+                idx + 1,
+                app.optimization_plans.len()
+            ),
             format!(
                 "{}\nKV Cache Badge: {}\n\n📖 WHAT & HOW WE DO IT:\n{}\n\n🎯 EXPECTED QUALITY IMPACT:\n{}\n\n📊 EXPECTED RESULTS (DRY-RUN):\n• Tokens: {} -> {} tok (-{} tok / -{:.1}%)\n• Health Score: {}/100 -> {}/100\n• KV Cache Rebuild: {} tok (Break-even: ~{} turns)\n────────────────────────────────────────────────────────\nCANDIDATE OPERATIONS ({}):\n{}",
                 plan.name,
@@ -413,7 +432,8 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
     } else if let Some(turn) = &app.latest_turn {
         if let Some(sel) = app.node_state.selected().and_then(|i| turn.nodes.get(i)) {
             (
-                " [2] Node Inspector & Payload (Press [o] or [1-5] for Optimization Studio) ".to_string(),
+                " [2] Node Inspector & Payload (Press [o] or [1-5] for Optimization Studio) "
+                    .to_string(),
                 format!(
                     "Node ID: {}  |  Fingerprint: {}\nJSON Pointer: {}\nRole: {:?}  |  Tokens: {} ({}..{})  |  Attention Salience: {:.0}%\nKV Status: {:?}\n────────────────────────────────────────────────────────\n{}",
                     sel.id,
@@ -435,7 +455,10 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
             )
         }
     } else {
-        (" [2] Node Inspector ".to_string(), "No turn loaded.".to_string())
+        (
+            " [2] Node Inspector ".to_string(),
+            "No turn loaded.".to_string(),
+        )
     };
 
     let inspector = Paragraph::new(inspector_text)
@@ -459,7 +482,9 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
                 lint_lines.push(Line::from(vec![
                     Span::styled(
                         format!("⚠ {:?}: ", fnd.rule_id),
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(format!("{} (wasted: {} tok)", fnd.title, fnd.wasted_tokens)),
                 ]));

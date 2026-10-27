@@ -5,16 +5,22 @@ use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum ProtocolViolation {
-    #[error("Anthropic invariant violation: roles must strictly alternate (found consecutive '{0}' at message index {1})")]
+    #[error(
+        "Anthropic invariant violation: roles must strictly alternate (found consecutive '{0}' at message index {1})"
+    )]
     ConsecutiveRoles(String, usize),
 
     #[error("Anthropic invariant violation: first message must have role 'user' (found '{0}')")]
     InvalidFirstMessageRole(String),
 
-    #[error("Tool call pairing violation: orphan tool_result with call_id '{call_id}' has no matching prior tool_use")]
+    #[error(
+        "Tool call pairing violation: orphan tool_result with call_id '{call_id}' has no matching prior tool_use"
+    )]
     OrphanToolResult { call_id: String },
 
-    #[error("Anthropic thinking invariant violation: thinking block at index {index} appears after text block")]
+    #[error(
+        "Anthropic thinking invariant violation: thinking block at index {index} appears after text block"
+    )]
     ThinkingBlockAfterText { index: usize },
 
     #[error("Payload structure violation: {0}")]
@@ -74,10 +80,7 @@ fn validate_anthropic_payload(payload: &Value) -> Result<(), ProtocolViolation> 
             let mut seen_text_block = false;
 
             for (c_idx, block) in content_arr.iter().enumerate() {
-                let block_type = block
-                    .get("type")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("");
+                let block_type = block.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
                 match block_type {
                     "thinking" => {
@@ -156,10 +159,7 @@ fn validate_gemini_payload(payload: &Value) -> Result<(), ProtocolViolation> {
 
     let mut prev_role: Option<&str> = None;
     for (idx, item) in contents.iter().enumerate() {
-        let role = item
-            .get("role")
-            .and_then(|r| r.as_str())
-            .unwrap_or("user");
+        let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
 
         if let Some(prev) = prev_role
             && prev == role

@@ -273,10 +273,7 @@ async fn execute_mcp_tool(
             post_mutation(client, base, &session_id, op).await
         }
         "cw_fold_turns" => {
-            let start_turn = args
-                .get("start_turn")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(1) as u32;
+            let start_turn = args.get("start_turn").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
             let end_turn = args
                 .get("end_turn")
                 .and_then(|v| v.as_u64())
@@ -478,9 +475,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(call_unknown["result"]["isError"], true);
-        assert!(call_unknown["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("Unknown tool"));
+        assert!(
+            call_unknown["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Unknown tool")
+        );
     }
 }

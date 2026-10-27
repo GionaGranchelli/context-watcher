@@ -71,9 +71,9 @@ pub fn apply_mutations_to_payload(
 
                     if (fp_match || call_match || ptr_match)
                         && replace_node_text_at_pointer(payload, &node.raw_json_pointer, stub_text)
-                        {
-                            applied = true;
-                        }
+                    {
+                        applied = true;
+                    }
                 }
             }
             MutationOp::FoldSubtree {
@@ -83,31 +83,30 @@ pub fn apply_mutations_to_payload(
             } => {
                 let mut first_folded = true;
                 for node in &before_nodes {
-                    if node.turn_seq >= *start_turn && node.turn_seq <= *end_turn
+                    if node.turn_seq >= *start_turn
+                        && node.turn_seq <= *end_turn
                         && matches!(
                             node.kind,
                             NodeKind::ToolResult { .. } | NodeKind::AssistantThinking { .. }
+                        )
+                    {
+                        let replacement = if first_folded {
+                            first_folded = false;
+                            format!(
+                                "[cw:folded_subtree turns={}..{}] {}",
+                                start_turn, end_turn, summary_text
+                            )
+                        } else {
+                            format!("[cw:folded_into_turn_{}..{}]", start_turn, end_turn)
+                        };
+                        if replace_node_text_at_pointer(
+                            payload,
+                            &node.raw_json_pointer,
+                            &replacement,
                         ) {
-                            let replacement = if first_folded {
-                                first_folded = false;
-                                format!(
-                                    "[cw:folded_subtree turns={}..{}] {}",
-                                    start_turn, end_turn, summary_text
-                                )
-                            } else {
-                                format!(
-                                    "[cw:folded_into_turn_{}..{}]",
-                                    start_turn, end_turn
-                                )
-                            };
-                            if replace_node_text_at_pointer(
-                                payload,
-                                &node.raw_json_pointer,
-                                &replacement,
-                            ) {
-                                applied = true;
-                            }
+                            applied = true;
                         }
+                    }
                 }
             }
             MutationOp::ShadowDedupe { file_path } => {
@@ -131,10 +130,9 @@ pub fn apply_mutations_to_payload(
                         NodeKind::ToolResult {
                             semantic_meta: Some(ToolSemanticMeta::FileRead { path, .. }),
                             ..
+                        } if file_path.as_ref().map(|fp| fp == path).unwrap_or(true) => {
+                            reads_by_path.entry(path.clone()).or_default().push(node);
                         }
-                            if file_path.as_ref().map(|fp| fp == path).unwrap_or(true) => {
-                                reads_by_path.entry(path.clone()).or_default().push(node);
-                            }
                         _ => {}
                     }
                 }
@@ -208,10 +206,7 @@ pub fn apply_mutations_to_payload(
 
 /// Estimates how many tokens a `MutationOp` will save and how many cached KV prefix tokens
 /// it would invalidate if committed immediately.
-pub fn estimate_mutation_impact(
-    op: &MutationOp,
-    nodes: &[ContextNode],
-) -> (i32, u32) {
+pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32, u32) {
     let total_cached: u32 = nodes
         .iter()
         .filter(|n| n.kv_status == crate::ir::KvNodeStatus::CachedHit)
@@ -255,14 +250,16 @@ pub fn estimate_mutation_impact(
             let mut target_tokens = 0u32;
             let mut earliest_start = total_cached;
             for node in nodes {
-                if node.turn_seq >= *start_turn && node.turn_seq <= *end_turn
+                if node.turn_seq >= *start_turn
+                    && node.turn_seq <= *end_turn
                     && matches!(
                         node.kind,
                         NodeKind::ToolResult { .. } | NodeKind::AssistantThinking { .. }
-                    ) {
-                        target_tokens += node.token_span.count;
-                        earliest_start = earliest_start.min(node.token_span.start);
-                    }
+                    )
+                {
+                    target_tokens += node.token_span.count;
+                    earliest_start = earliest_start.min(node.token_span.start);
+                }
             }
             let summary_tok = estimate_tokens(summary_text) as i32;
             let saved = (target_tokens as i32) - summary_tok;
@@ -287,10 +284,9 @@ pub fn estimate_mutation_impact(
                     NodeKind::ToolResult {
                         semantic_meta: Some(ToolSemanticMeta::FileRead { path, .. }),
                         ..
+                    } if file_path.as_ref().map(|fp| fp == path).unwrap_or(true) => {
+                        reads_by_path.entry(path.clone()).or_default().push(node);
                     }
-                        if file_path.as_ref().map(|fp| fp == path).unwrap_or(true) => {
-                            reads_by_path.entry(path.clone()).or_default().push(node);
-                        }
                     _ => {}
                 }
             }
@@ -371,10 +367,8 @@ pub fn evaluate_firewall(
                     if matches!(n.kind, NodeKind::ToolResult { .. })
                         && n.token_span.count > *max_tokens
                     {
-                        matching_pointers.push((
-                            n.raw_json_pointer.clone(),
-                            n.kind.text_for_tokenization(),
-                        ));
+                        matching_pointers
+                            .push((n.raw_json_pointer.clone(), n.kind.text_for_tokenization()));
                     }
                 }
                 !matching_pointers.is_empty()
@@ -418,8 +412,7 @@ pub fn evaluate_firewall(
                     if orig_text.len() > head_chars + tail_chars {
                         let head: String = orig_text.chars().take(*head_chars).collect();
                         let tail_vec: Vec<char> = orig_text.chars().collect();
-                        let tail: String = tail_vec
-                            [tail_vec.len().saturating_sub(*tail_chars)..]
+                        let tail: String = tail_vec[tail_vec.len().saturating_sub(*tail_chars)..]
                             .iter()
                             .collect();
                         let truncated = format!(
@@ -518,10 +511,7 @@ fn filter_tools_in_payload(
     let mut gemini_changed = false;
     for tool_group in tools.iter_mut() {
         for key in ["functionDeclarations", "function_declarations"] {
-            if let Some(decls) = tool_group
-                .get_mut(key)
-                .and_then(|v| v.as_array_mut())
-            {
+            if let Some(decls) = tool_group.get_mut(key).and_then(|v| v.as_array_mut()) {
                 let prev = decls.len();
                 decls.retain(|d| {
                     let name = d.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -596,10 +586,11 @@ fn sort_tools_in_payload(payload: &mut Value) -> bool {
 fn strip_dynamic_time_in_system(payload: &mut Value) -> bool {
     let mut changed = false;
     if let Some(Value::String(s)) = payload.get_mut("system")
-        && DYNAMIC_TIME_RE.is_match(s) {
-            *s = DYNAMIC_TIME_RE.replace_all(s, "").to_string();
-            changed = true;
-        }
+        && DYNAMIC_TIME_RE.is_match(s)
+    {
+        *s = DYNAMIC_TIME_RE.replace_all(s, "").to_string();
+        changed = true;
+    }
     changed
 }
 
@@ -612,27 +603,29 @@ fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)
 
     // Try Anthropic / OpenAI `messages` array tail
     if let Some(messages) = payload.get_mut("messages").and_then(|v| v.as_array_mut())
-        && let Some(last_msg) = messages.last_mut() {
-            match last_msg.get_mut("content") {
-                Some(Value::String(s)) => {
-                    s.push_str(&block);
-                    return;
-                }
-                Some(Value::Array(arr)) => {
-                    arr.push(json!({
-                        "type": "text",
-                        "text": block
-                    }));
-                    return;
-                }
-                _ => {}
+        && let Some(last_msg) = messages.last_mut()
+    {
+        match last_msg.get_mut("content") {
+            Some(Value::String(s)) => {
+                s.push_str(&block);
+                return;
             }
+            Some(Value::Array(arr)) => {
+                arr.push(json!({
+                    "type": "text",
+                    "text": block
+                }));
+                return;
+            }
+            _ => {}
         }
+    }
 
     // Try Gemini `contents` array tail
     if let Some(contents) = payload.get_mut("contents").and_then(|v| v.as_array_mut())
         && let Some(last_content) = contents.last_mut()
-            && let Some(parts) = last_content.get_mut("parts").and_then(|v| v.as_array_mut()) {
-                parts.push(json!({ "text": block }));
-            }
+        && let Some(parts) = last_content.get_mut("parts").and_then(|v| v.as_array_mut())
+    {
+        parts.push(json!({ "text": block }));
+    }
 }

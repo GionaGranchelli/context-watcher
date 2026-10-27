@@ -1,6 +1,4 @@
-use crate::ir::{
-    ContextTurn, KvNodeStatus, LintRuleId, MutationOp, NodeKind, ToolSemanticMeta,
-};
+use crate::ir::{ContextTurn, KvNodeStatus, LintRuleId, MutationOp, NodeKind, ToolSemanticMeta};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -139,7 +137,14 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                     call_id,
                     semantic_meta: Some(ToolSemanticMeta::FileRead { path, .. }),
                     ..
-                } => (Some(path.clone()), if call_id.is_empty() { None } else { Some(call_id.clone()) }),
+                } => (
+                    Some(path.clone()),
+                    if call_id.is_empty() {
+                        None
+                    } else {
+                        Some(call_id.clone())
+                    },
+                ),
                 _ => (None, None),
             };
             let after_tok = 14u32.min(tok);
@@ -242,7 +247,8 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         }
 
         // 4. Old Assistant Thinking blocks
-        if matches!(n.kind, NodeKind::AssistantThinking { .. }) && (n.turn_seq < max_turn || tok > 50)
+        if matches!(n.kind, NodeKind::AssistantThinking { .. })
+            && (n.turn_seq < max_turn || tok > 50)
         {
             let after_tok = 8u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
@@ -493,11 +499,7 @@ fn finalize_plan(
     } else {
         0.0
     };
-    let kv_break = items
-        .iter()
-        .map(|i| i.kv_break_tokens)
-        .max()
-        .unwrap_or(0);
+    let kv_break = items.iter().map(|i| i.kv_break_tokens).max().unwrap_or(0);
     let break_even_turns = if kv_break == 0 || saved_tokens == 0 {
         0
     } else {

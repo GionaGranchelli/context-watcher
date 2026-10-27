@@ -126,14 +126,16 @@ pub fn analyze_kv_cache(
                     total_prev_tokens.saturating_sub(matched_prefix_tokens)
                 ),
             },
-            NodeKind::McpToolSchema { tool_name, .. } => CacheInvalidationCause::ToolSchemaMutated {
-                node_id: div_node.id.clone(),
-                divergence_token: matched_prefix_tokens,
-                detail: format!(
-                    "Tool schema '{}' changed or reordered at token {}",
-                    tool_name, matched_prefix_tokens
-                ),
-            },
+            NodeKind::McpToolSchema { tool_name, .. } => {
+                CacheInvalidationCause::ToolSchemaMutated {
+                    node_id: div_node.id.clone(),
+                    divergence_token: matched_prefix_tokens,
+                    detail: format!(
+                        "Tool schema '{}' changed or reordered at token {}",
+                        tool_name, matched_prefix_tokens
+                    ),
+                }
+            }
             _ => CacheInvalidationCause::HistoryEditedOrCompacted {
                 node_id: div_node.id.clone(),
                 divergence_token: matched_prefix_tokens,
@@ -281,7 +283,11 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
         let g_id = node.id.clone();
         graph_nodes.push(RadixGraphNode {
             id: g_id.clone(),
-            label: format!("{} ({} tok)", node.kind.short_label(), node.token_span.count),
+            label: format!(
+                "{} ({} tok)",
+                node.kind.short_label(),
+                node.token_span.count
+            ),
             group: node.kind.kind_tag().to_string(),
             turn_seq: node.turn_seq,
             tokens: node.token_span.count,

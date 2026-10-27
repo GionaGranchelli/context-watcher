@@ -110,12 +110,8 @@ pub fn analyze_swarm_prefix_sharing(
         let mut shared_tokens = items[0].1.token_usage.input_tokens;
         for &(_s, turn) in items.iter().skip(1) {
             let order = prefix_serialization_order(&turn.nodes, first_provider);
-            let common = find_common_prefix_tokens(
-                &first_turn.nodes,
-                &first_order,
-                &turn.nodes,
-                &order,
-            );
+            let common =
+                find_common_prefix_tokens(&first_turn.nodes, &first_order, &turn.nodes, &order);
             shared_tokens = shared_tokens.min(common);
         }
 
@@ -178,7 +174,11 @@ pub fn analyze_swarm_prefix_sharing(
         };
 
         out_groups.push(SwarmPrefixGroup {
-            group_id: format!("swarm_{}_{}", project.to_lowercase(), &model.replace('/', "_")),
+            group_id: format!(
+                "swarm_{}_{}",
+                project.to_lowercase(),
+                &model.replace('/', "_")
+            ),
             project_name: project,
             model,
             shared_prefix_tokens: shared_tokens,
@@ -319,15 +319,44 @@ mod tests {
             ]
         });
 
-        let (turn1, _) = analyze_turn_from_payload("t1".into(), "agent_orchestrator".into(), None, 1, &p1, ProviderKind::OpenAI, None, None, None).unwrap();
-        let (turn2, _) = analyze_turn_from_payload("t2".into(), "agent_coder".into(), None, 1, &p2, ProviderKind::OpenAI, None, None, None).unwrap();
-        let (turn3, _) = analyze_turn_from_payload("t3".into(), "agent_tester".into(), None, 1, &p3, ProviderKind::OpenAI, None, None, None).unwrap();
+        let (turn1, _) = analyze_turn_from_payload(
+            "t1".into(),
+            "agent_orchestrator".into(),
+            None,
+            1,
+            &p1,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (turn2, _) = analyze_turn_from_payload(
+            "t2".into(),
+            "agent_coder".into(),
+            None,
+            1,
+            &p2,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (turn3, _) = analyze_turn_from_payload(
+            "t3".into(),
+            "agent_tester".into(),
+            None,
+            1,
+            &p3,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
 
-        let pairs = vec![
-            (&s1, &turn1),
-            (&s2, &turn2),
-            (&s3, &turn3),
-        ];
+        let pairs = vec![(&s1, &turn1), (&s2, &turn2), (&s3, &turn3)];
 
         let groups = analyze_swarm_prefix_sharing(&pairs);
         assert_eq!(groups.len(), 1);

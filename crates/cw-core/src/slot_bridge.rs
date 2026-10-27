@@ -103,7 +103,11 @@ pub fn calculate_block_map(
     prefix_locked_tokens: u32,
     block_size: u32,
 ) -> PagedAttentionBlockMap {
-    let bs = if block_size == 0 { DEFAULT_PAGED_ATTENTION_BLOCK_SIZE } else { block_size };
+    let bs = if block_size == 0 {
+        DEFAULT_PAGED_ATTENTION_BLOCK_SIZE
+    } else {
+        block_size
+    };
     let total_blocks = total_tokens.div_ceil(bs);
     let prefix_locked_blocks = prefix_locked_tokens.div_ceil(bs);
     let mutable_blocks = total_blocks.saturating_sub(prefix_locked_blocks);
@@ -134,7 +138,11 @@ pub fn calculate_block_map(
 /// Aligns an arbitrary token cut range `(start, end)` to enclosing PagedAttention block boundaries.
 /// Expands outward to the nearest block boundaries: `start` rounded down, `end` rounded up.
 pub fn align_to_block_boundary(range: (u32, u32), block_size: u32) -> (u32, u32) {
-    let bs = if block_size == 0 { DEFAULT_PAGED_ATTENTION_BLOCK_SIZE } else { block_size };
+    let bs = if block_size == 0 {
+        DEFAULT_PAGED_ATTENTION_BLOCK_SIZE
+    } else {
+        block_size
+    };
     let aligned_start = (range.0 / bs) * bs;
     let aligned_end = range.1.div_ceil(bs) * bs;
     (aligned_start, aligned_end)
@@ -148,7 +156,11 @@ pub fn plan_slot_splicing(
     prune_range: (u32, u32),
     block_size: u32,
 ) -> SlotSplicingPlan {
-    let bs = if block_size == 0 { DEFAULT_PAGED_ATTENTION_BLOCK_SIZE } else { block_size };
+    let bs = if block_size == 0 {
+        DEFAULT_PAGED_ATTENTION_BLOCK_SIZE
+    } else {
+        block_size
+    };
     let (mut start, end) = prune_range;
 
     // Guard against invalid or inverted ranges
@@ -304,7 +316,12 @@ mod tests {
         assert_eq!(plan.partial_boundary_slack_tokens, 0);
         assert_eq!(plan.estimated_vram_saved_mb, 120.0); // 480 * 0.25 MB
 
-        if let SlotSplicingAction::PhysicalPageUnmap { blocks_freed, tokens_freed, .. } = plan.action {
+        if let SlotSplicingAction::PhysicalPageUnmap {
+            blocks_freed,
+            tokens_freed,
+            ..
+        } = plan.action
+        {
             assert_eq!(blocks_freed, 30);
             assert_eq!(tokens_freed, 480);
         } else {
@@ -315,7 +332,11 @@ mod tests {
     #[test]
     fn test_slot_splicing_tail_truncation() {
         let plan = plan_slot_splicing(1, 2000, 256, (1500, 2000), 16);
-        if let SlotSplicingAction::TailTruncation { new_n_past, tokens_dropped } = plan.action {
+        if let SlotSplicingAction::TailTruncation {
+            new_n_past,
+            tokens_dropped,
+        } = plan.action
+        {
             assert_eq!(new_n_past, 1500);
             assert_eq!(tokens_dropped, 500);
         } else {

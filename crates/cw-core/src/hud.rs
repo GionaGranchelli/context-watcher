@@ -62,7 +62,10 @@ pub struct ContextHudSummary {
 
 /// Calculates the empirical U-shaped "Lost-in-the-Middle" attention score (0.0 to 100.0)
 /// based on the relative position `(start + end) / (2 * total_tokens)` in the prompt.
-pub fn calculate_attention_salience(mid_point_tokens: u32, total_tokens: u32) -> (f32, AttentionZone) {
+pub fn calculate_attention_salience(
+    mid_point_tokens: u32,
+    total_tokens: u32,
+) -> (f32, AttentionZone) {
     if total_tokens == 0 {
         return (100.0, AttentionZone::Primacy);
     }
@@ -154,7 +157,11 @@ pub fn generate_context_hud_summary(
     let (total_tokens, limit, kv_hit, saved_by_muts, health) = if let Some(t) = turn {
         (
             t.token_usage.input_tokens,
-            if t.token_usage.context_limit > 0 { t.token_usage.context_limit } else { 131_072 },
+            if t.token_usage.context_limit > 0 {
+                t.token_usage.context_limit
+            } else {
+                131_072
+            },
             t.kv_cache_report.hit_ratio * 100.0,
             t.token_usage.saved_by_mutations,
             t.health_score,
@@ -183,12 +190,20 @@ pub fn generate_context_hud_summary(
 
     let formatted = format!(
         "{} {} tok | {:.1}% KV | -{} tok diet | {}/100 Health",
-        indicator, tok_str, kv_hit, saved_by_muts + cuttable_bloat, health
+        indicator,
+        tok_str,
+        kv_hit,
+        saved_by_muts + cuttable_bloat,
+        health
     );
 
     let compact = format!(
         "{} {} [{:.0}% KV] (-{}t) H:{}",
-        indicator, tok_str, kv_hit, saved_by_muts + cuttable_bloat, health
+        indicator,
+        tok_str,
+        kv_hit,
+        saved_by_muts + cuttable_bloat,
+        health
     );
 
     ContextHudSummary {

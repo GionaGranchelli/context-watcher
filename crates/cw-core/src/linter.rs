@@ -27,8 +27,7 @@ pub fn analyze_context_health(
 
     // Track file reads and writes in chronological order
     // path -> Vec<FileReadEntry>
-    let mut file_reads: HashMap<String, Vec<FileReadEntry>> =
-        HashMap::new();
+    let mut file_reads: HashMap<String, Vec<FileReadEntry>> = HashMap::new();
     // path -> latest turn_seq where a write/edit occurred
     let mut latest_file_write_turn: HashMap<String, (u32, usize)> = HashMap::new();
     let mut pinned_paths: HashSet<String> = HashSet::new();
@@ -82,7 +81,8 @@ pub fn analyze_context_health(
 
     for (path, reads) in &file_reads {
         let write_info = latest_file_write_turn.get(path).copied();
-        let disk_modified_reason = check_file_modified_on_disk(path, workspace_root, reads.last(), nodes);
+        let disk_modified_reason =
+            check_file_modified_on_disk(path, workspace_root, reads.last(), nodes);
         let disk_modified = disk_modified_reason.is_some();
 
         // CW-L001: Stale File in Context
@@ -153,7 +153,10 @@ pub fn analyze_context_health(
             });
         }
 
-        let freshness = if pinned_paths.iter().any(|p| path.ends_with(p) || p.contains(path)) {
+        let freshness = if pinned_paths
+            .iter()
+            .any(|p| path.ends_with(p) || p.contains(path))
+        {
             FileContextFreshness::Pinned
         } else if stale_tokens > 0 {
             FileContextFreshness::Stale
@@ -298,11 +301,7 @@ pub fn analyze_context_health(
     if breakdown.mcp_and_native_tools > 8000 || mcp_tool_count > 25 {
         let unused_servers: Vec<String> = mcp_servers_seen
             .into_iter()
-            .filter(|srv| {
-                !called_tool_names
-                    .iter()
-                    .any(|called| called.contains(srv))
-            })
+            .filter(|srv| !called_tool_names.iter().any(|called| called.contains(srv)))
             .collect();
         findings.push(LintFinding {
             rule_id: LintRuleId::McpToolSchemaBloat,
@@ -331,38 +330,39 @@ pub fn analyze_context_health(
 
     // CW-L006: Unintended KV Cache Break
     if kv_report.invalidated_tokens > 0
-        && let Some(cause) = &kv_report.invalidation_cause {
-            let (node_id, detail) = match cause {
-                crate::ir::CacheInvalidationCause::DynamicSystemInjection {
-                    node_id, detail, ..
-                } => (Some(node_id.clone()), detail.clone()),
-                crate::ir::CacheInvalidationCause::ToolSchemaMutated {
-                    node_id, detail, ..
-                } => (Some(node_id.clone()), detail.clone()),
-                crate::ir::CacheInvalidationCause::HistoryEditedOrCompacted {
-                    node_id, detail, ..
-                } => (Some(node_id.clone()), detail.clone()),
-                crate::ir::CacheInvalidationCause::CacheTtlExpired { previous_tokens } => (
-                    None,
-                    format!("KV cache TTL expired for {previous_tokens} previous tokens"),
-                ),
-            };
-            findings.push(LintFinding {
-                rule_id: LintRuleId::UnintendedKvCacheBreak,
-                severity: LintSeverity::Critical,
-                title: format!(
-                    "KV Cache Prefix Invalidated ({} tok evicted)",
-                    kv_report.invalidated_tokens
-                ),
-                message: detail,
-                affected_node_ids: node_id.into_iter().collect(),
-                wasted_tokens: kv_report.invalidated_tokens,
-                suggested_mutation: Some(MutationOp::NormalizePrefix {
-                    sort_tools_deterministically: true,
-                    relocate_dynamic_system_metadata: true,
-                }),
-            });
-        }
+        && let Some(cause) = &kv_report.invalidation_cause
+    {
+        let (node_id, detail) = match cause {
+            crate::ir::CacheInvalidationCause::DynamicSystemInjection {
+                node_id, detail, ..
+            } => (Some(node_id.clone()), detail.clone()),
+            crate::ir::CacheInvalidationCause::ToolSchemaMutated {
+                node_id, detail, ..
+            } => (Some(node_id.clone()), detail.clone()),
+            crate::ir::CacheInvalidationCause::HistoryEditedOrCompacted {
+                node_id, detail, ..
+            } => (Some(node_id.clone()), detail.clone()),
+            crate::ir::CacheInvalidationCause::CacheTtlExpired { previous_tokens } => (
+                None,
+                format!("KV cache TTL expired for {previous_tokens} previous tokens"),
+            ),
+        };
+        findings.push(LintFinding {
+            rule_id: LintRuleId::UnintendedKvCacheBreak,
+            severity: LintSeverity::Critical,
+            title: format!(
+                "KV Cache Prefix Invalidated ({} tok evicted)",
+                kv_report.invalidated_tokens
+            ),
+            message: detail,
+            affected_node_ids: node_id.into_iter().collect(),
+            wasted_tokens: kv_report.invalidated_tokens,
+            suggested_mutation: Some(MutationOp::NormalizePrefix {
+                sort_tools_deterministically: true,
+                relocate_dynamic_system_metadata: true,
+            }),
+        });
+    }
 
     // CW-L007: Lost-in-the-Middle Attention Risk
     let total_tokens: u32 = nodes.iter().map(|n| n.token_span.count).sum();
@@ -420,14 +420,8 @@ pub fn analyze_context_health(
     }
 }
 
-fn emit_failed_loop_finding(
-    consecutive_errors: &[&ContextNode],
-    findings: &mut Vec<LintFinding>,
-) {
-    let start_turn = consecutive_errors
-        .first()
-        .map(|n| n.turn_seq)
-        .unwrap_or(1);
+fn emit_failed_loop_finding(consecutive_errors: &[&ContextNode], findings: &mut Vec<LintFinding>) {
+    let start_turn = consecutive_errors.first().map(|n| n.turn_seq).unwrap_or(1);
     let end_turn = consecutive_errors
         .last()
         .map(|n| n.turn_seq)
@@ -486,7 +480,11 @@ fn check_file_modified_on_disk(
         && let Ok(mtime) = meta.modified()
     {
         let mtime_dt: chrono::DateTime<chrono::Utc> = mtime.into();
-        if mtime_dt.signed_duration_since(read_dt.with_timezone(&chrono::Utc)).num_seconds() > 2 {
+        if mtime_dt
+            .signed_duration_since(read_dt.with_timezone(&chrono::Utc))
+            .num_seconds()
+            > 2
+        {
             // Confirm content actually differs before flagging
             let raw_node_text = node.kind.text_for_tokenization();
             if !disk_contains_read_snippet(&disk_content, &raw_node_text, read_range) {

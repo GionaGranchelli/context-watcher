@@ -417,10 +417,7 @@ impl CwStore {
 
     pub fn delete_mutation(&self, mutation_id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
-        let count = conn.execute(
-            "DELETE FROM mutations WHERE id = ?1",
-            params![mutation_id],
-        )?;
+        let count = conn.execute("DELETE FROM mutations WHERE id = ?1", params![mutation_id])?;
         Ok(count > 0)
     }
 
@@ -603,9 +600,8 @@ impl CwStore {
         limit: usize,
     ) -> Result<Vec<AmbientSavingsPulse>, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
-        let mut stmt = conn.prepare(
-            "SELECT pulse_json FROM ambient_pulses ORDER BY created_at DESC LIMIT ?1",
-        )?;
+        let mut stmt = conn
+            .prepare("SELECT pulse_json FROM ambient_pulses ORDER BY created_at DESC LIMIT ?1")?;
         let rows = stmt.query_map(params![limit as i64], |row| row.get::<_, String>(0))?;
         let mut out = Vec::new();
         for r in rows {
@@ -849,9 +845,7 @@ mod tests {
         )
         .unwrap();
 
-        store
-            .save_turn(&turn, Some(&payload), None, None)
-            .unwrap();
+        store.save_turn(&turn, Some(&payload), None, None).unwrap();
         store.save_file_states("sess_1", &file_states).unwrap();
 
         let loaded = store.get_latest_turn("sess_1").unwrap().unwrap();
@@ -891,7 +885,9 @@ mod tests {
         let rule = cw_core::ir::MutationRule {
             id: "mut_test_1".into(),
             session_id: "sess_ap".into(),
-            op: cw_core::ir::MutationOp::ShadowDedupe { file_path: Some("Cargo.toml".into()) },
+            op: cw_core::ir::MutationOp::ShadowDedupe {
+                file_path: Some("Cargo.toml".into()),
+            },
             status: cw_core::ir::MutationStatus::Committed,
             estimated_saved_tokens: 150,
             estimated_kv_break_tokens: 0,
@@ -920,7 +916,9 @@ mod tests {
         assert_eq!(records[0].ttft_ms, Some(250));
 
         // 4. Session source path persistence
-        store.set_session_source_path("sess_ap", "/tmp/transcript.jsonl", 1024).unwrap();
+        store
+            .set_session_source_path("sess_ap", "/tmp/transcript.jsonl", 1024)
+            .unwrap();
         let (src, len) = store.get_session_source_path("sess_ap").unwrap().unwrap();
         assert_eq!(src, "/tmp/transcript.jsonl");
         assert_eq!(len, 1024);
@@ -943,11 +941,18 @@ mod tests {
             timestamp: Utc::now(),
         };
         store.record_ambient_pulse(&pulse).unwrap();
-        let fetched_pulse = store.get_latest_pulse_for_session("sess_ap").unwrap().unwrap();
+        let fetched_pulse = store
+            .get_latest_pulse_for_session("sess_ap")
+            .unwrap()
+            .unwrap();
         assert_eq!(fetched_pulse.tokens_saved_this_pulse, 1500);
         assert_eq!(fetched_pulse.speedup_factor, 4.0);
         let pulses = store.list_recent_ambient_pulses(10).unwrap();
         assert_eq!(pulses.len(), 1);
-        assert!(pulses[0].formatted_message.contains("⚡ [cw] We saved you 1500 tokens"));
+        assert!(
+            pulses[0]
+                .formatted_message
+                .contains("⚡ [cw] We saved you 1500 tokens")
+        );
     }
 }

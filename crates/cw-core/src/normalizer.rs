@@ -28,15 +28,14 @@ pub fn detect_provider(path: &str, payload: &Value) -> ProviderKind {
     if path.contains("anthropic") || path.ends_with("/v1/messages") {
         return ProviderKind::Anthropic;
     }
-    if path.contains("gemini") || path.contains("generateContent") || payload.get("contents").is_some()
+    if path.contains("gemini")
+        || path.contains("generateContent")
+        || payload.get("contents").is_some()
     {
         return ProviderKind::Gemini;
     }
     if payload.get("system").is_some()
-        && payload
-            .get("messages")
-            .and_then(|m| m.as_array())
-            .is_some()
+        && payload.get("messages").and_then(|m| m.as_array()).is_some()
         && payload.get("max_tokens").is_some()
     {
         return ProviderKind::Anthropic;
@@ -164,15 +163,16 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let content = extract_tool_result_text(msg.get("content"));
-                let (tool_name, call_sem) = if let Some(n) = msg.get("toolName").and_then(|v| v.as_str()) {
-                    let sem = call_meta_by_id.get(&call_id).and_then(|(_, s)| s.clone());
-                    (n.to_string(), sem)
-                } else {
-                    call_meta_by_id
-                        .get(&call_id)
-                        .cloned()
-                        .unwrap_or_else(|| ("tool_result".to_string(), None))
-                };
+                let (tool_name, call_sem) =
+                    if let Some(n) = msg.get("toolName").and_then(|v| v.as_str()) {
+                        let sem = call_meta_by_id.get(&call_id).and_then(|(_, s)| s.clone());
+                        (n.to_string(), sem)
+                    } else {
+                        call_meta_by_id
+                            .get(&call_id)
+                            .cloned()
+                            .unwrap_or_else(|| ("tool_result".to_string(), None))
+                    };
                 let sem = enrich_result_semantic_meta(call_sem, &content);
                 push_node(
                     nodes,
@@ -293,17 +293,16 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false);
                                 let content = extract_tool_result_text(blk.get("content"));
-                                let (tool_name, call_sem) = blk
-                                    .get("tool_name")
-                                    .or_else(|| blk.get("toolName"))
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| (s.to_string(), None))
-                                    .unwrap_or_else(|| {
-                                        call_meta_by_id
-                                            .get(&call_id)
-                                            .cloned()
-                                            .unwrap_or_else(|| ("tool_result".to_string(), None))
-                                    });
+                                let (tool_name, call_sem) =
+                                    blk.get("tool_name")
+                                        .or_else(|| blk.get("toolName"))
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| (s.to_string(), None))
+                                        .unwrap_or_else(|| {
+                                            call_meta_by_id.get(&call_id).cloned().unwrap_or_else(
+                                                || ("tool_result".to_string(), None),
+                                            )
+                                        });
                                 let sem = enrich_result_semantic_meta(call_sem, &content);
                                 push_node(
                                     nodes,
@@ -390,14 +389,14 @@ fn parse_openai(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>) {
     }
 
     // 3. Messages or Input (`/messages` or `/input`)
-    let (arr_key, messages_opt) = if let Some(m) = payload.get("messages").and_then(|v| v.as_array())
-    {
-        ("messages", Some(m))
-    } else if let Some(inp) = payload.get("input").and_then(|v| v.as_array()) {
-        ("input", Some(inp))
-    } else {
-        ("messages", None)
-    };
+    let (arr_key, messages_opt) =
+        if let Some(m) = payload.get("messages").and_then(|v| v.as_array()) {
+            ("messages", Some(m))
+        } else if let Some(inp) = payload.get("input").and_then(|v| v.as_array()) {
+            ("input", Some(inp))
+        } else {
+            ("messages", None)
+        };
 
     let mut call_meta_by_id: HashMap<String, (String, Option<ToolSemanticMeta>)> = HashMap::new();
 
@@ -517,19 +516,20 @@ fn parse_openai(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>) {
 fn parse_gemini(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>) {
     // 1. System Instruction (`/systemInstruction`)
     if let Some(sys) = payload.get("systemInstruction")
-        && let Some(parts) = sys.get("parts").and_then(|v| v.as_array()) {
-            for (i, part) in parts.iter().enumerate() {
-                if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
-                    deconstruct_system_text(
-                        text,
-                        &format!("/systemInstruction/parts/{i}/text"),
-                        1,
-                        None,
-                        nodes,
-                    );
-                }
+        && let Some(parts) = sys.get("parts").and_then(|v| v.as_array())
+    {
+        for (i, part) in parts.iter().enumerate() {
+            if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                deconstruct_system_text(
+                    text,
+                    &format!("/systemInstruction/parts/{i}/text"),
+                    1,
+                    None,
+                    nodes,
+                );
             }
         }
+    }
 
     // 2. Tools (`/tools/0/functionDeclarations/i`)
     if let Some(tools) = payload.get("tools").and_then(|v| v.as_array()) {
@@ -805,9 +805,10 @@ fn extract_cache_control(val: &Value) -> Option<CacheControlBreakpoint> {
 
 fn split_mcp_tool_name(name: &str) -> (Option<String>, String) {
     if let Some(rest) = name.strip_prefix("mcp_")
-        && let Some((srv, tool)) = rest.split_once('_') {
-            return (Some(srv.to_string()), tool.to_string());
-        }
+        && let Some((srv, tool)) = rest.split_once('_')
+    {
+        return (Some(srv.to_string()), tool.to_string());
+    }
     if let Some((srv, tool)) = name.split_once("__") {
         return (Some(srv.to_string()), tool.to_string());
     }
@@ -854,46 +855,46 @@ pub fn infer_call_semantic_meta(tool_name: &str, args: &Value) -> Option<ToolSem
     if matches!(
         lower.as_str(),
         "read_file" | "read" | "view_file" | "cat" | "open_file"
-    )
-        && let Some(p) = path {
-            let start_line = args
-                .get("StartLine")
-                .or_else(|| args.get("start_line"))
-                .or_else(|| args.get("offset"))
-                .and_then(|v| v.as_u64())
-                .map(|n| n as u32);
-            let end_line = args
-                .get("EndLine")
-                .or_else(|| args.get("end_line"))
-                .or_else(|| args.get("limit"))
-                .and_then(|v| v.as_u64())
-                .map(|n| n as u32);
-            return Some(ToolSemanticMeta::FileRead {
-                path: p,
-                start_line,
-                end_line,
-                content_hash: String::new(),
-            });
-        }
+    ) && let Some(p) = path
+    {
+        let start_line = args
+            .get("StartLine")
+            .or_else(|| args.get("start_line"))
+            .or_else(|| args.get("offset"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32);
+        let end_line = args
+            .get("EndLine")
+            .or_else(|| args.get("end_line"))
+            .or_else(|| args.get("limit"))
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32);
+        return Some(ToolSemanticMeta::FileRead {
+            path: p,
+            start_line,
+            end_line,
+            content_hash: String::new(),
+        });
+    }
 
     if matches!(
         lower.as_str(),
         "edit_file" | "write_file" | "edit" | "write" | "replace_in_file" | "apply_patch"
-    )
-        && let Some(p) = path {
-            let content_str = args
-                .get("Content")
-                .or_else(|| args.get("Replacement"))
-                .or_else(|| args.get("content"))
-                .or_else(|| args.get("new_string"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let hash = blake3::hash(content_str.as_bytes()).to_hex()[..16].to_string();
-            return Some(ToolSemanticMeta::FileWrite {
-                path: p,
-                content_hash: hash,
-            });
-        }
+    ) && let Some(p) = path
+    {
+        let content_str = args
+            .get("Content")
+            .or_else(|| args.get("Replacement"))
+            .or_else(|| args.get("content"))
+            .or_else(|| args.get("new_string"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let hash = blake3::hash(content_str.as_bytes()).to_hex()[..16].to_string();
+        return Some(ToolSemanticMeta::FileWrite {
+            path: p,
+            content_hash: hash,
+        });
+    }
 
     if matches!(
         lower.as_str(),

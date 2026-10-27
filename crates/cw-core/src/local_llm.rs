@@ -53,7 +53,8 @@ pub struct LocalModelAnalysis {
 /// (`Ollama`, `llama.cpp`, `vLLM`, `SGLang`, `LM Studio`).
 pub fn detect_local_engine(model: &str, provider: ProviderKind) -> (bool, &'static str) {
     let m = model.to_lowercase();
-    if m.contains("ollama") || m.contains(':') && !m.starts_with("claude") && !m.starts_with("gpt") {
+    if m.contains("ollama") || m.contains(':') && !m.starts_with("claude") && !m.starts_with("gpt")
+    {
         return (true, "ollama");
     }
     if m.contains("gguf") || m.contains("llamacpp") || m.contains("llama.cpp") {
@@ -99,7 +100,14 @@ pub fn calculate_cost_and_perf(
 
     // Pricing per 1M tokens: (base_input_usd, cache_write_usd, cache_read_usd, output_usd, prefill_tok_per_sec)
     let (family, in_per_m, write_per_m, read_per_m, out_per_m, prefill_tps) = if is_local {
-        ("Local LLM (Zero API Cost • VRAM Bound)", 0.0, 0.0, 0.0, 0.0, 650u64)
+        (
+            "Local LLM (Zero API Cost • VRAM Bound)",
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            650u64,
+        )
     } else if m.contains("opus") {
         ("Claude Opus 4", 15.0, 18.75, 1.50, 75.0, 18_000)
     } else if m.contains("sonnet") || m.contains("claude") {
@@ -122,14 +130,11 @@ pub fn calculate_cost_and_perf(
     let saved_overlay_tok = turn.token_usage.saved_by_mutations as f64;
     let total_in_tok = turn.token_usage.input_tokens as f64;
 
-    let turn_cost_usd = ((hit_tok * read_per_m)
-        + (new_tok * write_per_m)
-        + (out_tok * out_per_m))
-        / 1_000_000.0;
+    let turn_cost_usd =
+        ((hit_tok * read_per_m) + (new_tok * write_per_m) + (out_tok * out_per_m)) / 1_000_000.0;
 
-    let unoptimized_cost_usd = (((total_in_tok + saved_overlay_tok) * in_per_m)
-        + (out_tok * out_per_m))
-        / 1_000_000.0;
+    let unoptimized_cost_usd =
+        (((total_in_tok + saved_overlay_tok) * in_per_m) + (out_tok * out_per_m)) / 1_000_000.0;
 
     let saved_by_kv_cache_usd = ((hit_tok * (in_per_m - read_per_m)) / 1_000_000.0).max(0.0);
     let saved_by_cw_overlays_usd = ((saved_overlay_tok * in_per_m) / 1_000_000.0).max(0.0);
@@ -140,8 +145,7 @@ pub fn calculate_cost_and_perf(
     let estimated_prefill_ms = uncached_ms + cached_ms;
     let saved_prefill_ms_by_kv =
         (((hit_tok as u64) * 1000) / prefill_tps.max(1)).saturating_sub(cached_ms);
-    let saved_prefill_ms_by_overlays =
-        ((saved_overlay_tok as u64) * 1000) / prefill_tps.max(1);
+    let saved_prefill_ms_by_overlays = ((saved_overlay_tok as u64) * 1000) / prefill_tps.max(1);
 
     CostAndPerfReport {
         model_family: family.to_string(),
@@ -184,24 +188,29 @@ pub fn analyze_local_model_kv(
     let recommended_n_keep_tokens = prefix_keep_tokens.max(256);
 
     // Local models typically default to 32,768 (or even 4,096 in stock Ollama!)
-    let num_ctx_limit = if turn.token_usage.context_limit > 0
-        && turn.token_usage.context_limit <= 131_072
-    {
-        turn.token_usage.context_limit
-    } else {
-        32_768
-    };
+    let num_ctx_limit =
+        if turn.token_usage.context_limit > 0 && turn.token_usage.context_limit <= 131_072 {
+            turn.token_usage.context_limit
+        } else {
+            32_768
+        };
 
     let input_tokens = turn.token_usage.input_tokens;
     let used_ctx_pct = ((input_tokens as f32 / num_ctx_limit.max(1) as f32) * 100.0).min(999.9);
-    let recommended_num_ctx = (input_tokens + 8192).next_power_of_two().clamp(16_384, 131_072);
+    let recommended_num_ctx = (input_tokens + 8192)
+        .next_power_of_two()
+        .clamp(16_384, 131_072);
 
     // Deterministic slot ID (0..3) for `llama.cpp` `id_slot` so concurrent agents don't overwrite each other's KV slot
     let slot_hash = blake3::hash(session_id.as_bytes());
     let recommended_slot_id = (slot_hash.as_bytes()[0] % 4) as u32;
 
     // PagedAttention block alignment (16 tokens per block in vLLM / llama.cpp, 64 in SGLang)
-    let block_size = if engine_kind == "sglang" { 64u32 } else { 16u32 };
+    let block_size = if engine_kind == "sglang" {
+        64u32
+    } else {
+        16u32
+    };
     let prefix_block_aligned_tokens = (recommended_n_keep_tokens / block_size) * block_size;
     let prefix_block_waste_tokens = recommended_n_keep_tokens % block_size;
 
@@ -217,14 +226,11 @@ pub fn analyze_local_model_kv(
     // Sliding window overflow risk: when `input_tokens > 80% of num_ctx_limit`, Ollama / llama.cpp
     // triggers a middle-context shift that invalidates all KV tokens after `n_keep`!
     let sliding_window_overflow_risk = input_tokens > (num_ctx_limit * 4 / 5);
-    let sliding_window_overflow_tokens =
-        input_tokens.saturating_sub(num_ctx_limit * 4 / 5);
+    let sliding_window_overflow_tokens = input_tokens.saturating_sub(num_ctx_limit * 4 / 5);
 
     // Local GPU prefill speed (~650 tok/s on consumer GPU / Apple M-series Max)
     let estimated_prefill_tps = 650u32;
-    let uncached_tokens = turn
-        .kv_cache_report
-        .newly_cached_tokens
+    let uncached_tokens = turn.kv_cache_report.newly_cached_tokens
         + turn.kv_cache_report.invalidated_tokens
         + turn.kv_cache_report.uncached_tail_tokens;
     let prefill_latency_ms = ((uncached_tokens as u64) * 1000) / estimated_prefill_tps as u64;
@@ -347,7 +353,9 @@ pub fn inject_local_engine_kv_optimizations(
         }
     }
     let n_keep = prefix_keep_tokens.max(256);
-    let recommended_ctx = (total_tokens + 8192).next_power_of_two().clamp(16_384, 131_072);
+    let recommended_ctx = (total_tokens + 8192)
+        .next_power_of_two()
+        .clamp(16_384, 131_072);
     let slot_id = (blake3::hash(session_id.as_bytes()).as_bytes()[0] % 4) as u32;
 
     match engine_hint {

@@ -141,12 +141,15 @@ install_from_source() {
     warn "Pre-built binary for ${TARGET} not found on GitHub Releases."
     if command -v cargo >/dev/null 2>&1; then
         info "Rust toolchain detected. Compiling contextWatcher from source via cargo..."
-        cargo install --git "https://github.com/${REPO}.git" cw-cli --root "${INSTALL_DIR}/.."
+        cargo install --git "https://github.com/${REPO}.git" cw-cli --root "$(dirname "${INSTALL_DIR}")"
         mkdir -p "$INSTALL_DIR"
-        if [ -f "${INSTALL_DIR}/../bin/cw" ] && [ "${INSTALL_DIR}" != "${INSTALL_DIR}/../bin" ]; then
-            cp "${INSTALL_DIR}/../bin/cw" "$INSTALL_DIR/$BIN_NAME"
+        # cargo --root "$(dirname "$INSTALL_DIR")" already places the binary at
+        # "$INSTALL_DIR/$BIN_NAME"; only copy when it landed elsewhere (custom CW_INSTALL_DIR).
+        if [ -x "${INSTALL_DIR}/../bin/$BIN_NAME" ] && [ ! -x "${INSTALL_DIR}/$BIN_NAME" ]; then
+            cp "${INSTALL_DIR}/../bin/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
             chmod +x "$INSTALL_DIR/$BIN_NAME"
         fi
+        [ -x "$INSTALL_DIR/$BIN_NAME" ] || error "cargo install finished but $INSTALL_DIR/$BIN_NAME is missing."
         return 0
     else
         error "Pre-built binary unavailable and cargo is not installed.\nTo install Rust, visit: https://rustup.rs or run:\n  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"

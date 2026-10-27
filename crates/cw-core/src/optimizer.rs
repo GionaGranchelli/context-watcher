@@ -134,12 +134,13 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
 
         // 2. Stale or duplicate file reads
         if stale_or_dup_node_ids.contains(&n.id) {
-            let path = match &n.kind {
+            let (path, call_id) = match &n.kind {
                 NodeKind::ToolResult {
+                    call_id,
                     semantic_meta: Some(ToolSemanticMeta::FileRead { path, .. }),
                     ..
-                } => Some(path.clone()),
-                _ => None,
+                } => (Some(path.clone()), if call_id.is_empty() { None } else { Some(call_id.clone()) }),
+                _ => (None, None),
             };
             let after_tok = 14u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
@@ -163,7 +164,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                 kv_break_tokens: kv_break,
                 mutation_op: MutationOp::PruneOrStub {
                     target_fingerprint: Some(n.fingerprint.0.clone()),
-                    target_call_id: None,
+                    target_call_id: call_id,
                     target_json_pointer: Some(n.raw_json_pointer.clone()),
                     stub_text: format!(
                         "[cw:shadow_deduped path=\"{}\" turn={} saved_tokens={}]",
@@ -233,7 +234,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                         ),
                     },
                 };
-                if n.kv_status != KvNodeStatus::CachedHit && tok > 200 {
+                if n.kv_status != KvNodeStatus::CachedHit && tok > 100 {
                     tail_bloat_items.push(item.clone());
                 }
                 log_and_thought_items.push(item);
@@ -374,20 +375,36 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
     }
 
     let strategy3_items = log_and_thought_items.clone();
-    let strategy4_items = fold_items;
+    let strategy4_items = fold_items.clone();
 
-    // Strategy 5: Max Token Diet (Stale files + Log & Thought diet + Unused MCP Tools + Pinning)
+    // Strategy 5: Max Token Diet (Deep Trajectory Fold + Stale files + Unused MCP Tools + Pinning)
     let mut seen_ids = HashSet::new();
     let mut strategy5_items = Vec::new();
-    for item in stale_file_items
-        .into_iter()
-        .chain(log_and_thought_items)
-        .chain(gate_tool_items)
-        .chain(pin_items)
-    {
-        let key = item.node_id.clone().unwrap_or_else(|| item.item_id.clone());
-        if seen_ids.insert(key) {
-            strategy5_items.push(item);
+    if !fold_items.is_empty() {
+        for item in &fold_items {
+            strategy5_items.push(item.clone());
+        }
+        for item in stale_file_items
+            .into_iter()
+            .chain(gate_tool_items)
+            .chain(pin_items)
+        {
+            let key = item.node_id.clone().unwrap_or_else(|| item.item_id.clone());
+            if seen_ids.insert(key) {
+                strategy5_items.push(item);
+            }
+        }
+    } else {
+        for item in stale_file_items
+            .into_iter()
+            .chain(log_and_thought_items)
+            .chain(gate_tool_items)
+            .chain(pin_items)
+        {
+            let key = item.node_id.clone().unwrap_or_else(|| item.item_id.clone());
+            if seen_ids.insert(key) {
+                strategy5_items.push(item);
+            }
         }
     }
 
@@ -514,10 +531,11 @@ fn finalize_plan(
 /// Maps short human/slash-command intensity levels (`min`, `mid`, `max`) to canonical strategy IDs.
 pub fn resolve_strategy_alias(input: &str) -> &str {
     match input.trim().to_ascii_lowercase().as_str() {
-        "min" | "lite" | "safe" => "clean_code_state",
+        "min" | "lite" | "safe" => "cache_safe_boost",
         "mid" | "medium" | "balanced" | "log" => "surgical_log_diet",
         "max" | "ultra" | "full" | "deep" => "max_token_diet",
         "boost" | "pin" => "cache_safe_boost",
+        "clean" | "dedupe" => "clean_code_state",
         "fold" => "deep_trajectory_fold",
         _ => input.trim(),
     }

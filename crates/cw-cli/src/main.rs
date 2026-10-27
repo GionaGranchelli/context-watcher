@@ -6,10 +6,16 @@ use axum::{
 };
 use clap::{Parser, Subcommand};
 use cw_core::{
-    ir::{HarnessKind, KvNodeStatus, MutationOp, MutationRule, MutationStatus},
+    hud::{evaluate_attention_ecg, generate_context_hud_summary},
+    ir::{ContextTurn, HarnessKind, KvNodeStatus, MutationOp, MutationRule, MutationStatus, Session},
     local_llm::{analyze_local_model_kv, calculate_cost_and_perf},
     optimizer::build_optimization_plans,
     radix::build_radix_graph,
+    slot_bridge::{
+        DEFAULT_PAGED_ATTENTION_BLOCK_SIZE, EngineSlotInfo, SlotSplicingAction, SlotSplicingPlan,
+        assign_deterministic_slot, plan_slot_splicing,
+    },
+    swarm::analyze_swarm_prefix_sharing,
 };
 use cw_harnesses::{
     import_agy_transcript, import_generic_jsonl_transcript, import_hermes_state_db,
@@ -191,12 +197,78 @@ enum Commands {
         enable: bool,
         #[arg(long)]
         disable: bool,
+        /// Set minimum health score threshold before self-healing triggers (default: 75)
+        #[arg(long)]
+        min_health: Option<u8>,
+        /// Set optimization strategy for self-healing (min, mid, max, clean_code_state, etc.)
+        #[arg(long)]
+        strategy: Option<String>,
+        /// Automatically sync self-healed mutations to disk transcript files (.jsonl + .bak)
+        #[arg(long)]
+        sync_to_disk: Option<bool>,
     },
     /// Show token, KV-cache, and dollar ($) savings analytics across all sessions, agents, and projects (like `rtk gain`)
     Gain {
         /// Show detailed mutation overlay history
         #[arg(long)]
         history: bool,
+    },
+    /// Display recent ambient savings notifications ("We saved you X tokens, Y% KV Cache, Z% TTFT speedup")
+    Pulse {
+        /// Target a specific session ID
+        #[arg(long)]
+        session: Option<String>,
+        /// Maximum number of pulses to display
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    /// Multi-Agent Swarm prefix sharing & VRAM multiplexing analysis (Horizon 2 / CW-060 / CW-061)
+    Swarm {
+        /// Filter by project workspace name
+        #[arg(long)]
+        project: Option<String>,
+        /// Filter by model name
+        #[arg(long)]
+        model: Option<String>,
+        /// Minimum member count in cluster (default: 2)
+        #[arg(long, default_value_t = 2)]
+        min_members: usize,
+        /// Output raw JSON structure
+        #[arg(long)]
+        json: bool,
+    },
+    /// Ambient Context HUD & Attention ECG statusline (Horizon 4 / CW-080)
+    Hud {
+        /// Target a specific session ID (defaults to most recent active session)
+        #[arg(long)]
+        session: Option<String>,
+        /// Emit ultra-compact glyph format for shell prompt (Starship / tmux / zellij)
+        #[arg(long)]
+        compact: bool,
+        /// Display the full positional attention ECG curve (Lost-in-the-Middle analysis)
+        #[arg(long)]
+        ecg: bool,
+        /// Output raw JSON structure
+        #[arg(long)]
+        json: bool,
+    },
+    /// Engine-Level PagedAttention & Slot Bridge (Horizon 3 / CW-070)
+    Slot {
+        /// Target a specific session ID
+        #[arg(long)]
+        session: Option<String>,
+        /// Upstream local engine URL (defaults to CW_LLAMACPP_UPSTREAM or http://127.0.0.1:8080)
+        #[arg(long)]
+        engine: Option<String>,
+        /// Target slot ID (0..N) to inspect or splice
+        #[arg(long)]
+        slot_id: Option<u32>,
+        /// Simulate or execute PagedAttention block unmapping for a token range (e.g. "500..1200")
+        #[arg(long)]
+        splice_range: Option<String>,
+        /// Output raw JSON structure
+        #[arg(long)]
+        json: bool,
     },
     /// One-command plugin, MCP, hook & systemd installer for Antigravity, Codex, Claude Code & Hermes (like `rtk init`)
     Init {
@@ -314,7 +386,10 @@ async fn main() -> Result<()> {
                 println!("No active sessions found in {}", db_path.display());
                 return Ok(());
             };
-            let sess = store.get_session(&sess_id)?.unwrap();
+            let Some(sess) = store.get_session(&sess_id)? else {
+                println!("Session {} not found in database.", sess_id);
+                return Ok(());
+            };
             let Some(turn) = store.get_latest_turn(&sess_id)? else {
                 println!("Session {} has no turns.", sess.id);
                 return Ok(());
@@ -633,7 +708,23 @@ async fn main() -> Result<()> {
                         store.save_mutation(&rule)?;
                     }
                     if !draft {
-                        let _ = recompute_latest_turn_in_store(&store, &sess_id);
+                        let updated_turn = recompute_latest_turn_in_store(&store, &sess_id);
+                        if let Some(mut t) = updated_turn {
+                            if t.token_usage.saved_by_mutations == 0 && plan.saved_tokens > 0 {
+                                t.token_usage.saved_by_mutations = plan.saved_tokens;
+                            }
+                            if let Ok(Some(sess)) = store.get_session(&sess_id) {
+                                let pulse = cw_core::autopilot::generate_ambient_savings_pulse(
+                                    &sess_id,
+                                    &t,
+                                    &sess.model,
+                                    sess.provider,
+                                    t.token_usage.saved_by_mutations as u64,
+                                );
+                                let _ = store.record_ambient_pulse(&pulse);
+                                println!("\n{}", pulse.formatted_message);
+                            }
+                        }
                         if sync_back {
                             let _ = sync_mutations_to_transcript_on_disk(&store, &sess_id);
                         }
@@ -752,7 +843,24 @@ async fn main() -> Result<()> {
             workspace,
         } => {
             let store = CwStore::open(&db_path)?;
-            let h = HarnessKind::from_str_lossy(&harness);
+            let h = if harness == "antigravity" {
+                let p_str = path.to_string_lossy();
+                if p_str.contains(".omp") {
+                    HarnessKind::Omp
+                } else if p_str.contains(".pi") {
+                    HarnessKind::Pi
+                } else if p_str.contains(".codex") {
+                    HarnessKind::Codex
+                } else if p_str.contains(".claude") {
+                    HarnessKind::ClaudeCode
+                } else if p_str.contains(".hermes") {
+                    HarnessKind::Hermes
+                } else {
+                    HarnessKind::Antigravity
+                }
+            } else {
+                HarnessKind::from_str_lossy(&harness)
+            };
             if h == HarnessKind::Hermes
                 || path.extension().and_then(|e| e.to_str()) == Some("db")
                 || path.extension().and_then(|e| e.to_str()) == Some("sqlite")
@@ -797,7 +905,10 @@ async fn main() -> Result<()> {
                 println!("No active sessions found.");
                 return Ok(());
             };
-            let sess = store.get_session(&sess_id)?.unwrap();
+            let Some(sess) = store.get_session(&sess_id)? else {
+                println!("Session {} not found in database.", sess_id);
+                return Ok(());
+            };
             let Some(turn) = store.get_latest_turn(&sess_id)? else {
                 println!("No turns recorded for session {sess_id}.");
                 return Ok(());
@@ -845,14 +956,36 @@ async fn main() -> Result<()> {
                 println!("    Fix / Config: {}", rec.cli_or_api_fix);
             }
         }
-        Commands::Autopilot { enable, disable } => {
+        Commands::Autopilot {
+            enable,
+            disable,
+            min_health,
+            strategy,
+            sync_to_disk,
+        } => {
             let store = CwStore::open(&db_path)?;
             let mut cfg = store.get_autopilot_config()?;
+            let mut changed = false;
             if enable {
                 cfg.enabled = true;
-                store.set_autopilot_config(&cfg)?;
+                changed = true;
             } else if disable {
                 cfg.enabled = false;
+                changed = true;
+            }
+            if let Some(h) = min_health {
+                cfg.min_health_score = h;
+                changed = true;
+            }
+            if let Some(s) = strategy {
+                cfg.heal_strategy = s;
+                changed = true;
+            }
+            if let Some(sd) = sync_to_disk {
+                cfg.auto_sync_to_disk = sd;
+                changed = true;
+            }
+            if changed {
                 store.set_autopilot_config(&cfg)?;
             }
             println!(
@@ -875,10 +1008,76 @@ async fn main() -> Result<()> {
                 "  4. Local Window Guard      : {} (protect local models >{} tok before num_ctx shift)",
                 cfg.local_model_window_guard, cfg.local_window_threshold_tokens
             );
+            println!(
+                "  5. Low-Health Self-Healer  : {} (auto-heal with '{}' when health < {}/100, sync_disk={})",
+                cfg.auto_heal_low_health, cfg.heal_strategy, cfg.min_health_score, cfg.auto_sync_to_disk
+            );
         }
         Commands::Gain { history } => {
             let store = CwStore::open(&db_path)?;
             run_gain_report(&store, history)?;
+        }
+        Commands::Pulse { session, limit } => {
+            let store = CwStore::open(&db_path)?;
+            if let Some(sess_target) = session {
+                let Some(sess_id) = resolve_session(&store, Some(sess_target))? else {
+                    println!("No matching session found.");
+                    return Ok(());
+                };
+                if let Some(pulse) = store.get_latest_pulse_for_session(&sess_id)? {
+                    println!("\nLatest Ambient Savings Pulse for {sess_id}:");
+                    println!("  {}", pulse.formatted_message);
+                    println!(
+                        "  Tokens Saved: {} ({:.1}%) | Speedup: {:.1}x | Est. Cost Saved: ${:.4} | Turn #{}",
+                        pulse.tokens_saved_this_pulse,
+                        pulse.saved_percentage,
+                        pulse.speedup_factor,
+                        pulse.estimated_cost_saved_usd,
+                        pulse.turn_seq
+                    );
+                } else {
+                    println!("No ambient savings pulses recorded yet for session {sess_id}.");
+                }
+            } else {
+                let pulses = store.list_recent_ambient_pulses(limit)?;
+                if pulses.is_empty() {
+                    println!("No ambient savings pulses recorded yet across sessions.");
+                    println!("💡 Tip: As sessions run or when you optimize, cw automatically records savings pulses.");
+                } else {
+                    println!("\n⚡ contextWatcher Ambient Savings Pulses (Recent {} events):\n", pulses.len());
+                    for p in pulses {
+                        println!("  • [{}] {}", p.timestamp.format("%Y-%m-%d %H:%M:%S"), p.formatted_message);
+                    }
+                }
+            }
+        }
+        Commands::Swarm {
+            project,
+            model,
+            min_members,
+            json,
+        } => {
+            let store = CwStore::open(&db_path)?;
+            run_swarm_report(&store, project, model, min_members, json)?;
+        }
+        Commands::Slot {
+            session,
+            engine,
+            slot_id,
+            splice_range,
+            json,
+        } => {
+            let store = CwStore::open(&db_path)?;
+            run_slot_bridge_report(&store, session, engine, slot_id, splice_range, json).await?;
+        }
+        Commands::Hud {
+            session,
+            compact,
+            ecg,
+            json,
+        } => {
+            let store = CwStore::open(&db_path)?;
+            run_hud_report(&store, session, compact, ecg, json)?;
         }
         Commands::Init { dry_run, service } => {
             run_init_installer(dry_run, service)?;
@@ -895,6 +1094,102 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+struct CallerContext {
+    detected_harness: Option<HarnessKind>,
+    open_transcripts: Vec<String>,
+}
+
+fn detect_caller_context() -> CallerContext {
+    let mut detected_harness = None;
+    let mut open_transcripts = Vec::new();
+
+    if let Ok(h) = std::env::var("CW_HARNESS") {
+        detected_harness = Some(HarnessKind::from_str_lossy(&h));
+    } else if let Ok(agent) = std::env::var("AI_AGENT")
+        && agent.contains("hermes")
+    {
+        detected_harness = Some(HarnessKind::Hermes);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let mut current_pid = std::process::id();
+        for _ in 0..6 {
+            let status_path = format!("/proc/{current_pid}/status");
+            let Ok(status_str) = std::fs::read_to_string(&status_path) else {
+                break;
+            };
+
+            let mut ppid: Option<u32> = None;
+            for line in status_str.lines() {
+                if let Some(rest) = line.strip_prefix("PPid:")
+                    && let Ok(p) = rest.trim().parse::<u32>()
+                {
+                    ppid = Some(p);
+                    break;
+                }
+            }
+
+            let Some(parent_pid) = ppid else { break };
+            if parent_pid == 0 || parent_pid == 1 {
+                break;
+            }
+
+            let comm = std::fs::read_to_string(format!("/proc/{parent_pid}/comm"))
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase();
+            let cmdline = std::fs::read_to_string(format!("/proc/{parent_pid}/cmdline"))
+                .unwrap_or_default()
+                .to_lowercase();
+
+            if detected_harness.is_none() {
+                if comm == "omp" || cmdline.contains("omp") {
+                    detected_harness = Some(HarnessKind::Omp);
+                } else if (comm == "pi" || cmdline.contains("pi-agent"))
+                    && !comm.contains("python")
+                    && !comm.contains("pip")
+                {
+                    detected_harness = Some(HarnessKind::Pi);
+                } else if comm.contains("codex") || cmdline.contains("codex") {
+                    detected_harness = Some(HarnessKind::Codex);
+                } else if comm.contains("claude") || cmdline.contains("claude") {
+                    detected_harness = Some(HarnessKind::ClaudeCode);
+                } else if comm.contains("hermes") || cmdline.contains("hermes") {
+                    detected_harness = Some(HarnessKind::Hermes);
+                } else if comm.contains("agy") || cmdline.contains("antigravity") {
+                    detected_harness = Some(HarnessKind::Antigravity);
+                }
+            }
+
+            if let Ok(entries) = std::fs::read_dir(format!("/proc/{parent_pid}/fd")) {
+                for entry in entries.flatten() {
+                    if let Ok(link) = std::fs::read_link(entry.path()) {
+                        let path_str = link.to_string_lossy();
+                        if (path_str.ends_with(".jsonl") || path_str.ends_with(".db"))
+                            && (path_str.contains("/.omp/")
+                                || path_str.contains("/.pi/")
+                                || path_str.contains("/.codex/")
+                                || path_str.contains("/.claude/")
+                                || path_str.contains("/.gemini/")
+                                || path_str.contains("/.hermes/"))
+                        {
+                            open_transcripts.push(path_str.to_string());
+                        }
+                    }
+                }
+            }
+
+            current_pid = parent_pid;
+        }
+    }
+
+    CallerContext {
+        detected_harness,
+        open_transcripts,
+    }
+}
+
 fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<String>> {
     if let Some(s) = explicit {
         return Ok(Some(s));
@@ -905,21 +1200,87 @@ fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<S
         return Ok(Some(env_sess.trim().to_string()));
     }
 
+    let ctx = detect_caller_context();
+    let sources = store.list_session_sources().unwrap_or_default();
+
+    // 1. Direct open file descriptor match: if caller process has an active session file open
+    for open_file in &ctx.open_transcripts {
+        for (sess_id, src_path) in &sources {
+            if (open_file == src_path || src_path.ends_with(open_file) || open_file.ends_with(src_path))
+                && let Some(sess) = store.get_session(sess_id).ok().flatten()
+            {
+                if let Some(ref caller_h) = ctx.detected_harness
+                    && &sess.harness != caller_h
+                {
+                    continue;
+                }
+                return Ok(Some(sess_id.clone()));
+            }
+        }
+        if let Some(file_name) = std::path::Path::new(open_file).file_name().and_then(|n| n.to_str())
+            && let Some((_, uuid_part)) = file_name.split_once('_')
+        {
+            let slug = &uuid_part[..uuid_part.len().min(12)];
+            for sess_id in sources.keys() {
+                if sess_id.contains(slug)
+                    && let Some(sess) = store.get_session(sess_id).ok().flatten()
+                {
+                    if let Some(ref caller_h) = ctx.detected_harness
+                        && &sess.harness != caller_h
+                    {
+                        continue;
+                    }
+                    return Ok(Some(sess_id.clone()));
+                }
+            }
+        }
+    }
+
     let sessions = store.list_sessions()?;
     if sessions.is_empty() {
         return Ok(None);
     }
 
-    // Prioritize sessions matching the current working directory / project workspace
-    if let Ok(cwd) = std::env::current_dir() {
-        let cwd_str = cwd.to_string_lossy();
-        for s in &sessions {
-            if let Some(ref ws) = s.workspace_root {
-                if ws == &cwd_str || cwd_str.starts_with(ws) || ws.starts_with(cwd_str.as_ref()) {
-                    return Ok(Some(s.id.clone()));
+    let cwd = std::env::current_dir().ok();
+    let cwd_str = cwd.as_ref().map(|c| c.to_string_lossy().to_string());
+
+    // 2. Score candidate sessions by harness match and workspace proximity
+    let mut scored: Vec<(&Session, i32)> = sessions
+        .iter()
+        .map(|s| {
+            let mut score = 0i32;
+
+            // Harness match
+            if let Some(ref caller_h) = ctx.detected_harness {
+                if &s.harness == caller_h {
+                    score += 500;
+                } else {
+                    score -= 500;
                 }
             }
-        }
+
+            // Workspace match
+            if let (Some(cwd_path), Some(ws)) = (&cwd_str, &s.workspace_root) {
+                if ws == cwd_path {
+                    score += 300; // Exact match
+                } else if cwd_path.starts_with(ws) {
+                    score += 150; // Inside project workspace
+                } else if ws.starts_with(cwd_path) {
+                    score += 30; // Project is a subfolder
+                }
+            }
+
+            (s, score)
+        })
+        .collect();
+
+    // Stable sort preserves recency order for equal scores
+    scored.sort_by_key(|b| std::cmp::Reverse(b.1));
+
+    if let Some((best_session, score)) = scored.first()
+        && *score > -300
+    {
+        return Ok(Some(best_session.id.clone()));
     }
 
     Ok(sessions.first().map(|s| s.id.clone()))
@@ -1138,6 +1499,500 @@ fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
     Ok(())
 }
 
+fn run_swarm_report(
+    store: &CwStore,
+    project_filter: Option<String>,
+    model_filter: Option<String>,
+    min_members: usize,
+    output_json: bool,
+) -> Result<()> {
+    let sessions = store.list_sessions()?;
+    if sessions.is_empty() {
+        if output_json {
+            println!("[]");
+        } else {
+            println!("No sessions recorded yet. Start agent sessions through `cw proxy` or run `cw serve`.");
+        }
+        return Ok(());
+    }
+
+    let mut sessions_with_turns = Vec::new();
+    for s in &sessions {
+        if let Some(ref proj) = project_filter {
+            let ws = project_label_from_workspace(s.workspace_root.as_deref());
+            if !ws.to_lowercase().contains(&proj.to_lowercase()) {
+                continue;
+            }
+        }
+        if let Some(ref mod_filter) = model_filter
+            && !s.model.to_lowercase().contains(&mod_filter.to_lowercase())
+        {
+            continue;
+        }
+
+        if let Some(turn) = store.get_latest_turn(&s.id)? {
+            sessions_with_turns.push((s, turn));
+        }
+    }
+
+    let items: Vec<(&Session, &ContextTurn)> = sessions_with_turns
+        .iter()
+        .map(|(s, t)| (*s, t))
+        .collect();
+
+    let mut swarms = analyze_swarm_prefix_sharing(&items);
+    if min_members > 1 {
+        swarms.retain(|s| s.member_count >= min_members);
+    }
+
+    if output_json {
+        println!("{}", serde_json::to_string_pretty(&swarms)?);
+        return Ok(());
+    }
+
+    if swarms.is_empty() {
+        println!("\n🔍 No multi-agent swarm clusters found matching filters.");
+        println!("💡 Tip: Multi-agent swarms occur when 2 or more subagents operate on the same workspace project using the same model.");
+        return Ok(());
+    }
+
+    println!("\n🐝 contextWatcher Multi-Agent Swarm Prefix Multiplexing");
+    println!("════════════════════════════════════════════════════════════════════════════════════");
+
+    let mut total_saved_tokens: u64 = 0;
+    let mut total_vram_saved_mb: f32 = 0.0;
+    let mut total_members: usize = 0;
+
+    for swarm in &swarms {
+        total_saved_tokens += swarm.tokens_saved;
+        total_vram_saved_mb += swarm.vram_fp16_mb_saved;
+        total_members += swarm.member_count;
+
+        println!(
+            "Cluster: {} | Model: {}",
+            swarm.project_name, swarm.model
+        );
+        println!(
+            "  Shared Prefix Trunk: {} tokens (System: {} tok • MCP/Tools: {} tok)",
+            swarm.shared_prefix_tokens, swarm.shared_system_tokens, swarm.shared_tool_tokens
+        );
+        println!(
+            "  Active Swarm Members: {} agents | Memory Reduction: {:.1}%",
+            swarm.member_count, swarm.memory_reduction_pct
+        );
+        println!(
+            "  Prefix Tokens Multiplexed: {} unshared -> {} shared (Saved: {} tokens)",
+            swarm.total_unshared_tokens, swarm.total_multiplexed_tokens, swarm.tokens_saved
+        );
+        println!(
+            "  Est. Local GPU VRAM Saved: {:.1} MB (FP16) / {:.1} MB (Q8)",
+            swarm.vram_fp16_mb_saved, swarm.vram_q8_mb_saved
+        );
+        println!("  Member Breakdown:");
+        for m in &swarm.members {
+            println!(
+                "    • [{}] {:<16} {:>6} tok ({:.1}% shared trunk, +{} unique tail tokens)",
+                m.session_id, m.harness, m.total_tokens, m.shared_ratio, m.unique_tokens
+            );
+        }
+        println!("────────────────────────────────────────────────────────────────────────────────");
+    }
+
+    println!(
+        "Summary: {} Swarm Cluster(s) | {} Active Agents | {} Shared Tokens Saved | ~{:.1} MB VRAM Preserved",
+        swarms.len(),
+        total_members,
+        total_saved_tokens,
+        total_vram_saved_mb
+    );
+    println!("💡 With Swarm Radix routing, local inference engines (llama.cpp/vLLM) only keep 1 copy of the shared prefix trunk in VRAM!\n");
+
+    Ok(())
+}
+
+async fn run_slot_bridge_report(
+    store: &CwStore,
+    session: Option<String>,
+    engine: Option<String>,
+    slot_id_filter: Option<u32>,
+    splice_range_str: Option<String>,
+    output_json: bool,
+) -> Result<()> {
+    let upstream_url = engine
+        .or_else(|| std::env::var("CW_LLAMACPP_UPSTREAM").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:8080".to_string());
+
+    let target_session_id = resolve_session(store, session)?;
+    let target_turn = match &target_session_id {
+        Some(sid) => store.get_latest_turn(sid)?,
+        None => None,
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(2500))
+        .build()
+        .unwrap_or_default();
+
+    let slots_url = format!("{}/slots", upstream_url.trim_end_matches('/'));
+    let mut req_b = client.get(&slots_url);
+    if let Ok(key) = std::env::var("CW_LLAMACPP_API_KEY") {
+        req_b = req_b.header("Authorization", format!("Bearer {key}"));
+    }
+
+    let mut upstream_slots = Vec::new();
+    let upstream_reachable = match req_b.send().await {
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(slots) = resp.json::<Vec<serde_json::Value>>().await {
+                upstream_slots = slots;
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    };
+
+    let sessions = store.list_sessions()?;
+    let mut slots_info = Vec::new();
+
+    if upstream_reachable && !upstream_slots.is_empty() {
+        let total_slots = upstream_slots.len() as u32;
+        for slot in upstream_slots {
+            let id = slot.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let n_ctx = slot.get("n_ctx").and_then(|v| v.as_u64()).unwrap_or(131072) as u32;
+            let is_processing = slot
+                .get("is_processing")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let n_prompt_tokens = slot
+                .get("n_prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+
+            let bound_session_id = sessions
+                .iter()
+                .find(|s| assign_deterministic_slot(&s.id, total_slots) == id)
+                .map(|s| s.id.clone());
+
+            let allocated_blocks = n_prompt_tokens.div_ceil(DEFAULT_PAGED_ATTENTION_BLOCK_SIZE);
+            let vram_usage_mb = (n_prompt_tokens as f32) * 0.25;
+
+            slots_info.push(EngineSlotInfo {
+                id,
+                n_ctx,
+                is_processing,
+                n_prompt_tokens,
+                bound_session_id,
+                allocated_blocks,
+                vram_usage_mb,
+            });
+        }
+    } else {
+        let total_slots = 4u32;
+        for id in 0..total_slots {
+            let bound_session = sessions
+                .iter()
+                .find(|s| assign_deterministic_slot(&s.id, total_slots) == id);
+            let (n_prompt_tokens, bound_id) = if let Some(s) = bound_session {
+                let tok = store
+                    .get_latest_turn(&s.id)
+                    .ok()
+                    .flatten()
+                    .map(|t| t.token_usage.input_tokens)
+                    .unwrap_or(0);
+                (tok, Some(s.id.clone()))
+            } else {
+                (0, None)
+            };
+
+            let allocated_blocks = n_prompt_tokens.div_ceil(DEFAULT_PAGED_ATTENTION_BLOCK_SIZE);
+            let vram_usage_mb = (n_prompt_tokens as f32) * 0.25;
+
+            slots_info.push(EngineSlotInfo {
+                id,
+                n_ctx: 131072,
+                is_processing: false,
+                n_prompt_tokens,
+                bound_session_id: bound_id,
+                allocated_blocks,
+                vram_usage_mb,
+            });
+        }
+    }
+
+    let mut splice_plan: Option<SlotSplicingPlan> = None;
+    if let Some(range_str) = splice_range_str {
+        let parts: Vec<&str> = range_str.split("..").collect();
+        if parts.len() == 2
+            && let (Ok(start), Ok(end)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+        {
+            let target_slot = slot_id_filter.unwrap_or(0);
+            let total_tok = target_turn
+                .as_ref()
+                .map(|t| t.token_usage.input_tokens)
+                .unwrap_or(end.max(2048));
+            let mut locked_prefix = 256u32;
+            if let Some(ref t) = target_turn {
+                for n in &t.nodes {
+                    match n.kind {
+                        cw_core::ir::NodeKind::SystemPrompt { .. }
+                        | cw_core::ir::NodeKind::InjectedRule { .. }
+                        | cw_core::ir::NodeKind::SkillCatalog { .. }
+                        | cw_core::ir::NodeKind::McpToolSchema { .. } => {
+                            locked_prefix += n.token_span.count;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            splice_plan = Some(plan_slot_splicing(
+                target_slot,
+                total_tok,
+                locked_prefix,
+                (start, end),
+                DEFAULT_PAGED_ATTENTION_BLOCK_SIZE,
+            ));
+        }
+    }
+
+    if output_json {
+        let out = serde_json::json!({
+            "upstream_url": upstream_url,
+            "upstream_reachable": upstream_reachable,
+            "block_size": DEFAULT_PAGED_ATTENTION_BLOCK_SIZE,
+            "slots": slots_info,
+            "splice_plan": splice_plan,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
+    println!("\n🧩 contextWatcher Engine-Level PagedAttention & Slot Bridge (Horizon 3)");
+    println!("════════════════════════════════════════════════════════════════════════════════════");
+    println!(
+        "Upstream Engine : {} ({})",
+        upstream_url,
+        if upstream_reachable {
+            "🟢 Online"
+        } else {
+            "⚪ Simulated/Offline"
+        }
+    );
+    println!(
+        "PagedAttention  : {} tokens / block (16-token page granularity)",
+        DEFAULT_PAGED_ATTENTION_BLOCK_SIZE
+    );
+    if let Some(ref sid) = target_session_id {
+        println!("Target Session  : {}", sid);
+    }
+    println!("────────────────────────────────────────────────────────────────────────────────");
+    println!(
+        "  {:<6} {:<10} {:>12} {:>14} {:>12}  {:<26}",
+        "SLOT", "STATUS", "TOKENS", "PAGES (16t)", "VRAM (MB)", "BOUND SESSION"
+    );
+    println!("  {}", "─".repeat(84));
+
+    for s in &slots_info {
+        if let Some(target_slot) = slot_id_filter
+            && s.id != target_slot
+        {
+            continue;
+        }
+        let status_str = if s.is_processing {
+            "🟡 Busy"
+        } else {
+            "🟢 Idle"
+        };
+        let bound_str = s.bound_session_id.as_deref().unwrap_or("<unbound>");
+        println!(
+            "  #{:<5} {:<10} {:>12} {:>14} {:>11.1}M  {:<26}",
+            s.id, status_str, s.n_prompt_tokens, s.allocated_blocks, s.vram_usage_mb, bound_str
+        );
+    }
+
+    if let Some(ref plan) = splice_plan {
+        println!(
+            "\n✂️  PAGEDATTENTION SPLICING SIMULATION (Range: {}..{} tok):",
+            plan.target_token_range.0, plan.target_token_range.1
+        );
+        println!("  Target Slot              : #{}", plan.slot_id);
+        println!(
+            "  Clean Pages Evicted      : {} blocks ({} tokens)",
+            plan.clean_blocks_evicted,
+            plan.clean_blocks_evicted * plan.block_size
+        );
+        println!(
+            "  Partial Boundary Slack   : {} tokens (sub-block remainder)",
+            plan.partial_boundary_slack_tokens
+        );
+        println!(
+            "  GPU VRAM Saved           : {:.1} MB",
+            plan.estimated_vram_saved_mb
+        );
+        println!(
+            "  Prefill Avoided Latency  : ~{} ms (zero-recompute speedup)",
+            plan.prefill_recompute_avoided_ms
+        );
+        match &plan.action {
+            SlotSplicingAction::PhysicalPageUnmap {
+                blocks_freed,
+                tokens_freed,
+                vram_freed_mb,
+            } => {
+                println!(
+                    "  Action Result            : 🟢 PhysicalPageUnmap: unmapped {} physical GPU pages ({} tok, {:.1} MB)",
+                    blocks_freed, tokens_freed, vram_freed_mb
+                );
+            }
+            SlotSplicingAction::TailTruncation {
+                new_n_past,
+                tokens_dropped,
+            } => {
+                println!(
+                    "  Action Result            : 🟡 TailTruncation: set n_past to {} (dropped {} tail tokens)",
+                    new_n_past, tokens_dropped
+                );
+            }
+            SlotSplicingAction::BlockAlignmentPad {
+                original_range,
+                aligned_range,
+                slack_tokens,
+            } => {
+                println!(
+                    "  Action Result            : 🔵 BlockAlignmentPad: recommend expanding {:?} -> {:?} (+{} tok) for 100% clean page unmap",
+                    original_range, aligned_range, slack_tokens
+                );
+            }
+            SlotSplicingAction::SubBlockNoop {
+                unaligned_tokens,
+                reason,
+            } => {
+                println!(
+                    "  Action Result            : ⚪ SubBlockNoop: {} ({} tokens)",
+                    reason, unaligned_tokens
+                );
+            }
+        }
+    }
+
+    println!("\n💡 Tip: When pruning intermediate nodes, cw splices physical PagedAttention blocks without invalidating the cached prefix!\n");
+    Ok(())
+}
+
+fn run_hud_report(
+    store: &CwStore,
+    session_target: Option<String>,
+    compact: bool,
+    show_ecg: bool,
+    output_json: bool,
+) -> Result<()> {
+    let session_id = resolve_session(store, session_target)?;
+    let Some(sid) = session_id else {
+        if output_json {
+            println!("null");
+        } else {
+            println!("No active session found.");
+        }
+        return Ok(());
+    };
+
+    let session_obj = store.get_session(&sid)?;
+    let latest_turn = store.get_latest_turn(&sid)?;
+
+    let plans = latest_turn
+        .as_ref()
+        .map(build_optimization_plans)
+        .unwrap_or_default();
+    let cuttable = plans
+        .iter()
+        .find(|p| p.id == "max_token_diet")
+        .map(|p| p.saved_tokens)
+        .unwrap_or(0);
+
+    let harness_str = session_obj
+        .as_ref()
+        .map(|s| s.harness.as_str())
+        .unwrap_or("agent");
+    let model_str = session_obj
+        .as_ref()
+        .map(|s| s.model.as_str())
+        .unwrap_or("model");
+
+    let summary = generate_context_hud_summary(
+        &sid,
+        harness_str,
+        model_str,
+        latest_turn.as_ref(),
+        cuttable,
+    );
+
+    let ecg = latest_turn.as_ref().map(evaluate_attention_ecg);
+
+    if output_json {
+        let out = serde_json::json!({
+            "summary": summary,
+            "ecg": ecg,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
+    if show_ecg {
+        println!("\n💓 contextWatcher Positional Attention ECG (Lost-in-the-Middle Salience)");
+        println!("════════════════════════════════════════════════════════════════════════════════════");
+        println!(
+            "Session       : {} ({} • {})",
+            summary.session_id, summary.harness, summary.model
+        );
+        println!("Statusline    : {}", summary.formatted_oneliner);
+        if let Some(e) = ecg {
+            println!(
+                "Attention ECG : Primacy: {}t | Trough (Dead Zone): {}t | Recency: {}t",
+                e.primacy_tokens, e.trough_tokens, e.recency_tokens
+            );
+            println!(
+                "Average Score : {:.1}% Attention Across Context",
+                e.avg_attention_pct
+            );
+            println!(
+                "Risk Nodes    : {} critical instruction(s) sinking in Lost-in-the-Middle trough",
+                e.critical_nodes_in_trough
+            );
+            println!("────────────────────────────────────────────────────────────────────────────────");
+            println!(
+                "  {:<6} {:<24} {:>10} {:>12}  {:<14}  {:<8}",
+                "INDEX", "NODE KIND", "SPAN", "SALIENT %", "ZONE", "STATUS"
+            );
+            println!("  {}", "─".repeat(80));
+            for (idx, n) in e.node_breakdown.iter().enumerate() {
+                let status_str = if n.at_risk { "⚠️ AT RISK" } else { "✅ Stable" };
+                let zone_str = match n.zone {
+                    cw_core::hud::AttentionZone::Primacy => "Primacy (Top)",
+                    cw_core::hud::AttentionZone::Trough => "Trough (Mid)",
+                    cw_core::hud::AttentionZone::Recency => "Recency (Tail)",
+                };
+                let span_str = format!("{}..{}", n.token_start, n.token_end);
+                println!(
+                    "  #{:<5} {:<24} {:>10} {:>11.1}%  {:<14}  {:<8}",
+                    idx, n.label, span_str, n.attention_score_pct, zone_str, status_str
+                );
+            }
+        }
+        println!(
+            "\n💡 Tip: Context Pinning (`cw pin`) injects critical instructions at the high-attention Recency tail!\n"
+        );
+        return Ok(());
+    }
+
+    if compact {
+        println!("{}", summary.compact_oneliner);
+    } else {
+        println!("{}", summary.formatted_oneliner);
+    }
+
+    Ok(())
+}
+
 fn run_hook_check(store: &CwStore, quiet: bool, explicit_session: Option<String>) -> Result<()> {
     let Some(sid) = resolve_session(store, explicit_session)? else {
         return Ok(());
@@ -1213,16 +2068,20 @@ description: Inspects and compacts the active LLM context window, KV cache prefi
 
 # contextWatcher (`cw`) — Context & KV-Cache Optimization Skill
 
-Supports both `/context-watcher` and `/cw` commands:
-- `/context-watcher optimize min` (or `/cw min`) — Safe diet (deduplicates duplicate/stale file reads, 0% KV break)
-- `/context-watcher optimize mid` (or `/cw mid`) — Balanced diet (stale files + truncates large old tool & command outputs)
-- `/context-watcher optimize max` (or `/cw max`) — Maximum compaction (stale files + tool outputs + old reasoning + folded turns)
-- `/context-watcher gain` (or `/cw gain`) — Displays token and dollar ($) savings scoreboard across all sessions
-- `/context-watcher status` (or `/cw status`) — Checks active context fullness, KV cache hit ratio, and health score
+When invoked for `/context-watcher` or `/cw` with any subcommand or level (`min`, `mid`, `max`, `status`, `gain`):
 
-To run optimization:
-1. Primary: call MCP tool `cw_optimize_strategy` with `strategy_id`: "min" | "mid" | "max" and pass `"sync_to_disk": true` so resumed sessions inherit the compacted transcript.
-2. CLI Fallback: if the MCP tool is not available in the current session, run `cw optimize -s min|mid|max --sync-back` via shell (`~/.local/bin/cw optimize -s <level> --sync-back`).
+**Execute the exact command directly using the shell/bash tool immediately on turn 1. Do not perform preliminary environment checks, do not search for config files, and do not run `which cw` or `--help`.**
+
+### Direct Shell Commands:
+- **Optimization:**
+  - `min`: `~/.local/bin/cw optimize -s min --sync-back`
+  - `mid`: `~/.local/bin/cw optimize -s mid --sync-back`
+  - `max`: `~/.local/bin/cw optimize -s max --sync-back`
+- **Inspection:**
+  - `status`: `~/.local/bin/cw status`
+  - `gain`: `~/.local/bin/cw gain`
+
+If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, you may call it with `{"strategy_id": "<level>", "sync_to_disk": true}`. Otherwise, execute the shell command above directly.
 "#;
 
     let skill_cw_md = r#"---
@@ -1232,16 +2091,20 @@ description: Inspects and compacts the active LLM context window, KV cache prefi
 
 # contextWatcher (`cw`) — Context & KV-Cache Optimization Skill
 
-Supports both `/cw` and `/context-watcher` commands:
-- `/cw optimize min` (or `/context-watcher min`) — Safe diet (deduplicates duplicate/stale file reads, 0% KV break)
-- `/cw optimize mid` (or `/context-watcher mid`) — Balanced diet (stale files + truncates large old tool & command outputs)
-- `/cw optimize max` (or `/context-watcher max`) — Maximum compaction (stale files + tool outputs + old reasoning + folded turns)
-- `/cw gain` (or `/context-watcher gain`) — Displays token and dollar ($) savings scoreboard across all sessions
-- `/cw status` (or `/context-watcher status`) — Checks active context fullness, KV cache hit ratio, and health score
+When invoked for `/cw` or `/context-watcher` with any subcommand or level (`min`, `mid`, `max`, `status`, `gain`):
 
-To run optimization:
-1. Primary: call MCP tool `cw_optimize_strategy` with `strategy_id`: "min" | "mid" | "max" and pass `"sync_to_disk": true` so resumed sessions inherit the compacted transcript.
-2. CLI Fallback: if the MCP tool is not available in the current session, run `cw optimize -s min|mid|max --sync-back` via shell (`~/.local/bin/cw optimize -s <level> --sync-back`).
+**Execute the exact command directly using the shell/bash tool immediately on turn 1. Do not perform preliminary environment checks, do not search for config files, and do not run `which cw` or `--help`.**
+
+### Direct Shell Commands:
+- **Optimization:**
+  - `min`: `~/.local/bin/cw optimize -s min --sync-back`
+  - `mid`: `~/.local/bin/cw optimize -s mid --sync-back`
+  - `max`: `~/.local/bin/cw optimize -s max --sync-back`
+- **Inspection:**
+  - `status`: `~/.local/bin/cw status`
+  - `gain`: `~/.local/bin/cw gain`
+
+If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, you may call it with `{"strategy_id": "<level>", "sync_to_disk": true}`. Otherwise, execute the shell command above directly.
 "#;
 
     let agy_mcp_json = serde_json::to_string_pretty(&serde_json::json!({

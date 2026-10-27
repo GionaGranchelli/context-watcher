@@ -15,6 +15,7 @@ pub enum HarnessKind {
     Codex,
     Hermes,
     Pi,
+    Omp,
     OpenCode,
     Aider,
     ClaudeCode,
@@ -28,6 +29,7 @@ impl HarnessKind {
             Self::Codex => "codex",
             Self::Hermes => "hermes",
             Self::Pi => "pi",
+            Self::Omp => "omp",
             Self::OpenCode => "opencode",
             Self::Aider => "aider",
             Self::ClaudeCode => "claude_code",
@@ -40,6 +42,7 @@ impl HarnessKind {
             "antigravity" | "agy" => Self::Antigravity,
             "codex" => Self::Codex,
             "hermes" | "hermes_agent" | "hermes-agent" => Self::Hermes,
+            "omp" | "oh-my-pi" | "oh_my_pi" => Self::Omp,
             "pi" => Self::Pi,
             "opencode" => Self::OpenCode,
             "aider" => Self::Aider,
@@ -542,4 +545,15 @@ pub struct FileContextState {
     pub total_tokens_in_context: u32,
     pub line_ranges: Vec<(u32, u32)>,
     pub node_ids: Vec<NodeId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MutationEffectivenessRecord {
+    pub mutation_id: String,
+    pub session_id: String,
+    pub turn_id: String,
+    pub tokens_saved: u32,
+    pub kv_cache_hit_rate: f64,
+    pub ttft_ms: Option<u64>,
+    pub created_at: DateTime<Utc>,
 }

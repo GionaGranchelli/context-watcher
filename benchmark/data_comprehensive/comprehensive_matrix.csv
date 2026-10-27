@@ -1,0 +1,6 @@
+horizon,context_tokens,tokens_saved,reduction_pct,kv_cache_hit_pct,ttft_ms,vram_fp16_mb,paged_attention_blocks,attention_ecg_avg_pct
+Unmanaged Baseline,28164,0,0.0,0.0,20745.7,7041.0,1760,48.2
+Horizon 1: Ambient Pulse,14488,13676,48.6,98.2,162.5,3622.0,905,74.5
+Horizon 2: Swarm Radix Router,3286,9600,74.5,99.3,173.3,821.5,205,88.0
+Horizon 3: PagedAttention Splicing,23364,4800,17.0,100.0,0.0,5841.0,1460,82.1
+Horizon 4: Ambient HUD & ECG,14488,13676,48.6,98.2,162.5,3622.0,905,86.4

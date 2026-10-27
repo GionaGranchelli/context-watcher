@@ -3,13 +3,14 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-function runCwCli(args) {
+function runCwCli(args, extraEnv = {}) {
+  const env = { ...process.env, CW_HARNESS: "omp", ...extraEnv };
   return new Promise((resolve, reject) => {
-    execFile("cw", args, { timeout: 15000 }, (error, stdout, stderr) => {
+    execFile("cw", args, { timeout: 15000, env }, (error, stdout, stderr) => {
       if (error) {
         // Fallback to absolute ~/.local/bin/cw if cw not in ambient PATH
         const fallbackPath = `${process.env.HOME || "/tmp"}/.local/bin/cw`;
-        execFile(fallbackPath, args, { timeout: 15000 }, (err2, out2, errStr2) => {
+        execFile(fallbackPath, args, { timeout: 15000, env }, (err2, out2, errStr2) => {
           if (err2) return reject(new Error(errStr2 || err2.message));
           resolve(out2 || "");
         });
@@ -24,6 +25,8 @@ const cwHandler = async (rawArgs, ctx, pi) => {
   const parts = String(rawArgs || "").trim().split(/\s+/).filter(Boolean);
   let action = parts[0] || "status";
   let param = parts[1] || "mid";
+  const sessId = ctx?.session?.id || ctx?.sessionId || pi?.sessionId;
+  const extraEnv = sessId ? { CW_SESSION_ID: `omp_${String(sessId).slice(0, 12)}` } : {};
 
   // Support direct `/context-watcher mid` or `/cw min` without requiring `optimize` keyword
   if (["min", "mid", "max", "clean_code_state", "surgical_log_diet", "max_token_diet"].includes(action)) {
@@ -34,7 +37,7 @@ const cwHandler = async (rawArgs, ctx, pi) => {
   if (action === "gain") {
     try {
       ctx?.ui?.notify?.("Fetching contextWatcher token savings...", "info");
-      const out = await runCwCli(["gain"]);
+      const out = await runCwCli(["gain"], extraEnv);
       pi.sendMessage(`\`\`\`text\n${out.trim()}\n\`\`\``);
     } catch (err) {
       ctx?.ui?.notify?.(`cw gain error: ${err.message}`, "error");
@@ -44,7 +47,7 @@ const cwHandler = async (rawArgs, ctx, pi) => {
 
   if (action === "status") {
     try {
-      const out = await runCwCli(["status"]);
+      const out = await runCwCli(["status"], extraEnv);
       pi.sendMessage(`\`\`\`text\n${out.trim()}\n\`\`\``);
     } catch (err) {
       ctx?.ui?.notify?.(`cw status error: ${err.message}`, "error");
@@ -58,7 +61,7 @@ const cwHandler = async (rawArgs, ctx, pi) => {
       : "mid";
     try {
       ctx?.ui?.notify?.(`Running contextWatcher optimize (${level})...`, "info");
-      const out = await runCwCli(["optimize", "-s", level, "--sync-back"]);
+      const out = await runCwCli(["optimize", "-s", level, "--sync-back"], extraEnv);
       pi.sendMessage(`\`\`\`text\n${out.trim()}\n\`\`\``);
       ctx?.ui?.notify?.(`Context compacted (${level}).`, "info");
     } catch (err) {

@@ -13,10 +13,14 @@ use bytes::Bytes;
 use chrono::Utc;
 use cw_core::{
     analyze_turn_from_payload,
-    autopilot::{AutoPilotConfig, evaluate_autopilot_policies},
+    autopilot::{
+        AmbientSavingsPulse, AutoPilotConfig, evaluate_autopilot_policies,
+        generate_ambient_savings_pulse, should_emit_savings_pulse,
+    },
+    hud::{evaluate_attention_ecg, generate_context_hud_summary},
     ir::{
         ContextTurn, FileContextState, FirewallRule, HarnessKind, MutationOp, MutationRule,
-        MutationStatus, ProviderKind, Session,
+        MutationStatus, NodeKind, ProviderKind, Session,
     },
     local_llm::{
         CostAndPerfReport, LocalModelAnalysis, analyze_local_model_kv, calculate_cost_and_perf,
@@ -26,6 +30,11 @@ use cw_core::{
     normalizer::detect_provider,
     optimizer::{OptimizationStrategyPlan, build_optimization_plans, resolve_strategy_alias},
     radix::{RadixGraph, build_radix_graph},
+    slot_bridge::{
+        DEFAULT_PAGED_ATTENTION_BLOCK_SIZE, EngineSlotInfo, SlotSplicingAction,
+        assign_deterministic_slot, plan_slot_splicing,
+    },
+    swarm::{analyze_swarm_prefix_sharing, build_swarm_radix_graph},
     validator::validate_protocol_invariants,
 };
 use cw_harnesses::sync_mutations_to_transcript_on_disk;
@@ -35,7 +44,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::{Mutex, broadcast, oneshot};
@@ -66,6 +78,10 @@ pub enum WsEvent {
     },
     FirewallResolved {
         intercept_id: String,
+    },
+    AmbientSavingsPulse {
+        session_id: String,
+        pulse: Box<AmbientSavingsPulse>,
     },
 }
 
@@ -177,6 +193,15 @@ pub fn build_api_router(state: DaemonState) -> Router {
             get(api_get_session_effectiveness),
         )
         .route("/api/v1/effectiveness", get(api_get_all_effectiveness))
+        .route("/api/v1/pulses", get(api_list_recent_pulses))
+        .route("/api/v1/sessions/:id/pulses", get(api_get_session_pulse))
+        .route("/api/v1/swarms", get(api_list_swarms))
+        .route("/api/v1/swarms/:group_id/graph", get(api_get_swarm_graph))
+        .route("/api/v1/engine/slots", get(api_get_engine_slots))
+        .route("/api/v1/engine/slots/:slot_id/splice", post(api_splice_engine_slot))
+        .route("/api/v1/hud", get(api_get_active_hud))
+        .route("/api/v1/sessions/:id/hud", get(api_get_session_hud))
+        .route("/api/v1/sessions/:id/ecg", get(api_get_session_ecg))
         .route(
             "/api/v1/sessions/:id/sync-back",
             post(api_sync_transcript_back),
@@ -364,6 +389,7 @@ async fn handle_proxy_request(
             provider,
             seq_num,
             &preflight_turn.nodes,
+            Some(&preflight_turn),
             &mut mutated_payload,
         );
         for rule in &ap_rep.generated_mutations {
@@ -371,6 +397,9 @@ async fn handle_proxy_request(
                 autopilot_saved += rule.estimated_saved_tokens as u32;
             }
             let _ = state.store.save_mutation(rule);
+        }
+        if ap_cfg.auto_sync_to_disk && !ap_rep.generated_mutations.is_empty() {
+            let _ = sync_mutations_to_transcript_on_disk(&state.store, &session_id);
         }
 
         // 2b. Local LLM Engine KV Cache Pinning (`n_keep`, `num_keep`, `cache_prompt`, `id_slot`)
@@ -450,7 +479,7 @@ async fn handle_proxy_request(
 
     // 3. Forward mutated payload to upstream provider (or local mock mode if header `x-cw-dry-run` is set)
     if headers.get("x-cw-dry-run").is_some() {
-        let (mut final_turn, file_states) = analyze_turn_from_payload(
+        let (mut final_turn, file_states) = match analyze_turn_from_payload(
             turn_id,
             session_id.clone(),
             prev_turn.as_ref().map(|t| t.id.clone()),
@@ -460,8 +489,16 @@ async fn handle_proxy_request(
             prev_nodes,
             None,
             workspace_root.as_deref(),
-        )
-        .unwrap();
+        ) {
+            Ok(res) => res,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": format!("Normalization error during dry-run: {e}") })),
+                )
+                    .into_response();
+            }
+        };
         final_turn.token_usage.saved_by_mutations = mut_report.saved_tokens + autopilot_saved;
         final_turn.latency_ms = Some(start_instant.elapsed().as_millis() as u64);
         strip_internal_cw_fields(&mut mutated_payload);
@@ -550,55 +587,103 @@ async fn handle_proxy_request(
         .unwrap_or(false);
 
     if is_sse {
-        // Stream SSE chunks directly to client while tapping usage metrics in background
+        // Stream SSE chunks directly to client while tapping usage metrics asynchronously in background
         let stream = upstream_resp.bytes_stream();
         let state_clone = state.clone();
         let prev_nodes_owned = prev_nodes.map(|s| s.to_vec());
+        let tapped_once = Arc::new(AtomicBool::new(false));
+        let accumulator = Arc::new(std::sync::Mutex::new(SseChunkAccumulator::default()));
 
         let tapped_stream = stream.inspect(move |chunk_res| {
             if let Ok(bytes) = chunk_res {
-                let text = String::from_utf8_lossy(bytes);
-                if text.contains("\"usage\"") || text.contains("message_delta") {
-                    let cached = extract_cached_tokens_from_sse(&text);
-                    if let Ok((mut turn, file_states)) = analyze_turn_from_payload(
-                        turn_id.clone(),
-                        session_id.clone(),
-                        prev_turn.as_ref().map(|t| t.id.clone()),
-                        seq_num,
-                        &mutated_payload,
-                        provider,
-                        prev_nodes_owned.as_deref(),
-                        cached,
-                        workspace_root.as_deref(),
-                    ) {
-                        turn.token_usage.saved_by_mutations = mut_report.saved_tokens;
-                        turn.latency_ms = Some(start_instant.elapsed().as_millis() as u64);
-                        let _ = state_clone.store.save_turn(
-                            &turn,
-                            Some(&raw_payload),
-                            Some(&mutated_payload),
-                            None,
-                        );
-                        let _ = state_clone.store.save_file_states(&session_id, &file_states);
+                let cached_found = if let Ok(mut acc) = accumulator.lock() {
+                    acc.push_chunk(bytes)
+                } else {
+                    None
+                };
 
-                        // CW-049: Record closed-loop mutation effectiveness telemetry
-                        for rule in &active_mutations {
-                            let _ = state_clone.store.record_mutation_effectiveness(&MutationEffectivenessRecord {
-                                mutation_id: rule.id.clone(),
-                                session_id: session_id.clone(),
-                                turn_id: turn.id.clone(),
-                                tokens_saved: rule.estimated_saved_tokens.max(0) as u32,
-                                kv_cache_hit_rate: turn.kv_cache_report.hit_ratio as f64,
-                                ttft_ms: turn.latency_ms,
-                                created_at: Utc::now(),
+                let text = String::from_utf8_lossy(bytes);
+                let is_usage_marker = text.contains("\"usage\"") || text.contains("message_delta");
+
+                if (cached_found.is_some() || is_usage_marker)
+                    && !tapped_once.swap(true, Ordering::SeqCst)
+                {
+                    let cached = cached_found.or_else(|| extract_cached_tokens_from_sse(&text));
+                    let state_bg = state_clone.clone();
+                    let turn_id_bg = turn_id.clone();
+                    let session_id_bg = session_id.clone();
+                    let prev_turn_id_bg = prev_turn.as_ref().map(|t| t.id.clone());
+                    let mutated_payload_bg = mutated_payload.clone();
+                    let prev_nodes_bg = prev_nodes_owned.clone();
+                    let workspace_root_bg = workspace_root.clone();
+                    let raw_payload_bg = raw_payload.clone();
+                    let active_mutations_bg = active_mutations.clone();
+                    let model_bg = session.model.clone();
+                    let mut_saved = mut_report.saved_tokens;
+                    let elapsed = start_instant.elapsed().as_millis() as u64;
+
+                    tokio::spawn(async move {
+                        if let Ok((mut turn, file_states)) = analyze_turn_from_payload(
+                            turn_id_bg,
+                            session_id_bg.clone(),
+                            prev_turn_id_bg,
+                            seq_num,
+                            &mutated_payload_bg,
+                            provider,
+                            prev_nodes_bg.as_deref(),
+                            cached,
+                            workspace_root_bg.as_deref(),
+                        ) {
+                            turn.token_usage.saved_by_mutations = mut_saved;
+                            turn.latency_ms = Some(elapsed);
+                            let _ = state_bg.store.save_turn(
+                                &turn,
+                                Some(&raw_payload_bg),
+                                Some(&mutated_payload_bg),
+                                None,
+                            );
+                            let _ = state_bg.store.save_file_states(&session_id_bg, &file_states);
+
+                            // CW-049: Record closed-loop mutation effectiveness telemetry
+                            for rule in &active_mutations_bg {
+                                let _ = state_bg.store.record_mutation_effectiveness(&MutationEffectivenessRecord {
+                                    mutation_id: rule.id.clone(),
+                                    session_id: session_id_bg.clone(),
+                                    turn_id: turn.id.clone(),
+                                    tokens_saved: rule.estimated_saved_tokens.max(0) as u32,
+                                    kv_cache_hit_rate: turn.kv_cache_report.hit_ratio as f64,
+                                    ttft_ms: turn.latency_ms,
+                                    created_at: Utc::now(),
+                                });
+                            }
+
+                            if mut_saved > 0 {
+                                let cur_saved = mut_saved as u64;
+                                let last_pulse = state_bg.store.get_latest_pulse_for_session(&session_id_bg).ok().flatten();
+                                let last_saved = last_pulse.map(|p| p.cumulative_tokens_saved).unwrap_or(0);
+                                if should_emit_savings_pulse(cur_saved, last_saved, 200) {
+                                    let pulse = generate_ambient_savings_pulse(
+                                        &session_id_bg,
+                                        &turn,
+                                        &model_bg,
+                                        provider,
+                                        cur_saved,
+                                    );
+                                    let _ = state_bg.store.record_ambient_pulse(&pulse);
+                                    eprintln!("{}", pulse.formatted_message);
+                                    state_bg.broadcast(WsEvent::AmbientSavingsPulse {
+                                        session_id: session_id_bg.clone(),
+                                        pulse: Box::new(pulse),
+                                    });
+                                }
+                            }
+
+                            state_bg.broadcast(WsEvent::TurnCompleted {
+                                session_id: session_id_bg,
+                                turn: Box::new(turn),
                             });
                         }
-
-                        state_clone.broadcast(WsEvent::TurnCompleted {
-                            session_id: session_id.clone(),
-                            turn: Box::new(turn),
-                        });
-                    }
+                    });
                 }
             }
         });
@@ -738,7 +823,7 @@ fn extract_cached_tokens_from_json(resp: &Value) -> Option<u32> {
         .map(|n| n as u32)
 }
 
-fn extract_cached_tokens_from_sse(chunk_text: &str) -> Option<u32> {
+pub fn extract_cached_tokens_from_sse(chunk_text: &str) -> Option<u32> {
     for line in chunk_text.lines() {
         if let Some(data) = line.strip_prefix("data: ")
             && let Ok(val) = serde_json::from_str::<Value>(data)
@@ -747,6 +832,31 @@ fn extract_cached_tokens_from_sse(chunk_text: &str) -> Option<u32> {
                 }
     }
     None
+}
+
+#[derive(Default, Debug)]
+pub struct SseChunkAccumulator {
+    buffer: String,
+}
+
+impl SseChunkAccumulator {
+    pub fn push_chunk(&mut self, bytes: &[u8]) -> Option<u32> {
+        let text = String::from_utf8_lossy(bytes);
+        self.buffer.push_str(&text);
+        if let Some(idx) = self.buffer.rfind('\n') {
+            let complete = &self.buffer[..=idx];
+            let cached = extract_cached_tokens_from_sse(complete);
+            self.buffer.drain(..=idx);
+            return cached;
+        }
+        None
+    }
+
+    pub fn flush_cached(&mut self) -> Option<u32> {
+        let res = extract_cached_tokens_from_sse(&self.buffer);
+        self.buffer.clear();
+        res
+    }
 }
 
 // ============================================================================
@@ -1074,6 +1184,364 @@ async fn api_get_all_effectiveness(State(state): State<DaemonState>) -> impl Int
     }
 }
 
+async fn api_list_recent_pulses(State(state): State<DaemonState>) -> impl IntoResponse {
+    let pulses = state.store.list_recent_ambient_pulses(50).unwrap_or_default();
+    Json(json!({ "pulses": pulses }))
+}
+
+async fn api_get_session_pulse(
+    State(state): State<DaemonState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let pulse = state.store.get_latest_pulse_for_session(&id).ok().flatten();
+    Json(json!({ "session_id": id, "pulse": pulse }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SwarmQueryParams {
+    pub project: Option<String>,
+    pub model: Option<String>,
+    pub min_members: Option<usize>,
+}
+
+async fn api_list_swarms(
+    State(state): State<DaemonState>,
+    Query(params): Query<SwarmQueryParams>,
+) -> impl IntoResponse {
+    let sessions = state.store.list_sessions().unwrap_or_default();
+    let mut sessions_with_turns = Vec::new();
+
+    for sess in &sessions {
+        if let Some(ref proj) = params.project {
+            let ws = sess
+                .workspace_root
+                .as_deref()
+                .map(|w| {
+                    w.trim_end_matches('/')
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(w)
+                })
+                .unwrap_or("default_workspace");
+            if !ws.to_lowercase().contains(&proj.to_lowercase()) {
+                continue;
+            }
+        }
+        if let Some(ref mod_filter) = params.model
+            && !sess.model.to_lowercase().contains(&mod_filter.to_lowercase())
+        {
+            continue;
+        }
+
+        if let Ok(Some(latest_turn)) = state.store.get_latest_turn(&sess.id) {
+            sessions_with_turns.push((sess, latest_turn));
+        }
+    }
+
+    let items: Vec<(&Session, &ContextTurn)> = sessions_with_turns
+        .iter()
+        .map(|(s, t)| (*s, t))
+        .collect();
+
+    let mut swarms = analyze_swarm_prefix_sharing(&items);
+    if let Some(min_m) = params.min_members {
+        swarms.retain(|s| s.member_count >= min_m);
+    }
+    Json(swarms)
+}
+
+async fn api_get_swarm_graph(
+    State(state): State<DaemonState>,
+    Path(group_id): Path<String>,
+) -> impl IntoResponse {
+    let sessions = state.store.list_sessions().unwrap_or_default();
+    let mut sessions_with_turns = Vec::new();
+
+    for sess in &sessions {
+        if let Ok(Some(latest_turn)) = state.store.get_latest_turn(&sess.id) {
+            sessions_with_turns.push((sess, latest_turn));
+        }
+    }
+
+    let items: Vec<(&Session, &ContextTurn)> = sessions_with_turns
+        .iter()
+        .map(|(s, t)| (*s, t))
+        .collect();
+
+    let swarms = analyze_swarm_prefix_sharing(&items);
+    if let Some(swarm) = swarms.into_iter().find(|s| s.group_id == group_id) {
+        let graph = build_swarm_radix_graph(&swarm);
+        Json(json!({ "swarm": swarm, "radix_graph": graph })).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("Swarm group '{group_id}' not found") })),
+        )
+            .into_response()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EngineSlotsQuery {
+    pub engine_url: Option<String>,
+}
+
+async fn api_get_engine_slots(
+    State(state): State<DaemonState>,
+    Query(params): Query<EngineSlotsQuery>,
+) -> impl IntoResponse {
+    let upstream_url = params
+        .engine_url
+        .unwrap_or_else(|| state.llamacpp_upstream.clone());
+    let slots_url = format!("{}/slots", upstream_url.trim_end_matches('/'));
+
+    let mut req_builder = state
+        .http_client
+        .get(&slots_url)
+        .timeout(Duration::from_millis(2500));
+    if let Ok(key) = std::env::var("CW_LLAMACPP_API_KEY") {
+        req_builder = req_builder.header("Authorization", format!("Bearer {key}"));
+    }
+
+    let mut raw_slots = Vec::new();
+    let upstream_reachable = match req_builder.send().await {
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(slots_json) = resp.json::<Vec<serde_json::Value>>().await {
+                raw_slots = slots_json;
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    };
+
+    let sessions = state.store.list_sessions().unwrap_or_default();
+    let mut slots_info = Vec::new();
+
+    if upstream_reachable && !raw_slots.is_empty() {
+        let total_slots = raw_slots.len() as u32;
+        for slot in raw_slots {
+            let id = slot.get("id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let n_ctx = slot.get("n_ctx").and_then(|v| v.as_u64()).unwrap_or(131072) as u32;
+            let is_processing = slot
+                .get("is_processing")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let n_prompt_tokens = slot
+                .get("n_prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
+
+            let bound_session_id = sessions
+                .iter()
+                .find(|s| assign_deterministic_slot(&s.id, total_slots) == id)
+                .map(|s| s.id.clone());
+
+            let allocated_blocks = n_prompt_tokens.div_ceil(DEFAULT_PAGED_ATTENTION_BLOCK_SIZE);
+            let vram_usage_mb = (n_prompt_tokens as f32) * 0.25;
+
+            slots_info.push(EngineSlotInfo {
+                id,
+                n_ctx,
+                is_processing,
+                n_prompt_tokens,
+                bound_session_id,
+                allocated_blocks,
+                vram_usage_mb,
+            });
+        }
+    } else {
+        let total_slots = 4u32;
+        for id in 0..total_slots {
+            let bound_session = sessions
+                .iter()
+                .find(|s| assign_deterministic_slot(&s.id, total_slots) == id);
+            let (n_prompt_tokens, bound_id) = if let Some(s) = bound_session {
+                let tok = state
+                    .store
+                    .get_latest_turn(&s.id)
+                    .ok()
+                    .flatten()
+                    .map(|t| t.token_usage.input_tokens)
+                    .unwrap_or(0);
+                (tok, Some(s.id.clone()))
+            } else {
+                (0, None)
+            };
+
+            let allocated_blocks = n_prompt_tokens.div_ceil(DEFAULT_PAGED_ATTENTION_BLOCK_SIZE);
+            let vram_usage_mb = (n_prompt_tokens as f32) * 0.25;
+
+            slots_info.push(EngineSlotInfo {
+                id,
+                n_ctx: 131072,
+                is_processing: false,
+                n_prompt_tokens,
+                bound_session_id: bound_id,
+                allocated_blocks,
+                vram_usage_mb,
+            });
+        }
+    }
+
+    Json(json!({
+        "upstream_url": upstream_url,
+        "upstream_reachable": upstream_reachable,
+        "block_size": DEFAULT_PAGED_ATTENTION_BLOCK_SIZE,
+        "total_slots": slots_info.len(),
+        "slots": slots_info,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SpliceRequest {
+    pub session_id: Option<String>,
+    pub prune_range: (u32, u32),
+    pub block_size: Option<u32>,
+    pub execute: Option<bool>,
+}
+
+async fn api_splice_engine_slot(
+    State(state): State<DaemonState>,
+    Path(slot_id): Path<u32>,
+    Json(req): Json<SpliceRequest>,
+) -> impl IntoResponse {
+    let bs = req.block_size.unwrap_or(DEFAULT_PAGED_ATTENTION_BLOCK_SIZE);
+    let mut total_tokens = 0u32;
+    let mut prefix_locked = 256u32;
+
+    if let Some(ref sid) = req.session_id
+        && let Ok(Some(turn)) = state.store.get_latest_turn(sid)
+    {
+        total_tokens = turn.token_usage.input_tokens;
+        for n in &turn.nodes {
+            match n.kind {
+                NodeKind::SystemPrompt { .. }
+                | NodeKind::InjectedRule { .. }
+                | NodeKind::SkillCatalog { .. }
+                | NodeKind::McpToolSchema { .. } => {
+                    prefix_locked += n.token_span.count;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if total_tokens == 0 {
+        total_tokens = req.prune_range.1.max(1024);
+    }
+
+    let plan = plan_slot_splicing(slot_id, total_tokens, prefix_locked, req.prune_range, bs);
+
+    let mut upstream_executed = false;
+    if req.execute.unwrap_or(false)
+        && let SlotSplicingAction::TailTruncation { new_n_past, .. } = plan.action
+    {
+        let erase_url = format!(
+            "{}/slots/{}?action=erase",
+            state.llamacpp_upstream.trim_end_matches('/'),
+            slot_id
+        );
+        let mut req_b = state.http_client.post(&erase_url).json(&json!({
+            "id_slot": slot_id,
+            "n_past": new_n_past
+        }));
+        if let Ok(key) = std::env::var("CW_LLAMACPP_API_KEY") {
+            req_b = req_b.header("Authorization", format!("Bearer {key}"));
+        }
+        if let Ok(resp) = req_b.send().await {
+            upstream_executed = resp.status().is_success();
+        }
+    }
+
+    Json(json!({
+        "slot_id": slot_id,
+        "plan": plan,
+        "upstream_executed": upstream_executed,
+    }))
+}
+
+async fn api_get_active_hud(State(state): State<DaemonState>) -> impl IntoResponse {
+    let sessions = state.store.list_sessions().unwrap_or_default();
+    let latest_session = sessions.last();
+
+    if let Some(s) = latest_session {
+        let turn = state.store.get_latest_turn(&s.id).ok().flatten();
+        let plans = turn
+            .as_ref()
+            .map(build_optimization_plans)
+            .unwrap_or_default();
+        let cuttable = plans
+            .iter()
+            .find(|p| p.id == "max_token_diet")
+            .map(|p| p.saved_tokens)
+            .unwrap_or(0);
+        let hud = generate_context_hud_summary(
+            &s.id,
+            s.harness.as_str(),
+            &s.model,
+            turn.as_ref(),
+            cuttable,
+        );
+        Json(hud).into_response()
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "No active sessions found" })),
+        )
+            .into_response()
+    }
+}
+
+async fn api_get_session_hud(
+    State(state): State<DaemonState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let Some(s) = state.store.get_session(&id).ok().flatten() else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("Session '{id}' not found") })),
+        )
+            .into_response();
+    };
+
+    let turn = state.store.get_latest_turn(&s.id).ok().flatten();
+    let plans = turn
+        .as_ref()
+        .map(build_optimization_plans)
+        .unwrap_or_default();
+    let cuttable = plans
+        .iter()
+        .find(|p| p.id == "max_token_diet")
+        .map(|p| p.saved_tokens)
+        .unwrap_or(0);
+    let hud = generate_context_hud_summary(
+        &s.id,
+        s.harness.as_str(),
+        &s.model,
+        turn.as_ref(),
+        cuttable,
+    );
+    Json(hud).into_response()
+}
+
+async fn api_get_session_ecg(
+    State(state): State<DaemonState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let Some(turn) = state.store.get_latest_turn(&id).ok().flatten() else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": format!("No turns found for session '{id}'") })),
+        )
+            .into_response();
+    };
+
+    let ecg = evaluate_attention_ecg(&turn);
+    Json(ecg).into_response()
+}
+
 #[derive(Deserialize)]
 struct ReplayRequest {
     from_turn_id: Option<String>,
@@ -1358,6 +1826,30 @@ fn recompute_latest_turn_with_mutations(state: &DaemonState, session_id: &str) {
         let session = state.store.get_session(session_id).ok().flatten();
         let workspace_root = session.as_ref().and_then(|s| s.workspace_root.clone());
         let file_states = state.store.get_file_states(session_id).unwrap_or_default();
+        let model = session.as_ref().map(|s| s.model.as_str()).unwrap_or("claude-sonnet-4");
+        let provider = session.as_ref().map(|s| s.provider).unwrap_or(ProviderKind::Anthropic);
+
+        let cur_saved = updated_turn.token_usage.saved_by_mutations as u64;
+        if cur_saved > 0 {
+            let last_pulse = state.store.get_latest_pulse_for_session(session_id).ok().flatten();
+            let last_saved = last_pulse.map(|p| p.cumulative_tokens_saved).unwrap_or(0);
+            if should_emit_savings_pulse(cur_saved, last_saved, 100) {
+                let pulse = generate_ambient_savings_pulse(
+                    session_id,
+                    &updated_turn,
+                    model,
+                    provider,
+                    cur_saved,
+                );
+                let _ = state.store.record_ambient_pulse(&pulse);
+                eprintln!("{}", pulse.formatted_message);
+                state.broadcast(WsEvent::AmbientSavingsPulse {
+                    session_id: session_id.to_string(),
+                    pulse: Box::new(pulse),
+                });
+            }
+        }
+
         state.broadcast(WsEvent::TurnCompleted {
             session_id: session_id.to_string(),
             turn: Box::new(updated_turn),
@@ -1493,5 +1985,25 @@ mod tests {
 
         assert_eq!(outbound, valid_raw);
         assert!(validate_protocol_invariants(&outbound, ProviderKind::Anthropic).is_ok());
+    }
+
+    #[test]
+    fn test_split_chunk_sse_accumulator() {
+        let mut acc = SseChunkAccumulator::default();
+
+        // Chunk 1: Partial SSE event split right in the middle of json key
+        let chunk1 = b"event: message_delta\ndata: {\"type\": \"message_delta\", \"usage\": {\"cache_";
+        let res1 = acc.push_chunk(chunk1);
+        assert_eq!(res1, None); // Not ready yet
+
+        // Chunk 2: The rest of the key and values, followed by newline
+        let chunk2 = b"read_input_tokens\": 2048}}\n\n";
+        let res2 = acc.push_chunk(chunk2);
+        assert_eq!(res2, Some(2048)); // Successfully reassembled and parsed!
+
+        // Chunk 3: Normal complete chunk
+        let chunk3 = b"data: {\"usage\": {\"input_tokens_details\": {\"cached_tokens\": 512}}}\n";
+        let res3 = acc.push_chunk(chunk3);
+        assert_eq!(res3, Some(512));
     }
 }

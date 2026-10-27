@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-10-27T14:07:07Z",
+  "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+  "engine": "Strata 0.1.44.1 on dual AMD Radeon Instinct gfx906 (192.168.1.156:8095)",
+  "subagents_count": 4,
+  "shared_trunk_tokens": 3200,
+  "total_unshared_tokens": 12886,
+  "total_multiplexed_tokens": 3286,
+  "tokens_saved": 9600,
+  "reduction_pct": 74.5,
+  "unshared_vram_fp16_mb": 3221.5,
+  "multiplexed_vram_fp16_mb": 821.5,
+  "vram_saved_fp16_mb": 2400.0,
+  "paged_attention_blocks_freed": 600,
+  "unshared_prefill_ms": 85594.6,
+  "swarm_prefill_ms": 21179.0,
+  "speedup_factor": 4.04,
+  "subagents": [
+    {
+      "agent": "Lead Architect",
+      "role": "Orchestrator & Architecture",
+      "unshared_tokens": 3221,
+      "unshared_ttft_ms": 20745.7,
+      "swarm_tokens": 3221,
+      "swarm_ttft_ms": 20745.7,
+      "speedup": "1.0x (Trunk Seed)",
+      "shared_trunk_pct": 99.3
+    },
+    {
+      "agent": "Backend Coder",
+      "role": "Implementation Subagent",
+      "unshared_tokens": 3226,
+      "unshared_ttft_ms": 21381.7,
+      "swarm_tokens": 26,
+      "swarm_ttft_ms": 173.3,
+      "speedup": "123.4x",
+      "shared_trunk_pct": 99.2
+    },
+    {
+      "agent": "Test Runner",
+      "role": "Verification Subagent",
+      "unshared_tokens": 3219,
+      "unshared_ttft_ms": 21730.2,
+      "swarm_tokens": 19,
+      "swarm_ttft_ms": 126.7,
+      "speedup": "171.5x",
+      "shared_trunk_pct": 99.4
+    },
+    {
+      "agent": "Security Auditor",
+      "role": "Vulnerability Review Subagent",
+      "unshared_tokens": 3220,
+      "unshared_ttft_ms": 21737.0,
+      "swarm_tokens": 20,
+      "swarm_ttft_ms": 133.3,
+      "speedup": "163.1x",
+      "shared_trunk_pct": 99.4
+    }
+  ]
+}

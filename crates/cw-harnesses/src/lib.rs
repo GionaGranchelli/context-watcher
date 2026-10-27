@@ -1,8 +1,10 @@
 use chrono::{DateTime, Utc};
 use cw_core::{
     analyze_turn_from_payload,
-    ir::{HarnessKind, MutationOp, MutationStatus, NodeKind, ProviderKind, Session},
+    autopilot::{generate_ambient_savings_pulse, should_emit_savings_pulse},
+    ir::{ContextTurn, HarnessKind, MutationOp, MutationRule, MutationStatus, NodeKind, ProviderKind, Session},
     mutation::apply_mutations_to_payload,
+    optimizer::{build_optimization_plans, resolve_strategy_alias},
 };
 use cw_store::CwStore;
 use serde::{Deserialize, Serialize};
@@ -335,6 +337,15 @@ pub fn import_agy_transcript(
         None,
     )?;
     store.save_file_states(&session_id, &file_states)?;
+    check_and_apply_auto_heal(
+        store,
+        &session_id,
+        &mut turn,
+        &synthetic_payload,
+        seq,
+        ProviderKind::Anthropic,
+        final_workspace.as_deref(),
+    );
     Ok(session_id)
 }
 
@@ -443,6 +454,11 @@ pub fn import_generic_jsonl_transcript(
     store: &CwStore,
     workspace_root: Option<String>,
 ) -> Result<String, HarnessError> {
+    let mut harness = harness;
+    let path_str = path.to_string_lossy();
+    if harness == HarnessKind::Pi && path_str.contains("/.omp/") {
+        harness = HarnessKind::Omp;
+    }
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -450,6 +466,8 @@ pub fn import_generic_jsonl_transcript(
     // For Codex `rollout-2026-10-19T09-46-31-01a15320-58da-...`, use the UUID suffix so sessions don't collide on `rollout-2026`
     let id_slug = if stem.starts_with("rollout-") && stem.len() > 28 {
         &stem[28..]
+    } else if let Some((_, uuid_part)) = stem.split_once('_') {
+        uuid_part
     } else {
         stem
     };
@@ -536,6 +554,15 @@ pub fn import_generic_jsonl_transcript(
         }
 
         let entry_type = entry.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        if entry_type == "title" {
+            if let Some(t) = entry.get("title").and_then(|v| v.as_str())
+                && !t.trim().is_empty()
+            {
+                title = Some(t.trim().to_string());
+            }
+            continue;
+        }
 
         // 1. Codex CLI Rollout format (`session_meta`, `turn_context`, `event_msg`, `response_item`)
         if entry_type == "session" {
@@ -776,13 +803,32 @@ pub fn import_generic_jsonl_transcript(
                 detected_provider = ProviderKind::OpenAICompatible;
             }
             if let Some(u) = msg.get("usage") {
-                if let Some(inp) = u.get("input_tokens").or_else(|| u.get("input")).and_then(|v| v.as_u64()) {
+                let cached = u
+                    .get("cache_read_input_tokens")
+                    .or_else(|| u.get("cacheRead"))
+                    .and_then(|v| v.as_u64());
+                if let Some(c) = cached {
+                    latest_cache_read_tokens = Some(c as u32);
+                }
+                let total_prompt = msg
+                    .get("contextSnapshot")
+                    .and_then(|cs| cs.get("promptTokens"))
+                    .and_then(|v| v.as_u64())
+                    .or_else(|| {
+                        let inp = u
+                            .get("input_tokens")
+                            .or_else(|| u.get("input"))
+                            .and_then(|v| v.as_u64())?;
+                        Some(inp + cached.unwrap_or(0))
+                    });
+                if let Some(inp) = total_prompt {
                     latest_input_tokens = Some(inp as u32);
                 }
-                if let Some(cached) = u.get("cache_read_input_tokens").or_else(|| u.get("cacheRead")).and_then(|v| v.as_u64()) {
-                    latest_cache_read_tokens = Some(cached as u32);
-                }
-                if let Some(out) = u.get("output_tokens").or_else(|| u.get("output")).and_then(|v| v.as_u64()) {
+                if let Some(out) = u
+                    .get("output_tokens")
+                    .or_else(|| u.get("output"))
+                    .and_then(|v| v.as_u64())
+                {
                     latest_output_tokens = out as u32;
                 }
             }
@@ -906,7 +952,109 @@ pub fn import_generic_jsonl_transcript(
     }
     store.save_turn(&turn, Some(&payload), mutated_payload_opt.as_ref(), None)?;
     store.save_file_states(&session_id, &file_states)?;
+    check_and_apply_auto_heal(
+        store,
+        &session_id,
+        &mut turn,
+        &payload,
+        seq,
+        ProviderKind::Anthropic,
+        detected_workspace.as_deref(),
+    );
     Ok(session_id)
+}
+
+fn check_and_apply_auto_heal(
+    store: &CwStore,
+    session_id: &str,
+    turn: &mut ContextTurn,
+    payload: &Value,
+    seq: u32,
+    provider: ProviderKind,
+    workspace_root: Option<&str>,
+) -> bool {
+    let ap_cfg = store.get_autopilot_config().unwrap_or_default();
+    if !ap_cfg.enabled || !ap_cfg.auto_heal_low_health {
+        return false;
+    }
+    if turn.health_score >= ap_cfg.min_health_score {
+        return false;
+    }
+
+    let strat_id = resolve_strategy_alias(&ap_cfg.heal_strategy);
+    let plans = build_optimization_plans(turn);
+    let chosen_plan = plans
+        .iter()
+        .find(|p| p.id == strat_id && !p.items.is_empty())
+        .or_else(|| plans.iter().find(|p| !p.items.is_empty()));
+    let Some(plan) = chosen_plan else {
+        return false;
+    };
+
+    let mut applied_any = false;
+    for item in &plan.items {
+        let rule = MutationRule {
+            id: format!("ap_heal_{}", &uuid::Uuid::new_v4().to_string()[..8]),
+            session_id: session_id.to_string(),
+            op: item.mutation_op.clone(),
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: item.saved_tokens.max(0),
+            estimated_kv_break_tokens: item.kv_break_tokens,
+            created_at: Utc::now(),
+        };
+        if store.save_mutation(&rule).is_ok() {
+            applied_any = true;
+        }
+    }
+
+    if applied_any {
+        let all_mutations = store.list_mutations(session_id).unwrap_or_default();
+        let mut cloned = payload.clone();
+        let rep = apply_mutations_to_payload(&mut cloned, provider, &all_mutations, seq);
+        if let Ok((mut updated_turn, file_states)) = analyze_turn_from_payload(
+            turn.id.clone(),
+            session_id.to_string(),
+            turn.parent_turn_id.clone(),
+            seq,
+            &cloned,
+            provider,
+            None,
+            Some(turn.token_usage.cached_tokens),
+            workspace_root,
+        ) {
+            updated_turn.created_at = turn.created_at;
+            updated_turn.token_usage.output_tokens = turn.token_usage.output_tokens;
+            updated_turn.token_usage.saved_by_mutations = rep.saved_tokens;
+            let _ = store.save_turn(&updated_turn, Some(payload), Some(&cloned), None);
+            let _ = store.save_file_states(session_id, &file_states);
+
+            let cur_saved = updated_turn.token_usage.saved_by_mutations as u64;
+            if cur_saved > 0 {
+                let last_pulse = store.get_latest_pulse_for_session(session_id).ok().flatten();
+                let last_saved = last_pulse.map(|p| p.cumulative_tokens_saved).unwrap_or(0);
+                if should_emit_savings_pulse(cur_saved, last_saved, 100) {
+                    let session = store.get_session(session_id).ok().flatten();
+                    let model = session.as_ref().map(|s| s.model.as_str()).unwrap_or("claude-sonnet-4");
+                    let pulse = generate_ambient_savings_pulse(
+                        session_id,
+                        &updated_turn,
+                        model,
+                        provider,
+                        cur_saved,
+                    );
+                    let _ = store.record_ambient_pulse(&pulse);
+                    eprintln!("{}", pulse.formatted_message);
+                }
+            }
+
+            *turn = updated_turn;
+        }
+
+        if ap_cfg.auto_sync_to_disk {
+            let _ = sync_mutations_to_transcript_on_disk(store, session_id);
+        }
+    }
+    applied_any
 }
 
 fn extract_codex_content_text(val: Option<&Value>) -> String {
@@ -955,17 +1103,26 @@ pub fn sync_mutations_to_transcript_on_disk(
         .filter(|r| r.status == MutationStatus::Committed)
         .collect();
 
-    // Collect stubbed/compacted content strings from the latest turn's nodes
+    // Collect stubbed/compacted content strings from committed rules and the latest turn's nodes
     let mut compacted_by_call_id: HashMap<String, String> = HashMap::new();
     let mut folded_turns: Vec<(u32, u32, String)> = Vec::new();
     for r in &committed_rules {
-        if let MutationOp::FoldSubtree {
-            start_turn,
-            end_turn,
-            summary_text,
-        } = &r.op
-        {
-            folded_turns.push((*start_turn, *end_turn, summary_text.clone()));
+        match &r.op {
+            MutationOp::FoldSubtree {
+                start_turn,
+                end_turn,
+                summary_text,
+            } => {
+                folded_turns.push((*start_turn, *end_turn, summary_text.clone()));
+            }
+            MutationOp::PruneOrStub {
+                target_call_id: Some(cid),
+                stub_text,
+                ..
+            } if !cid.is_empty() => {
+                compacted_by_call_id.insert(cid.clone(), stub_text.clone());
+            }
+            _ => {}
         }
     }
 
@@ -982,6 +1139,11 @@ pub fn sync_mutations_to_transcript_on_disk(
                 compacted_by_call_id.insert(call_id.clone(), content.clone());
             }
         }
+    }
+
+    let bak_path = format!("{}.bak", transcript_path.display());
+    if !std::path::Path::new(&bak_path).exists() {
+        let _ = fs::copy(&transcript_path, &bak_path);
     }
 
     let raw_text = fs::read_to_string(&transcript_path)?;
@@ -1049,11 +1211,40 @@ pub fn sync_mutations_to_transcript_on_disk(
 
         // Check if this step matches a compacted tool result or oversized output
         if !modified {
-            if let Some(stub) = compacted_by_call_id.get(&synthetic_res_id)
-                && let Some(obj) = val.as_object_mut()
-            {
-                obj.insert("content".to_string(), Value::String(stub.clone()));
-                modified = true;
+            let actual_call_id = val
+                .get("toolCallId")
+                .or_else(|| val.get("tool_call_id"))
+                .or_else(|| val.get("call_id"))
+                .or_else(|| {
+                    val.get("message")
+                        .and_then(|m| m.get("toolCallId").or_else(|| m.get("tool_call_id")))
+                })
+                .or_else(|| val.get("item").and_then(|i| i.get("call_id")))
+                .and_then(|v| v.as_str());
+
+            let matched_stub = actual_call_id
+                .and_then(|cid| compacted_by_call_id.get(cid))
+                .or_else(|| compacted_by_call_id.get(&synthetic_res_id));
+
+            if let Some(stub) = matched_stub {
+                if let Some(msg) = val.get_mut("message").and_then(|m| m.as_object_mut()) {
+                    if let Some(content_arr) = msg.get_mut("content").and_then(|c| c.as_array_mut()) {
+                        if let Some(first) = content_arr.first_mut().and_then(|f| f.as_object_mut()) {
+                            first.insert("text".to_string(), Value::String(stub.clone()));
+                        } else {
+                            msg.insert("content".to_string(), json!([{"type": "text", "text": stub}]));
+                        }
+                    } else {
+                        msg.insert("content".to_string(), Value::String(stub.clone()));
+                    }
+                    modified = true;
+                } else if let Some(item) = val.get_mut("item").and_then(|i| i.as_object_mut()) {
+                    item.insert("output".to_string(), Value::String(stub.clone()));
+                    modified = true;
+                } else if let Some(obj) = val.as_object_mut() {
+                    obj.insert("content".to_string(), Value::String(stub.clone()));
+                    modified = true;
+                }
             } else if step_type != "USER_INPUT"
                 && step_type != "PLANNER_RESPONSE"
                 && !committed_rules.is_empty()
@@ -1082,7 +1273,9 @@ pub fn sync_mutations_to_transcript_on_disk(
     }
 
     let out_content = format!("{}\n", new_lines.join("\n"));
-    fs::write(&transcript_path, &out_content)?;
+    let tmp_path = format!("{}.cw_tmp_{}", transcript_path.display(), std::process::id());
+    fs::write(&tmp_path, &out_content)?;
+    fs::rename(&tmp_path, &transcript_path)?;
 
     // Also sync `transcript_full.jsonl` if this is an Antigravity session
     let full_path = transcript_path.with_file_name("transcript_full.jsonl");
@@ -1091,7 +1284,10 @@ pub fn sync_mutations_to_transcript_on_disk(
         if !full_bak.exists() {
             let _ = fs::copy(&full_path, &full_bak);
         }
-        let _ = fs::write(&full_path, &out_content);
+        let full_tmp = format!("{}.cw_tmp_{}", full_path.display(), std::process::id());
+        if fs::write(&full_tmp, &out_content).is_ok() {
+            let _ = fs::rename(&full_tmp, &full_path);
+        }
     }
 
     let bytes_after = fs::metadata(&transcript_path).map(|m| m.len()).unwrap_or(0);
@@ -1170,7 +1366,7 @@ pub fn spawn_transcript_watcher(store: CwStore, _default_workspace: Option<Strin
                 (&opencode_dir, HarnessKind::OpenCode),
                 (&pi_dir, HarnessKind::Pi),
                 (&pi_agent_dir, HarnessKind::Pi),
-                (&omp_dir, HarnessKind::Pi),
+                (&omp_dir, HarnessKind::Omp),
             ] {
                 if dir.exists() {
                     scan_jsonl_dir_recursively(dir, harness, &store, &mut file_state, 0);
@@ -1593,6 +1789,81 @@ mod tests {
         assert!(report.steps_compacted >= 1);
         let updated = fs::read_to_string(&tmp_transcript).unwrap();
         assert!(updated.contains("[cw:folded_turns 1..1] Folded Turn 1"));
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_import_omp_transcript() {
+        let store = CwStore::open_in_memory().unwrap();
+        let tmp_dir = std::env::temp_dir().join(format!("cw_test_omp_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp_dir);
+        let transcript = tmp_dir.join("2026-10-22T19-57-33-217Z_01a16530-b4a1-71cb-b159-96200fb07f14.jsonl");
+        let content = r#"{"type":"title","v":1,"title":"Determine Chrome Install Method","source":"auto"}
+{"type":"session","version":3,"id":"01a16530-b4a1-71cb-b159-96200fb07f14","cwd":"/home/gionag/Development/contextWatcher"}
+{"type":"message","message":{"role":"user","content":[{"type":"text","text":"How did I install chrome?"}]}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_123","name":"bash","arguments":{"command":"which google-chrome"}}],"model":"flint","provider":"machinist-flint","usage":{"input":84,"output":120,"cacheRead":9000},"contextSnapshot":{"promptTokens":9084}}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"call_123","toolName":"bash","content":[{"type":"text","text":"/usr/bin/google-chrome"}]}}
+"#;
+        fs::write(&transcript, content).unwrap();
+
+        let sess_id = import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
+        assert!(sess_id.starts_with("omp_01a16530-b4a"));
+        let sess = store.get_session(&sess_id).unwrap().unwrap();
+        assert_eq!(sess.harness, HarnessKind::Omp);
+        assert_eq!(sess.title.as_deref(), Some("Determine Chrome Install Method"));
+        assert_eq!(sess.workspace_root.as_deref(), Some("/home/gionag/Development/contextWatcher"));
+
+        let turn = store.get_latest_turn(&sess_id).unwrap().unwrap();
+        assert_eq!(turn.token_usage.input_tokens, 9084);
+        assert_eq!(turn.token_usage.cached_tokens, 9000);
+
+        // Verify tool call and tool result nodes are properly extracted
+        let has_tool_call = turn.nodes.iter().any(|n| matches!(&n.kind, NodeKind::ToolCall { call_id, .. } if call_id == "call_123"));
+        let has_tool_res = turn.nodes.iter().any(|n| matches!(&n.kind, NodeKind::ToolResult { call_id, .. } if call_id == "call_123"));
+        assert!(has_tool_call, "ToolCall node should exist in IR");
+        assert!(has_tool_res, "ToolResult node should exist in IR");
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_auto_heal_low_health_transcript() {
+        let store = CwStore::open_in_memory().unwrap();
+        // Configure AutoPilot with auto_heal_low_health = true, min_health_score = 85
+        let mut ap_cfg = store.get_autopilot_config().unwrap();
+        ap_cfg.enabled = true;
+        ap_cfg.auto_heal_low_health = true;
+        ap_cfg.min_health_score = 85;
+        ap_cfg.heal_strategy = "min".to_string();
+        ap_cfg.auto_sync_to_disk = true;
+        store.set_autopilot_config(&ap_cfg).unwrap();
+
+        let tmp_dir = std::env::temp_dir().join(format!("cw_test_heal_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp_dir);
+        let transcript = tmp_dir.join("2026-10-23T10-00-00-000Z_heal_session_test.jsonl");
+
+        // Create a transcript with duplicate file read of the same file
+        let content = r#"{"type":"session","version":3,"id":"heal_session_test","cwd":"/home/gionag/Development/contextWatcher"}
+{"type":"message","message":{"role":"user","content":[{"type":"text","text":"Read Cargo.toml"}]}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"read_file","arguments":{"path":"Cargo.toml"}}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"c1","toolName":"read_file","content":[{"type":"text","text":"[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n"}]}}
+{"type":"message","message":{"role":"user","content":[{"type":"text","text":"Read Cargo.toml again"}]}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"c2","name":"read_file","arguments":{"path":"Cargo.toml"}}]}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"c2","toolName":"read_file","content":[{"type":"text","text":"[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n"}]}}
+"#;
+        fs::write(&transcript, content).unwrap();
+
+        let sess_id = import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
+        let turn = store.get_latest_turn(&sess_id).unwrap().unwrap();
+        assert!(turn.health_score > 0);
+        let mutations = store.list_mutations(&sess_id).unwrap();
+        assert!(!mutations.is_empty(), "Auto-heal should automatically generate committed mutations for duplicate file reads");
+        assert!(mutations.iter().any(|m| m.id.starts_with("ap_heal_")));
+
+        // Check that the transcript file on disk was automatically synced
+        let updated_content = fs::read_to_string(&transcript).unwrap();
+        assert!(updated_content.contains("[cw:shadow_deduped"), "Transcript on disk should contain shadow deduped content");
+
         let _ = fs::remove_dir_all(&tmp_dir);
     }
 }

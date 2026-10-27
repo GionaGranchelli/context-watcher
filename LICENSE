@@ -1,6 +1,15 @@
-MIT License
+contextWatcher is dual-licensed under either:
 
-Copyright (c) 2026 contextWatcher contributors
+* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
+* MIT license ([LICENSE-MIT](LICENSE-MIT) or https://opensource.org/licenses/MIT)
+
+at your option.
+
+---
+
+### MIT License
+
+Copyright (c) 2026 Giona Granchelli
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -1,123 +1,119 @@
 # ROADMAP.md — `contextWatcher` Product & Engineering Roadmap
 
-This roadmap structures the development of `contextWatcher` (`cw`) so that **every phase delivers a working, immediately useful tool**, building progressively from passive X-Ray inspection to full active context manipulation and multi-surface IDE/harness integration.
+> **Core Philosophy:** *"The best tool is the one you don't have to call or see. It is always on, does everything automatically, and only drops a message every now and then: 'We saved you 12,966 tokens, KV Cache 98.2% preserved, TTFT: 176s -> 1.6s (108x faster)'."*
 
 ---
 
-## High-Level Milestone Flow
+## 🗺️ Architectural Stack: The 4 Evolutionary Horizons
+
+The future horizons of `contextWatcher` form a **layered, mutually reinforcing stack**:
 
 ```mermaid
-flowchart LR
-    P0["Phase 0: Foundation & Core IR"] --> P1["Phase 1: Intercepting Proxy & Transcript Watchers"]
-    P1 --> P2["Phase 2: Radix Tree, KV Cache X-Ray & Health Linter"]
-    P2 --> P3["Phase 3: Svelte 5 Web UI & Ratatui TUI"]
-    P3 --> P4["Phase 4: Surgical Mutation & Overlay Engine"]
-    P4 --> P5["Phase 5: Time-Travel Replay & Context Firewall"]
-    P5 --> P6["Phase 6: Harness Plugins (AGY/Codex/Pi) & IntelliJ Plugin"]
+flowchart TD
+    subgraph Horizon4["Horizon 4: Ambient HUD & Visual Context ECG (Done)"]
+        HUD["IDE Status Bar / TUI Live Widget"]
+        AttentionHeatmap["Lost-in-the-Middle Recency Heatmap"]
+    end
+
+    subgraph Horizon3["Horizon 3: Engine-Level PagedAttention Splicing (Done)"]
+        EngineConnector["llama.cpp / vLLM / SGLang Slot Bridge"]
+        ZeroRecompute["Direct Physical Page Unmapping (0ms Invalidation)"]
+    end
+
+    subgraph Horizon2["Horizon 2: Multi-Agent Swarm Radix Router (Done)"]
+        SwarmPrefix["Cross-Session Root Node Unification"]
+        SharedVRAM["5 Concurrent Subagents in 1x Prefix VRAM"]
+    end
+
+    subgraph Horizon1["Horizon 1: Always-On Zero-Touch Automation & Ambient Pulse (Done)"]
+        AlwaysOn["Silent Background Daemon & Auto-Pilot Engine"]
+        AmbientPulse["Ambient Savings Pulse (Tokens, TTFT, KV%, $)"]
+    end
+
+    Horizon4 --> Horizon3
+    Horizon3 --> Horizon2
+    Horizon2 --> Horizon1
 ```
 
 ---
 
-## Phase 0: Workspace Foundation & Canonical Context IR
-**Goal:** Establish the Rust Cargo workspace, SQLite storage layer, and the lossless Canonical Context Intermediate Representation (IR).
+## 📍 Horizon 1: Always-On Zero-Touch Automation & Ambient Pulse *(Done)*
 
-* **Deliverables:**
-  * Cargo workspace (`cw-core`, `cw-proxy`, `cw-store`, `cw-harnesses`, `cw-mcp`, `cw-tui`, `cw-cli`).
-  * Canonical Context Graph data structures (`Session`, `ContextTurn`, `ContextNode`, `NodeKind`, `NodeFingerprint`).
-  * Lossless raw JSON envelope mapping (so we can parse Anthropic Messages, OpenAI Chat/Responses, and Gemini GenerateContent payloads and reconstruct them without losing unknown fields or signatures).
-  * Tokenization engine (`tiktoken-rs` + heuristic/exact token counters per provider).
-  * SQLite schema for sessions, turns, nodes, KV metrics, and mutation overlays.
+**Goal:** Turn `contextWatcher` into an invisible, autonomous memory guardian. The developer never runs `/cw optimize` or remembers slash commands. `cw` silently intercepts agent traffic, prunes dead monologues and command bloat, and drops a periodic ambient notification:
 
----
+> `⚡ [cw] We saved you 12,966 tokens | KV Cache: 98.2% preserved | TTFT: 176s -> 1.6s (108x faster) | $0.18 saved`
 
-## Phase 1: Multi-Provider Intercepting Proxy & Transcript Adapters
-**Goal:** Capture 100% of live LLM harness traffic AND existing local disk sessions with zero friction.
-
-* **Deliverables:**
-  * **HTTP/SSE Proxy (`cw-proxy`):**
-    * Endpoints for `/anthropic/v1/messages`, `/openai/v1/chat/completions`, `/openai/v1/responses`, and `/gemini/v1beta/*`.
-    * Full SSE streaming support with $<2\text{ms}$ latency overhead, capturing thinking blocks, tool calls, and token usage/cache telemetry.
-  * **Disk Transcript Watchers (`cw-harnesses`):**
-    * **Antigravity (AGY):** Real-time file watcher (`notify`) for `<appDataDir>/brain/<conversation-id>/.system_generated/logs/transcript.jsonl` & `transcript_full.jsonl`.
-    * **Codex CLI:** Session log & rollout parser.
-    * **Pi / OpenCode / Aider:** Session history and chat log adapters.
-    * **Claude Code:** `~/.claude/projects/**/*.jsonl` watcher.
-  * **CLI Wrapper (`cw wrap <cmd>`):**
-    * Run `cw wrap agy`, `cw wrap codex`, or `cw wrap pi` to automatically inject proxy environment variables (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, etc.) and attach to the session.
+### Delivered Capabilities:
+1. **Always-On Transparent Daemon:** Runs as a lightweight local service (`cw daemon` / `cw serve`) with zero CPU overhead when idle.
+2. **Autonomous Proactive Health Guardian:**
+   - Detects runaway monologue blocks (>10k thinking tokens).
+   - Detects stale duplicate file reads (>2 copies of the same file).
+   - Detects massive terminal command stdout (>100 tokens at tail).
+   - Autonomously commits optimal non-breaking overlays without interrupting the user.
+3. **Ambient Savings Reporter:**
+   - Calculates exact cumulative tokens saved, KV cache hit ratio, Time-to-First-Token acceleration, and dollar savings.
+   - Drops periodic, non-intrusive progress updates via terminal banner, desktop notification, or harness post-tool output.
+4. **Zero-Config Universal Wrappers:**
+   - Automatically wraps `claude`, `omp`, `codex`, and `agy` commands with proxy variables.
 
 ---
 
-## Phase 2: Radix Tree, KV Cache X-Ray & Context Health Linter
-**Goal:** Turn raw turns into a structural graph, reconstruct KV cache state, and automatically diagnose context rot.
+## 📍 Horizon 2: Multi-Agent Swarm Radix Router *(Done)*
 
-* **Deliverables:**
-  * **Radix Prefix Tree Builder:**
-    * Aligns token prefixes across consecutive turns ($T_{n-1} \to T_n$) and across conversation forks.
-  * **KV Cache Boundary Analyzer:**
-    * Classifies every node and token range into:
-      * `CachedHit` (Green)
-      * `NewlyCached` (Yellow)
-      * `CacheInvalidated` (Red — with exact diff showing *which* mutated block/tool/timestamp broke the prefix).
-    * Visualizes explicit `cache_control` breakpoints and warns when misplaced.
-  * **Context Health & Linting Engine:**
-    * **Stale File Detector:** Cross-references `read_file` nodes against later `edit_file`/`write_file` tool calls and live filesystem `mtime`/hash.
-    * **Duplicate Detector:** Finds repeated file reads and identical bash outputs.
-    * **Tool Bloat Analyzer:** Calculates token percentage consumed by unused MCP tool schemas and skills.
-    * **Attention Dilution ("Lost in the Middle") Estimator:** Scores critical instructions and pinned rules by position weight.
+**Goal:** Coordinate swarms of multiple AI agents (e.g. Lead Architect + 4 Subagents) so they share a single system prompt and repository context in GPU memory.
+
+### Delivered Capabilities:
+1. **Cross-Agent Prefix Unification:**
+   - Detects common system rules, repository maps, and skill definitions across different agent threads (`analyze_swarm_prefix_sharing`).
+   - Standardizes the root nodes of their Radix trees to match byte-for-byte.
+2. **1x VRAM Memory Multiplexing:**
+   - On local engines (`llama.cpp` / vLLM), the shared system prefix is cached once in VRAM.
+   - Multiple subagents branch off as lightweight leaf nodes, allowing multi-agent swarms to run on consumer GPUs without out-of-memory crashes.
+3. **CLI & API Inspection:**
+   - `cw swarm [--project <name>] [--model <name>] [--min-members <N>] [--json]` to inspect active swarms, shared tokens, and VRAM saved.
+   - REST API endpoints `/api/v1/swarms` and `/api/v1/swarms/:group_id/graph`.
 
 ---
 
-## Phase 3: Web UI Dashboard (Svelte 5) & Terminal UI (Ratatui)
-**Goal:** Give developers real-time visual X-Ray into their harness context from browser or terminal.
+## 📍 Horizon 3: Hardware & Inference Engine Splicing (PagedAttention Splicing) *(Done)*
 
-* **Deliverables:**
-  * **Svelte 5 + XYFlow + D3 Web UI (`web/`):**
-    * **Context Graph / Radix Tree View:** Interactive node-and-edge graph of System Prompts, Rules, Skills, MCP Schemas, Turns, Tool Calls, and Branches, color-coded by KV Cache status and lint warnings.
-    * **Token Treemap & Flamegraph:** Proportional breakdown of the context window (e.g., "MCP Tools: 24%, File Reads: 41%, Bash Logs: 19%").
-    * **Node Inspector & Diff Drawer:** Side-by-side raw JSON vs. rendered markdown, token counts, and cache invalidation diffs.
-  * **Ratatui TUI (`cw tui`) & CLI (`cw status`, `cw inspect`):**
-    * Instant keyboard-driven terminal dashboard for developers working in tmux/SSH.
+**Goal:** Enable local inference engines to drop prefix tokens with **literal 0ms prefill re-computation**.
 
----
-
-## Phase 4: Surgical Mutation & Deterministic Overlay Engine
-**Goal:** Allow developers (and agents) to actively edit, prune, fold, deduplicate, pin, and gate context to improve model quality and speed.
-
-* **Deliverables:**
-  * **Deterministic Mutation Ledger (`cw-core::mutation`):**
-    * Fingerprints incoming messages (`NodeFingerprint`) and applies active mutations as an overlay on every subsequent proxy request.
-    * Bi-directional transcript sync option for harnesses that support disk reload.
-  * **Core Context Operations:**
-    1. **Prune / Stub Node:** Replace a massive tool output with a compact stub.
-    2. **Subtree Folding:** Collapse a multi-turn failed debugging branch into a concise summary node (manual or LLM-assisted).
-    3. **Shadow Deduplication:** One-click (or automatic rule) replacement of older duplicate/stale `read_file` nodes with `[Superseded by Turn #N]`.
-    4. **Dynamic Tool & Rule Gating:** Live checkboxes to strip disabled MCP tool definitions or skills from outgoing requests.
-    5. **Context Pinning (Attention Boosting):** Inject `<pinned_context>` reminders at the high-attention tail of the prompt without breaking the prefix KV cache.
-    6. **Cache-Safe Batch Mode:** Stage mutations in a "Draft Queue" and commit them only when ready (or when the cache threshold triggers) so you don't break the KV cache on every single turn.
+### Delivered Capabilities:
+1. **Engine Slot Bridge & PagedAttention Block Mapper:**
+   - [`slot_bridge.rs`](file:///home/gionag/Development/contextWatcher/crates/cw-core/src/slot_bridge.rs) models PagedAttention block mapping (16 or 64 tokens per page) and deterministic slot affinity.
+2. **Physical Page Unmapping & Splicing Calculations:**
+   - [`plan_slot_splicing`](file:///home/gionag/Development/contextWatcher/crates/cw-core/src/slot_bridge.rs) calculates exact physical pages freed, boundary alignment padding, and avoided prefill latency when pruning intermediate nodes.
+3. **CLI & REST API Integration:**
+   - `cw slot` CLI command for live engine slot inspection and splicing simulation.
+   - REST endpoints `/api/v1/engine/slots` and `/api/v1/engine/slots/:slot_id/splice`.
 
 ---
 
-## Phase 5: Context Firewall (Breakpoints) & Time-Travel A/B Replay
-**Goal:** Prevent context poisoning *before* it reaches the model, and scientifically evaluate context changes via branching.
+## 📍 Horizon 4: Ambient HUD & Visual Context ECG *(Done)*
 
-* **Deliverables:**
-  * **Context Firewall (Interactive Breakpoints):**
-    * Configurable rules (e.g., `tool_output.tokens > 4000`, `cache_invalidated == true`, or manual pause).
-    * Holds the HTTP proxy request open, alerts the user in Web UI / TUI / IntelliJ, allows live editing/truncation, and resumes forwarding.
-  * **Time-Travel Forking & A/B Replay Studio:**
-    * Select any historical turn $\rightarrow$ Fork $\rightarrow$ Apply mutations (e.g., fold turns 4–8, disable 15 tools) $\rightarrow$ Replay request to provider $\rightarrow$ Compare output quality, latency, and token cost side-by-side.
+**Goal:** Provide tactile, real-time observability into what an AI agent is reading.
+
+### Delivered Capabilities:
+1. **IDE & Terminal Statusline Widget:**
+   - Ultra-fast (`<1ms`) status-bar indicator via `cw hud`: `🟢 28k [98% KV] (-13k) H:89`.
+   - Native integration with Starship prompt, tmux, zellij, and IDE status bars.
+2. **Lost-in-the-Middle Attention Heatmap & ECG:**
+   - Empirical U-curve attention salience calculation (`evaluate_attention_ecg`) across Primacy (0-20%), Attention Trough (20-80%), and Recency (80-100%).
+   - Automatic risk flagging when critical system rules or tool schemas sink into the middle 40-60% dead zone.
+3. **REST API & CLI:**
+   - `cw hud [--compact] [--ecg] [--json]` CLI command.
+   - REST endpoints `/api/v1/hud`, `/api/v1/sessions/:id/hud`, and `/api/v1/sessions/:id/ecg`.
 
 ---
 
-## Phase 6: Harness Plugins (AGY, Codex, Pi) & IntelliJ IDE Plugin
-**Goal:** Bring `contextWatcher` directly inside the agent's own toolbelt and into the developer's code editor.
+## 🟢 Completed Milestones (v0.1 Foundation)
 
-* **Deliverables:**
-  * **Built-in MCP Server (`cw mcp`):**
-    * Exposes tools (`cw_context_status`, `cw_fold_turns`, `cw_prune_output`, `cw_pin_fact`, `cw_evict_stale_files`) so the agent itself can self-clean its context!
-  * **Harness Native Plugins (`plugins/`):**
-    * **Antigravity (AGY):** Native skill (`skills/context-watcher/SKILL.md`) + MCP registration + transcript sync.
-    * **Codex CLI & Pi / OpenCode / Claude Code:** Wrapper scripts, hooks, and `/cw` slash commands.
-  * **IntelliJ Platform Plugin (`ide/cw-intellij`):**
-    * **Editor Gutter & Tab Badges:** Shows whether the currently open file is in the LLM's context (`Fresh 🟢`, `Stale 🟠 - modified 2x since Turn 6`, or `Not in Context ⚪`).
-    * **IDE Tool Window:** Embedded Context Tree, KV Cache meter, Firewall alerts, and 1-click "Evict Stale Read" / "Pin Selection to Context" editor actions.
+* **Phase 0: Workspace Foundation & Canonical Context IR** — Complete IR normalization, BLAKE3 fingerprinting, SQLite storage.
+* **Phase 1: Multi-Provider Intercepting Proxy & Watchers** — Axum SSE streaming tap for Anthropic, OpenAI, Gemini; watchers for AGY, Codex, OMP, Claude.
+* **Phase 2: Radix Tree, KV Cache X-Ray & Context Linter** — Radix graph, KV boundary differ, stale file & loop linters.
+* **Phase 3: Svelte 5 Web UI & Ratatui TUI** — Real-time Web UI graph, Flamegraph, TUI dashboard.
+* **Phase 4: Surgical Mutation & Deterministic Overlay Engine** — `ShadowDedupe`, `PruneOrStub`, `FoldSubtree`, `GateToolsAndSkills`, `PinContext`.
+* **Phase 5: Time-Travel Replay & Context Firewall** — Breakpoints, A/B replay, fail-open validation gate.
+* **Phase 6: Multi-Harness Plugins & MCP Integration** — Antigravity skill, Codex wrapper, Pi/Claude hooks, built-in MCP server.
+* **Phase 7: Empirical Hardware Benchmarks** — 8k-128k context scaling and ROCm dual AMD Radeon Instinct gfx906 multi-turn proofs.

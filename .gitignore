@@ -1,12 +1,38 @@
+# Rust build artifacts
 /target
+**/*.rs.bk
+
+# Node & SvelteKit
 /web/node_modules
 /web/.svelte-kit
-/web/build
+/web/.env
+/web/.env.*
+!/web/.env.example
+
+# IntelliJ Plugin & JetBrains IDE
 /ide/cw-intellij/.gradle
 /ide/cw-intellij/build
 /ide/cw-intellij/.intellijPlatform
+.idea/
+*.iml
+
+# Local database & state
 *.db
 *.db-shm
 *.db-wal
 .cw/
+*.bak
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment & secrets
+.env
+.env.*
+!*.example
+
+# Operating System files
 .DS_Store
+Thumbs.db

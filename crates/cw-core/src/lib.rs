@@ -1,4 +1,5 @@
 pub mod autopilot;
+pub mod hud;
 pub mod ir;
 pub mod linter;
 pub mod local_llm;
@@ -6,6 +7,9 @@ pub mod mutation;
 pub mod normalizer;
 pub mod optimizer;
 pub mod radix;
+pub mod repository;
+pub mod slot_bridge;
+pub mod swarm;
 pub mod tokenizer;
 pub mod validator;
 
@@ -389,5 +393,112 @@ mod tests {
         strip_internal_cw_fields(&mut payload);
         assert!(payload["messages"][0].get("cw_timestamp").is_none());
         assert!(payload["messages"][0].get("cw_turn_seq").is_none());
+    }
+
+    #[test]
+    fn test_gemini_tool_gating_and_sorting() {
+        use crate::ir::{MutationOp, MutationRule, MutationStatus, ProviderKind};
+        use crate::mutation::apply_mutations_to_payload;
+        use serde_json::json;
+
+        let mut payload = json!({
+            "contents": [
+                { "role": "user", "parts": [{ "text": "Hello" }] }
+            ],
+            "tools": [
+                {
+                    "function_declarations": [
+                        { "name": "z_tool", "description": "tool z" },
+                        { "name": "a_tool", "description": "tool a" },
+                        { "name": "mcp_github_create_issue", "description": "gh" }
+                    ]
+                }
+            ]
+        });
+
+        // Test sorting
+        let sort_rule = MutationRule {
+            id: "sort_1".into(),
+            session_id: "s_gem".into(),
+            op: MutationOp::NormalizePrefix {
+                sort_tools_deterministically: true,
+                relocate_dynamic_system_metadata: false,
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: chrono::Utc::now(),
+        };
+        let rep1 = apply_mutations_to_payload(&mut payload, ProviderKind::Gemini, &[sort_rule], 1);
+        assert!(!rep1.applied_rule_ids.is_empty());
+        let decls = payload["tools"][0]["function_declarations"].as_array().unwrap();
+        assert_eq!(decls[0]["name"], "a_tool");
+        assert_eq!(decls[1]["name"], "mcp_github_create_issue");
+        assert_eq!(decls[2]["name"], "z_tool");
+
+        // Test gating
+        let gate_rule = MutationRule {
+            id: "gate_1".into(),
+            session_id: "s_gem".into(),
+            op: MutationOp::GateToolsAndSkills {
+                disabled_tools: vec!["a_tool".into()],
+                disabled_mcp_servers: vec!["github".into()],
+                disabled_skills: vec![],
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 10,
+            estimated_kv_break_tokens: 0,
+            created_at: chrono::Utc::now(),
+        };
+        let rep2 = apply_mutations_to_payload(&mut payload, ProviderKind::Gemini, &[gate_rule], 1);
+        assert!(!rep2.applied_rule_ids.is_empty());
+        let decls_after = payload["tools"][0]["function_declarations"].as_array().unwrap();
+        assert_eq!(decls_after.len(), 1);
+        assert_eq!(decls_after[0]["name"], "z_tool");
+    }
+
+    #[test]
+    fn test_ambient_savings_pulse_generation() {
+        use crate::autopilot::{generate_ambient_savings_pulse, should_emit_savings_pulse};
+
+        assert!(should_emit_savings_pulse(5000, 0, 1000));
+        assert!(should_emit_savings_pulse(6500, 5000, 1000));
+        assert!(!should_emit_savings_pulse(5500, 5000, 1000));
+
+        let payload = json!({
+            "model": "claude-sonnet-4",
+            "messages": [
+                { "role": "user", "content": "Hello world" }
+            ]
+        });
+        let (mut turn, _) = analyze_turn_from_payload(
+            "t1".to_string(),
+            "s1".to_string(),
+            None,
+            1,
+            &payload,
+            ProviderKind::Anthropic,
+            None,
+            None,
+            None,
+        ).unwrap();
+
+        turn.token_usage.input_tokens = 14488;
+        turn.token_usage.saved_by_mutations = 12966;
+        turn.kv_cache_report.hit_ratio = 98.2;
+        turn.kv_cache_report.hit_tokens = 14227;
+
+        let pulse = generate_ambient_savings_pulse(
+            "s1",
+            &turn,
+            "claude-sonnet-4",
+            ProviderKind::Anthropic,
+            12966,
+        );
+
+        assert_eq!(pulse.tokens_saved_this_pulse, 12966);
+        assert_eq!(pulse.session_id, "s1");
+        assert!(pulse.formatted_message.contains("⚡ [cw] We saved you 12966 tokens"));
+        assert!(pulse.formatted_message.contains("KV Cache 98.2% preserved"));
     }
 }

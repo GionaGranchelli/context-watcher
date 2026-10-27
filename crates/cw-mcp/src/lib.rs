@@ -41,20 +41,26 @@ pub async fn handle_mcp_request(
 ) -> Option<Value> {
     let req_id = id?; // Notifications without `id` do not expect a response
 
-    let result = match method {
-        "initialize" => json!({
-            "protocolVersion": "2024-11-05",
-            "capabilities": {
-                "tools": {}
-            },
-            "serverInfo": {
-                "name": "contextWatcher-mcp",
-                "version": "0.1.0"
-            }
-        }),
-        "tools/list" => json!({
-            "tools": mcp_tool_definitions()
-        }),
+    let (result, error) = match method {
+        "initialize" => (
+            Some(json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "contextWatcher-mcp",
+                    "version": "0.1.0"
+                }
+            })),
+            None,
+        ),
+        "tools/list" => (
+            Some(json!({
+                "tools": mcp_tool_definitions()
+            })),
+            None,
+        ),
         "tools/call" => {
             let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let args = params
@@ -62,24 +68,44 @@ pub async fn handle_mcp_request(
                 .cloned()
                 .unwrap_or(Value::Object(Default::default()));
             match execute_mcp_tool(client, daemon_api_url, tool_name, &args).await {
-                Ok(text) => json!({
-                    "content": [{ "type": "text", "text": text }],
-                    "isError": false
-                }),
-                Err(e) => json!({
-                    "content": [{ "type": "text", "text": format!("Error: {e}") }],
-                    "isError": true
-                }),
+                Ok(text) => (
+                    Some(json!({
+                        "content": [{ "type": "text", "text": text }],
+                        "isError": false
+                    })),
+                    None,
+                ),
+                Err(e) => (
+                    Some(json!({
+                        "content": [{ "type": "text", "text": format!("Error: {e}") }],
+                        "isError": true
+                    })),
+                    None,
+                ),
             }
         }
-        _ => json!({}),
+        _ => (
+            None,
+            Some(json!({
+                "code": -32601,
+                "message": format!("Method not found: {method}")
+            })),
+        ),
     };
 
-    Some(json!({
-        "jsonrpc": "2.0",
-        "id": req_id,
-        "result": result
-    }))
+    if let Some(err) = error {
+        Some(json!({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "error": err
+        }))
+    } else {
+        Some(json!({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": result.unwrap_or(json!({}))
+        }))
+    }
 }
 
 pub fn mcp_tool_definitions() -> Value {
@@ -366,7 +392,7 @@ async fn execute_mcp_tool(
                 Ok(serde_json::to_string_pretty(&opt_resp)?)
             }
         }
-        other => Ok(format!("Unknown tool: {other}")),
+        other => anyhow::bail!("Unknown tool: {other}"),
     }
 }
 
@@ -423,5 +449,38 @@ mod tests {
         assert_eq!(tools.len(), 8);
         assert!(tools.iter().any(|t| t["name"] == "cw_shadow_dedupe"));
         assert!(tools.iter().any(|t| t["name"] == "cw_evict_stale_reads"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_unknown_tool_and_unsupported_method() {
+        let client = reqwest::Client::new();
+        let resp = handle_mcp_request(
+            &client,
+            "http://127.0.0.1:4400",
+            Some(json!(42)),
+            "unknown_method",
+            &json!({}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(resp["error"]["code"], -32601);
+
+        let call_unknown = handle_mcp_request(
+            &client,
+            "http://127.0.0.1:4400",
+            Some(json!(43)),
+            "tools/call",
+            &json!({
+                "name": "non_existent_tool",
+                "arguments": {}
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(call_unknown["result"]["isError"], true);
+        assert!(call_unknown["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Unknown tool"));
     }
 }

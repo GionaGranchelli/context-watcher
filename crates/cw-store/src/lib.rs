@@ -1,14 +1,14 @@
 use chrono::{DateTime, Utc};
 use cw_core::{
-    autopilot::AutoPilotConfig,
+    autopilot::{AmbientSavingsPulse, AutoPilotConfig},
     ir::{
         ContextTurn, FileContextState, FirewallAction, FirewallRule, FirewallTrigger, HarnessKind,
         MutationRule, MutationStatus, ProviderKind, Session,
     },
 };
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -120,6 +120,21 @@ impl CwStore {
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS ambient_pulses (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                turn_seq INTEGER NOT NULL,
+                tokens_saved INTEGER NOT NULL,
+                cumulative_saved INTEGER NOT NULL,
+                speedup_factor REAL NOT NULL,
+                cost_saved REAL NOT NULL,
+                pulse_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_pulses_session ON ambient_pulses(session_id);
+
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value_json TEXT NOT NULL
@@ -136,6 +151,18 @@ impl CwStore {
                 FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );",
         )?;
+
+        // Ensure any sessions originating from ~/.omp/ are properly categorized as OMP
+        let _ = conn.execute(
+            "UPDATE sessions
+             SET harness = 'omp'
+             WHERE harness = 'pi'
+               AND id IN (
+                   SELECT session_id FROM session_sources WHERE transcript_path LIKE '%/.omp/%'
+               )",
+            [],
+        );
+
         Ok(())
     }
 
@@ -325,7 +352,7 @@ impl CwStore {
         let hash_opt: Option<String> = {
             let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
             conn.query_row(
-                "SELECT COALESCE(mutated_request_hash, raw_request_hash) FROM turns WHERE id = ?1",
+                "SELECT COALESCE(raw_request_hash, mutated_request_hash) FROM turns WHERE id = ?1",
                 params![turn_id],
                 |row| row.get(0),
             )
@@ -334,6 +361,21 @@ impl CwStore {
         };
         match hash_opt {
             Some(h) => self.get_blob(&h),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_turn(&self, turn_id: &str) -> Result<Option<ContextTurn>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT turn_json FROM turns WHERE id = ?1",
+                params![turn_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match raw {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
             None => Ok(None),
         }
     }
@@ -378,6 +420,24 @@ impl CwStore {
         let count = conn.execute(
             "DELETE FROM mutations WHERE id = ?1",
             params![mutation_id],
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn update_mutation_status(
+        &self,
+        mutation_id: &str,
+        status: MutationStatus,
+    ) -> Result<bool, StoreError> {
+        let status_str = match status {
+            MutationStatus::Draft => "draft",
+            MutationStatus::Committed => "committed",
+            MutationStatus::Disabled => "disabled",
+        };
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let count = conn.execute(
+            "UPDATE mutations SET status = ?1 WHERE id = ?2",
+            params![status_str, mutation_id],
         )?;
         Ok(count > 0)
     }
@@ -487,6 +547,74 @@ impl CwStore {
         Ok(row.map(|(p, off)| (p, off.max(0) as u64)))
     }
 
+    pub fn list_session_sources(&self) -> Result<HashMap<String, String>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut stmt = conn.prepare("SELECT session_id, transcript_path FROM session_sources")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let mut map = HashMap::new();
+        for r in rows.flatten() {
+            map.insert(r.0, r.1);
+        }
+        Ok(map)
+    }
+
+    pub fn record_ambient_pulse(&self, pulse: &AmbientSavingsPulse) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let id = format!("{}_{}", pulse.session_id, pulse.turn_seq);
+        let pulse_json = serde_json::to_string(pulse)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO ambient_pulses (id, session_id, turn_seq, tokens_saved, cumulative_saved, speedup_factor, cost_saved, pulse_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                pulse.session_id,
+                pulse.turn_seq,
+                pulse.tokens_saved_this_pulse as i64,
+                pulse.cumulative_tokens_saved as i64,
+                pulse.speedup_factor as f64,
+                pulse.estimated_cost_saved_usd,
+                pulse_json,
+                pulse.timestamp.to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_latest_pulse_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<AmbientSavingsPulse>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let raw: Option<String> = conn
+            .query_row(
+                "SELECT pulse_json FROM ambient_pulses WHERE session_id = ?1 ORDER BY turn_seq DESC, created_at DESC LIMIT 1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match raw {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn list_recent_ambient_pulses(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<AmbientSavingsPulse>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut stmt = conn.prepare(
+            "SELECT pulse_json FROM ambient_pulses ORDER BY created_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| row.get::<_, String>(0))?;
+        let mut out = Vec::new();
+        for r in rows {
+            let s = r?;
+            out.push(serde_json::from_str(&s)?);
+        }
+        Ok(out)
+    }
+
     pub fn get_autopilot_config(&self) -> Result<AutoPilotConfig, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         let raw: Option<String> = conn
@@ -516,7 +644,7 @@ impl CwStore {
         &self,
         record: &MutationEffectivenessRecord,
     ) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         conn.execute(
             "INSERT OR REPLACE INTO mutation_effectiveness (
                 mutation_id, session_id, turn_id, tokens_saved, kv_cache_hit_rate, ttft_ms, created_at
@@ -538,7 +666,7 @@ impl CwStore {
         &self,
         session_id: Option<&str>,
     ) -> Result<Vec<MutationEffectivenessRecord>, StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         let mut res = Vec::new();
         if let Some(sid) = session_id {
             let mut stmt = conn.prepare(
@@ -581,15 +709,104 @@ impl CwStore {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MutationEffectivenessRecord {
-    pub mutation_id: String,
-    pub session_id: String,
-    pub turn_id: String,
-    pub tokens_saved: u32,
-    pub kv_cache_hit_rate: f64,
-    pub ttft_ms: Option<u64>,
-    pub created_at: DateTime<Utc>,
+pub use cw_core::ir::MutationEffectivenessRecord;
+use cw_core::repository::{ContextRepository, MutationRepository, RepositoryError};
+
+impl From<StoreError> for RepositoryError {
+    fn from(e: StoreError) -> Self {
+        RepositoryError::Storage(e.to_string())
+    }
+}
+
+impl ContextRepository for CwStore {
+    fn upsert_session(&self, session: &Session) -> Result<(), RepositoryError> {
+        self.upsert_session(session).map_err(Into::into)
+    }
+
+    fn get_session(&self, session_id: &str) -> Result<Option<Session>, RepositoryError> {
+        self.get_session(session_id).map_err(Into::into)
+    }
+
+    fn list_sessions(&self) -> Result<Vec<Session>, RepositoryError> {
+        self.list_sessions().map_err(Into::into)
+    }
+
+    fn save_turn(
+        &self,
+        turn: &ContextTurn,
+        raw_payload: Option<&Value>,
+        mutated_payload: Option<&Value>,
+        raw_response: Option<&Value>,
+    ) -> Result<(), RepositoryError> {
+        self.save_turn(turn, raw_payload, mutated_payload, raw_response)
+            .map_err(Into::into)
+    }
+
+    fn get_latest_turn(&self, session_id: &str) -> Result<Option<ContextTurn>, RepositoryError> {
+        self.get_latest_turn(session_id).map_err(Into::into)
+    }
+
+    fn get_turn(&self, turn_id: &str) -> Result<Option<ContextTurn>, RepositoryError> {
+        self.get_turn(turn_id).map_err(Into::into)
+    }
+
+    fn list_turns(&self, session_id: &str) -> Result<Vec<ContextTurn>, RepositoryError> {
+        self.list_turns(session_id).map_err(Into::into)
+    }
+
+    fn put_blob(&self, content: &Value) -> Result<String, RepositoryError> {
+        self.put_blob(content).map_err(Into::into)
+    }
+
+    fn get_blob(&self, hash: &str) -> Result<Option<Value>, RepositoryError> {
+        self.get_blob(hash).map_err(Into::into)
+    }
+}
+
+impl MutationRepository for CwStore {
+    fn save_mutation(&self, rule: &MutationRule) -> Result<(), RepositoryError> {
+        self.save_mutation(rule).map_err(Into::into)
+    }
+
+    fn update_mutation_status(
+        &self,
+        mutation_id: &str,
+        status: MutationStatus,
+    ) -> Result<bool, RepositoryError> {
+        self.update_mutation_status(mutation_id, status)
+            .map_err(Into::into)
+    }
+
+    fn list_mutations(&self, session_id: &str) -> Result<Vec<MutationRule>, RepositoryError> {
+        self.list_mutations(session_id).map_err(Into::into)
+    }
+
+    fn delete_mutation(&self, mutation_id: &str) -> Result<bool, RepositoryError> {
+        self.delete_mutation(mutation_id).map_err(Into::into)
+    }
+
+    fn list_firewall_rules(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Vec<FirewallRule>, RepositoryError> {
+        self.list_firewall_rules(session_id).map_err(Into::into)
+    }
+
+    fn record_mutation_effectiveness(
+        &self,
+        record: &MutationEffectivenessRecord,
+    ) -> Result<(), RepositoryError> {
+        self.record_mutation_effectiveness(record)
+            .map_err(Into::into)
+    }
+
+    fn list_mutation_effectiveness(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Vec<MutationEffectivenessRecord>, RepositoryError> {
+        self.list_mutation_effectiveness(session_id)
+            .map_err(Into::into)
+    }
 }
 
 #[cfg(test)]
@@ -643,5 +860,94 @@ mod tests {
 
         let raw = store.get_turn_raw_payload("turn_1").unwrap().unwrap();
         assert_eq!(raw["model"], "claude-sonnet-4");
+    }
+
+    #[test]
+    fn test_sqlite_autopilot_and_mutations_and_effectiveness() {
+        let store = CwStore::open_in_memory().unwrap();
+        let session = Session {
+            id: "sess_ap".into(),
+            parent_session_id: None,
+            harness: HarnessKind::Omp,
+            workspace_root: Some("/test".into()),
+            model: "flint".into(),
+            provider: ProviderKind::OpenAICompatible,
+            title: Some("AutoPilot Test".into()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        store.upsert_session(&session).unwrap();
+
+        // 1. AutoPilot Config persistence
+        let mut cfg = store.get_autopilot_config().unwrap();
+        cfg.min_health_score = 82;
+        cfg.heal_strategy = "mid".to_string();
+        store.set_autopilot_config(&cfg).unwrap();
+        let loaded_cfg = store.get_autopilot_config().unwrap();
+        assert_eq!(loaded_cfg.min_health_score, 82);
+        assert_eq!(loaded_cfg.heal_strategy, "mid");
+
+        // 2. Mutations persistence
+        let rule = cw_core::ir::MutationRule {
+            id: "mut_test_1".into(),
+            session_id: "sess_ap".into(),
+            op: cw_core::ir::MutationOp::ShadowDedupe { file_path: Some("Cargo.toml".into()) },
+            status: cw_core::ir::MutationStatus::Committed,
+            estimated_saved_tokens: 150,
+            estimated_kv_break_tokens: 0,
+            created_at: Utc::now(),
+        };
+        store.save_mutation(&rule).unwrap();
+        let muts = store.list_mutations("sess_ap").unwrap();
+        assert_eq!(muts.len(), 1);
+        assert_eq!(muts[0].id, "mut_test_1");
+        assert_eq!(muts[0].estimated_saved_tokens, 150);
+
+        // 3. Mutation effectiveness telemetry persistence
+        let eff = MutationEffectivenessRecord {
+            mutation_id: "mut_test_1".into(),
+            session_id: "sess_ap".into(),
+            turn_id: "turn_1".into(),
+            tokens_saved: 150,
+            kv_cache_hit_rate: 0.95,
+            ttft_ms: Some(250),
+            created_at: Utc::now(),
+        };
+        store.record_mutation_effectiveness(&eff).unwrap();
+        let records = store.list_mutation_effectiveness(Some("sess_ap")).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].mutation_id, "mut_test_1");
+        assert_eq!(records[0].ttft_ms, Some(250));
+
+        // 4. Session source path persistence
+        store.set_session_source_path("sess_ap", "/tmp/transcript.jsonl", 1024).unwrap();
+        let (src, len) = store.get_session_source_path("sess_ap").unwrap().unwrap();
+        assert_eq!(src, "/tmp/transcript.jsonl");
+        assert_eq!(len, 1024);
+
+        // 5. Ambient pulse persistence
+        let pulse = AmbientSavingsPulse {
+            session_id: "sess_ap".into(),
+            turn_seq: 1,
+            tokens_saved_this_pulse: 1500,
+            cumulative_tokens_saved: 1500,
+            total_input_tokens: 3000,
+            saved_percentage: 33.3,
+            kv_cache_hit_ratio: 95.0,
+            ttft_before_ms: 1200,
+            ttft_after_ms: 300,
+            speedup_factor: 4.0,
+            estimated_cost_saved_usd: 0.05,
+            is_local_model: false,
+            formatted_message: "⚡ [cw] We saved you 1500 tokens (-33.3%) | KV Cache 95.0% preserved | TTFT: 1200ms -> 300ms (4.0x faster) | $0.05 saved".into(),
+            timestamp: Utc::now(),
+        };
+        store.record_ambient_pulse(&pulse).unwrap();
+        let fetched_pulse = store.get_latest_pulse_for_session("sess_ap").unwrap().unwrap();
+        assert_eq!(fetched_pulse.tokens_saved_this_pulse, 1500);
+        assert_eq!(fetched_pulse.speedup_factor, 4.0);
+        let pulses = store.list_recent_ambient_pulses(10).unwrap();
+        assert_eq!(pulses.len(), 1);
+        assert!(pulses[0].formatted_message.contains("⚡ [cw] We saved you 1500 tokens"));
     }
 }

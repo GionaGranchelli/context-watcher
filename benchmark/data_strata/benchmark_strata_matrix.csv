@@ -1,0 +1,7 @@
+tier,strategy_or_rule,automation_mode,context_tokens,health_score,active_lints,tokens_saved,saved_pct,kv_cache_hit_ratio,slot_vram_int8_mb,prefill_ttft_ms,tests_passed
+Baseline (Unmanaged OMP),None (Raw history),Manual / None,24401,82,1,0,0.0,0.0,3233.4,152500.0,13/13 (100%)
+Tier 1: Min (/cw optimize min),Cache-Safe Attention & Tail Boost,Slash / MCP,23702,97,0,699,2.86,100.0,3140.7,148130.0,13/13 (100%)
+Tier 2: Mid (/cw optimize mid),Surgical Log & Thinking Diet,Slash / MCP,16306,100,0,8095,33.17,97.8,2160.7,101910.0,13/13 (100%)
+Tier 3: Max (/cw optimize max),Max Token Diet (Trajectory Fold),Slash / MCP,14860,100,0,9541,39.10,96.1,1969.1,92875.0,13/13 (100%)
+Harness Native Compaction,Native Blind LLM Summary,Harness Fallback,1250,50,2,23151,94.87,0.0,165.6,7812.5,Fail (Loss of tool IDs & state)
+AutoPilot Mode (Auto Mode),Rule 5: Low-Health Self-Healer,100% Autonomous,23702,100,0,699,2.86,100.0,3140.7,148130.0,13/13 (100%)

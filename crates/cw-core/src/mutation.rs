@@ -514,20 +514,22 @@ fn filter_tools_in_payload(
         true
     });
 
-    // Also filter Gemini `functionDeclarations` if present
+    // Also filter Gemini `functionDeclarations` / `function_declarations` if present
     let mut gemini_changed = false;
     for tool_group in tools.iter_mut() {
-        if let Some(decls) = tool_group
-            .get_mut("functionDeclarations")
-            .and_then(|v| v.as_array_mut())
-        {
-            let prev = decls.len();
-            decls.retain(|d| {
-                let name = d.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                !is_tool_disabled(name, disabled_tools, disabled_servers)
-            });
-            if decls.len() != prev {
-                gemini_changed = true;
+        for key in ["functionDeclarations", "function_declarations"] {
+            if let Some(decls) = tool_group
+                .get_mut(key)
+                .and_then(|v| v.as_array_mut())
+            {
+                let prev = decls.len();
+                decls.retain(|d| {
+                    let name = d.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    !is_tool_disabled(name, disabled_tools, disabled_servers)
+                });
+                if decls.len() != prev {
+                    gemini_changed = true;
+                }
             }
         }
     }
@@ -574,6 +576,20 @@ fn sort_tools_in_payload(payload: &mut Value) -> bool {
             .unwrap_or("");
         name_a.cmp(name_b)
     });
+
+    // Also sort Gemini function declarations inside each tool group
+    for tool_group in tools.iter_mut() {
+        for key in ["functionDeclarations", "function_declarations"] {
+            if let Some(decls) = tool_group.get_mut(key).and_then(|v| v.as_array_mut()) {
+                decls.sort_by(|a, b| {
+                    let name_a = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let name_b = b.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    name_a.cmp(name_b)
+                });
+            }
+        }
+    }
+
     true
 }
 

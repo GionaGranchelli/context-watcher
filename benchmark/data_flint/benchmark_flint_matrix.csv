@@ -1,0 +1,5 @@
+tier,strategy_or_rule,automation_mode,context_tokens,health_score,active_lints,tokens_saved,saved_pct,kv_cache_hit_pct,cached_tokens,slot_vram_q8_mb,prefill_ttft_ms,unit_tests_passed
+Baseline (Unmanaged OMP),None (Raw unmanaged history),Manual / None,21519,48,4,0,0.0%,76.3%,16419,2851.2,1840.5,8/8 (100%)
+Auto-Pilot Rule 5 (Proactive Self-Heal),Autonomous Low-Health Self-Healer (<75 threshold),100% Autonomous (0 Human Prompts),16440,100,0,5074,23.58%,99.1%,16299,2178.0,428.15,8/8 (100%)
+Tier 2: Mid (/cw optimize mid),Surgical Log & Thinking Diet (surgical_log_diet),Slash Command / MCP,7472,100,0,14042,65.25%,98.4%,7352,990.0,194.2,8/8 (100%)
+Tier 3: Max (/cw optimize max),Max Token Diet (Stale Eviction + Log Diet + Gating),Slash Command / MCP,7316,100,0,14203,66.0%,98.2%,7184,969.4,189.8,8/8 (100%)

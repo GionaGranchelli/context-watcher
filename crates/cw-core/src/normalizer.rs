@@ -129,8 +129,11 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
     if let Some(messages) = payload.get("messages").and_then(|v| v.as_array()) {
         for (msg_idx, msg) in messages.iter().enumerate() {
             let role_str = msg.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+            let is_tool_msg = role_str == "tool" || role_str == "toolResult";
             let role = if role_str == "assistant" {
                 Role::Assistant
+            } else if is_tool_msg {
+                Role::Tool
             } else {
                 Role::User
             };
@@ -146,6 +149,52 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
             let before_len = nodes.len();
+
+            if is_tool_msg {
+                let call_id = msg
+                    .get("toolCallId")
+                    .or_else(|| msg.get("tool_call_id"))
+                    .or_else(|| msg.get("tool_use_id"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let is_error = msg
+                    .get("isError")
+                    .or_else(|| msg.get("is_error"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let content = extract_tool_result_text(msg.get("content"));
+                let (tool_name, call_sem) = if let Some(n) = msg.get("toolName").and_then(|v| v.as_str()) {
+                    let sem = call_meta_by_id.get(&call_id).and_then(|(_, s)| s.clone());
+                    (n.to_string(), sem)
+                } else {
+                    call_meta_by_id
+                        .get(&call_id)
+                        .cloned()
+                        .unwrap_or_else(|| ("tool_result".to_string(), None))
+                };
+                let sem = enrich_result_semantic_meta(call_sem, &content);
+                push_node(
+                    nodes,
+                    approx_turn,
+                    &format!("{msg_pointer}/content"),
+                    Role::Tool,
+                    NodeKind::ToolResult {
+                        call_id,
+                        tool_name,
+                        is_error,
+                        content,
+                        semantic_meta: sem,
+                    },
+                    msg_cache,
+                );
+                if let Some(ref ts) = msg_ts {
+                    for node in &mut nodes[before_len..] {
+                        node.timestamp = Some(ts.clone());
+                    }
+                }
+                continue;
+            }
 
             match msg.get("content") {
                 Some(Value::String(text)) => {
@@ -192,18 +241,26 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
                                     blk_cache,
                                 );
                             }
-                            "tool_use" => {
+                            "tool_use" | "tool_call" | "toolCall" => {
                                 let call_id = blk
                                     .get("id")
+                                    .or_else(|| blk.get("call_id"))
+                                    .or_else(|| blk.get("toolCallId"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("")
                                     .to_string();
                                 let tool_name = blk
                                     .get("name")
+                                    .or_else(|| blk.get("tool_name"))
+                                    .or_else(|| blk.get("toolName"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("tool")
                                     .to_string();
-                                let args = blk.get("input").cloned().unwrap_or(Value::Null);
+                                let args = blk
+                                    .get("input")
+                                    .or_else(|| blk.get("arguments"))
+                                    .cloned()
+                                    .unwrap_or(Value::Null);
                                 let sem = infer_call_semantic_meta(&tool_name, &args);
                                 call_meta_by_id
                                     .insert(call_id.clone(), (tool_name.clone(), sem.clone()));
@@ -221,21 +278,32 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
                                     blk_cache,
                                 );
                             }
-                            "tool_result" => {
+                            "tool_result" | "toolResult" => {
                                 let call_id = blk
                                     .get("tool_use_id")
+                                    .or_else(|| blk.get("tool_call_id"))
+                                    .or_else(|| blk.get("toolCallId"))
+                                    .or_else(|| blk.get("id"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("")
                                     .to_string();
                                 let is_error = blk
                                     .get("is_error")
+                                    .or_else(|| blk.get("isError"))
                                     .and_then(|v| v.as_bool())
                                     .unwrap_or(false);
                                 let content = extract_tool_result_text(blk.get("content"));
-                                let (tool_name, call_sem) = call_meta_by_id
-                                    .get(&call_id)
-                                    .cloned()
-                                    .unwrap_or_else(|| ("tool_result".to_string(), None));
+                                let (tool_name, call_sem) = blk
+                                    .get("tool_name")
+                                    .or_else(|| blk.get("toolName"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| (s.to_string(), None))
+                                    .unwrap_or_else(|| {
+                                        call_meta_by_id
+                                            .get(&call_id)
+                                            .cloned()
+                                            .unwrap_or_else(|| ("tool_result".to_string(), None))
+                                    });
                                 let sem = enrich_result_semantic_meta(call_sem, &content);
                                 push_node(
                                     nodes,

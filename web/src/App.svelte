@@ -140,6 +140,12 @@
 
   function harnessBadgeStyle(h: string): { bg: string; fg: string; border: string; dot: string; label: string } {
     switch (h) {
+      case 'omp':
+        return { bg: 'rgba(236, 72, 153, 0.15)', fg: '#f472b6', border: 'rgba(236, 72, 153, 0.34)', dot: '#ec4899', label: 'omp' };
+      case 'pi':
+        return { bg: 'rgba(168, 85, 247, 0.15)', fg: '#d8b4fe', border: 'rgba(168, 85, 247, 0.34)', dot: '#a855f7', label: 'pi' };
+      case 'opencode':
+        return { bg: 'rgba(14, 165, 233, 0.15)', fg: '#38bdf8', border: 'rgba(14, 165, 233, 0.34)', dot: '#0ea5e9', label: 'opencode' };
       case 'hermes':
         return { bg: 'rgba(245, 158, 11, 0.14)', fg: '#fbbf24', border: 'rgba(245, 158, 11, 0.32)', dot: '#f59e0b', label: 'hermes' };
       case 'codex':
@@ -191,7 +197,13 @@
                 ? '~/.gemini/antigravity-cli'
                 : h === 'claude_code'
                   ? '~/.claude/projects'
-                  : 'Local / Proxy';
+                  : h === 'omp'
+                    ? '~/.omp/agent/sessions'
+                    : h === 'pi'
+                      ? '~/.pi/agent/sessions'
+                      : h === 'opencode'
+                        ? '~/.local/share/opencode'
+                        : 'Local / Proxy';
       const subKey = groupByMode === 'project_first' ? h : proj;
       const subLabel = groupByMode === 'project_first' ? h : proj;
 

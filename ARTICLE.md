@@ -23,7 +23,7 @@ When developers ask how to solve this, the universal industry advice has been:
 
 Here is the uncomfortable truth: **standard compaction is an emergency parachute, not a garbage collector.** In fact, running `/compact` often destroys the very thing that makes LLM inference fast: **your KV-cache prefix**.
 
-Over the past few months at Constant Labs, we engineered **`contextWatcher` (`cw`)**, a local-first, zero-overhead context compiler and intercepting proxy written in Rust 2024. In this article, we explain what is actually happening inside your prompt at a silicon level, why modern agent harnesses are fundamentally append-only memory leaks, and how treating LLM context like a garbage-collected virtual memory address space drops prefill latency from **171 seconds down to 1.6 seconds (a 107x speedup)** on real hardware.
+Over the past few months at Constant Labs, we engineered **`contextWatcher` (`cw`)**, a local-first, zero-overhead context compiler and intercepting proxy written in Rust 2024. In this article, we explain what is actually happening inside your prompt at a silicon level, why modern agent harnesses are fundamentally append-only memory leaks, and how treating LLM context like a garbage-collected virtual memory address space drops prefill latency from **171 seconds down to 1.6 seconds (a 105x speedup: 171,587 ms → 1,630 ms)** on real hardware.
 
 ---
 
@@ -162,7 +162,7 @@ We executed a multi-turn agent workflow building a crash-safe key-value store, c
 ```
 
 ### The Takeaways:
-1. **The 107x Prefill Speedup:** In the unmanaged baseline, every turn required a grueling **171-second prefill delay** (nearly 3 minutes!). With `contextWatcher` Tier 2 (`cw optimize mid`), TTFT plummeted to **1.629 seconds**—a **107x acceleration**.
+1. **The 105x Prefill Speedup:** In the unmanaged baseline, every turn required a grueling **171-second prefill delay** (nearly 3 minutes!). With `contextWatcher` Tier 2 (`cw optimize mid`), TTFT plummeted to **1.629 seconds**—a **105x acceleration** (171,587 ms / 1,630 ms = 105.3x).
 2. **Ground Truth Integrity:** While traditional `/compact` wiped out exact function signatures—causing the model to fail all 8 unit tests—`contextWatcher` retained **8/8 (100%) test passes** across all tiers.
 3. **Zero Human Touch:** In autonomous autopilot mode, `cw` executed these optimizations silently in the background, requiring zero developer intervention.
 

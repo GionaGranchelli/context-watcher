@@ -31,7 +31,7 @@ Works natively with **Antigravity (AGY)**, **Claude Code**, **Codex CLI**, **Pi 
 ├──────────────────────────────┼────────────────────┼────────────────────────────┼───────┤
 │ Active Context Volume        │ 27,454 tokens      │ 14,206 tokens              │ -48%  │
 │ Stale File Duplicates        │ 6 copies in window │ 1 active copy + 5 stubs    │ -97%  │
-│ Time-to-First-Token (TTFT)   │ 171,587 ms (2.86m) │ 1,629 ms (1.63s)           │ 107x  │
+│ Time-to-First-Token (TTFT)   │ 171,587 ms (2.86m) │ 1,629 ms (1.63s)           │ 105x  │
 │ Subagent Swarm Memory        │ 12,886 tokens      │ 3,286 tokens               │ -75%  │
 │ PagedAttention Spliced Pages │ 0 pages unmapped   │ 300 physical blocks freed  │ 1.2GB │
 │ Ground-Truth Unit Tests      │ 8 / 8 passed       │ 8 / 8 passed (100% intact) │ 100%  │

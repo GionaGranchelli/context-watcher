@@ -56,7 +56,7 @@ Once installed, `cw` runs invisibly in the background. As you code with Claude C
 4. It drops a friendly ambient savings pulse when significant memory or time is saved:
 
 ```text
-⚡ [cw] We saved you 12,966 tokens | KV Cache: 98.2% preserved | TTFT: 171s -> 1.6s (107x faster) | $0.18 saved
+⚡ [cw] We saved you 12,966 tokens | KV Cache: 98.2% preserved | TTFT: 171s -> 1.6s (105x faster) | $0.18 saved
 ```
 
 ---

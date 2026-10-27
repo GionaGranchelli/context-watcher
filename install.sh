@@ -46,7 +46,7 @@ warn() {
 }
 
 error() {
-    printf "${RED}error:${RESET} %s\n" "$1" >&2
+    printf "${RED}error:${RESET} %b\n" "$1" >&2
     exit 1
 }
 

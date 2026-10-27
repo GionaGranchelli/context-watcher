@@ -60,6 +60,14 @@ enum Commands {
         proxy_port: u16,
         #[arg(long)]
         workspace: Option<String>,
+        /// Run daemon detached in the background
+        #[arg(long, short = 'd')]
+        detach: bool,
+    },
+    /// Manage the background contextWatcher daemon (start, stop, restart, status)
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
     },
     /// Wrap and launch an agent harness (agy, codex, pi, opencode, aider, claude) with proxy env vars injected
     Wrap {
@@ -270,14 +278,14 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// One-command plugin, MCP, hook & systemd installer for Antigravity, Codex, Claude Code & Hermes (like `rtk init`)
+    /// One-command plugin, MCP, hook & background service installer for Antigravity, Codex, Claude Code, Pi & Hermes
     Init {
         /// Only preview what files will be created or modified without writing to disk
         #[arg(long)]
         dry_run: bool,
-        /// Also enable and start the background systemd user service (`contextwatcher.service`)
+        /// Do not automatically start the background daemon after registration
         #[arg(long)]
-        service: bool,
+        no_start: bool,
     },
     /// Fast PostToolUse / PreCompact hook invoked by harnesses to enforce Auto-Pilot context hygiene
     Hook {
@@ -288,6 +296,38 @@ enum Commands {
     },
     /// Alias for `cw init`: install contextWatcher Skill & MCP config for Antigravity, Claude Code, Codex, OpenCode & Pi
     InstallIntegrations,
+}
+
+#[derive(Subcommand)]
+enum DaemonAction {
+    /// Start the contextWatcher daemon in the background
+    Start {
+        #[arg(long, default_value_t = 4400)]
+        port: u16,
+        #[arg(long, default_value_t = 4401)]
+        proxy_port: u16,
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+    /// Stop the background contextWatcher daemon
+    Stop {
+        #[arg(long, default_value_t = 4400)]
+        port: u16,
+    },
+    /// Restart the background contextWatcher daemon
+    Restart {
+        #[arg(long, default_value_t = 4400)]
+        port: u16,
+        #[arg(long, default_value_t = 4401)]
+        proxy_port: u16,
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+    /// Inspect background daemon status and port health
+    Status {
+        #[arg(long, default_value_t = 4400)]
+        port: u16,
+    },
 }
 
 fn default_db_path() -> PathBuf {
@@ -311,7 +351,13 @@ async fn main() -> Result<()> {
             port,
             proxy_port,
             workspace,
+            detach,
         } => {
+            if detach {
+                start_daemon_detached(port, proxy_port, workspace)?;
+                return Ok(());
+            }
+
             tracing_subscriber::fmt()
                 .with_env_filter(
                     tracing_subscriber::EnvFilter::try_from_default_env()
@@ -354,6 +400,29 @@ async fn main() -> Result<()> {
                 axum::serve(ui_listener, ui_and_api_app),
             )?;
         }
+        Commands::Daemon { action } => match action {
+            DaemonAction::Start {
+                port,
+                proxy_port,
+                workspace,
+            } => {
+                start_daemon_detached(port, proxy_port, workspace)?;
+            }
+            DaemonAction::Stop { port } => {
+                stop_daemon(port)?;
+            }
+            DaemonAction::Restart {
+                port,
+                proxy_port,
+                workspace,
+            } => {
+                stop_daemon(port)?;
+                start_daemon_detached(port, proxy_port, workspace)?;
+            }
+            DaemonAction::Status { port } => {
+                status_daemon(port)?;
+            }
+        },
         Commands::Wrap { proxy_port, cmd } => {
             let bin = &cmd[0];
             let args = &cmd[1..];
@@ -1140,8 +1209,8 @@ async fn main() -> Result<()> {
             let store = CwStore::open(&db_path)?;
             run_hud_report(&store, session, compact, ecg, json)?;
         }
-        Commands::Init { dry_run, service } => {
-            run_init_installer(dry_run, service)?;
+        Commands::Init { dry_run, no_start } => {
+            run_init_installer(dry_run, !no_start)?;
         }
         Commands::Hook { quiet, session } => {
             let store = CwStore::open(&db_path)?;
@@ -1262,7 +1331,11 @@ fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<S
     }
 
     let ctx = detect_caller_context();
-    let sources = store.list_session_sources().unwrap_or_default();
+    let mut sources = store.list_session_sources().unwrap_or_default();
+    if sources.is_empty() {
+        cw_harnesses::scan_and_import_all_transcripts_once(store);
+        sources = store.list_session_sources().unwrap_or_default();
+    }
 
     // 1. Direct open file descriptor match: if caller process has an active session file open
     for open_file in &ctx.open_transcripts {
@@ -1398,9 +1471,45 @@ fn project_label_from_workspace(ws: Option<&str>) -> String {
 }
 
 fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
-    let sessions = store.list_sessions()?;
+    let mut sessions = store.list_sessions()?;
     if sessions.is_empty() {
-        println!("No sessions recorded yet. Run `cw serve` to import local transcripts.");
+        // Automatically attempt fast synchronous discovery of on-disk transcripts (like rtk discover)
+        let discovered = cw_harnesses::scan_and_import_all_transcripts_once(store);
+        if discovered > 0 {
+            sessions = store.list_sessions()?;
+        }
+    }
+    if sessions.is_empty() {
+        println!(
+            "┌──────────────────────────────────────────────────────────────────────────────────┐"
+        );
+        println!(
+            "│ contextWatcher (`cw gain`) — Token, KV Cache & Cost Savings Analytics           │"
+        );
+        println!(
+            "├──────────────────────────────────────────────────────────────────────────────────┤"
+        );
+        println!(
+            "│ No active coding sessions recorded on this machine yet.                          │"
+        );
+        println!(
+            "│                                                                                  │"
+        );
+        println!(
+            "│ 💡 contextWatcher is active and watching in the background!                      │"
+        );
+        println!(
+            "│ As soon as you run any coding session with Antigravity, Claude Code, Codex,     │"
+        );
+        println!(
+            "│ Pi / OMP, or Hermes, cw will automatically record your tokens and display your   │"
+        );
+        println!(
+            "│ KV-cache hit ratio & dollar savings here.                                        │"
+        );
+        println!(
+            "└──────────────────────────────────────────────────────────────────────────────────┘"
+        );
         return Ok(());
     }
 
@@ -2102,7 +2211,144 @@ fn run_hook_check(store: &CwStore, quiet: bool, explicit_session: Option<String>
     Ok(())
 }
 
-fn run_init_installer(dry_run: bool, enable_service: bool) -> Result<()> {
+fn is_daemon_running(port: u16) -> bool {
+    use std::net::TcpStream;
+    use std::time::Duration;
+    if let Ok(addr) = format!("127.0.0.1:{port}").parse() {
+        TcpStream::connect_timeout(&addr, Duration::from_millis(150)).is_ok()
+    } else {
+        false
+    }
+}
+
+fn start_daemon_detached(port: u16, proxy_port: u16, workspace: Option<String>) -> Result<()> {
+    if is_daemon_running(port) {
+        println!("contextWatcher daemon is already running in background.");
+        println!("  • Web UI : http://127.0.0.1:{port}");
+        println!("  • Proxy  : http://127.0.0.1:{proxy_port}");
+        return Ok(());
+    }
+
+    // Try systemd user service first if available on Linux
+    let has_systemctl = std::process::Command::new("systemctl")
+        .args(["--user", "is-enabled", "contextwatcher.service"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if has_systemctl {
+        let _ = std::process::Command::new("systemctl")
+            .args(["--user", "start", "contextwatcher.service"])
+            .status();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if is_daemon_running(port) {
+            println!("⚡ Started contextWatcher background daemon via systemd user service.");
+            println!("   • Web UI : http://127.0.0.1:{port}");
+            println!("   • Proxy  : http://127.0.0.1:{proxy_port}");
+            return Ok(());
+        }
+    }
+
+    // Fallback: spawn detached child process with ~/.cw/cw.log
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let cw_dir = PathBuf::from(&home).join(".cw");
+    std::fs::create_dir_all(&cw_dir)?;
+    let log_path = cw_dir.join("cw.log");
+    let pid_path = cw_dir.join("cw.pid");
+
+    let exe = std::env::current_exe()?;
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    let err_file = log_file.try_clone()?;
+
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args([
+        "serve",
+        "--port",
+        &port.to_string(),
+        "--proxy-port",
+        &proxy_port.to_string(),
+    ]);
+    if let Some(ws) = workspace {
+        cmd.args(["--workspace", &ws]);
+    }
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(log_file))
+        .stderr(std::process::Stdio::from(err_file));
+
+    let child = cmd.spawn()?;
+    let pid = child.id();
+    std::fs::write(&pid_path, pid.to_string())?;
+
+    for _ in 0..15 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if is_daemon_running(port) {
+            break;
+        }
+    }
+
+    if is_daemon_running(port) {
+        println!("⚡ Started contextWatcher daemon in background (PID: {pid})");
+        println!("   • Web UI : http://127.0.0.1:{port}");
+        println!("   • Proxy  : http://127.0.0.1:{proxy_port}");
+        println!("   • Logs   : {}", log_path.display());
+    } else {
+        println!(
+            "⚠️ Daemon process spawned (PID: {pid}), waiting for port {port}. Logs: {}",
+            log_path.display()
+        );
+    }
+
+    Ok(())
+}
+
+fn stop_daemon(port: u16) -> Result<()> {
+    // 1. Try systemd user service stop
+    let _ = std::process::Command::new("systemctl")
+        .args(["--user", "stop", "contextwatcher.service"])
+        .status();
+
+    // 2. Also check ~/.cw/cw.pid
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let pid_path = PathBuf::from(&home).join(".cw/cw.pid");
+    if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+        let p = pid_str.trim();
+        let _ = std::process::Command::new("kill").arg(p).status();
+        let _ = std::fs::remove_file(&pid_path);
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    if !is_daemon_running(port) {
+        println!("✓ contextWatcher background daemon stopped.");
+    } else {
+        println!("⚠️ Daemon still active on port {port}.");
+    }
+    Ok(())
+}
+
+fn status_daemon(port: u16) -> Result<()> {
+    let running = is_daemon_running(port);
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let pid_path = PathBuf::from(&home).join(".cw/cw.pid");
+    let pid = std::fs::read_to_string(&pid_path)
+        .ok()
+        .map(|s| s.trim().to_string());
+
+    if running {
+        println!("🟢 contextWatcher daemon is RUNNING (Web UI: http://127.0.0.1:{port})");
+        if let Some(p) = pid {
+            println!("   PID: {p}");
+        }
+    } else {
+        println!("🔴 contextWatcher daemon is NOT running.");
+        println!("   Run `cw daemon start` to start it in the background.");
+    }
+    Ok(())
+}
+
+fn run_init_installer(dry_run: bool, auto_start: bool) -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let home_path = PathBuf::from(&home);
     let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cw"));
@@ -2414,13 +2660,25 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
     if !dry_run {
         let _ = std::fs::create_dir_all(&systemd_dir);
         let _ = std::fs::write(&service_path, service_unit);
-        if enable_service {
-            let _ = std::process::Command::new("systemctl")
+        if auto_start {
+            let mut started = false;
+            let has_systemctl = std::process::Command::new("systemctl")
                 .args(["--user", "daemon-reload"])
-                .status();
-            let _ = std::process::Command::new("systemctl")
-                .args(["--user", "enable", "--now", "contextwatcher.service"])
-                .status();
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if has_systemctl {
+                let _ = std::process::Command::new("systemctl")
+                    .args(["--user", "enable", "--now", "contextwatcher.service"])
+                    .status();
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                if is_daemon_running(4400) {
+                    started = true;
+                }
+            }
+            if !started && !is_daemon_running(4400) {
+                let _ = start_daemon_detached(4400, 4401, None);
+            }
         }
     }
     println!(

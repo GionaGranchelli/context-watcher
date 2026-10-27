@@ -1329,6 +1329,58 @@ pub fn sync_mutations_to_transcript_on_disk(
     })
 }
 
+/// One-shot synchronous import of all local transcripts across all harnesses.
+/// Discovers and imports existing sessions on disk into the CwStore immediately (<25ms)
+/// without requiring a long-running background daemon to be active.
+pub fn scan_and_import_all_transcripts_once(store: &CwStore) -> usize {
+    let mut file_state: HashMap<PathBuf, (SystemTime, u64)> = HashMap::new();
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let agy_brain_dir = PathBuf::from(&home).join(".gemini/antigravity-cli/brain");
+    let claude_dir = PathBuf::from(&home).join(".claude/projects");
+    let codex_dir = PathBuf::from(&home).join(".codex/sessions");
+    let hermes_db = PathBuf::from(&home).join(".hermes/state.db");
+    let opencode_dir = PathBuf::from(&home).join(".local/share/opencode");
+    let pi_dir = PathBuf::from(&home).join(".pi/sessions");
+    let pi_agent_dir = PathBuf::from(&home).join(".pi/agent/sessions");
+    let omp_dir = PathBuf::from(&home).join(".omp/agent/sessions");
+
+    let count_before = store.list_sessions().map(|s| s.len()).unwrap_or(0);
+
+    // 1. Antigravity transcripts
+    if agy_brain_dir.exists()
+        && let Ok(entries) = fs::read_dir(&agy_brain_dir)
+    {
+        for entry in entries.flatten() {
+            let transcript = entry.path().join(".system_generated/logs/transcript.jsonl");
+            if transcript.exists() {
+                let _ = import_agy_transcript(&transcript, store, None);
+            }
+        }
+    }
+
+    // 2. Hermes Agent
+    if hermes_db.exists() {
+        let _ = import_hermes_state_db(&hermes_db, store, 18);
+    }
+
+    // 3. Claude Code, Codex, OpenCode, Pi, OMP
+    for (dir, harness) in [
+        (&claude_dir, HarnessKind::ClaudeCode),
+        (&codex_dir, HarnessKind::Codex),
+        (&opencode_dir, HarnessKind::OpenCode),
+        (&pi_dir, HarnessKind::Pi),
+        (&pi_agent_dir, HarnessKind::Pi),
+        (&omp_dir, HarnessKind::Omp),
+    ] {
+        if dir.exists() {
+            scan_jsonl_dir_recursively(dir, harness, store, &mut file_state, 0);
+        }
+    }
+
+    let count_after = store.list_sessions().map(|s| s.len()).unwrap_or(0);
+    count_after.saturating_sub(count_before)
+}
+
 /// Spawns an incremental background watcher task that scans Antigravity (`~/.gemini/antigravity-cli/brain`),
 /// Claude Code (`~/.claude/projects`), Codex (`~/.codex/sessions`), OpenCode (`~/.local/share/opencode`),
 /// and Pi (`~/.pi/sessions`) transcript directories, tracking `(mtime, byte_len)` per file.

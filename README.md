@@ -42,15 +42,23 @@ Works natively with **Antigravity (AGY)**, **Claude Code**, **Codex CLI**, **Pi 
 
 ## ⚡ Quickstart (One Command)
 
-```bash
-# 1. Install contextWatcher binary
-cargo install --path crates/cw-cli
+Install `cw` and auto-configure all your coding harnesses in one command:
 
-# 2. Automatically install integrations for all your installed harnesses
+```bash
+curl -fsSL https://constant-labs.com/cw-install.sh | sh
+```
+
+*(Alternatively via GitHub raw or Cargo):*
+```bash
+# Via GitHub direct:
+curl -fsSL https://raw.githubusercontent.com/GionaGranchelli/context-watcher/main/install.sh | sh
+
+# Or build locally from source:
+cargo install --path crates/cw-cli
 cw init
 ```
 
-`cw init` auto-discovers your local harnesses and configures:
+The installer auto-discovers your local harnesses and configures:
 * **Antigravity:** MCP server + native `/context-watcher` skill in `~/.gemini/antigravity-cli/`
 * **Claude Code:** Slash commands (`/cw`) in `~/.claude/commands/` + auto-pilot post-tool hooks
 * **Codex CLI:** Session watchers & rollout sync in `~/.codex/`

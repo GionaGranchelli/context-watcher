@@ -7,30 +7,32 @@
 
 ## ⚡ 1. Installation
 
-### Option A: From Source via Cargo (Recommended)
+### Option A: The One-Liner (Fastest — Linux & macOS)
 
-Make sure you have Rust 1.80+ installed:
+Run the universal installer. It detects your OS and architecture, downloads the binary, sets up `$PATH`, and runs `cw init` automatically:
+
+```bash
+curl -fsSL https://constant-labs.com/cw-install.sh | sh
+```
+
+*(Direct GitHub URL fallback):*
+```bash
+curl -fsSL https://raw.githubusercontent.com/GionaGranchelli/context-watcher/main/install.sh | sh
+```
+
+### Option B: Build From Source via Cargo
 
 ```bash
 git clone git@github.com:GionaGranchelli/context-watcher.git
 cd context-watcher
 cargo install --path crates/cw-cli
+cw init
 ```
 
 Verify the binary is available on your PATH:
 ```bash
 cw --version
 # Output: cw 0.2.0
-```
-
----
-
-## 🚀 2. One-Command Setup (`cw init`)
-
-Run `cw init` once in your terminal:
-
-```bash
-cw init
 ```
 
 `cw init` automatically discovers your installed AI coding harnesses and sets up integrations:

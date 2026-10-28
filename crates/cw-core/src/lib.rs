@@ -19,6 +19,22 @@ use linter::analyze_context_health;
 use normalizer::{NormalizeError, parse_request_to_nodes};
 use radix::analyze_kv_cache;
 use serde_json::Value;
+use std::path::PathBuf;
+
+/// Returns the current user's home directory cross-platform (Linux, macOS, Windows).
+/// On Windows, falls back to `USERPROFILE` if `HOME` is unset, and falls back to temp_dir if neither is present.
+pub fn home_dir() -> PathBuf {
+    std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.trim().is_empty())
+        .or_else(|| {
+            std::env::var("USERPROFILE")
+                .ok()
+                .filter(|p| !p.trim().is_empty())
+        })
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+}
 
 /// End-to-end turn pipeline: parses a raw request payload into `ContextNode`s,
 /// runs KV Cache Prefix Diffing against `prev_turn`, and executes the 7-rule Context Health Linter.

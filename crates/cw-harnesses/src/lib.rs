@@ -1334,15 +1334,16 @@ pub fn sync_mutations_to_transcript_on_disk(
 /// without requiring a long-running background daemon to be active.
 pub fn scan_and_import_all_transcripts_once(store: &CwStore) -> usize {
     let mut file_state: HashMap<PathBuf, (SystemTime, u64)> = HashMap::new();
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let agy_brain_dir = PathBuf::from(&home).join(".gemini/antigravity-cli/brain");
-    let claude_dir = PathBuf::from(&home).join(".claude/projects");
-    let codex_dir = PathBuf::from(&home).join(".codex/sessions");
-    let hermes_db = PathBuf::from(&home).join(".hermes/state.db");
-    let opencode_dir = PathBuf::from(&home).join(".local/share/opencode");
-    let pi_dir = PathBuf::from(&home).join(".pi/sessions");
-    let pi_agent_dir = PathBuf::from(&home).join(".pi/agent/sessions");
-    let omp_dir = PathBuf::from(&home).join(".omp/agent/sessions");
+    let home_path = cw_core::home_dir();
+    let agy_brain_dir = home_path.join(".gemini/antigravity-cli/brain");
+    let claude_dir = home_path.join(".claude/projects");
+    let codex_dir = home_path.join(".codex/sessions");
+    let hermes_db = home_path.join(".hermes/state.db");
+    let opencode_dir = home_path.join(".local/share/opencode");
+    let opencode_db = home_path.join(".local/share/opencode/opencode.db");
+    let pi_dir = home_path.join(".pi/sessions");
+    let pi_agent_dir = home_path.join(".pi/agent/sessions");
+    let omp_dir = home_path.join(".omp/agent/sessions");
 
     let count_before = store.list_sessions().map(|s| s.len()).unwrap_or(0);
 
@@ -1363,7 +1364,12 @@ pub fn scan_and_import_all_transcripts_once(store: &CwStore) -> usize {
         let _ = import_hermes_state_db(&hermes_db, store, 18);
     }
 
-    // 3. Claude Code, Codex, OpenCode, Pi, OMP
+    // 3. OpenCode V2 SQLite database
+    if opencode_db.exists() {
+        let _ = import_opencode_state_db(&opencode_db, store, 18);
+    }
+
+    // 4. Claude Code, Codex, OpenCode, Pi, OMP
     for (dir, harness) in [
         (&claude_dir, HarnessKind::ClaudeCode),
         (&codex_dir, HarnessKind::Codex),
@@ -1387,16 +1393,18 @@ pub fn scan_and_import_all_transcripts_once(store: &CwStore) -> usize {
 pub fn spawn_transcript_watcher(store: CwStore, _default_workspace: Option<String>) {
     tokio::spawn(async move {
         let mut file_state: HashMap<PathBuf, (SystemTime, u64)> = HashMap::new();
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        let agy_brain_dir = PathBuf::from(&home).join(".gemini/antigravity-cli/brain");
-        let claude_dir = PathBuf::from(&home).join(".claude/projects");
-        let codex_dir = PathBuf::from(&home).join(".codex/sessions");
-        let hermes_db = PathBuf::from(&home).join(".hermes/state.db");
-        let hermes_wal = PathBuf::from(&home).join(".hermes/state.db-wal");
-        let opencode_dir = PathBuf::from(&home).join(".local/share/opencode");
-        let pi_dir = PathBuf::from(&home).join(".pi/sessions");
-        let pi_agent_dir = PathBuf::from(&home).join(".pi/agent/sessions");
-        let omp_dir = PathBuf::from(&home).join(".omp/agent/sessions");
+        let home_path = cw_core::home_dir();
+        let agy_brain_dir = home_path.join(".gemini/antigravity-cli/brain");
+        let claude_dir = home_path.join(".claude/projects");
+        let codex_dir = home_path.join(".codex/sessions");
+        let hermes_db = home_path.join(".hermes/state.db");
+        let hermes_wal = home_path.join(".hermes/state.db-wal");
+        let opencode_dir = home_path.join(".local/share/opencode");
+        let opencode_db = home_path.join(".local/share/opencode/opencode.db");
+        let opencode_wal = home_path.join(".local/share/opencode/opencode.db-wal");
+        let pi_dir = home_path.join(".pi/sessions");
+        let pi_agent_dir = home_path.join(".pi/agent/sessions");
+        let omp_dir = home_path.join(".omp/agent/sessions");
 
         loop {
             // 1. Antigravity transcripts
@@ -1435,7 +1443,24 @@ pub fn spawn_transcript_watcher(store: CwStore, _default_workspace: Option<Strin
                 }
             }
 
-            // 3. Claude Code, Codex, OpenCode, and Pi/OMP JSONL transcripts
+            // 3. OpenCode V2 SQLite state database (`~/.local/share/opencode/opencode.db` + `-wal`)
+            let opencode_watch_target = if opencode_wal.exists() {
+                &opencode_wal
+            } else {
+                &opencode_db
+            };
+            if opencode_db.exists()
+                && let Ok(meta) = fs::metadata(opencode_watch_target)
+                && let Ok(mtime) = meta.modified()
+            {
+                let sig = (mtime, meta.len());
+                if file_state.get(&opencode_db).copied() != Some(sig) {
+                    file_state.insert(opencode_db.clone(), sig);
+                    let _ = import_opencode_state_db(&opencode_db, &store, 18);
+                }
+            }
+
+            // 4. Claude Code, Codex, OpenCode, and Pi/OMP JSONL transcripts
             for (dir, harness) in [
                 (&claude_dir, HarnessKind::ClaudeCode),
                 (&codex_dir, HarnessKind::Codex),
@@ -1818,6 +1843,350 @@ pub fn import_hermes_state_db(
     Ok(imported_ids)
 }
 
+/// Discovers and imports OpenCode V2 SQLite sessions (`~/.local/share/opencode/opencode.db`).
+///
+/// OpenCode V2 stores all sessions in SQLite tables (`session_v2` / `session`, `message`, `part`)
+/// rather than writing individual JSONL files. This importer parses conversations losslessly into
+/// contextWatcher's canonical ContextTurn/ContextNode IR with precise token usage and cache hit stats.
+pub fn import_opencode_state_db(
+    db_path: &Path,
+    store: &CwStore,
+    max_sessions: usize,
+) -> Result<Vec<String>, HarnessError> {
+    let conn = rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+
+    // Detect if `session_v2` (OpenCode 2.x) or legacy `session` table exists
+    let table_name: String = conn
+        .query_row(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='session_v2'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| "session".to_string());
+
+    let session_sql = format!(
+        "SELECT
+            id,
+            COALESCE(directory, ''),
+            COALESCE(title, ''),
+            COALESCE(model, ''),
+            COALESCE(tokens_input, 0),
+            COALESCE(tokens_output, 0),
+            COALESCE(tokens_cache_read, 0),
+            COALESCE(tokens_cache_write, 0),
+            COALESCE(time_created, 0),
+            COALESCE(time_updated, time_created, 0)
+         FROM {table_name}
+         ORDER BY COALESCE(time_updated, time_created, 0) DESC
+         LIMIT ?1"
+    );
+
+    let mut stmt = conn.prepare(&session_sql)?;
+    let rows = stmt.query_map(rusqlite::params![max_sessions as i64], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i64>(4)?,
+            row.get::<_, i64>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, i64>(7)?,
+            row.get::<_, i64>(8)?,
+            row.get::<_, i64>(9)?,
+        ))
+    })?;
+
+    let mut imported_ids = Vec::new();
+
+    let mut msg_stmt = conn.prepare(
+        "SELECT
+            m.id,
+            COALESCE(json_extract(m.data, '$.role'), 'user'),
+            COALESCE(m.time_created, 0),
+            COALESCE(p.id, ''),
+            COALESCE(json_extract(p.data, '$.type'), ''),
+            COALESCE(p.data, ''),
+            COALESCE(p.time_created, m.time_created, 0)
+         FROM message m
+         LEFT JOIN part p ON p.message_id = m.id
+         WHERE m.session_id = ?1
+         ORDER BY m.time_created ASC, p.time_created ASC
+         LIMIT 2000",
+    )?;
+
+    for r in rows.flatten() {
+        let (
+            raw_id,
+            raw_cwd,
+            raw_title,
+            raw_model,
+            cum_inp,
+            cum_out,
+            cum_cache_read,
+            _cum_cache_write,
+            created_ms,
+            updated_ms,
+        ) = r;
+
+        let session_id = format!("opencode_{raw_id}");
+        let created_at = DateTime::from_timestamp_millis(created_ms).unwrap_or_else(Utc::now);
+        let updated_at = DateTime::from_timestamp_millis(updated_ms).unwrap_or(created_at);
+
+        let model = if let Ok(v) = serde_json::from_str::<Value>(&raw_model) {
+            v.get("id")
+                .or_else(|| v.get("modelID"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("opencode-model")
+                .to_string()
+        } else if !raw_model.trim().is_empty() {
+            raw_model.clone()
+        } else {
+            "opencode-model".to_string()
+        };
+
+        let msg_rows = msg_stmt.query_map(rusqlite::params![&raw_id], |m| {
+            Ok((
+                m.get::<_, String>(0)?,
+                m.get::<_, String>(1)?,
+                m.get::<_, i64>(2)?,
+                m.get::<_, String>(3)?,
+                m.get::<_, String>(4)?,
+                m.get::<_, String>(5)?,
+                m.get::<_, i64>(6)?,
+            ))
+        })?;
+
+        struct OpenCodeMsg {
+            id: String,
+            role: String,
+            time_created: i64,
+            parts: Vec<(String, String, Value)>,
+        }
+
+        // Group rows by message ID
+        let mut grouped_msgs: Vec<OpenCodeMsg> = Vec::new();
+        for m_res in msg_rows.flatten() {
+            let (m_id, role, m_time, p_id, p_type, p_data_str, _p_time) = m_res;
+            let p_val: Value = serde_json::from_str(&p_data_str).unwrap_or(Value::Null);
+
+            if let Some(last) = grouped_msgs.last_mut().filter(|l| l.id == m_id) {
+                if !p_id.is_empty() {
+                    last.parts.push((p_id, p_type, p_val));
+                }
+                continue;
+            }
+            let mut parts = Vec::new();
+            if !p_id.is_empty() {
+                parts.push((p_id, p_type, p_val));
+            }
+            grouped_msgs.push(OpenCodeMsg {
+                id: m_id,
+                role,
+                time_created: m_time,
+                parts,
+            });
+        }
+
+        let mut messages = Vec::new();
+        let mut turn_counter = 0u32;
+        let mut first_user_prompt: Option<String> = None;
+        let mut inferred_ws: Option<String> = if !raw_cwd.trim().is_empty() {
+            Some(raw_cwd.clone())
+        } else {
+            None
+        };
+
+        for msg in grouped_msgs {
+            let ts_iso = DateTime::from_timestamp_millis(msg.time_created).map(|d| d.to_rfc3339());
+
+            if msg.role == "user" {
+                turn_counter += 1;
+                let mut text_parts = Vec::new();
+                for (_pid, ptype, pval) in &msg.parts {
+                    if ptype == "text" {
+                        if let Some(t) = pval.get("text").and_then(|v| v.as_str()) {
+                            text_parts.push(t.to_string());
+                        }
+                    } else if ptype == "file"
+                        && let Some(fname) = pval.get("filename").and_then(|v| v.as_str())
+                    {
+                        text_parts.push(format!("[attached file: {fname}]"));
+                    }
+                }
+                let full_text = text_parts.join("\n");
+                if first_user_prompt.is_none() && !full_text.trim().is_empty() {
+                    let one_line = full_text.split_whitespace().collect::<Vec<_>>().join(" ");
+                    first_user_prompt = Some(one_line.chars().take(78).collect());
+                }
+                if inferred_ws.is_none() {
+                    inferred_ws = infer_workspace_from_text(&full_text);
+                }
+                messages.push(json!({
+                    "role": "user",
+                    "content": full_text,
+                    "cw_timestamp": ts_iso,
+                    "cw_turn_seq": turn_counter
+                }));
+            } else if msg.role == "assistant" {
+                let mut blocks = Vec::new();
+                let mut tool_results = Vec::new();
+
+                for (pid, ptype, pval) in msg.parts {
+                    if ptype == "reasoning" {
+                        if let Some(t) = pval.get("text").and_then(|v| v.as_str()) {
+                            blocks.push(json!({
+                                "type": "thinking",
+                                "thinking": t
+                            }));
+                        }
+                    } else if ptype == "text" {
+                        if let Some(t) = pval.get("text").and_then(|v| v.as_str()) {
+                            blocks.push(json!({
+                                "type": "text",
+                                "text": t
+                            }));
+                        }
+                    } else if ptype == "tool" {
+                        let tool_name = pval.get("tool").and_then(|v| v.as_str()).unwrap_or("tool");
+                        let call_id = pval.get("callID").and_then(|v| v.as_str()).unwrap_or(&pid);
+                        let state = pval.get("state").cloned().unwrap_or(Value::Null);
+                        let input = state.get("input").cloned().unwrap_or_else(|| json!({}));
+                        let output = state.get("output").and_then(|v| v.as_str()).unwrap_or("");
+
+                        if inferred_ws.is_none() {
+                            inferred_ws = infer_workspace_from_tool_args(&input);
+                        }
+
+                        blocks.push(json!({
+                            "type": "tool_use",
+                            "id": call_id,
+                            "name": tool_name,
+                            "input": input
+                        }));
+
+                        tool_results.push((call_id.to_string(), output.to_string()));
+                    }
+                }
+
+                if !blocks.is_empty() {
+                    messages.push(json!({
+                        "role": "assistant",
+                        "content": blocks,
+                        "cw_timestamp": ts_iso.clone(),
+                        "cw_turn_seq": turn_counter.max(1)
+                    }));
+                }
+
+                if !tool_results.is_empty() {
+                    let res_content: Vec<Value> = tool_results
+                        .into_iter()
+                        .map(|(cid, out)| {
+                            json!({
+                                "type": "tool_result",
+                                "tool_use_id": cid,
+                                "content": out
+                            })
+                        })
+                        .collect();
+                    messages.push(json!({
+                        "role": "user",
+                        "content": res_content,
+                        "cw_timestamp": ts_iso,
+                        "cw_turn_seq": turn_counter.max(1)
+                    }));
+                }
+            }
+        }
+
+        if messages.is_empty() {
+            continue;
+        }
+
+        let final_workspace = inferred_ws.unwrap_or_else(|| "/opencode".to_string());
+        let final_title = if !raw_title.trim().is_empty() {
+            Some(raw_title.trim().to_string())
+        } else {
+            first_user_prompt
+        };
+
+        let payload = json!({
+            "model": model,
+            "max_tokens": 8192,
+            "system": "OpenCode V2 Agent",
+            "messages": messages
+        });
+
+        let session = Session {
+            id: session_id.clone(),
+            parent_session_id: None,
+            harness: HarnessKind::OpenCode,
+            workspace_root: Some(final_workspace.clone()),
+            model: model.clone(),
+            provider: ProviderKind::Anthropic,
+            title: final_title,
+            created_at,
+            updated_at,
+        };
+        store.upsert_session(&session)?;
+
+        let seq = turn_counter.max(1);
+        let existing_mutations = store.list_mutations(&session_id).unwrap_or_default();
+        let mut mutated_payload_opt = None;
+        let mut saved_by_mutations = 0u32;
+        if !existing_mutations.is_empty() {
+            let mut cloned = payload.clone();
+            let rep = apply_mutations_to_payload(
+                &mut cloned,
+                ProviderKind::Anthropic,
+                &existing_mutations,
+                seq,
+            );
+            saved_by_mutations = rep.saved_tokens;
+            mutated_payload_opt = Some(cloned);
+        }
+        let payload_for_analysis = mutated_payload_opt.as_ref().unwrap_or(&payload);
+
+        let turn_id = format!("turn_{}_{}", session_id, seq);
+        let (mut turn, file_states) = analyze_turn_from_payload(
+            turn_id,
+            session_id.clone(),
+            None,
+            seq,
+            payload_for_analysis,
+            ProviderKind::Anthropic,
+            None,
+            None,
+            Some(&final_workspace),
+        )?;
+        turn.created_at = updated_at;
+        turn.token_usage.output_tokens = (cum_out as u32).min(128_000);
+        turn.token_usage.saved_by_mutations = saved_by_mutations;
+        if cum_inp > 0 {
+            turn.token_usage.input_tokens = (cum_inp as u32).saturating_sub(saved_by_mutations);
+        }
+        if cum_cache_read > 0 {
+            let total_cum = (cum_inp + cum_cache_read).max(1) as f64;
+            let hit_ratio = (cum_cache_read as f64 / total_cum).clamp(0.0, 0.99) as f32;
+            let hit_tok = ((turn.token_usage.input_tokens as f32) * hit_ratio).round() as u32;
+            turn.token_usage.cached_tokens = hit_tok;
+            turn.kv_cache_report.hit_tokens = hit_tok;
+            turn.kv_cache_report.newly_cached_tokens =
+                turn.token_usage.input_tokens.saturating_sub(hit_tok);
+            turn.kv_cache_report.hit_ratio = hit_ratio;
+        }
+
+        store.save_turn(&turn, Some(&payload), mutated_payload_opt.as_ref(), None)?;
+        store.save_file_states(&session_id, &file_states)?;
+        imported_ids.push(session_id);
+    }
+
+    Ok(imported_ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1964,6 +2333,109 @@ mod tests {
             updated_content.contains("[cw:shadow_deduped"),
             "Transcript on disk should contain shadow deduped content"
         );
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_import_opencode_sqlite_db() {
+        let tmp_dir = std::env::temp_dir().join(format!("cw_test_opencode_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp_dir);
+        let db_path = tmp_dir.join("opencode.db");
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session_v2 (
+                id text PRIMARY KEY,
+                directory text NOT NULL,
+                title text NOT NULL,
+                model text,
+                tokens_input integer DEFAULT 0,
+                tokens_output integer DEFAULT 0,
+                tokens_cache_read integer DEFAULT 0,
+                tokens_cache_write integer DEFAULT 0,
+                time_created integer NOT NULL,
+                time_updated integer NOT NULL
+            );
+            CREATE TABLE message (
+                id text PRIMARY KEY,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                data text NOT NULL
+            );
+            CREATE TABLE part (
+                id text PRIMARY KEY,
+                message_id text NOT NULL,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                data text NOT NULL
+            );",
+        )
+        .unwrap();
+
+        // Insert session
+        conn.execute(
+            "INSERT INTO session_v2 (id, directory, title, model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created, time_updated)
+             VALUES ('ses_test_123', '/test/project', 'Explore project', '{\"id\":\"claude-3-7-sonnet\"}', 10000, 500, 7500, 0, 1781210000000, 1781210010000);",
+            [],
+        )
+        .unwrap();
+
+        // Insert user message and part
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data)
+             VALUES ('msg_u1', 'ses_test_123', 1781210000000, '{\"role\":\"user\"}');",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_u1', 'msg_u1', 'ses_test_123', 1781210000000, '{\"type\":\"text\",\"text\":\"Read Cargo.toml\"}');",
+            [],
+        )
+        .unwrap();
+
+        // Insert assistant message with reasoning and tool call
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data)
+             VALUES ('msg_a1', 'ses_test_123', 1781210005000, '{\"role\":\"assistant\"}');",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_a1_reason', 'msg_a1', 'ses_test_123', 1781210005000, '{\"type\":\"reasoning\",\"text\":\"Let me inspect Cargo.toml\"}');",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_a1_tool', 'msg_a1', 'ses_test_123', 1781210006000, '{\"type\":\"tool\",\"tool\":\"read\",\"callID\":\"call_c1\",\"state\":{\"status\":\"completed\",\"input\":{\"filePath\":\"Cargo.toml\"},\"output\":\"[package]\\nname=\\\"test\\\"\"}}');",
+            [],
+        )
+        .unwrap();
+
+        let store = CwStore::open_in_memory().unwrap();
+        let imported = import_opencode_state_db(&db_path, &store, 10).unwrap();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0], "opencode_ses_test_123");
+
+        let sess = store.get_session("opencode_ses_test_123").unwrap().unwrap();
+        assert_eq!(sess.title.as_deref(), Some("Explore project"));
+        assert_eq!(sess.model, "claude-3-7-sonnet");
+        assert_eq!(sess.harness, HarnessKind::OpenCode);
+
+        let turn = store
+            .get_latest_turn("opencode_ses_test_123")
+            .unwrap()
+            .unwrap();
+        assert!(turn.token_usage.cached_tokens > 0);
+        assert_eq!(turn.token_usage.output_tokens, 500);
+        assert!(turn.kv_cache_report.hit_ratio > 0.0);
+
+        let file_states = store.get_file_states("opencode_ses_test_123").unwrap();
+        assert_eq!(file_states.len(), 1);
+        assert_eq!(file_states[0].path, "Cargo.toml");
 
         let _ = fs::remove_dir_all(&tmp_dir);
     }

@@ -21,7 +21,7 @@ use cw_core::{
 };
 use cw_harnesses::{
     import_agy_transcript, import_generic_jsonl_transcript, import_hermes_state_db,
-    spawn_transcript_watcher, sync_mutations_to_transcript_on_disk,
+    import_opencode_state_db, spawn_transcript_watcher, sync_mutations_to_transcript_on_disk,
 };
 use cw_mcp::run_mcp_stdio_server;
 use cw_proxy::{DaemonState, build_api_router, build_proxy_router, recompute_latest_turn_in_store};
@@ -334,8 +334,7 @@ fn default_db_path() -> PathBuf {
     if let Ok(p) = std::env::var("CW_DB_PATH") {
         return PathBuf::from(p);
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".local/share/context-watcher/cw.db")
+    cw_core::home_dir().join(".local/share/context-watcher/cw.db")
 }
 
 #[tokio::main]
@@ -948,8 +947,8 @@ async fn main() -> Result<()> {
             workspace,
         } => {
             let store = CwStore::open(&db_path)?;
+            let p_str = path.to_string_lossy();
             let h = if harness == "antigravity" {
-                let p_str = path.to_string_lossy();
                 if p_str.contains(".omp") {
                     HarnessKind::Omp
                 } else if p_str.contains(".pi") {
@@ -960,13 +959,26 @@ async fn main() -> Result<()> {
                     HarnessKind::ClaudeCode
                 } else if p_str.contains(".hermes") {
                     HarnessKind::Hermes
+                } else if p_str.contains("opencode") {
+                    HarnessKind::OpenCode
                 } else {
                     HarnessKind::Antigravity
                 }
             } else {
                 HarnessKind::from_str_lossy(&harness)
             };
-            if h == HarnessKind::Hermes
+            if (h == HarnessKind::OpenCode || p_str.contains("opencode"))
+                && (path.extension().and_then(|e| e.to_str()) == Some("db")
+                    || path.extension().and_then(|e| e.to_str()) == Some("sqlite"))
+            {
+                let ids = import_opencode_state_db(&path, &store, 20)?;
+                println!(
+                    "Imported {} OpenCode sessions from {}: {}",
+                    ids.len(),
+                    path.display(),
+                    ids.join(", ")
+                );
+            } else if h == HarnessKind::Hermes
                 || path.extension().and_then(|e| e.to_str()) == Some("db")
                 || path.extension().and_then(|e| e.to_str()) == Some("sqlite")
             {
@@ -1576,7 +1588,7 @@ fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
         100
     };
     let kv_ratio = if total.input_tokens > 0 {
-        (total.kv_hit_tokens as f64 / total.input_tokens as f64) * 100.0
+        ((total.kv_hit_tokens as f64 / total.input_tokens as f64) * 100.0).clamp(0.0, 99.9)
     } else {
         0.0
     };
@@ -2250,8 +2262,7 @@ fn start_daemon_detached(port: u16, proxy_port: u16, workspace: Option<String>) 
     }
 
     // Fallback: spawn detached child process with ~/.cw/cw.log
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let cw_dir = PathBuf::from(&home).join(".cw");
+    let cw_dir = cw_core::home_dir().join(".cw");
     std::fs::create_dir_all(&cw_dir)?;
     let log_path = cw_dir.join("cw.log");
     let pid_path = cw_dir.join("cw.pid");
@@ -2311,10 +2322,14 @@ fn stop_daemon(port: u16) -> Result<()> {
         .status();
 
     // 2. Also check ~/.cw/cw.pid
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let pid_path = PathBuf::from(&home).join(".cw/cw.pid");
+    let pid_path = cw_core::home_dir().join(".cw/cw.pid");
     if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
         let p = pid_str.trim();
+        #[cfg(windows)]
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/PID", p])
+            .status();
+        #[cfg(not(windows))]
         let _ = std::process::Command::new("kill").arg(p).status();
         let _ = std::fs::remove_file(&pid_path);
     }
@@ -2330,8 +2345,7 @@ fn stop_daemon(port: u16) -> Result<()> {
 
 fn status_daemon(port: u16) -> Result<()> {
     let running = is_daemon_running(port);
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let pid_path = PathBuf::from(&home).join(".cw/cw.pid");
+    let pid_path = cw_core::home_dir().join(".cw/cw.pid");
     let pid = std::fs::read_to_string(&pid_path)
         .ok()
         .map(|s| s.trim().to_string());
@@ -2414,8 +2428,7 @@ fn register_claude_code_mcp(home_path: &std::path::Path, cw_cmd_str: &str) {
 }
 
 fn run_init_installer(dry_run: bool, auto_start: bool) -> Result<()> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let home_path = PathBuf::from(&home);
+    let home_path = cw_core::home_dir();
     let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cw"));
     let local_bin_dir = home_path.join(".local/bin");
     let installed_cw_bin = local_bin_dir.join("cw");

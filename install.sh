@@ -227,12 +227,16 @@ main() {
     # Run auto-initialization for agent harnesses
     printf "\n"
     info "Running 'cw init' to register agent harness integrations..."
-    "$INSTALL_DIR/$BIN_NAME" init || true
+    # Do not enable an always-on background service from a piped installer; let the
+    # user opt in explicitly.
+    "$INSTALL_DIR/$BIN_NAME" init --no-start || true
 
     printf "\n"
     success "Installation and setup complete!"
     printf "\n"
     printf "  ${BOLD}Next steps:${RESET}\n"
+    printf "    ${CYAN}cw daemon start${RESET}   Start the background daemon (Web UI :4400, proxy :4401)\n"
+    printf "    ${DIM}systemctl --user enable --now contextwatcher${RESET}  (optional) start it at every login\n"
     printf "    ${CYAN}cw gain${RESET}        Show token, KV cache & dollar savings scoreboard\n"
     printf "    ${CYAN}cw hud${RESET}         Display instant sub-millisecond shell statusline\n"
     printf "    ${CYAN}cw pulse${RESET}       View recent ambient background savings notifications\n"

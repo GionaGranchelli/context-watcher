@@ -843,24 +843,25 @@ pub fn import_generic_jsonl_transcript(
                     latest_output_tokens = out as u32;
                 }
             }
-            if msg.get("role").and_then(|r| r.as_str()) == Some("user") {
+            let role_val = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+            if role_val == "user" || role_val == "assistant" {
                 turn_counter += 1;
-                if title.is_none() {
-                    if let Some(c) = msg.get("content").and_then(|v| v.as_str())
-                        && !c.trim().is_empty()
-                    {
-                        let one_line = c.split_whitespace().collect::<Vec<_>>().join(" ");
-                        title = Some(one_line.chars().take(78).collect());
-                    } else if let Some(arr) = msg.get("content").and_then(|v| v.as_array()) {
-                        for item in arr {
-                            if item.get("type").and_then(|t| t.as_str()) == Some("text")
-                                && let Some(t) = item.get("text").and_then(|s| s.as_str())
-                                && !t.trim().is_empty()
-                            {
-                                let one_line = t.split_whitespace().collect::<Vec<_>>().join(" ");
-                                title = Some(one_line.chars().take(78).collect());
-                                break;
-                            }
+            }
+            if role_val == "user" && title.is_none() {
+                if let Some(c) = msg.get("content").and_then(|v| v.as_str())
+                    && !c.trim().is_empty()
+                {
+                    let one_line = c.split_whitespace().collect::<Vec<_>>().join(" ");
+                    title = Some(one_line.chars().take(78).collect());
+                } else if let Some(arr) = msg.get("content").and_then(|v| v.as_array()) {
+                    for item in arr {
+                        if item.get("type").and_then(|t| t.as_str()) == Some("text")
+                            && let Some(t) = item.get("text").and_then(|s| s.as_str())
+                            && !t.trim().is_empty()
+                        {
+                            let one_line = t.split_whitespace().collect::<Vec<_>>().join(" ");
+                            title = Some(one_line.chars().take(78).collect());
+                            break;
                         }
                     }
                 }

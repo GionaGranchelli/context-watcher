@@ -1,11 +1,36 @@
 # contextWatcher Empirical Benchmark & Claim Verification
 
-> **Target Model:** `qwen3.8-27b-ud` running on local network host `machinist` (`http://192.168.1.156:1234/v1`)  
-> **Host Specifications:** Linux 7.2 x86_64, 125 GiB System RAM, ROCm / Vulkan Multi-GPU, `llama-server` backend  
-> **Agent Harness:** `omp` (oh-my-pi / Pi Agent v18.12.2)  
+> **Target Model:** `qwen3.8-27b-ud` & `Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS` on local multi-GPU host `machinist` (`192.168.1.156`)  
+> **Host Specifications:** Linux x86_64, 125 GiB System RAM, Dual AMD Radeon Instinct MI50 (`gfx906`, 32 GB VRAM) ROCm / HIP `llama-server` backend  
+> **Agent Harness:** `omp` (oh-my-pi / Pi Agent v18.12)  
 > **Context Windows Tested:** `8k`, `16k`, `32k`, `64k`, and `128k`  
-> **Benchmark Date:** October 2026  
-> **Tool Under Test:** `contextWatcher` (`cw v0.1.0`)
+> **Live Reproducible Runner:** [`benchmark/run_benchmark.py`](run_benchmark.py) + raw transcripts in [`benchmark/fixtures/`](fixtures/)
+
+---
+
+## 0. Run the Reproducible Benchmark Suite Yourself (`run_benchmark.py`)
+
+Nothing in [`benchmark/run_benchmark.py`](run_benchmark.py) is hardcoded. Anyone can reproduce the canonical IR parsing, token compaction across `min` / `mid` / `max` strategies, on-disk `.jsonl` sync-back, and unit test verification from the raw recorded session transcripts in [`benchmark/fixtures/`](fixtures/):
+
+```bash
+# 1. Build the release binary
+cargo build --release -p cw-cli
+
+# 2. Execute the live benchmark suite against the raw .jsonl fixtures
+python3 benchmark/run_benchmark.py
+
+# 3. (Optional) Measure live prefill TTFT before & after compaction against your own local LLM server
+python3 benchmark/run_benchmark.py --upstream http://127.0.0.1:8080/v1 --model qwen3
+```
+
+### What `run_benchmark.py` Does Under the Hood:
+1. **Raw Hardware-Recorded Fixtures ([`benchmark/fixtures/`](fixtures/)):**
+   * [`session_lru_cache.jsonl`](fixtures/session_lru_cache.jsonl) — 13-turn `omp` session implementing a thread-safe TTL LRU cache (`18,480` baseline tokens).
+   * [`session_flint_scheduler.jsonl`](fixtures/session_flint_scheduler.jsonl) — 21-turn `omp` session implementing an async DAG task scheduler (`31,545` baseline tokens).
+   * [`session_strata_rate_limiter.jsonl`](fixtures/session_strata_rate_limiter.jsonl) — 15-turn `omp` session on Dual MI50 ROCm implementing a sliding-window & token-bucket rate limiter (`24,401` baseline tokens).
+   * [`session_longrun_kv_engine.jsonl`](fixtures/session_longrun_kv_engine.jsonl) — 12-turn `omp` session on Dual MI50 ROCm implementing a crash-safe WAL + MemTable + Snapshot KV engine (`27,454` baseline tokens).
+2. **Real `cw` Binary Execution:** Spawns an isolated temporary `CW_DB_PATH` SQLite store per test case and tier, runs `cw import`, queries the SQLite `turns` and `blobs` tables directly for exact token counts, node counts, health scores, and lint findings, and runs `cw optimize -s <min|mid|max> --sync-back` on isolated copies of the `.jsonl` transcripts.
+3. **Real Unit Test Verification:** Runs `python3 -m unittest discover` across all 4 artifact directories (`35/35` unit tests passing) and outputs live computed metrics to [`benchmark/results/live_benchmark_results.json`](results/live_benchmark_results.json) and [`benchmark/results/live_benchmark_results.csv`](results/live_benchmark_results.csv).
 
 ---
 

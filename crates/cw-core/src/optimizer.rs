@@ -239,7 +239,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                         ),
                     },
                 };
-                if n.kv_status != KvNodeStatus::CachedHit && tok > 100 {
+                if n.turn_seq >= max_turn.saturating_sub(1) && tok > 60 {
                     tail_bloat_items.push(item.clone());
                 }
                 log_and_thought_items.push(item);
@@ -253,7 +253,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
             let after_tok = 8u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
             let kv_break = total_cached.saturating_sub(n.token_span.start);
-            log_and_thought_items.push(OptimizationCandidateItem {
+            let think_item = OptimizationCandidateItem {
                 item_id: format!("cut_think_{}", n.id),
                 node_id: Some(n.id.clone()),
                 turn_seq: n.turn_seq,
@@ -276,7 +276,11 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                     target_json_pointer: Some(n.raw_json_pointer.clone()),
                     stub_text: format!("[cw:pruned_thinking turn={}]", n.turn_seq),
                 },
-            });
+            };
+            if n.turn_seq >= max_turn.saturating_sub(1) && tok > 50 {
+                tail_bloat_items.push(think_item.clone());
+            }
+            log_and_thought_items.push(think_item);
         }
 
         // 5. Unused MCP Tool Schemas
@@ -392,6 +396,11 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         }
         for item in stale_file_items
             .into_iter()
+            .chain(
+                log_and_thought_items
+                    .into_iter()
+                    .filter(|i| i.turn_seq > fold_end),
+            )
             .chain(gate_tool_items)
             .chain(pin_items)
         {

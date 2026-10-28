@@ -1898,11 +1898,24 @@ pub fn recompute_latest_turn_in_store(store: &CwStore, session_id: &str) -> Opti
     let latest = store.get_latest_turn(session_id).ok().flatten()?;
     let mut raw_payload = store.get_turn_raw_payload(&latest.id).ok().flatten()?;
     let session = store.get_session(session_id).ok().flatten();
-    let provider = session
-        .as_ref()
-        .map(|s| s.provider)
-        .unwrap_or(ProviderKind::Anthropic);
+    let provider = if raw_payload.get("system").is_some()
+        || session
+            .as_ref()
+            .is_some_and(|s| s.harness != HarnessKind::GenericProxy)
+    {
+        ProviderKind::Anthropic
+    } else {
+        session
+            .as_ref()
+            .map(|s| s.provider)
+            .unwrap_or(ProviderKind::Anthropic)
+    };
     let workspace_root = session.as_ref().and_then(|s| s.workspace_root.clone());
+
+    let unmutated_input_tokens = latest
+        .token_usage
+        .input_tokens
+        .saturating_add(latest.token_usage.saved_by_mutations);
 
     let rules = store.list_mutations(session_id).unwrap_or_default();
     let mut_report =
@@ -1919,6 +1932,9 @@ pub fn recompute_latest_turn_in_store(store: &CwStore, session_id: &str) -> Opti
         Some(latest.token_usage.cached_tokens),
         workspace_root.as_deref(),
     ) {
+        updated_turn.token_usage.input_tokens = unmutated_input_tokens
+            .saturating_sub(mut_report.saved_tokens)
+            .max(updated_turn.token_usage.input_tokens);
         updated_turn.token_usage.saved_by_mutations = mut_report.saved_tokens;
         let _ = store.save_turn(&updated_turn, None, Some(&raw_payload), None);
         let _ = store.save_file_states(session_id, &file_states);

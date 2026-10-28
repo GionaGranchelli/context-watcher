@@ -216,7 +216,14 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
                     for (blk_idx, blk) in blocks.iter().enumerate() {
                         let blk_ptr = format!("{msg_pointer}/content/{blk_idx}");
                         let blk_cache = extract_cache_control(blk).or_else(|| msg_cache.clone());
-                        let blk_type = blk.get("type").and_then(|v| v.as_str()).unwrap_or("text");
+                        let blk_type =
+                            blk.get("type").and_then(|v| v.as_str()).unwrap_or_else(|| {
+                                if blk.get("thinking").is_some() {
+                                    "thinking"
+                                } else {
+                                    "text"
+                                }
+                            });
 
                         match blk_type {
                             "thinking" => {
@@ -227,6 +234,7 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
                                     .to_string();
                                 let sig = blk
                                     .get("signature")
+                                    .or_else(|| blk.get("thinkingSignature"))
                                     .and_then(|v| v.as_str())
                                     .map(|s| s.to_string());
                                 push_node(

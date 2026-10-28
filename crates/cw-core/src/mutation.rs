@@ -83,12 +83,15 @@ pub fn apply_mutations_to_payload(
             } => {
                 let mut first_folded = true;
                 for node in &before_nodes {
-                    if node.turn_seq >= *start_turn
-                        && node.turn_seq <= *end_turn
-                        && matches!(
+                    let is_foldable_kind =
+                        matches!(
                             node.kind,
                             NodeKind::ToolResult { .. } | NodeKind::AssistantThinking { .. }
-                        )
+                        ) || (matches!(node.kind, NodeKind::AssistantText { .. })
+                            && node.turn_seq < *end_turn);
+                    if node.turn_seq >= *start_turn
+                        && node.turn_seq <= *end_turn
+                        && is_foldable_kind
                     {
                         let replacement = if first_folded {
                             first_folded = false;
@@ -97,7 +100,7 @@ pub fn apply_mutations_to_payload(
                                 start_turn, end_turn, summary_text
                             )
                         } else {
-                            format!("[cw:folded_into_turn_{}..{}]", start_turn, end_turn)
+                            "[cw:folded]".to_string()
                         };
                         if replace_node_text_at_pointer(
                             payload,

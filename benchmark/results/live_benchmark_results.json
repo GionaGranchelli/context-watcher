@@ -1,0 +1,334 @@
+{
+  "generated_at_utc": "2026-10-28T20:03:05Z",
+  "cw_binary": "target/release/cw",
+  "cases": [
+    {
+      "case": "lru_cache",
+      "description": "Thread-safe TTL LRU Cache (omp + qwen3.8-27b-ud)",
+      "fixture_file": "session_lru_cache.jsonl",
+      "fixture_bytes": 105449,
+      "session_id": "omp_01a163cd-a64",
+      "recorded_hardware_telemetry": {
+        "assistant_turns": 13,
+        "models": [
+          "qwen3.8-27b-ud"
+        ],
+        "providers": [
+          "machinist-lms"
+        ],
+        "recorded_max_prompt_tokens": 7952,
+        "recorded_avg_ttft_ms": 4442.25,
+        "recorded_max_ttft_ms": 10447.24,
+        "recorded_total_generation_ms": 723057.64
+      },
+      "artifact_unit_tests": {
+        "passed": true,
+        "tests_run": 7,
+        "duration_ms": 165.13
+      },
+      "cw_engine_latencies_ms": {
+        "import_ms": 8.32,
+        "hud_json_ms": 5.38
+      },
+      "baseline": {
+        "context_tokens": 18480,
+        "nodes_count": 46,
+        "health_score": 91,
+        "active_lint_findings": 1,
+        "attention_avg_salience": 0.0,
+        "critical_rules_in_dead_zone": 0,
+        "live_upstream_ttft_ms": null
+      },
+      "optimization_tiers": {
+        "min": {
+          "strategy": "min",
+          "context_tokens": 17505,
+          "tokens_saved": 975,
+          "reported_overlay_saved": 975,
+          "reduction_pct": 5.28,
+          "health_score_after": 91,
+          "remaining_lints": 1,
+          "disk_bytes_before": 105449,
+          "disk_bytes_after": 105447,
+          "disk_bytes_saved_pct": 0.0,
+          "optimize_and_sync_latency_ms": 10.62,
+          "live_upstream_ttft_ms": null
+        },
+        "mid": {
+          "strategy": "mid",
+          "context_tokens": 9133,
+          "tokens_saved": 9347,
+          "reported_overlay_saved": 9347,
+          "reduction_pct": 50.58,
+          "health_score_after": 91,
+          "remaining_lints": 1,
+          "disk_bytes_before": 105449,
+          "disk_bytes_after": 102443,
+          "disk_bytes_saved_pct": 2.85,
+          "optimize_and_sync_latency_ms": 9.42,
+          "live_upstream_ttft_ms": null
+        },
+        "max": {
+          "strategy": "max",
+          "context_tokens": 8920,
+          "tokens_saved": 9560,
+          "reported_overlay_saved": 9560,
+          "reduction_pct": 51.73,
+          "health_score_after": 91,
+          "remaining_lints": 1,
+          "disk_bytes_before": 105449,
+          "disk_bytes_after": 103128,
+          "disk_bytes_saved_pct": 2.2,
+          "optimize_and_sync_latency_ms": 9.45,
+          "live_upstream_ttft_ms": null
+        }
+      }
+    },
+    {
+      "case": "flint_scheduler",
+      "description": "Async DAG Task Scheduler with Retry & Backoff",
+      "fixture_file": "session_flint_scheduler.jsonl",
+      "fixture_bytes": 282622,
+      "session_id": "omp_01a168da-6bd",
+      "recorded_hardware_telemetry": {
+        "assistant_turns": 21,
+        "models": [
+          "flint"
+        ],
+        "providers": [
+          "machinist-flint"
+        ],
+        "recorded_max_prompt_tokens": 31545,
+        "recorded_avg_ttft_ms": 1506.46,
+        "recorded_max_ttft_ms": 7148.02,
+        "recorded_total_generation_ms": 1393309.3
+      },
+      "artifact_unit_tests": {
+        "passed": true,
+        "tests_run": 7,
+        "duration_ms": 49.22
+      },
+      "cw_engine_latencies_ms": {
+        "import_ms": 9.59,
+        "hud_json_ms": 5.66
+      },
+      "baseline": {
+        "context_tokens": 31545,
+        "nodes_count": 70,
+        "health_score": 82,
+        "active_lint_findings": 2,
+        "attention_avg_salience": 0.0,
+        "critical_rules_in_dead_zone": 0,
+        "live_upstream_ttft_ms": null
+      },
+      "optimization_tiers": {
+        "min": {
+          "strategy": "min",
+          "context_tokens": 31342,
+          "tokens_saved": 203,
+          "reported_overlay_saved": 203,
+          "reduction_pct": 0.64,
+          "health_score_after": 82,
+          "remaining_lints": 2,
+          "disk_bytes_before": 282622,
+          "disk_bytes_after": 282622,
+          "disk_bytes_saved_pct": 0.0,
+          "optimize_and_sync_latency_ms": 12.66,
+          "live_upstream_ttft_ms": null
+        },
+        "mid": {
+          "strategy": "mid",
+          "context_tokens": 15989,
+          "tokens_saved": 15556,
+          "reported_overlay_saved": 15556,
+          "reduction_pct": 49.31,
+          "health_score_after": 82,
+          "remaining_lints": 2,
+          "disk_bytes_before": 282622,
+          "disk_bytes_after": 280360,
+          "disk_bytes_saved_pct": 0.8,
+          "optimize_and_sync_latency_ms": 15.16,
+          "live_upstream_ttft_ms": null
+        },
+        "max": {
+          "strategy": "max",
+          "context_tokens": 15934,
+          "tokens_saved": 15611,
+          "reported_overlay_saved": 15611,
+          "reduction_pct": 49.49,
+          "health_score_after": 82,
+          "remaining_lints": 2,
+          "disk_bytes_before": 282622,
+          "disk_bytes_after": 282622,
+          "disk_bytes_saved_pct": 0.0,
+          "optimize_and_sync_latency_ms": 13.69,
+          "live_upstream_ttft_ms": null
+        }
+      }
+    },
+    {
+      "case": "strata_rate_limiter",
+      "description": "Sliding-Window & Token-Bucket Rate Limiter",
+      "fixture_file": "session_strata_rate_limiter.jsonl",
+      "fixture_bytes": 196054,
+      "session_id": "omp_01a178a7-a3a",
+      "recorded_hardware_telemetry": {
+        "assistant_turns": 15,
+        "models": [
+          "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+        ],
+        "providers": [
+          "machinist-strata"
+        ],
+        "recorded_max_prompt_tokens": 24401,
+        "recorded_avg_ttft_ms": 112699.09,
+        "recorded_max_ttft_ms": 148754.35,
+        "recorded_total_generation_ms": 1999767.03
+      },
+      "artifact_unit_tests": {
+        "passed": true,
+        "tests_run": 13,
+        "duration_ms": 1645.15
+      },
+      "cw_engine_latencies_ms": {
+        "import_ms": 8.34,
+        "hud_json_ms": 4.84
+      },
+      "baseline": {
+        "context_tokens": 24401,
+        "nodes_count": 48,
+        "health_score": 91,
+        "active_lint_findings": 1,
+        "attention_avg_salience": 0.0,
+        "critical_rules_in_dead_zone": 0,
+        "live_upstream_ttft_ms": null
+      },
+      "optimization_tiers": {
+        "min": {
+          "strategy": "min",
+          "context_tokens": 21433,
+          "tokens_saved": 2968,
+          "reported_overlay_saved": 2968,
+          "reduction_pct": 12.16,
+          "health_score_after": 91,
+          "remaining_lints": 1,
+          "disk_bytes_before": 196054,
+          "disk_bytes_after": 194147,
+          "disk_bytes_saved_pct": 0.97,
+          "optimize_and_sync_latency_ms": 11.41,
+          "live_upstream_ttft_ms": null
+        },
+        "mid": {
+          "strategy": "mid",
+          "context_tokens": 16860,
+          "tokens_saved": 7541,
+          "reported_overlay_saved": 7541,
+          "reduction_pct": 30.9,
+          "health_score_after": 91,
+          "remaining_lints": 1,
+          "disk_bytes_before": 196054,
+          "disk_bytes_after": 191553,
+          "disk_bytes_saved_pct": 2.3,
+          "optimize_and_sync_latency_ms": 10.73,
+          "live_upstream_ttft_ms": null
+        },
+        "max": {
+          "strategy": "max",
+          "context_tokens": 16829,
+          "tokens_saved": 7572,
+          "reported_overlay_saved": 7572,
+          "reduction_pct": 31.03,
+          "health_score_after": 91,
+          "remaining_lints": 1,
+          "disk_bytes_before": 196054,
+          "disk_bytes_after": 194164,
+          "disk_bytes_saved_pct": 0.96,
+          "optimize_and_sync_latency_ms": 10.3,
+          "live_upstream_ttft_ms": null
+        }
+      }
+    },
+    {
+      "case": "longrun_kv_engine",
+      "description": "Crash-Safe WAL + MemTable + Snapshot KV Engine",
+      "fixture_file": "session_longrun_kv_engine.jsonl",
+      "fixture_bytes": 151271,
+      "session_id": "omp_01a178e7-a09",
+      "recorded_hardware_telemetry": {
+        "assistant_turns": 12,
+        "models": [
+          "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+        ],
+        "providers": [
+          "machinist-strata"
+        ],
+        "recorded_max_prompt_tokens": 26022,
+        "recorded_avg_ttft_ms": 123283.13,
+        "recorded_max_ttft_ms": 157439.88,
+        "recorded_total_generation_ms": 1210594.12
+      },
+      "artifact_unit_tests": {
+        "passed": true,
+        "tests_run": 8,
+        "duration_ms": 219.79
+      },
+      "cw_engine_latencies_ms": {
+        "import_ms": 8.33,
+        "hud_json_ms": 4.98
+      },
+      "baseline": {
+        "context_tokens": 27454,
+        "nodes_count": 33,
+        "health_score": 100,
+        "active_lint_findings": 0,
+        "attention_avg_salience": 0.0,
+        "critical_rules_in_dead_zone": 0,
+        "live_upstream_ttft_ms": null
+      },
+      "optimization_tiers": {
+        "min": {
+          "strategy": "min",
+          "context_tokens": 27454,
+          "tokens_saved": 0,
+          "reported_overlay_saved": 0,
+          "reduction_pct": 0.0,
+          "health_score_after": 100,
+          "remaining_lints": 0,
+          "disk_bytes_before": 151271,
+          "disk_bytes_after": 150307,
+          "disk_bytes_saved_pct": 0.64,
+          "optimize_and_sync_latency_ms": 9.99,
+          "live_upstream_ttft_ms": null
+        },
+        "mid": {
+          "strategy": "mid",
+          "context_tokens": 14906,
+          "tokens_saved": 12548,
+          "reported_overlay_saved": 12548,
+          "reduction_pct": 45.71,
+          "health_score_after": 100,
+          "remaining_lints": 0,
+          "disk_bytes_before": 151271,
+          "disk_bytes_after": 149906,
+          "disk_bytes_saved_pct": 0.9,
+          "optimize_and_sync_latency_ms": 10.19,
+          "live_upstream_ttft_ms": null
+        },
+        "max": {
+          "strategy": "max",
+          "context_tokens": 14843,
+          "tokens_saved": 12611,
+          "reported_overlay_saved": 12611,
+          "reduction_pct": 45.94,
+          "health_score_after": 100,
+          "remaining_lints": 0,
+          "disk_bytes_before": 151271,
+          "disk_bytes_after": 151029,
+          "disk_bytes_saved_pct": 0.16,
+          "optimize_and_sync_latency_ms": 9.43,
+          "live_upstream_ttft_ms": null
+        }
+      }
+    }
+  ]
+}

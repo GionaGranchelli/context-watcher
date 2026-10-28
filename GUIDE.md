@@ -37,7 +37,7 @@ cw --version
 
 `cw init` automatically discovers your installed AI coding harnesses and sets up integrations:
 * **Antigravity (AGY):** Configures the native `/context-watcher` MCP server and skill in `~/.gemini/antigravity-cli/`.
-* **Claude Code:** Registers `/cw` slash commands in `~/.claude/commands/` and sets up ambient hooks.
+* **Claude Code:** Registers the `contextwatcher` MCP server at user scope (via `claude mcp add`, or `~/.claude.json`) and `/cw` slash commands in `~/.claude/commands/`.
 * **Codex CLI:** Hooks into session rollouts in `~/.codex/`.
 * **Pi / OMP:** Installs extension hooks in `~/.pi/agent/settings.json`.
 * **Hermes Agent:** Configures state database watchers in `~/.hermes/`.

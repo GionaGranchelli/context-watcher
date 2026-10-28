@@ -2348,6 +2348,58 @@ fn status_daemon(port: u16) -> Result<()> {
     Ok(())
 }
 
+/// Registers the `contextwatcher` MCP server for Claude Code at user scope.
+///
+/// Claude Code reads user-scoped MCP servers from `~/.claude.json` (top-level `mcpServers`),
+/// not from `~/.claude/settings.json`. Prefer the official `claude mcp add` CLI; if it is not
+/// on PATH, merge the entry into `~/.claude.json` directly, keeping a backup.
+fn register_claude_code_mcp(home_path: &std::path::Path, cw_cmd_str: &str) {
+    let via_cli = std::process::Command::new("claude")
+        .args(["mcp", "remove", "--scope", "user", "contextwatcher"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok()
+        && std::process::Command::new("claude")
+            .args(["mcp", "add", "--scope", "user", "contextwatcher", "--", cw_cmd_str, "mcp"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+    if via_cli {
+        return;
+    }
+
+    let config_path = home_path.join(".claude.json");
+    let mut root: serde_json::Value = match std::fs::read_to_string(&config_path) {
+        Ok(s) => match serde_json::from_str(&s) {
+            Ok(v) => v,
+            // Never overwrite a config we could not parse.
+            Err(_) => return,
+        },
+        Err(_) => serde_json::json!({}),
+    };
+    let Some(obj) = root.as_object_mut() else { return };
+    let servers = obj
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(servers) = servers.as_object_mut() else { return };
+    servers.insert(
+        "contextwatcher".to_string(),
+        serde_json::json!({ "type": "stdio", "command": cw_cmd_str, "args": ["mcp"], "env": {} }),
+    );
+    if config_path.exists() {
+        let _ = std::fs::copy(&config_path, home_path.join(".claude.json.cw.bak"));
+    }
+    if let Ok(pretty) = serde_json::to_string_pretty(&root) {
+        let tmp = home_path.join(".claude.json.cw.tmp");
+        if std::fs::write(&tmp, format!("{pretty}\n")).is_ok() {
+            let _ = std::fs::rename(&tmp, &config_path);
+        }
+    }
+}
+
 fn run_init_installer(dry_run: bool, auto_start: bool) -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let home_path = PathBuf::from(&home);
@@ -2564,37 +2616,35 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
             let _ = std::fs::write(skills_full_dir.join("SKILL.md"), skill_md);
             let _ = std::fs::write(skills_cw_dir.join("SKILL.md"), skill_cw_md);
 
-            let mut root: serde_json::Value = if settings_path.exists() {
-                let _ = std::fs::copy(&settings_path, claude_dir.join("settings.json.cw.bak"));
-                std::fs::read_to_string(&settings_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_else(|| serde_json::json!({}))
-            } else {
-                serde_json::json!({})
-            };
+            register_claude_code_mcp(&home_path, &cw_cmd_str);
 
-            if let Some(obj) = root.as_object_mut() {
-                let mcp_servers = obj
-                    .entry("mcpServers")
-                    .or_insert_with(|| serde_json::json!({}));
-                if let Some(mcp_obj) = mcp_servers.as_object_mut() {
-                    mcp_obj.insert(
-                        "contextwatcher".to_string(),
-                        serde_json::json!({
-                            "command": cw_cmd_str,
-                            "args": ["mcp"]
-                        }),
-                    );
+            // Earlier versions wrote `mcpServers.contextwatcher` into settings.json, which
+            // Claude Code does not read MCP servers from. Remove that stale entry if present.
+            if settings_path.exists()
+                && let Some(mut root) = std::fs::read_to_string(&settings_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            {
+                let mut changed = false;
+                if let Some(obj) = root.as_object_mut() {
+                    if let Some(mcp) = obj.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+                        changed = mcp.remove("contextwatcher").is_some();
+                        if mcp.is_empty() {
+                            obj.remove("mcpServers");
+                        }
+                    }
                 }
-            }
-            if let Ok(pretty) = serde_json::to_string_pretty(&root) {
-                let _ = std::fs::write(&settings_path, format!("{pretty}\n"));
+                if changed {
+                    let _ = std::fs::copy(&settings_path, claude_dir.join("settings.json.cw.bak"));
+                    if let Ok(pretty) = serde_json::to_string_pretty(&root) {
+                        let _ = std::fs::write(&settings_path, format!("{pretty}\n"));
+                    }
+                }
             }
         }
         println!(
-            "  [4/6] Claude Code Config     : {} (mcpServers.contextwatcher + /context-watcher & /cw slash commands)",
-            settings_path.display()
+            "  [4/6] Claude Code Config     : {} (user-scope MCP server `contextwatcher` + /context-watcher & /cw slash commands)",
+            home_path.join(".claude.json").display()
         );
     }
 

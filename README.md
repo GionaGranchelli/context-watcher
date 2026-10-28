@@ -60,7 +60,7 @@ cw init
 
 The installer auto-discovers your local harnesses and configures:
 * **Antigravity (AGY):** MCP server + native `/context-watcher` skill in `~/.gemini/antigravity-cli/`
-* **Claude Code:** Slash commands (`/cw`) in `~/.claude/commands/` + auto-pilot post-tool hooks
+* **Claude Code:** User-scope MCP server (`contextwatcher`) + slash commands (`/cw`) in `~/.claude/commands/`
 * **Codex CLI:** Session watchers & rollout sync in `~/.codex/`
 * **Pi / OMP (oh-my-pi):** Extension hook & commands in `~/.pi/agent/settings.json`
 * **Hermes Agent:** State DB watchers & project categorizers in `~/.hermes/`

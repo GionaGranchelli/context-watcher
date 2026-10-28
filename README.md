@@ -59,11 +59,13 @@ cw init
 ```
 
 The installer auto-discovers your local harnesses and configures:
-* **Antigravity:** MCP server + native `/context-watcher` skill in `~/.gemini/antigravity-cli/`
+* **Antigravity (AGY):** MCP server + native `/context-watcher` skill in `~/.gemini/antigravity-cli/`
 * **Claude Code:** Slash commands (`/cw`) in `~/.claude/commands/` + auto-pilot post-tool hooks
 * **Codex CLI:** Session watchers & rollout sync in `~/.codex/`
 * **Pi / OMP (oh-my-pi):** Extension hook & commands in `~/.pi/agent/settings.json`
 * **Hermes Agent:** State DB watchers & project categorizers in `~/.hermes/`
+* **OpenCode:** Auto-watched transcripts in `~/.local/share/opencode/` + MCP server config
+* **Aider & Custom Agents:** Transparent proxy (`cw wrap <cmd>`) + native MCP server (`cw mcp`)
 
 Verify your setup:
 ```bash
@@ -526,16 +528,25 @@ cw sync-back --all                     # Sync compacted state back to on-disk tr
 
 ---
 
-## 📦 Harness Compatibility
+## 📦 Supported Harnesses & Compatibility
 
-| Harness | Proxy Interception | On-Disk Transcript Watcher | Native Slash Commands | Disk Sync-Back |
+| Harness | Proxy Interception | On-Disk Transcript Watcher | Native Slash Commands / Skills | Disk Sync-Back |
 | :--- | :---: | :---: | :---: | :---: |
-| **Antigravity (AGY)** | ✅ Yes (`cw wrap`) | ✅ Auto-watched (`~/.gemini/...`) | ✅ `/context-watcher` | ✅ Safe `.jsonl.bak` |
-| **Claude Code** | ✅ Yes (`cw wrap`) | ✅ Auto-watched (`~/.claude/...`) | ✅ `/cw optimize` | ✅ Safe `.jsonl.bak` |
-| **Codex CLI** | ✅ Yes (`cw wrap`) | ✅ Auto-watched (`~/.codex/...`) | ✅ `/cw` skill | ✅ Safe `.jsonl.bak` |
-| **Pi / OMP** | ✅ Yes (`cw wrap`) | ✅ Auto-watched (`~/.omp/...`) | ✅ Extension command | ✅ Safe `.jsonl.bak` |
-| **Hermes Agent** | ✅ Yes (`cw wrap`) | ✅ SQLite Watcher (`~/.hermes/...`)| ✅ Integrated hooks | ✅ State DB sync |
-| **OpenCode / Aider** | ✅ Yes (`cw wrap`) | ✅ Auto-watched | ✅ MCP Tool Server | ✅ Safe `.jsonl.bak` |
+| **Antigravity (AGY)** | ✅ Yes (`cw wrap`) | ✅ Auto-watched (`~/.gemini/...`) | ✅ `/context-watcher` & `/cw` | ✅ Safe `.jsonl.bak` |
+| **Claude Code** | ✅ Yes (`cw wrap`) | ✅ Auto-watched (`~/.claude/...`) | ✅ `/cw` & `/context-watcher` | ✅ Safe `.jsonl.bak` |
+| **Codex CLI** | ✅ Yes (`cw wrap`) | ✅ Auto-watched (`~/.codex/...`) | ✅ `/cw` & `/context-watcher` | ✅ Safe `.jsonl.bak` |
+| **Pi / OMP** | ✅ Yes (`cw wrap`) | ✅ Auto-watched (`~/.omp/...`) | ✅ Native Extension & `/cw` | ✅ Safe `.jsonl.bak` |
+| **Hermes Agent** | ✅ Yes (`cw wrap`) | ✅ SQLite Watcher (`~/.hermes/...`)| ✅ Integrated skills | ✅ State DB sync |
+| **OpenCode** | ✅ Yes (`cw wrap`) | ✅ Auto-watched (`~/.local/share/opencode`) | ✅ Built-in MCP Tools | ✅ Safe `.jsonl.bak` |
+| **Aider & Custom Agents** | ✅ Yes (`cw wrap aider`) | ✅ Auto-watched JSONL transcripts | ✅ MCP Server (`cw mcp`) | ✅ Safe `.jsonl.bak` |
+
+### 🤖 Tell Your AI Agent to Set This Up (Copy-Paste Prompt)
+
+Using **OpenCode**, **Cursor**, **Windsurf**, **Aider**, or an in-house agent? You can have your agent wire up `contextWatcher` autonomously. Copy and paste this prompt directly into your agent's chat:
+
+> "Read the contextWatcher guide at https://github.com/GionaGranchelli/context-watcher/blob/main/GUIDE.md. Configure contextWatcher for this project by connecting to the local MCP server (`cw mcp`) or setting up the proxy wrapper (`cw wrap`) so our conversational context, duplicate file reads, and KV-cache are automatically monitored and optimized."
+
+Your agent will inspect the guide, register the built-in `cw` MCP tools (`cw_context_status`, `cw_optimize_strategy`, `cw_evict_stale_reads`), and start managing its own context window and KV-cache health automatically.
 
 ---
 

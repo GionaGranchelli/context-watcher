@@ -41,7 +41,14 @@ cw --version
 * **Codex CLI:** Hooks into session rollouts in `~/.codex/`.
 * **Pi / OMP:** Installs extension hooks in `~/.pi/agent/settings.json`.
 * **Hermes Agent:** Configures state database watchers in `~/.hermes/`.
-* **Aider / OpenCode:** Provides standard MCP server configs.
+* **OpenCode:** Auto-watched transcripts in `~/.local/share/opencode/` + MCP server configuration.
+* **Aider & Custom Agents:** Transparent proxy (`cw wrap <cmd>`) + native MCP server (`cw mcp`).
+
+### 🤖 Tell Your AI Agent to Set This Up
+
+Using **OpenCode**, **Cursor**, **Windsurf**, or a custom agent? You can paste this prompt directly into your agent's chat:
+
+> "Read the contextWatcher guide at https://github.com/GionaGranchelli/context-watcher/blob/main/GUIDE.md. Configure contextWatcher for this project by connecting to the local MCP server (`cw mcp`) or setting up the proxy wrapper (`cw wrap`) so our conversational context, duplicate file reads, and KV-cache are automatically monitored and optimized."
 
 ---
 

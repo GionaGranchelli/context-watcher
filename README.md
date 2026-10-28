@@ -38,6 +38,8 @@ Works natively with **Antigravity (AGY)**, **Claude Code**, **Codex CLI**, **Pi 
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+> **Reproduce these benchmarks locally:** Raw recorded `.jsonl` agent sessions and generated code/test suites are checked into [`benchmark/fixtures/`](benchmark/fixtures/). Run `cargo build --release -p cw-cli && python3 benchmark/run_benchmark.py` (see [`benchmark/README.md`](benchmark/README.md)).
+
 ---
 
 ## ⚡ Quickstart (One Command)
@@ -77,25 +79,46 @@ which cw              # Verify binary path (~/.local/bin/cw)
 
 ---
 
-## 🛑 The Dirty Secret of AI Coding Agents
+## 🛑 The Problem: Append-Only Agent Memory & Why Engine Prefix Caching Isn't Enough
 
-Every modern AI agent harness (**Claude Code, Codex, Antigravity, Pi, Aider**) shares the same architectural flaw: **append-only conversation memory**.
+Every modern AI agent harness (**Claude Code, Codex, Antigravity, Pi, OpenCode, Aider**) uses **append-only conversation history**. Every turn, the harness sends the entire past conversation plus the new turn:
 
 ```
-Turn 1: User request + Tools                     ➔ 5,000 tokens sent
-Turn 2: Turn 1 + Assistant Monologue + Test Logs ➔ 12,000 tokens sent (Turn 1 re-billed!)
-Turn 3: Turn 1 + Turn 2 + Build Stacks + Edits   ➔ 28,000 tokens sent (Everything re-billed!)
+Turn 1: User request + Tools                     ➔ 5,000 tokens in window
+Turn 2: Turn 1 + Assistant Thinking + Test Logs  ➔ 12,000 tokens in window
+Turn 3: Turn 1 + Turn 2 + Build Logs + Re-Reads  ➔ 28,000 tokens in window
 ...
-Turn 10: 100,000+ tokens re-sent on every keystroke!
+Turn 10: 100,000+ tokens accumulated in the context window!
 ```
 
-### The Cost on Cloud Models (Claude 3.7 / GPT-4o / Gemini 2.0)
-* **The Financial Drain:** Re-sending 100k+ tokens every turn costs **$10–$50 per day** in redundant input tokens.
-* **The "Lost-in-the-Middle" Rot:** Past 60k tokens, models suffer attention dilution. They repeat old terminal errors from earlier turns and hallucinate deleted functions from stale file reads.
+### 💡 *"Wait—doesn't `llama.cpp` / `vLLM` prefix caching already skip re-evaluating repeated tokens?"*
 
-### The Catastrophe on Local Models (Ollama / `llama.cpp` / LM Studio)
-* **Context Overflows:** Local engines (8k–16k context) hard-crash on Turn 2 (`exceed_context_size_error`) because hidden reasoning monologues eat 96% of the window.
-* **The 80-Second Prefill Freeze:** At 64k–128k context, allocating KV-cache slots consumes **+26 GiB of RAM**, taking **84+ seconds of prefill computation** before generating a single word!
+Yes! Inference engines (and cloud prompt caches) reuse the KV cache for the repeated prefix so they don't re-compute those tokens from scratch. **However, engine prefix caching has two huge blind spots:**
+
+1. **It Caches Garbage in Your VRAM:** The engine has no idea *what* is inside the prompt. If your agent reads `src/main.rs` 6 times, dumps 15,000 tokens of old `<thinking>` monologues, and prints 4,000 lines of resolved `cargo test` output, the engine faithfully locks all of that dead noise into GPU VRAM—eating gigabytes of KV cache memory and overflowing 16k–32k local context slots.
+2. **Attention Dilution ("Lost in the Middle"):** Even when tokens are cached in VRAM, **every newly generated token still computes self-attention against every single cached token in the context window**. When 70% of your cached context is outdated file copies, old stack traces, and past internal monologues:
+   * The model hallucinates old line numbers or deleted functions from earlier file reads.
+   * Your core project rules (`AGENTS.md` / `CLAUDE.md`) sink into the middle of the context where transformer attention drops below **45%**.
+   * Whenever a cached prefix * does* get invalidated (slot eviction by a subagent, context shift, or editing an earlier turn), a local GPU has to re-prefill all 60k–100k tokens of accumulated bloat—freezing for **60 to 170 seconds**.
+
+---
+
+## 🩺 How `contextWatcher` Decides What to Clean (In Plain English)
+
+Instead of blindly summarizing your conversation, `contextWatcher` calculates a **Context Health Score (`0` to `100`)** on every turn based on three simple signals:
+
+1. **File Entropy (Duplicate & Stale Reads):** Did the agent read the same file 4 times, or did the file change on disk after the agent read it? If so, `cw` replaces the older copies with a 1-line pointer (`[cw:shadow_deduped ...]`) and keeps **only the newest read 100% verbatim**.
+2. **Signal-to-Noise Ratio (Logs & Old Thinking):** How much of the context is actual code and user instructions vs. verbose command stdout and completed `<thinking>` blocks from 10 turns ago?
+3. **Instruction Salience (Attention Position):** Have your `AGENTS.md` rules sunk into the "Lost-in-the-Middle" attention dead zone? If so, `cw` re-pins a short reminder at the very end of the prompt (where attention is ~98%) **without touching the cached prefix**.
+
+### 🛡️ The 3 Safety Rules: Why Your Agent Never Goes Blind to Compiler Errors
+
+A common question: *"If `contextWatcher` filters compiler logs and test outputs, what happens when I ask the agent to fix a compilation error? Will it miss the error?"*
+
+**No—because `cw` follows three strict safety rules:**
+1. **Never Touches the Current Turn:** If a build or test *just* failed, `cw` leaves the latest turn's output and thinking **100% untouched**. The agent sees the full compiler output while it is actively debugging. `cw` only compacts old logs from *past* turns after the agent has already moved on.
+2. **Keeps the Command Header + Error Tail:** Even when an older log is compacted, `cw` doesn't wipe it blank—it keeps the command that ran, the exit code, and the error/panic lines at the end, only stripping the thousands of repetitive middle lines (progress bars, passing test lines, duplicate warnings).
+3. **100% Lossless Backup in SQLite & `.jsonl.bak`:** Every unmutated turn and raw payload is stored intact in `contextWatcher`'s local SQLite database (`~/.cw/cw.db`), and whenever `cw` syncs mutations to disk, it saves an automatic `.jsonl.bak` backup first. Nothing is ever permanently lost.
 
 ---
 

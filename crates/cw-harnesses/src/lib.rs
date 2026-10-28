@@ -1920,11 +1920,11 @@ mod tests {
     #[test]
     fn test_auto_heal_low_health_transcript() {
         let store = CwStore::open_in_memory().unwrap();
-        // Configure AutoPilot with auto_heal_low_health = true, min_health_score = 85
+        // Configure AutoPilot with auto_heal_low_health = true, min_health_score = 95
         let mut ap_cfg = store.get_autopilot_config().unwrap();
         ap_cfg.enabled = true;
         ap_cfg.auto_heal_low_health = true;
-        ap_cfg.min_health_score = 85;
+        ap_cfg.min_health_score = 95;
         ap_cfg.heal_strategy = "min".to_string();
         ap_cfg.auto_sync_to_disk = true;
         store.set_autopilot_config(&ap_cfg).unwrap();
@@ -1934,14 +1934,17 @@ mod tests {
         let transcript = tmp_dir.join("2026-10-23T10-00-00-000Z_heal_session_test.jsonl");
 
         // Create a transcript with duplicate file read of the same file
-        let content = r#"{"type":"session","version":3,"id":"heal_session_test","cwd":"/home/gionag/Development/contextWatcher"}
-{"type":"message","message":{"role":"user","content":[{"type":"text","text":"Read Cargo.toml"}]}}
-{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"c1","name":"read_file","arguments":{"path":"Cargo.toml"}}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"c1","toolName":"read_file","content":[{"type":"text","text":"[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n"}]}}
-{"type":"message","message":{"role":"user","content":[{"type":"text","text":"Read Cargo.toml again"}]}}
-{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"c2","name":"read_file","arguments":{"path":"Cargo.toml"}}]}}
-{"type":"message","message":{"role":"toolResult","toolCallId":"c2","toolName":"read_file","content":[{"type":"text","text":"[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n"}]}}
-"#;
+        let content = format!(
+            r#"{{"type":"session","version":3,"id":"heal_session_test","cwd":"{}"}}
+{{"type":"message","message":{{"role":"user","content":[{{"type":"text","text":"Read Cargo.toml"}}]}}}}
+{{"type":"message","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"c1","name":"read_file","arguments":{{"path":"Cargo.toml"}}}}]}}}}
+{{"type":"message","message":{{"role":"toolResult","toolCallId":"c1","toolName":"read_file","content":[{{"type":"text","text":"[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n"}}]}}}}
+{{"type":"message","message":{{"role":"user","content":[{{"type":"text","text":"Read Cargo.toml again"}}]}}}}
+{{"type":"message","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"c2","name":"read_file","arguments":{{"path":"Cargo.toml"}}}}]}}}}
+{{"type":"message","message":{{"role":"toolResult","toolCallId":"c2","toolName":"read_file","content":[{{"type":"text","text":"[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n"}}]}}}}
+"#,
+            tmp_dir.display()
+        );
         fs::write(&transcript, content).unwrap();
 
         let sess_id =

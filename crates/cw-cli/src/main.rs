@@ -2642,6 +2642,40 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
         );
     }
 
+    // 7. OpenCode (~/.config/opencode/config.json or ~/.opencode/config.json)
+    let opencode_cfg_dir = home_path.join(".config/opencode");
+    let opencode_alt_dir = home_path.join(".opencode");
+    let opencode_data_dir = home_path.join(".local/share/opencode");
+    if opencode_cfg_dir.exists() || opencode_alt_dir.exists() || opencode_data_dir.exists() {
+        let target_cfg = if opencode_alt_dir.exists() {
+            opencode_alt_dir.join("config.json")
+        } else {
+            opencode_cfg_dir.join("config.json")
+        };
+        if !dry_run {
+            if let Some(parent) = target_cfg.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let mut cfg_val: serde_json::Value = std::fs::read_to_string(&target_cfg)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            if !cfg_val.is_object() {
+                cfg_val = serde_json::json!({});
+            }
+            cfg_val["mcp"]["contextWatcher"] = serde_json::json!({
+                "type": "local",
+                "command": ["cw", "mcp", "--daemon-url", "http://127.0.0.1:4400"],
+                "enabled": true
+            });
+            let _ = std::fs::write(&target_cfg, serde_json::to_string_pretty(&cfg_val).unwrap());
+        }
+        println!(
+            "  [7/7] OpenCode Integration   : {} (MCP server registered)",
+            target_cfg.display()
+        );
+    }
+
     // 5. Systemd User Service (~/.config/systemd/user/contextwatcher.service)
     let systemd_dir = home_path.join(".config/systemd/user");
     let service_path = systemd_dir.join("contextwatcher.service");

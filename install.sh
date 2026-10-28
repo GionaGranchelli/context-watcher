@@ -104,6 +104,44 @@ EOF
     printf "${DIM}Dual-licensed under MIT / Apache-2.0 • Constant Labs (constant-labs.com)${RESET}\n\n"
 }
 
+# Download a URL to a file; prints nothing, returns non-zero on failure
+fetch_to() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "$2" "$1"
+    else
+        wget -q -O "$2" "$1"
+    fi
+}
+
+# Verify a downloaded artifact against its published .sha256 file
+verify_checksum() {
+    FILE="$1"
+    SUM_URL="$2"
+    SUM_FILE="${TMP_DIR}/checksum.sha256"
+
+    if ! fetch_to "$SUM_URL" "$SUM_FILE" || [ ! -s "$SUM_FILE" ]; then
+        warn "No checksum published for this release (${SUM_URL})."
+        return 1
+    fi
+    EXPECTED="$(awk '{print $1}' "$SUM_FILE" | tr '[:upper:]' '[:lower:]')"
+
+    if command -v sha256sum >/dev/null 2>&1; then
+        ACTUAL="$(sha256sum "$FILE" | awk '{print $1}')"
+    elif command -v shasum >/dev/null 2>&1; then
+        ACTUAL="$(shasum -a 256 "$FILE" | awk '{print $1}')"
+    else
+        warn "Neither sha256sum nor shasum is available to verify the download."
+        return 1
+    fi
+
+    if [ -z "$EXPECTED" ] || [ "$EXPECTED" != "$ACTUAL" ]; then
+        warn "Checksum mismatch for $(basename "$FILE") (expected ${EXPECTED:-<none>}, got ${ACTUAL})."
+        return 1
+    fi
+    info "Checksum verified (sha256 ${ACTUAL})."
+    return 0
+}
+
 # Install via pre-compiled release tarball
 install_from_release() {
     DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/${ARTIFACT_NAME}"
@@ -125,6 +163,10 @@ install_from_release() {
     fi
 
     if [ "$HTTP_CODE" -eq 200 ] && [ -s "$DOWNLOAD_FILE" ]; then
+        if ! verify_checksum "$DOWNLOAD_FILE" "${DOWNLOAD_URL}.sha256"; then
+            warn "Refusing to install an unverified binary."
+            return 1
+        fi
         info "Extracting ${ARTIFACT_NAME}..."
         tar -xzf "$DOWNLOAD_FILE" -C "$TMP_DIR"
         mkdir -p "$INSTALL_DIR"
@@ -138,7 +180,7 @@ install_from_release() {
 
 # Fallback: build from source via cargo
 install_from_source() {
-    warn "Pre-built binary for ${TARGET} not found on GitHub Releases."
+    warn "No verified pre-built binary for ${TARGET} on GitHub Releases."
     if command -v cargo >/dev/null 2>&1; then
         info "Rust toolchain detected. Compiling contextWatcher from source via cargo..."
         cargo install --git "https://github.com/${REPO}.git" cw-cli --root "$(dirname "${INSTALL_DIR}")"

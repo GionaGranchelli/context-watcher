@@ -67,10 +67,17 @@ jobs:
           cp target/${{ matrix.target }}/release/cw staging/
           cp README.md LICENSE staging/
           tar -czvf ${{ matrix.artifact_name }}.tar.gz -C staging cw README.md LICENSE
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum ${{ matrix.artifact_name }}.tar.gz > ${{ matrix.artifact_name }}.tar.gz.sha256
+          else
+            shasum -a 256 ${{ matrix.artifact_name }}.tar.gz > ${{ matrix.artifact_name }}.tar.gz.sha256
+          fi
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact_name }}.tar.gz
+          files: |
+            ${{ matrix.artifact_name }}.tar.gz
+            ${{ matrix.artifact_name }}.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

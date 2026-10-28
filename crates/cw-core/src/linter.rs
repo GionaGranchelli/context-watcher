@@ -462,10 +462,9 @@ fn check_file_modified_on_disk(
     let &(node_idx, _, _, ref read_hash, read_range) = last_read?;
     let resolved = if Path::new(path).is_absolute() {
         std::path::PathBuf::from(path)
-    } else if let Some(root) = workspace_root {
-        Path::new(root).join(path)
     } else {
-        return None;
+        let root = workspace_root?;
+        Path::new(root).join(path)
     };
 
     let Ok(disk_content) = std::fs::read_to_string(&resolved) else {

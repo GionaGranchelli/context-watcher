@@ -177,7 +177,7 @@ pub fn analyze_swarm_prefix_sharing(
             group_id: format!(
                 "swarm_{}_{}",
                 project.to_lowercase(),
-                &model.replace('/', "_")
+                model.replace('/', "_")
             ),
             project_name: project,
             model,

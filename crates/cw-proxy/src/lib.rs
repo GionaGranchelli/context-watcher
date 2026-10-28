@@ -179,7 +179,10 @@ fn is_loopback_host(host: &str) -> bool {
 /// Returns true when an `Origin` header value is a page served from the local machine
 /// (the embedded web UI, or the Vite dev server). `null` and every remote origin are refused.
 fn is_loopback_origin(origin: &str) -> bool {
-    match origin.strip_prefix("http://").or_else(|| origin.strip_prefix("https://")) {
+    match origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+    {
         Some(rest) if !rest.contains('/') => is_loopback_host(rest),
         _ => false,
     }
@@ -206,15 +209,25 @@ fn local_cors_layer() -> CorsLayer {
 /// unaffected.
 async fn local_only_guard(req: Request<Body>, next: Next) -> Response {
     let headers = req.headers();
-    if let Some(host) = headers.get(header::HOST) {
-        if !host.to_str().map(is_loopback_host).unwrap_or(false) {
-            return (StatusCode::FORBIDDEN, "contextWatcher: non-loopback Host refused").into_response();
-        }
+    if headers
+        .get(header::HOST)
+        .is_some_and(|h| !h.to_str().map(is_loopback_host).unwrap_or(false))
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            "contextWatcher: non-loopback Host refused",
+        )
+            .into_response();
     }
-    if let Some(origin) = headers.get(header::ORIGIN) {
-        if !origin.to_str().map(is_loopback_origin).unwrap_or(false) {
-            return (StatusCode::FORBIDDEN, "contextWatcher: cross-origin request refused").into_response();
-        }
+    if headers
+        .get(header::ORIGIN)
+        .is_some_and(|o| !o.to_str().map(is_loopback_origin).unwrap_or(false))
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            "contextWatcher: cross-origin request refused",
+        )
+            .into_response();
     }
     next.run(req).await
 }
@@ -1974,10 +1987,25 @@ mod tests {
 
     #[test]
     fn test_loopback_host_and_origin_checks() {
-        for ok in ["127.0.0.1", "127.0.0.1:4400", "localhost:4401", "LOCALHOST", "[::1]:4400", "[::1]"] {
+        for ok in [
+            "127.0.0.1",
+            "127.0.0.1:4400",
+            "localhost:4401",
+            "LOCALHOST",
+            "[::1]:4400",
+            "[::1]",
+        ] {
             assert!(is_loopback_host(ok), "{ok} should be accepted");
         }
-        for bad in ["evil.example", "evil.example:4400", "127.0.0.1.evil.example", "localhost.evil:80", "[::1]x", "127.0.0.1:44a0", ""] {
+        for bad in [
+            "evil.example",
+            "evil.example:4400",
+            "127.0.0.1.evil.example",
+            "localhost.evil:80",
+            "[::1]x",
+            "127.0.0.1:44a0",
+            "",
+        ] {
             assert!(!is_loopback_host(bad), "{bad} should be refused");
         }
         assert!(is_loopback_origin("http://127.0.0.1:4400"));

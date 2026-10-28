@@ -2361,7 +2361,16 @@ fn register_claude_code_mcp(home_path: &std::path::Path, cw_cmd_str: &str) {
         .status()
         .is_ok()
         && std::process::Command::new("claude")
-            .args(["mcp", "add", "--scope", "user", "contextwatcher", "--", cw_cmd_str, "mcp"])
+            .args([
+                "mcp",
+                "add",
+                "--scope",
+                "user",
+                "contextwatcher",
+                "--",
+                cw_cmd_str,
+                "mcp",
+            ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -2380,11 +2389,15 @@ fn register_claude_code_mcp(home_path: &std::path::Path, cw_cmd_str: &str) {
         },
         Err(_) => serde_json::json!({}),
     };
-    let Some(obj) = root.as_object_mut() else { return };
+    let Some(obj) = root.as_object_mut() else {
+        return;
+    };
     let servers = obj
         .entry("mcpServers")
         .or_insert_with(|| serde_json::json!({}));
-    let Some(servers) = servers.as_object_mut() else { return };
+    let Some(servers) = servers.as_object_mut() else {
+        return;
+    };
     servers.insert(
         "contextwatcher".to_string(),
         serde_json::json!({ "type": "stdio", "command": cw_cmd_str, "args": ["mcp"], "env": {} }),
@@ -2627,11 +2640,16 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
             {
                 let mut changed = false;
                 if let Some(obj) = root.as_object_mut() {
-                    if let Some(mcp) = obj.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
+                    let should_remove_mcps = if let Some(mcp) =
+                        obj.get_mut("mcpServers").and_then(|v| v.as_object_mut())
+                    {
                         changed = mcp.remove("contextwatcher").is_some();
-                        if mcp.is_empty() {
-                            obj.remove("mcpServers");
-                        }
+                        mcp.is_empty()
+                    } else {
+                        false
+                    };
+                    if should_remove_mcps {
+                        obj.remove("mcpServers");
                     }
                 }
                 if changed {

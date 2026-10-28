@@ -5,7 +5,8 @@ use axum::{
         Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, StatusCode, Uri},
+    http::{HeaderMap, HeaderValue, Request, StatusCode, Uri, header},
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
@@ -51,7 +52,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{Mutex, broadcast, oneshot};
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -153,12 +154,78 @@ impl DaemonState {
     }
 }
 
+/// Returns true when `host` (a `Host` header value, optionally with a port) names the
+/// loopback interface. Used to reject DNS-rebinding requests, where a hostile domain is
+/// re-pointed at 127.0.0.1 and the browser sends `Host: evil.example`.
+fn is_loopback_host(host: &str) -> bool {
+    let host = host.trim();
+    let name = if let Some(rest) = host.strip_prefix('[') {
+        // IPv6 literal: "[::1]" or "[::1]:4400"
+        match rest.split_once(']') {
+            Some((addr, tail)) if tail.is_empty() || tail.starts_with(':') => addr,
+            _ => return false,
+        }
+    } else {
+        match host.rsplit_once(':') {
+            Some((name, port)) if port.chars().all(|c| c.is_ascii_digit()) => name,
+            Some(_) => return false,
+            None => host,
+        }
+    };
+    let name = name.to_ascii_lowercase();
+    name == "localhost" || name == "127.0.0.1" || name == "::1"
+}
+
+/// Returns true when an `Origin` header value is a page served from the local machine
+/// (the embedded web UI, or the Vite dev server). `null` and every remote origin are refused.
+fn is_loopback_origin(origin: &str) -> bool {
+    match origin.strip_prefix("http://").or_else(|| origin.strip_prefix("https://")) {
+        Some(rest) if !rest.contains('/') => is_loopback_host(rest),
+        _ => false,
+    }
+}
+
+/// CORS policy for the daemon: only pages served from loopback may read responses.
+/// Replaces the previous `CorsLayer::permissive()`, which let any website read session
+/// transcripts and drive the control API from the user's browser.
+fn local_cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
+            origin.to_str().map(is_loopback_origin).unwrap_or(false)
+        }))
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any)
+}
+
+/// Rejects requests that did not come from the local machine's own pages or tools:
+/// * a `Host` header that is not loopback (blocks DNS rebinding), and
+/// * an `Origin` header that is not loopback (blocks cross-site requests, including
+///   "simple" form POSTs and cross-origin WebSocket upgrades, which CORS does not stop).
+///
+/// CLI, MCP and harness clients send no `Origin` header and a loopback `Host`, so they are
+/// unaffected.
+async fn local_only_guard(req: Request<Body>, next: Next) -> Response {
+    let headers = req.headers();
+    if let Some(host) = headers.get(header::HOST) {
+        if !host.to_str().map(is_loopback_host).unwrap_or(false) {
+            return (StatusCode::FORBIDDEN, "contextWatcher: non-loopback Host refused").into_response();
+        }
+    }
+    if let Some(origin) = headers.get(header::ORIGIN) {
+        if !origin.to_str().map(is_loopback_origin).unwrap_or(false) {
+            return (StatusCode::FORBIDDEN, "contextWatcher: cross-origin request refused").into_response();
+        }
+    }
+    next.run(req).await
+}
+
 /// Builds the Intercepting Proxy Router (`127.0.0.1:4401`).
 pub fn build_proxy_router(state: DaemonState) -> Router {
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
         .fallback(handle_proxy_request)
-        .layer(CorsLayer::permissive())
+        .layer(local_cors_layer())
+        .layer(middleware::from_fn(local_only_guard))
         .with_state(state)
 }
 
@@ -228,7 +295,8 @@ pub fn build_api_router(state: DaemonState) -> Router {
             post(api_resolve_intercept),
         )
         .route("/api/v1/ws", get(api_ws_handler))
-        .layer(CorsLayer::permissive())
+        .layer(local_cors_layer())
+        .layer(middleware::from_fn(local_only_guard))
         .with_state(state)
 }
 
@@ -1903,6 +1971,64 @@ mod tests {
     use axum::body::to_bytes;
     use axum::http::Request;
     use tower::ServiceExt;
+
+    #[test]
+    fn test_loopback_host_and_origin_checks() {
+        for ok in ["127.0.0.1", "127.0.0.1:4400", "localhost:4401", "LOCALHOST", "[::1]:4400", "[::1]"] {
+            assert!(is_loopback_host(ok), "{ok} should be accepted");
+        }
+        for bad in ["evil.example", "evil.example:4400", "127.0.0.1.evil.example", "localhost.evil:80", "[::1]x", "127.0.0.1:44a0", ""] {
+            assert!(!is_loopback_host(bad), "{bad} should be refused");
+        }
+        assert!(is_loopback_origin("http://127.0.0.1:4400"));
+        assert!(is_loopback_origin("http://localhost:5173"));
+        assert!(!is_loopback_origin("null"));
+        assert!(!is_loopback_origin("https://evil.example"));
+        assert!(!is_loopback_origin("http://localhost.evil.example"));
+    }
+
+    #[tokio::test]
+    async fn test_api_refuses_cross_origin_and_rebinding() {
+        let api_app = build_api_router(DaemonState::new(CwStore::open_in_memory().unwrap()));
+
+        let cross_origin = Request::builder()
+            .uri("/api/v1/sessions")
+            .header("host", "127.0.0.1:4400")
+            .header("origin", "https://evil.example")
+            .body(Body::empty())
+            .unwrap();
+        let res = api_app.clone().oneshot(cross_origin).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        let rebinding = Request::builder()
+            .uri("/api/v1/sessions")
+            .header("host", "evil.example:4400")
+            .body(Body::empty())
+            .unwrap();
+        let res = api_app.clone().oneshot(rebinding).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        let local_ui = Request::builder()
+            .uri("/api/v1/sessions")
+            .header("host", "127.0.0.1:4400")
+            .header("origin", "http://127.0.0.1:4400")
+            .body(Body::empty())
+            .unwrap();
+        let res = api_app.clone().oneshot(local_ui).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers().get("access-control-allow-origin").unwrap(),
+            "http://127.0.0.1:4400"
+        );
+
+        let cli = Request::builder()
+            .uri("/api/v1/health")
+            .header("host", "127.0.0.1:4400")
+            .body(Body::empty())
+            .unwrap();
+        let res = api_app.oneshot(cli).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
 
     #[tokio::test]
     async fn test_proxy_dry_run_and_api_mutations_and_replay() {

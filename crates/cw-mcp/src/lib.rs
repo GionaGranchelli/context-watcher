@@ -222,6 +222,20 @@ async fn execute_mcp_tool(
     tool_name: &str,
     args: &Value,
 ) -> Result<String> {
+    if !matches!(
+        tool_name,
+        "cw_context_status"
+            | "cw_shadow_dedupe"
+            | "cw_evict_stale_reads"
+            | "cw_fold_turns"
+            | "cw_prune_tool_output"
+            | "cw_pin_context"
+            | "cw_gate_tools"
+            | "cw_optimize_strategy"
+    ) {
+        anyhow::bail!("Unknown tool: {tool_name}");
+    }
+
     let base = base_url.trim_end_matches('/');
     let session_id = match args.get("session_id").and_then(|v| v.as_str()) {
         Some(s) if !s.is_empty() => s.to_string(),

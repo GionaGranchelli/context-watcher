@@ -519,4 +519,141 @@ mod tests {
         );
         assert!(pulse.formatted_message.contains("KV Cache 98.2% preserved"));
     }
+
+    #[test]
+    fn test_opencode_pin_growth_and_unread_tool_output_regression() {
+        use crate::autopilot::{AutoPilotConfig, evaluate_autopilot_policies};
+
+        // Simulate an OpenCode session on Turn 15 where Turn 1 was "do npm test, see if it runs",
+        // tools schemas are present (which previously inflated `max_turn` to 15),
+        // and the latest message is a 110-char `cw_context_status` result from `execute`.
+        let mut payload = json!({
+            "model": "litellm-estate/swift-1.5-iq3_xxs",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "execute",
+                        "description": "Execute MCP or shell tool",
+                        "parameters": { "type": "object" }
+                    }
+                }
+            ],
+            "messages": [
+                { "role": "system", "content": "You are an OpenCode agent." },
+                { "role": "user", "content": "do npm test, see if it runs" },
+                {
+                    "role": "assistant",
+                    "content": "Running npm test.",
+                    "tool_calls": [
+                        {
+                            "id": "call_status_1",
+                            "type": "function",
+                            "function": { "name": "execute", "arguments": "{\"tool\":\"cw_context_status\"}" }
+                        }
+                    ]
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_status_1",
+                    "name": "execute",
+                    "content": "{\"session_id\":\"s_oc\",\"health_score\":88,\"kv_cache_report\":{\"hit_ratio\":95.0}}"
+                }
+            ]
+        });
+
+        let (turn, _) = analyze_turn_from_payload(
+            "turn_15".to_string(),
+            "s_oc".to_string(),
+            None,
+            15,
+            &payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        // 1. Verify no optimization plan auto-pins the initial UserMessage or prunes the unread tail ToolResult
+        let plans = crate::optimizer::build_optimization_plans(&turn);
+        for plan in &plans {
+            for item in &plan.items {
+                assert!(
+                    !matches!(item.mutation_op, MutationOp::PinContext { .. }),
+                    "UserMessage must never be auto-pinned in plan {}",
+                    plan.id
+                );
+                assert!(
+                    !matches!(item.mutation_op, MutationOp::PruneOrStub { .. }),
+                    "Unread tail cw_context_status output must never be pruned in plan {}",
+                    plan.id
+                );
+            }
+        }
+
+        // 2. Verify AutoPilot default config does not inject any PinContext or prune the tail tool output
+        let ap_cfg = AutoPilotConfig::default();
+        let ap_report = evaluate_autopilot_policies(
+            &ap_cfg,
+            "s_oc",
+            "litellm-estate/swift-1.5-iq3_xxs",
+            ProviderKind::OpenAI,
+            15,
+            &turn.nodes,
+            Some(&turn),
+            &mut payload,
+        );
+        assert!(ap_report.generated_mutations.is_empty());
+        let serialized = serde_json::to_string(&payload).unwrap();
+        assert!(!serialized.contains("<cw_pinned_context>"));
+        assert!(!serialized.contains("[cw:pruned"));
+
+        // 3. Even if duplicate PinContext rules or pre-existing <cw_pinned_context> blocks exist,
+        // apply_mutations_to_payload must deduplicate them and never nest <cw_pinned_context>.
+        payload["messages"][1]["content"] = json!(
+            "do npm test, see if it runs\n<cw_pinned_context>\n- [User: do npm test]: do npm test\n</cw_pinned_context>"
+        );
+        let dup_pins = vec![
+            MutationRule {
+                id: "pin_1".into(),
+                session_id: "s_oc".into(),
+                op: MutationOp::PinContext {
+                    label: "Rule".into(),
+                    content: "Never break KV cache\n<cw_pinned_context>\n- [Nested]: bad\n</cw_pinned_context>".into(),
+                    source_node_id: None,
+                },
+                status: MutationStatus::Committed,
+                estimated_saved_tokens: 0,
+                estimated_kv_break_tokens: 0,
+                created_at: chrono::Utc::now(),
+            },
+            MutationRule {
+                id: "pin_2".into(),
+                session_id: "s_oc".into(),
+                op: MutationOp::PinContext {
+                    label: "Rule".into(),
+                    content: "Never break KV cache".into(),
+                    source_node_id: None,
+                },
+                status: MutationStatus::Committed,
+                estimated_saved_tokens: 0,
+                estimated_kv_break_tokens: 0,
+                created_at: chrono::Utc::now(),
+            },
+        ];
+        assert!(dup_pins[0].op.is_semantically_equivalent(&dup_pins[1].op));
+        apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &dup_pins, 15);
+        let after_str = serde_json::to_string(&payload).unwrap();
+        assert_eq!(
+            after_str.matches("<cw_pinned_context>").count(),
+            1,
+            "Must contain exactly one <cw_pinned_context> block without nesting or duplicates"
+        );
+        assert_eq!(
+            after_str.matches("Never break KV cache").count(),
+            1,
+            "Duplicate PinContext rules must be deduplicated"
+        );
+    }
 }

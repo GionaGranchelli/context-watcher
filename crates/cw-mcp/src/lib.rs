@@ -183,6 +183,18 @@ pub fn mcp_tool_definitions() -> Value {
             }
         },
         {
+            "name": "cw_unpin_context",
+            "description": "Removes pinned `<cw_pinned_context>` items from the session (all pins by default, or filtered by `label`), or clears all active session mutations when `clear_all_mutations` is true.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "session_id": { "type": "string" },
+                    "label": { "type": "string", "description": "Optional label substring to unpin only matching items. Omit to clear all pins." },
+                    "clear_all_mutations": { "type": "boolean", "description": "If true, clears all active mutations (pins, prunes, folds) for the session." }
+                }
+            }
+        },
+        {
             "name": "cw_gate_tools",
             "description": "Disables unused MCP tool servers or specific tools for the remainder of the session to save tokens and sharpen tool selection accuracy.",
             "inputSchema": {
@@ -230,6 +242,7 @@ async fn execute_mcp_tool(
             | "cw_fold_turns"
             | "cw_prune_tool_output"
             | "cw_pin_context"
+            | "cw_unpin_context"
             | "cw_gate_tools"
             | "cw_optimize_strategy"
     ) {
@@ -340,6 +353,23 @@ async fn execute_mcp_tool(
                 source_node_id: None,
             };
             post_mutation(client, base, &session_id, op).await
+        }
+        "cw_unpin_context" => {
+            let clear_all = args
+                .get("clear_all_mutations")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let only_pins = !clear_all;
+            let mut req = client
+                .delete(format!("{base}/api/v1/sessions/{session_id}/mutations"))
+                .query(&[("only_pins", only_pins.to_string())]);
+            if let Some(label) = args.get("label").and_then(|v| v.as_str())
+                && !label.trim().is_empty()
+            {
+                req = req.query(&[("label", label.trim().to_string())]);
+            }
+            let resp: Value = req.send().await?.json().await?;
+            Ok(serde_json::to_string_pretty(&resp)?)
         }
         "cw_gate_tools" => {
             let disabled_mcp_servers: Vec<String> = args
@@ -457,9 +487,10 @@ mod tests {
         .await
         .unwrap();
         let tools = list_resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 9);
         assert!(tools.iter().any(|t| t["name"] == "cw_shadow_dedupe"));
         assert!(tools.iter().any(|t| t["name"] == "cw_evict_stale_reads"));
+        assert!(tools.iter().any(|t| t["name"] == "cw_unpin_context"));
     }
 
     #[tokio::test]

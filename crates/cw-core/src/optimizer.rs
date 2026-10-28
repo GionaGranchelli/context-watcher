@@ -87,7 +87,13 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         }
     }
 
-    for n in &turn.nodes {
+    let last_assistant_idx = turn
+        .nodes
+        .iter()
+        .rposition(|n| matches!(n.kind, NodeKind::AssistantText { .. }))
+        .unwrap_or(0);
+
+    for (node_idx, n) in turn.nodes.iter().enumerate() {
         let tok = n.token_span.count;
         let text = n.kind.text_for_tokenization();
         if text.starts_with("[cw:pruned")
@@ -98,10 +104,11 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         }
         let preview: String = text.chars().take(180).collect();
 
-        // 1. Low-attention rules or early user constraints -> Pin to tail (0% KV break)
-        if (matches!(n.kind, NodeKind::InjectedRule { .. })
-            || (matches!(n.kind, NodeKind::UserMessage { .. }) && n.turn_seq == 1))
-            && n.attention_salience < 0.45
+        // 1. Low-attention rules -> Pin to tail (0% KV break).
+        // Never auto-pin UserMessage turns (prevents pinning casual user requests every turn).
+        if matches!(n.kind, NodeKind::InjectedRule { .. })
+            && total_tokens >= 30_000
+            && n.attention_salience < 0.42
         {
             let snippet: String = text.chars().take(160).collect();
             pin_items.push(OptimizationCandidateItem {
@@ -169,8 +176,12 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                 kv_break_tokens: kv_break,
                 mutation_op: MutationOp::PruneOrStub {
                     target_fingerprint: Some(n.fingerprint.0.clone()),
-                    target_call_id: call_id,
-                    target_json_pointer: Some(n.raw_json_pointer.clone()),
+                    target_call_id: call_id.clone(),
+                    target_json_pointer: if call_id.is_none() {
+                        Some(n.raw_json_pointer.clone())
+                    } else {
+                        None
+                    },
                     stub_text: format!(
                         "[cw:shadow_deduped path=\"{}\" turn={} saved_tokens={}]",
                         path.unwrap_or_else(|| n.kind.short_label()),
@@ -182,17 +193,32 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         }
 
         // 3. Tool outputs (Command logs, directory listings, old tool results)
+        // Never stub unread tool results at the tail of the prompt, current-turn outputs,
+        // contextWatcher's own MCP inspection outputs, or skill payloads.
         if let NodeKind::ToolResult {
             call_id,
             tool_name,
+            content,
             semantic_meta,
             ..
         } = &n.kind
         {
             let is_fresh_file = matches!(semantic_meta, Some(ToolSemanticMeta::FileRead { .. }))
                 && !stale_or_dup_node_ids.contains(&n.id);
+            let lower_tool = tool_name.to_ascii_lowercase();
+            let is_cw_or_skill = lower_tool.starts_with("cw_")
+                || lower_tool.contains("contextwatcher")
+                || lower_tool.contains("context_watcher")
+                || lower_tool.contains("skill")
+                || content.contains("\"health_score\"")
+                || content.contains("\"kv_cache_report\"")
+                || content.contains("<SKILL>")
+                || content.contains("SKILL.md");
+            let is_unread_tail = (last_assistant_idx > 0 && node_idx > last_assistant_idx)
+                || node_idx + 1 == turn.nodes.len()
+                || n.turn_seq >= max_turn;
 
-            if !is_fresh_file && (n.turn_seq < max_turn || tok > 100) {
+            if !is_fresh_file && !is_cw_or_skill && !is_unread_tail && tok > 100 {
                 let after_tok = 16u32.min(tok);
                 let saved = (tok as i32) - (after_tok as i32);
                 let kv_break = total_cached.saturating_sub(n.token_span.start);
@@ -211,15 +237,10 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                         "Replaces raw '{}' output ({} tok) at {} with a compact 1-line outcome stub while keeping call_id '{}' intact.",
                         tool_name, tok, n.raw_json_pointer, call_id
                     ),
-                    why_it_matters: if n.turn_seq < max_turn {
-                        format!(
-                            "The model already processed and acted on this Turn #{} output. Keeping verbose old command logs dilutes attention on current tasks.",
-                            n.turn_seq
-                        )
-                    } else {
-                        "Compacts verbose output from the current turn into a clean summary stub."
-                            .to_string()
-                    },
+                    why_it_matters: format!(
+                        "The model already processed and acted on this Turn #{} output. Keeping verbose old command logs dilutes attention on current tasks.",
+                        n.turn_seq
+                    ),
                     content_preview: preview.clone(),
                     tokens_before: tok,
                     tokens_after: after_tok,
@@ -232,14 +253,18 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                         } else {
                             Some(call_id.clone())
                         },
-                        target_json_pointer: Some(n.raw_json_pointer.clone()),
+                        target_json_pointer: if call_id.is_empty() {
+                            Some(n.raw_json_pointer.clone())
+                        } else {
+                            None
+                        },
                         stub_text: format!(
                             "[cw:pruned tool=\"{}\" turn={} original_tokens={}]",
                             tool_name, n.turn_seq, tok
                         ),
                     },
                 };
-                if n.turn_seq >= max_turn.saturating_sub(1) && tok > 60 {
+                if n.turn_seq == max_turn.saturating_sub(1) && tok > 100 {
                     tail_bloat_items.push(item.clone());
                 }
                 log_and_thought_items.push(item);

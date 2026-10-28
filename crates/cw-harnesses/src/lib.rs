@@ -998,7 +998,11 @@ fn check_and_apply_auto_heal(
     let chosen_plan = plans
         .iter()
         .find(|p| p.id == strat_id && !p.items.is_empty())
-        .or_else(|| plans.iter().find(|p| !p.items.is_empty()));
+        .or_else(|| {
+            plans
+                .iter()
+                .find(|p| p.id == "clean_code_state" && !p.items.is_empty())
+        });
     let Some(plan) = chosen_plan else {
         return false;
     };

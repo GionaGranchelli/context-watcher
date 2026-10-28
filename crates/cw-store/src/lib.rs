@@ -381,6 +381,7 @@ impl CwStore {
     }
 
     pub fn save_mutation(&self, rule: &MutationRule) -> Result<(), StoreError> {
+        let existing = self.list_mutations(&rule.session_id).unwrap_or_default();
         let json_str = serde_json::to_string(rule)?;
         let status_str = match rule.status {
             MutationStatus::Draft => "draft",
@@ -388,6 +389,11 @@ impl CwStore {
             MutationStatus::Disabled => "disabled",
         };
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        for prev in existing {
+            if prev.id != rule.id && prev.op.is_semantically_equivalent(&rule.op) {
+                let _ = conn.execute("DELETE FROM mutations WHERE id = ?1", params![prev.id]);
+            }
+        }
         conn.execute(
             "INSERT OR REPLACE INTO mutations (id, session_id, rule_json, status, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -400,6 +406,36 @@ impl CwStore {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn clear_session_mutations(
+        &self,
+        session_id: &str,
+        only_pins: bool,
+        label_filter: Option<&str>,
+    ) -> Result<usize, StoreError> {
+        let rules = self.list_mutations(session_id)?;
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut deleted = 0usize;
+        for r in rules {
+            let should_delete = if only_pins {
+                match &r.op {
+                    cw_core::ir::MutationOp::PinContext { label, .. } => label_filter
+                        .map(|f| {
+                            let f_trim = f.trim().to_ascii_lowercase();
+                            f_trim.is_empty() || label.to_ascii_lowercase().contains(&f_trim)
+                        })
+                        .unwrap_or(true),
+                    _ => false,
+                }
+            } else {
+                true
+            };
+            if should_delete {
+                deleted += conn.execute("DELETE FROM mutations WHERE id = ?1", params![r.id])?;
+            }
+        }
+        Ok(deleted)
     }
 
     pub fn list_mutations(&self, session_id: &str) -> Result<Vec<MutationRule>, StoreError> {

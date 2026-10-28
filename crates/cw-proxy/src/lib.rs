@@ -260,7 +260,9 @@ pub fn build_api_router(state: DaemonState) -> Router {
         .route("/api/v1/sessions/:id/files", get(api_get_session_files))
         .route(
             "/api/v1/sessions/:id/mutations",
-            get(api_list_mutations).post(api_create_mutation),
+            get(api_list_mutations)
+                .post(api_create_mutation)
+                .delete(api_clear_mutations),
         )
         .route(
             "/api/v1/sessions/:id/mutations/commit-drafts",
@@ -1204,6 +1206,35 @@ async fn api_delete_mutation(
         mutations: all_mutations,
     });
     Json(json!({ "deleted": deleted }))
+}
+
+#[derive(Deserialize, Default)]
+struct ClearMutationsQuery {
+    only_pins: Option<bool>,
+    label: Option<String>,
+}
+
+async fn api_clear_mutations(
+    State(state): State<DaemonState>,
+    Path(id): Path<String>,
+    axum::extract::Query(q): axum::extract::Query<ClearMutationsQuery>,
+) -> impl IntoResponse {
+    let only_pins = q.only_pins.unwrap_or(true);
+    let deleted_count = state
+        .store
+        .clear_session_mutations(&id, only_pins, q.label.as_deref())
+        .unwrap_or(0);
+    recompute_latest_turn_with_mutations(&state, &id);
+    let all_mutations = state.store.list_mutations(&id).unwrap_or_default();
+    state.broadcast(WsEvent::MutationsUpdated {
+        session_id: id,
+        mutations: all_mutations,
+    });
+    Json(json!({
+        "deleted_count": deleted_count,
+        "only_pins": only_pins,
+        "label_filter": q.label
+    }))
 }
 
 #[derive(Deserialize, Default)]

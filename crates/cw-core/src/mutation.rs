@@ -15,6 +15,9 @@ static DYNAMIC_TIME_RE: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 
+static PINNED_CONTEXT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)\n?<cw_pinned_context>\n?.*?</cw_pinned_context>").unwrap());
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MutationApplicationReport {
     pub applied_rule_ids: Vec<String>,
@@ -29,6 +32,10 @@ pub fn apply_mutations_to_payload(
     rules: &[MutationRule],
     turn_seq: u32,
 ) -> MutationApplicationReport {
+    // Always strip any existing `<cw_pinned_context>` blocks first to prevent
+    // duplicate registries or nested `<cw_pinned_context>` across turns/syncs.
+    strip_existing_pinned_context_in_payload(payload);
+
     let active_rules: Vec<&MutationRule> = rules
         .iter()
         .filter(|r| r.status == MutationStatus::Committed)
@@ -39,6 +46,17 @@ pub fn apply_mutations_to_payload(
 
     let before_nodes = parse_request_to_nodes(payload, provider, turn_seq).unwrap_or_default();
     let before_tokens: u32 = before_nodes.iter().map(|n| n.token_span.count).sum();
+    let last_assistant_idx = before_nodes
+        .iter()
+        .rposition(|n| {
+            matches!(
+                n.kind,
+                NodeKind::AssistantText { .. }
+                    | NodeKind::AssistantThinking { .. }
+                    | NodeKind::ToolCall { .. }
+            )
+        })
+        .unwrap_or(0);
 
     let mut applied_ids = Vec::new();
     let mut pinned_blocks: Vec<(String, String)> = Vec::new();
@@ -52,8 +70,19 @@ pub fn apply_mutations_to_payload(
                 target_json_pointer,
                 stub_text,
             } => {
+                let is_tail_hygiene_spill = stub_text.contains("[cw:auto_pilot");
                 // Match node by fingerprint, call_id, or direct pointer
-                for node in &before_nodes {
+                for (node_idx, node) in before_nodes.iter().enumerate() {
+                    if !is_tail_hygiene_spill
+                        && is_protected_tool_result(
+                            node,
+                            node_idx,
+                            before_nodes.len(),
+                            last_assistant_idx,
+                        )
+                    {
+                        continue;
+                    }
                     let fp_match = target_fingerprint
                         .as_ref()
                         .map(|fp| fp == &node.fingerprint.0)
@@ -64,10 +93,14 @@ pub fn apply_mutations_to_payload(
                         }
                         _ => false,
                     };
-                    let ptr_match = target_json_pointer
-                        .as_ref()
-                        .map(|p| p == &node.raw_json_pointer)
-                        .unwrap_or(false);
+                    // Only fall back to positional pointer matching if neither fingerprint nor call_id was specified,
+                    // or if fingerprint also matches, preventing stale `/messages/N` pointer collisions across turns.
+                    let ptr_match = target_fingerprint.is_none()
+                        && target_call_id.is_none()
+                        && target_json_pointer
+                            .as_ref()
+                            .map(|p| p == &node.raw_json_pointer)
+                            .unwrap_or(false);
 
                     if (fp_match || call_match || ptr_match)
                         && replace_node_text_at_pointer(payload, &node.raw_json_pointer, stub_text)
@@ -82,7 +115,15 @@ pub fn apply_mutations_to_payload(
                 summary_text,
             } => {
                 let mut first_folded = true;
-                for node in &before_nodes {
+                for (node_idx, node) in before_nodes.iter().enumerate() {
+                    if is_protected_tool_result(
+                        node,
+                        node_idx,
+                        before_nodes.len(),
+                        last_assistant_idx,
+                    ) {
+                        continue;
+                    }
                     let is_foldable_kind =
                         matches!(
                             node.kind,
@@ -174,8 +215,24 @@ pub fn apply_mutations_to_payload(
                 }
             }
             MutationOp::PinContext { label, content, .. } => {
-                pinned_blocks.push((label.clone(), content.clone()));
-                applied = true;
+                let clean_content = PINNED_CONTEXT_RE
+                    .replace_all(content, "")
+                    .replace("<cw_pinned_context>", "")
+                    .replace("</cw_pinned_context>", "")
+                    .trim()
+                    .to_string();
+                let clean_label = label.trim().to_string();
+                if !clean_content.is_empty() {
+                    let already_exists = pinned_blocks.iter().any(|(l, c)| {
+                        (l.eq_ignore_ascii_case(&clean_label)
+                            && c.eq_ignore_ascii_case(&clean_content))
+                            || c == &clean_content
+                    });
+                    if !already_exists {
+                        pinned_blocks.push((clean_label, clean_content));
+                    }
+                    applied = true;
+                }
             }
             MutationOp::NormalizePrefix {
                 sort_tools_deterministically,
@@ -595,6 +652,75 @@ fn strip_dynamic_time_in_system(payload: &mut Value) -> bool {
         changed = true;
     }
     changed
+}
+
+fn is_protected_tool_result(
+    node: &ContextNode,
+    node_idx: usize,
+    total_nodes: usize,
+    last_assistant_idx: usize,
+) -> bool {
+    let NodeKind::ToolResult {
+        tool_name, content, ..
+    } = &node.kind
+    else {
+        return false;
+    };
+    // Never prune an unread tool result at the tail of the prompt before the assistant responds
+    if (last_assistant_idx > 0 && node_idx > last_assistant_idx) || node_idx + 1 == total_nodes {
+        return true;
+    }
+    // Never prune contextWatcher's own MCP inspection outputs or skill payloads
+    let lower_tool = tool_name.to_ascii_lowercase();
+    lower_tool.starts_with("cw_")
+        || lower_tool.contains("contextwatcher")
+        || lower_tool.contains("context_watcher")
+        || lower_tool.contains("skill")
+        || content.contains("\"health_score\"")
+        || content.contains("\"kv_cache_report\"")
+        || content.contains("<SKILL>")
+        || content.contains("SKILL.md")
+}
+
+fn strip_existing_pinned_context_in_payload(payload: &mut Value) {
+    if let Some(messages) = payload.get_mut("messages").and_then(|v| v.as_array_mut()) {
+        for msg in messages.iter_mut() {
+            match msg.get_mut("content") {
+                Some(Value::String(s)) => {
+                    if s.contains("<cw_pinned_context>") {
+                        *s = PINNED_CONTEXT_RE.replace_all(s, "").to_string();
+                    }
+                }
+                Some(Value::Array(arr)) => {
+                    arr.retain_mut(|block| {
+                        if let Some(Value::String(text)) = block.get_mut("text")
+                            && text.contains("<cw_pinned_context>")
+                        {
+                            *text = PINNED_CONTEXT_RE.replace_all(text, "").to_string();
+                            return !text.trim().is_empty();
+                        }
+                        true
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+    if let Some(contents) = payload.get_mut("contents").and_then(|v| v.as_array_mut()) {
+        for content in contents.iter_mut() {
+            if let Some(parts) = content.get_mut("parts").and_then(|v| v.as_array_mut()) {
+                parts.retain_mut(|part| {
+                    if let Some(Value::String(text)) = part.get_mut("text")
+                        && text.contains("<cw_pinned_context>")
+                    {
+                        *text = PINNED_CONTEXT_RE.replace_all(text, "").to_string();
+                        return !text.trim().is_empty();
+                    }
+                    true
+                });
+            }
+        }
+    }
 }
 
 fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)]) {

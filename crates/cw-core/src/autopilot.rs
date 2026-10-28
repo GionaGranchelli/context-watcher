@@ -41,7 +41,7 @@ impl Default for AutoPilotConfig {
             enabled: true,
             zero_break_tail_hygiene: true,
             tail_max_tool_tokens: 4_000,
-            auto_cache_safe_pin: true,
+            auto_cache_safe_pin: false,
             pin_min_context_tokens: 60_000,
             auto_diet_at_breakpoint: true,
             breakpoint_tokens: 140_000,
@@ -49,7 +49,7 @@ impl Default for AutoPilotConfig {
             local_window_threshold_tokens: 25_000,
             auto_heal_low_health: true,
             min_health_score: 75,
-            heal_strategy: "min".to_string(),
+            heal_strategy: "clean_code_state".to_string(),
             auto_sync_to_disk: true,
         }
     }
@@ -234,7 +234,11 @@ pub fn evaluate_autopilot_policies(
         let chosen_plan = plans
             .iter()
             .find(|p| p.id == strat_id && !p.items.is_empty())
-            .or_else(|| plans.iter().find(|p| !p.items.is_empty()));
+            .or_else(|| {
+                plans
+                    .iter()
+                    .find(|p| p.id == "clean_code_state" && !p.items.is_empty())
+            });
 
         if let Some(plan) = chosen_plan {
             for item in &plan.items {

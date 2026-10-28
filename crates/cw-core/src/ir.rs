@@ -480,6 +480,78 @@ pub enum MutationOp {
     },
 }
 
+impl MutationOp {
+    /// Returns true if two `MutationOp`s target the same logical content or node,
+    /// preventing duplicate rules from accumulating across turns.
+    pub fn is_semantically_equivalent(&self, other: &Self) -> bool {
+        if self == other {
+            return true;
+        }
+        match (self, other) {
+            (
+                Self::PinContext {
+                    label: l1,
+                    content: c1,
+                    ..
+                },
+                Self::PinContext {
+                    label: l2,
+                    content: c2,
+                    ..
+                },
+            ) => {
+                let clean_c1 = c1.split("<cw_pinned_context>").next().unwrap_or(c1).trim();
+                let clean_c2 = c2.split("<cw_pinned_context>").next().unwrap_or(c2).trim();
+                l1.trim().eq_ignore_ascii_case(l2.trim()) && clean_c1.eq_ignore_ascii_case(clean_c2)
+            }
+            (
+                Self::PruneOrStub {
+                    target_fingerprint: fp1,
+                    target_call_id: cid1,
+                    target_json_pointer: ptr1,
+                    ..
+                },
+                Self::PruneOrStub {
+                    target_fingerprint: fp2,
+                    target_call_id: cid2,
+                    target_json_pointer: ptr2,
+                    ..
+                },
+            ) => {
+                let call_match = match (cid1.as_deref(), cid2.as_deref()) {
+                    (Some(a), Some(b)) if !a.is_empty() => a == b,
+                    _ => false,
+                };
+                let fp_match = match (fp1.as_deref(), fp2.as_deref()) {
+                    (Some(a), Some(b)) if !a.is_empty() => a == b,
+                    _ => false,
+                };
+                let ptr_match = match (ptr1.as_deref(), ptr2.as_deref()) {
+                    (Some(a), Some(b)) if !a.is_empty() => a == b,
+                    _ => false,
+                };
+                call_match || fp_match || ptr_match
+            }
+            (
+                Self::FoldSubtree {
+                    start_turn: s1,
+                    end_turn: e1,
+                    ..
+                },
+                Self::FoldSubtree {
+                    start_turn: s2,
+                    end_turn: e2,
+                    ..
+                },
+            ) => s1 == s2 && e1 == e2,
+            (Self::ShadowDedupe { file_path: p1 }, Self::ShadowDedupe { file_path: p2 }) => {
+                p1 == p2
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationStatus {

@@ -90,7 +90,7 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
             let pointer = format!("/tools/{i}");
             push_node(
                 nodes,
-                turn_seq,
+                1,
                 &pointer,
                 Role::System,
                 NodeKind::McpToolSchema {
@@ -108,14 +108,14 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
     if let Some(sys) = payload.get("system") {
         match sys {
             Value::String(s) => {
-                deconstruct_system_text(s, "/system", turn_seq, None, nodes);
+                deconstruct_system_text(s, "/system", 1, None, nodes);
             }
             Value::Array(arr) => {
                 for (i, block) in arr.iter().enumerate() {
                     let pointer = format!("/system/{i}");
                     let text = block.get("text").and_then(|t| t.as_str()).unwrap_or("");
                     let cache_ctrl = extract_cache_control(block);
-                    deconstruct_system_text(text, &pointer, turn_seq, cache_ctrl, nodes);
+                    deconstruct_system_text(text, &pointer, 1, cache_ctrl, nodes);
                 }
             }
             _ => {}
@@ -377,7 +377,7 @@ fn parse_openai(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>) {
             let (server_name, short_name) = split_mcp_tool_name(&name);
             push_node(
                 nodes,
-                turn_seq,
+                1,
                 &format!("/tools/{i}"),
                 Role::System,
                 NodeKind::McpToolSchema {
@@ -390,6 +390,7 @@ fn parse_openai(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>) {
             );
         }
     }
+    let _ = turn_seq;
 
     // 2. Top-level instructions (OpenAI Responses API `/instructions`)
     if let Some(instr) = payload.get("instructions").and_then(|v| v.as_str()) {
@@ -564,7 +565,7 @@ fn parse_gemini(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>) {
                     let (server_name, short_name) = split_mcp_tool_name(&name);
                     push_node(
                         nodes,
-                        turn_seq,
+                        1,
                         &format!("/tools/{t_idx}/functionDeclarations/{d_idx}"),
                         Role::System,
                         NodeKind::McpToolSchema {
@@ -579,6 +580,7 @@ fn parse_gemini(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>) {
             }
         }
     }
+    let _ = turn_seq;
 
     // 3. Contents (`/contents/i/parts/j`)
     let mut last_call_by_name: HashMap<String, Option<ToolSemanticMeta>> = HashMap::new();

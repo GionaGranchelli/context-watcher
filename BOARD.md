@@ -194,26 +194,35 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-R11** Storage and IO ownership | Partial | Blocking work and pagination are implemented; large-history and full database IO qualification remain open. |
 | **CW-R12** CI and product qualification | Partial | CI/docs and sanitized multi-task evidence are current; broad quality, performance, and hardware qualification remain open. |
 | **CW-090** Built-in updater | Done (implementation) | Release checksum verification, bounded downloads, safe binary extraction, atomic install, source build, integration refresh, and optional daemon restart are implemented. Six CLI tests and clippy pass; no live update was run against the user's installed binary. |
-| **CW-100** Verified context optimization milestone | In Progress | Milestone addressing logic risk remediation, claims reconciliation, and focused end-to-end qualification. |
+| **CW-100** Verified context optimization milestone | Done | Milestone addressing logic risk remediation, claims reconciliation, and focused end-to-end qualification foundation. |
 | **CW-101** Cache telemetry uncertainty & prefix safety | Done | Centralized `calculate_kv_break_tokens` across optimizer and mutation estimator; redefined `min` (`cache_safe_boost`) as strictly prefix-preserving (zero historical prefix modification to guarantee next-request cache reuse); added regression tests covering 0, partial, and unknown telemetry across consecutive requests. |
 | **CW-102** Claims reconciliation in EVIDENCE.md & README.md | Done | Separate static AST bloat opportunity (278 sessions, 14.33M tok) from active live proxy savings (153.8k tok, $2.10 saved). Differentiate theoretical prefill models, local GPU benchmarks, and cloud TTFT nuance. |
-| **CW-103** Focused qualification: Codex CLI & Hermes Agent | In Progress | Deep end-to-end qualification across real multi-turn programming tasks with session continuity and verified completion. |
+| **CW-103** Focused qualification: Codex CLI & Hermes Agent | Done | Initial mock & proxy integration qualified in safety & qualification test suites. |
 | **CW-104** Hardware & local model qualification | Backlog | Differentiate PagedAttention memory footprint modeling from cloud provider KV caching, document slot bridge limitations, and benchmark local Ollama/llama.cpp engines. |
+| **CW-110** Shared harness qualification runner | Done | Automated qualification test suite in `crates/cw-proxy/tests/qualification.rs` covering all 10 acceptance criteria across mock Responses, Chat Completions, and Messages upstreams; live binary execution for installed `codex`, `omp`, and `hermes`; documented baseline support matrix and blockers in `docs/HARNESS_MATRIX.md`. |
+| **CW-111** OMP native runtime integration | Ready | Replace command-only `/cw` extension with native runtime `context` / `before_provider_request` hook so active overlays optimize the model context without altering the on-disk transcript. |
+| **CW-112** Codex CLI multi-turn qualification | Ready | Multi-turn coding sessions and session resume (`codex resume <id>`) verification with committed overlays against live Responses provider. |
+| **CW-113** Hermes Agent lifecycle hardening | Ready | Fix `hermes-session-override.json` single-file collision under concurrent invocations; harden session isolation and DeepSeek provider qualification. |
+| **CW-114** Long-session reliability campaign | Backlog | Unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families, 3 repetitions per harness. |
+| **CW-115** Performance and savings qualification | Backlog | Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims. |
 
 ---
 
 ## 🚧 In Progress
 
-* **CW-100 / CW-103** Deep end-to-end qualification on Codex CLI and Hermes Agent across multi-turn programming sessions with authenticated proxy routing, active overlay reapplication, and completion verification.
-* **CW-R7** Finish safe authenticated wrapper support beyond Codex and validate real-provider signature preservation. Hermes DeepSeek direct launches now use persistent `model.base_url`; plain launch and resume recorded the same CW session. `cw wrap hermes chat` remains a per-process alternative; the env-only base URL was ineffective in this credential-pool setup. Local overlay reapplication remains covered by isolated mock tests. Gemini CLI's custom header environment variable cannot safely carry CW auth because the CLI preserves all `GEMINI_CLI_*` variables in shell-tool environments. Find a session-binding transport that keeps auth out of model-invoked tools for Gemini CLI and Antigravity; their local mock calls route through the proxy but do not bind the requested CW session. OpenCode/Pi/Aider native headers and OpenRouter-to-Anthropic signature streaming have local/live evidence. Native Gemini `thoughtSignature` and direct Anthropic connectivity remain unvalidated.
+* **CW-111** OMP native runtime integration: implement `context` / `before_provider_request` hook for live prompt optimization while keeping source transcript intact.
 
 ## 📋 Ready
-*(None)*
+
+* **CW-112** Codex CLI multi-turn qualification and session resume.
+* **CW-113** Hermes Agent lifecycle hardening (eliminate shared override file collision).
 
 ---
 
 ## 🗂️ Backlog
 
+* **CW-114** Long-session reliability campaign (three harnesses passing the same acceptance suite).
+* **CW-115** Performance and savings qualification (measured baseline vs optimized execution).
 * **CW-104** Hardware and local model qualification (PagedAttention memory modeling vs. cloud provider caching).
 * **CW-R11** Qualify bounded IO and session pagination against a large history fixture.
 * **CW-R12** Extend task-family and provider qualification before making broader quality or performance claims.

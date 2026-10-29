@@ -246,17 +246,10 @@ pub fn estimate_mutation_impact(
         .max()
         .unwrap_or(0)
         .max(nodes.iter().map(|n| n.token_span.count).sum());
-    let max_turn = nodes.iter().map(|n| n.turn_seq).max().unwrap_or(1).max(1);
 
-    let calc_break = |start: u32, count: u32, turn_seq: u32| -> u32 {
-        crate::radix::calculate_kv_break_tokens(
-            start,
-            count,
-            turn_seq,
-            max_turn,
-            total_tokens,
-            report,
-        )
+    let is_append = op.is_append_only();
+    let calc_break = |start: u32, count: u32| -> u32 {
+        crate::radix::calculate_kv_break_tokens(start, count, is_append, total_tokens, report)
     };
 
     match op {
@@ -282,8 +275,7 @@ pub fn estimate_mutation_impact(
                     };
                 if matches {
                     let saved = (node.token_span.count as i32) - stub_tok;
-                    let kv_break =
-                        calc_break(node.token_span.start, node.token_span.count, node.turn_seq);
+                    let kv_break = calc_break(node.token_span.start, node.token_span.count);
                     return (saved, kv_break);
                 }
             }
@@ -310,7 +302,7 @@ pub fn estimate_mutation_impact(
             }
             let summary_tok = estimate_tokens(summary_text) as i32;
             let saved = (target_tokens as i32) - summary_tok;
-            let kv_break = calc_break(earliest_start, target_tokens, *start_turn);
+            let kv_break = calc_break(earliest_start, target_tokens);
             (saved, kv_break)
         }
         MutationOp::ShadowDedupe { file_path } => {
@@ -339,18 +331,16 @@ pub fn estimate_mutation_impact(
             }
             let mut saved = 0i32;
             let mut earliest_start = total_tokens;
-            let mut affected_turn = 0u32;
             for (path, reads) in reads_by_path {
                 let write_turn = latest_write_by_path.get(&path).copied().unwrap_or(0);
                 for (i, r) in reads.iter().enumerate() {
                     if i + 1 < reads.len() || r.turn_seq < write_turn {
                         saved += (r.token_span.count as i32) - 24;
                         earliest_start = earliest_start.min(r.token_span.start);
-                        affected_turn = affected_turn.max(r.turn_seq);
                     }
                 }
             }
-            (saved, calc_break(earliest_start, 1, affected_turn))
+            (saved, calc_break(earliest_start, 1))
         }
         MutationOp::GateToolsAndSkills {
             disabled_tools,
@@ -376,7 +366,7 @@ pub fn estimate_mutation_impact(
                     }
                 }
             }
-            (saved, calc_break(earliest, 1, 0))
+            (saved, calc_break(earliest, 1))
         }
         MutationOp::PinContext { content, .. } => {
             // PinContext is injected at the tail -> 0 KV cache break!

@@ -193,11 +193,12 @@ pub fn analyze_kv_cache(
 
 /// Centralized calculator for estimated KV-cache prefix break cost (in tokens).
 ///
-/// Architectural Invariants (Finding 1 & Finding 2):
-/// 1. Pure tail operations (e.g. `PinContext` appending `<cw_pinned_context>` at prompt tail)
-///    never modify historical context, guaranteeing 0 KV cache break on Turn N and Turn N+1.
-/// 2. Any mutation to historical context (`turn_seq < max_turn` or `start_token < total_tokens`)
-///    modifies the tokenized prefix that the provider ingested and cached on Turn N.
+/// Architectural Invariants:
+/// 1. Pure append-only operations (`is_append_only == true`, such as `PinContext` appending
+///    `<cw_pinned_context>` at the prompt tail) never replace or modify historical tokens,
+///    guaranteeing 0 KV cache break on Turn N and Turn N+1.
+/// 2. Any in-place modification or replacement (`is_append_only == false`), even if targeting
+///    the final node of the turn, alters the tokenized prefix that the provider cached during Turn N.
 ///    On Turn N+1, modifying token `start_token` invalidates provider cache reuse for all tokens
 ///    from `start_token` to `total_tokens`.
 /// 3. When cache telemetry is absent or unverified (`report.telemetry_available == false`),
@@ -205,18 +206,19 @@ pub fn analyze_kv_cache(
 pub fn calculate_kv_break_tokens(
     start_token: u32,
     token_count: u32,
-    turn_seq: u32,
-    max_turn: u32,
+    is_append_only: bool,
     total_tokens: u32,
     report: Option<&KvCacheReport>,
 ) -> u32 {
-    let telemetry_available = report.map(|r| r.telemetry_available).unwrap_or(false);
-
-    // Strictly tail operations (such as PinContext appending to prompt tail) do not mutate the historical prefix.
-    if turn_seq >= max_turn && start_token >= total_tokens.saturating_sub(token_count) {
+    // Pure append-only operations at prompt tail never modify historical context.
+    if is_append_only {
         return 0;
     }
 
+    let telemetry_available = report.map(|r| r.telemetry_available).unwrap_or(false);
+
+    // Any in-place modification or replacement at start_token invalidates all cached
+    // prefix tokens from start_token to total_tokens on subsequent requests.
     if telemetry_available {
         total_tokens.saturating_sub(start_token)
     } else {

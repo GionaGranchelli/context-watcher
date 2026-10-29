@@ -496,6 +496,12 @@ pub enum MutationOp {
 }
 
 impl MutationOp {
+    /// Returns true if this operation is strictly append-only (e.g. `PinContext`),
+    /// injecting additive content at the prompt tail rather than replacing or modifying historical tokens.
+    pub fn is_append_only(&self) -> bool {
+        matches!(self, Self::PinContext { .. })
+    }
+
     /// Returns true if two `MutationOp`s target the same logical content or node,
     /// preventing duplicate rules from accumulating across turns.
     pub fn is_semantically_equivalent(&self, other: &Self) -> bool {

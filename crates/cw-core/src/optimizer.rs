@@ -68,12 +68,11 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         .max(1);
 
     // Compute kv_break_tokens using centralized prefix-invalidation calculator
-    let compute_kv_break = |start: u32, count: u32, turn_seq: u32| -> u32 {
+    let compute_kv_break = |start: u32, count: u32, is_append: bool| -> u32 {
         crate::radix::calculate_kv_break_tokens(
             start,
             count,
-            turn_seq,
-            max_turn,
+            is_append,
             total_tokens,
             Some(&turn.kv_cache_report),
         )
@@ -176,7 +175,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
             };
             let after_tok = 14u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
-            let kv_break = compute_kv_break(n.token_span.start, tok, n.turn_seq);
+            let kv_break = compute_kv_break(n.token_span.start, tok, false);
             stale_file_items.push(OptimizationCandidateItem {
                 item_id: format!("dedupe_{}", n.id),
                 node_id: Some(n.id.clone()),
@@ -227,7 +226,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
             if !is_fresh_file && !is_cw_or_skill && !is_unread_tail && tok > 100 {
                 let after_tok = 16u32.min(tok);
                 let saved = (tok as i32) - (after_tok as i32);
-                let kv_break = compute_kv_break(n.token_span.start, tok, n.turn_seq);
+                let kv_break = compute_kv_break(n.token_span.start, tok, false);
                 let item = OptimizationCandidateItem {
                     item_id: format!("cut_tool_{}", n.id),
                     node_id: Some(n.id.clone()),
@@ -288,7 +287,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         {
             let after_tok = 8u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
-            let kv_break = compute_kv_break(n.token_span.start, tok, n.turn_seq);
+            let kv_break = compute_kv_break(n.token_span.start, tok, false);
             let think_item = OptimizationCandidateItem {
                 item_id: format!("cut_think_{}", n.id),
                 node_id: Some(n.id.clone()),
@@ -327,7 +326,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         } = &n.kind
             && !called_tools.iter().any(|c| c.contains(tool_name))
         {
-            let kv_break = compute_kv_break(n.token_span.start, tok, n.turn_seq);
+            let kv_break = compute_kv_break(n.token_span.start, tok, false);
             gate_tool_items.push(OptimizationCandidateItem {
                 item_id: format!("gate_{}", n.id),
                 node_id: Some(n.id.clone()),

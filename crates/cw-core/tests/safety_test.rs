@@ -225,14 +225,26 @@ fn consecutive_requests_telemetry_and_suffix_invalidation_matrix() {
     let break_at_8k = cw_core::radix::calculate_kv_break_tokens(
         8_000,
         500,
-        1, // historical turn
-        2, // max_turn
+        false, // in-place modification
         total_tokens,
         Some(&report_partial),
     );
     assert_eq!(
         break_at_8k, 2_000,
         "Modifying token 8,000 must account for invalidating suffix 8,000..10,000 for Turn N+1"
+    );
+
+    // In-place modification at final node (9,500..10,000) must NOT receive zero break cost!
+    let break_at_9500 = cw_core::radix::calculate_kv_break_tokens(
+        9_500,
+        500,
+        false, // in-place replacement / prune on final node
+        total_tokens,
+        Some(&report_partial),
+    );
+    assert_eq!(
+        break_at_9500, 500,
+        "In-place modification of final node must invalidate 9,500..10,000 on Turn N+1 (cannot receive 0 break)"
     );
 
     // 3. Centralized agreement: verify estimate_mutation_impact matches calculate_kv_break_tokens
@@ -314,12 +326,11 @@ fn consecutive_requests_telemetry_and_suffix_invalidation_matrix() {
         "estimate_mutation_impact must match calculate_kv_break_tokens"
     );
 
-    // 4. Pure tail operation (PinContext) preserves 0 break across all states
+    // 4. Pure append-only operation (PinContext) preserves 0 break across all states
     let pin_break_partial = cw_core::radix::calculate_kv_break_tokens(
         10_000,
         50,
-        2,
-        2,
+        true, // is_append_only: true
         total_tokens,
         Some(&report_partial),
     );
@@ -328,8 +339,7 @@ fn consecutive_requests_telemetry_and_suffix_invalidation_matrix() {
     let pin_break_unknown = cw_core::radix::calculate_kv_break_tokens(
         10_000,
         50,
-        2,
-        2,
+        true, // is_append_only: true
         total_tokens,
         None, // Unknown telemetry
     );

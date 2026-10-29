@@ -72,6 +72,13 @@ pub(super) async fn handle_proxy_request(
             }) {
                 return (StatusCode::BAD_REQUEST, "Invalid cw session ID").into_response();
             }
+            let is_conversation_payload = raw.get("messages").is_some()
+                || raw.get("input").is_some()
+                || raw.get("contents").is_some()
+                || raw.get("prompt").is_some();
+            if !is_conversation_payload && !headers.contains_key("x-cw-dry-run") {
+                break 'capture;
+            }
             let session_id = explicit
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("sess_{}", Uuid::new_v4().simple()));
@@ -85,26 +92,40 @@ pub(super) async fn handle_proxy_request(
                 .and_then(Value::as_str)
                 .unwrap_or("unknown-model")
                 .to_string();
-            if let Ok(Some(existing)) = state.store.get_session(&session_id)
-                && (existing.provider != provider
-                    || existing.workspace_root != workspace
-                    || existing.model != model)
+            let existing_session = state.store.get_session(&session_id).ok().flatten();
+            if let Some(ref existing) = existing_session
+                && existing.provider != provider
             {
                 return (
                     StatusCode::CONFLICT,
-                    "Session metadata changed; start a new session",
+                    "Session provider changed; start a new session",
                 )
                     .into_response();
             }
+            let workspace = workspace.or_else(|| {
+                existing_session
+                    .as_ref()
+                    .and_then(|existing| existing.workspace_root.clone())
+            });
             let session = Session {
                 id: session_id.clone(),
-                parent_session_id: None,
-                harness: HarnessKind::GenericProxy,
+                parent_session_id: existing_session
+                    .as_ref()
+                    .and_then(|existing| existing.parent_session_id.clone()),
+                harness: existing_session
+                    .as_ref()
+                    .map(|existing| existing.harness)
+                    .unwrap_or(HarnessKind::GenericProxy),
                 workspace_root: workspace.clone(),
                 model,
                 provider,
-                title: None,
-                created_at: Utc::now(),
+                title: existing_session
+                    .as_ref()
+                    .and_then(|existing| existing.title.clone()),
+                created_at: existing_session
+                    .as_ref()
+                    .map(|existing| existing.created_at)
+                    .unwrap_or_else(Utc::now),
                 updated_at: Utc::now(),
             };
             let cfg = state.store.get_autopilot_config().unwrap_or_default();

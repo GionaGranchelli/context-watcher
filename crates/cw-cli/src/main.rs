@@ -580,15 +580,23 @@ async fn main() -> Result<()> {
             if is_codex {
                 args.extend(codex_proxy_config_args(proxy_port));
             }
-            args.extend(cmd[1..].iter().cloned());
-            if is_hermes && cmd.get(1).is_some_and(|arg| arg == "chat") {
-                // Hermes config takes precedence over DEEPSEEK_BASE_URL; its chat CLI flag wins.
-                args.extend([
-                    "--base-url".to_owned(),
-                    format!("http://127.0.0.1:{proxy_port}/deepseek"),
-                ]);
+            let mut extracted_session_id = session_id;
+            let mut tail_iter = cmd[1..].iter().cloned();
+            while let Some(arg) = tail_iter.next() {
+                if (is_hermes || extracted_session_id.is_none()) && arg == "--session-id" {
+                    if let Some(val) = tail_iter.next() {
+                        extracted_session_id = Some(val);
+                        continue;
+                    }
+                } else if (is_hermes || extracted_session_id.is_none())
+                    && let Some(val) = arg.strip_prefix("--session-id=")
+                {
+                    extracted_session_id = Some(val.to_owned());
+                    continue;
+                }
+                args.push(arg);
             }
-            let session_id = session_id.or_else(|| std::env::var("CW_SESSION_ID").ok());
+            let session_id = extracted_session_id.or_else(|| std::env::var("CW_SESSION_ID").ok());
             if session_id
                 .as_deref()
                 .is_some_and(|id| !valid_proxy_session_id(id))
@@ -634,7 +642,9 @@ async fn main() -> Result<()> {
             if let Some(token) = token {
                 process.env("CW_CONTROL_TOKEN", token);
             }
+            let mut hermes_override_file = None;
             if is_hermes {
+                let _ = cw_core::control::control_token(true);
                 process.env_remove("CW_SESSION_ID").env(
                     "DEEPSEEK_BASE_URL",
                     format!("http://127.0.0.1:{proxy_port}/deepseek"),
@@ -642,6 +652,33 @@ async fn main() -> Result<()> {
                 process.env("CW_CONTROL_TOKEN_FILE", cw_core::control::token_path());
                 if let Some(session_id) = session_id.as_deref() {
                     process.env("CW_SESSION_ID", session_id);
+                    if let Some(parent) = cw_core::control::token_path().parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                        let override_path = parent.join("hermes-session-override.json");
+                        let cwd_str = std::env::current_dir()
+                            .ok()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        let payload = serde_json::json!({
+                            "session_id": session_id,
+                            "workspace": cwd_str,
+                            "ts": chrono::Utc::now().timestamp(),
+                        });
+                        if let Ok(bytes) = serde_json::to_vec(&payload) {
+                            let mut opts = std::fs::OpenOptions::new();
+                            opts.write(true).create(true).truncate(true);
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::fs::OpenOptionsExt;
+                                opts.mode(0o600);
+                            }
+                            if let Ok(mut f) = opts.open(&override_path) {
+                                use std::io::Write;
+                                let _ = f.write_all(&bytes);
+                                hermes_override_file = Some(override_path);
+                            }
+                        }
+                    }
                 }
             } else if let Some(session_id) = session_id.as_deref() {
                 process.env("CW_SESSION_ID", session_id);
@@ -649,6 +686,9 @@ async fn main() -> Result<()> {
                 process.env("CW_SESSION_ID", format!("wrap_{}", Uuid::new_v4().simple()));
             }
             let status = process.status()?;
+            if let Some(path) = hermes_override_file {
+                let _ = std::fs::remove_file(path);
+            }
             std::process::exit(status.code().unwrap_or(1));
         }
         Commands::Tui { session } => {
@@ -1466,24 +1506,30 @@ fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<S
         .or_else(|| std::env::var("CW_SESSION_ID").ok())
         .filter(|s| !s.trim().is_empty());
     if let Some(id) = selected {
-        anyhow::ensure!(store.get_session(&id)?.is_some(), "Session not found: {id}");
-        return Ok(Some(id));
+        if store.get_session(&id)?.is_some() {
+            return Ok(Some(id));
+        }
+        let prefix_matches: Vec<_> = store
+            .list_sessions()?
+            .into_iter()
+            .filter(|s| s.id.starts_with(&id))
+            .collect();
+        return match prefix_matches.as_slice() {
+            [session] => Ok(Some(session.id.clone())),
+            [] => anyhow::bail!("Session not found: {id}"),
+            _ => anyhow::bail!("Several sessions match prefix '{id}'. Pass the full --session ID."),
+        };
     }
     let cwd = std::env::current_dir()?;
     let sessions = store.list_sessions()?;
-    let matching: Vec<_> = sessions
-        .iter()
-        .filter(|s| {
-            s.workspace_root
-                .as_deref()
-                .is_some_and(|root| std::path::Path::new(root) == cwd)
-        })
-        .collect();
-    match matching.as_slice() {
-        [] => Ok(None),
-        [session] => Ok(Some(session.id.clone())),
-        _ => anyhow::bail!("Several sessions match this workspace. Pass --session explicitly."),
+    if let Some(matching) = sessions.iter().find(|s| {
+        s.workspace_root
+            .as_deref()
+            .is_some_and(|root| std::path::Path::new(root) == cwd)
+    }) {
+        return Ok(Some(matching.id.clone()));
     }
+    Ok(sessions.first().map(|s| s.id.clone()))
 }
 
 fn save_cli_mutation(store: &CwStore, session_id: &str, op: MutationOp, draft: bool) -> Result<()> {
@@ -2754,6 +2800,16 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
                 .status()
                 .is_ok_and(|status| status.success())
             {
+                let hermes_agent_dir = hermes_dir.join("hermes-agent");
+                if hermes_agent_dir.exists() {
+                    let _ = std::process::Command::new("python3")
+                        .env("PYTHONPATH", &hermes_agent_dir)
+                        .args([
+                            "-c",
+                            "from pathlib import Path; from gateway.control_socket import query_gateway_control; query_gateway_control(Path.home() / '.hermes', 'reload-plugins')",
+                        ])
+                        .output();
+                }
                 println!("           Hermes contextWatcher middleware enabled for new sessions.");
             } else {
                 println!(
@@ -2859,6 +2915,9 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
             if has_systemctl {
                 let _ = std::process::Command::new("systemctl")
                     .args(["--user", "enable", "--now", "contextwatcher.service"])
+                    .status();
+                let _ = std::process::Command::new("systemctl")
+                    .args(["--user", "restart", "contextwatcher.service"])
                     .status();
                 std::thread::sleep(std::time::Duration::from_millis(200));
                 if is_daemon_running(4400) {

@@ -50,7 +50,7 @@ impl Default for AutoPilotConfig {
             local_window_threshold_tokens: 25_000,
             auto_heal_low_health: true,
             min_health_score: 75,
-            heal_strategy: "clean_code_state".to_string(),
+            heal_strategy: "surgical_log_diet".to_string(),
             auto_sync_to_disk: false,
         }
     }
@@ -162,9 +162,13 @@ pub fn evaluate_autopilot_policies(
             .iter()
             .find(|p| p.id == strat_id && !p.items.is_empty())
             .or_else(|| {
-                plans
-                    .iter()
-                    .find(|p| p.id == "clean_code_state" && !p.items.is_empty())
+                ["clean_code_state", "surgical_log_diet", "max_token_diet"]
+                    .into_iter()
+                    .find_map(|fallback| {
+                        plans
+                            .iter()
+                            .find(|p| p.id == fallback && !p.items.is_empty())
+                    })
             });
 
         if let Some(plan) = chosen_plan {

@@ -65,6 +65,15 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         .filter(|n| n.kv_status == KvNodeStatus::CachedHit)
         .map(|n| n.token_span.count)
         .sum();
+    let total_unknown: u32 = turn
+        .nodes
+        .iter()
+        .filter(|n| n.kv_status == KvNodeStatus::Unknown)
+        .map(|n| n.token_span.count)
+        .sum();
+    let telemetry_available = turn.kv_cache_report.telemetry_available;
+    let has_unknown = total_unknown > 0;
+    let cache_known = telemetry_available && !has_unknown;
     let max_turn = turn
         .nodes
         .iter()
@@ -72,6 +81,30 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         .max()
         .unwrap_or(1)
         .max(1);
+
+    // Compute kv_break_tokens for candidate items.
+    // When cache telemetry is known and verified:
+    //   - If total_cached > 0: mutating before total_cached breaks (total_cached - start) cached tokens.
+    //   - If total_cached == 0: telemetry verified 0 tokens were cached on this turn (0 break).
+    // When cache telemetry is UNKNOWN (telemetry unavailable or Unknown nodes present):
+    //   - Prefix or historical turn mutations CANNOT be treated as 0 break.
+    //   - We conservatively estimate non-zero cache invalidation impact so unknown cache is never free.
+    let compute_kv_break = |start: u32, count: u32, turn_seq: u32| -> u32 {
+        if cache_known {
+            total_cached.saturating_sub(start)
+        } else {
+            if turn_seq < max_turn || start < total_tokens.saturating_sub(count) {
+                let prefix_scope = if total_unknown > 0 {
+                    total_unknown
+                } else {
+                    total_tokens
+                };
+                prefix_scope.saturating_sub(start).max(count).max(1)
+            } else {
+                0
+            }
+        }
+    };
 
     // Identify stale/duplicate file read nodes from linter findings
     let mut stale_or_dup_node_ids: HashSet<String> = HashSet::new();
@@ -170,7 +203,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
             };
             let after_tok = 14u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
-            let kv_break = total_cached.saturating_sub(n.token_span.start);
+            let kv_break = compute_kv_break(n.token_span.start, tok, n.turn_seq);
             stale_file_items.push(OptimizationCandidateItem {
                 item_id: format!("dedupe_{}", n.id),
                 node_id: Some(n.id.clone()),
@@ -221,7 +254,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
             if !is_fresh_file && !is_cw_or_skill && !is_unread_tail && tok > 100 {
                 let after_tok = 16u32.min(tok);
                 let saved = (tok as i32) - (after_tok as i32);
-                let kv_break = total_cached.saturating_sub(n.token_span.start);
+                let kv_break = compute_kv_break(n.token_span.start, tok, n.turn_seq);
                 let item = OptimizationCandidateItem {
                     item_id: format!("cut_tool_{}", n.id),
                     node_id: Some(n.id.clone()),
@@ -282,7 +315,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         {
             let after_tok = 8u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
-            let kv_break = total_cached.saturating_sub(n.token_span.start);
+            let kv_break = compute_kv_break(n.token_span.start, tok, n.turn_seq);
             let think_item = OptimizationCandidateItem {
                 item_id: format!("cut_think_{}", n.id),
                 node_id: Some(n.id.clone()),
@@ -321,7 +354,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         } = &n.kind
             && !called_tools.iter().any(|c| c.contains(tool_name))
         {
-            let kv_break = total_cached.saturating_sub(n.token_span.start);
+            let kv_break = compute_kv_break(n.token_span.start, tok, n.turn_seq);
             gate_tool_items.push(OptimizationCandidateItem {
                 item_id: format!("gate_{}", n.id),
                 node_id: Some(n.id.clone()),
@@ -365,8 +398,8 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
     let mut strategy1_items = Vec::new();
     for item in pin_items
         .iter()
-        .chain(stale_file_items.iter().filter(|i| i.kv_break_tokens == 0))
-        .chain(tail_bloat_items.iter().filter(|i| i.kv_break_tokens == 0))
+        .chain(stale_file_items.iter().filter(|i| cache_known && i.kv_break_tokens == 0))
+        .chain(tail_bloat_items.iter().filter(|i| cache_known && i.kv_break_tokens == 0))
     {
         let key = item.node_id.clone().unwrap_or_else(|| item.item_id.clone());
         if strategy1_seen.insert(key) {

@@ -241,6 +241,31 @@ pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32,
         .filter(|n| n.kv_status == crate::ir::KvNodeStatus::CachedHit)
         .map(|n| n.token_span.count)
         .sum();
+    let total_unknown: u32 = nodes
+        .iter()
+        .filter(|n| n.kv_status == crate::ir::KvNodeStatus::Unknown)
+        .map(|n| n.token_span.count)
+        .sum();
+    let total_tokens: u32 = nodes.iter().map(|n| n.token_span.count).sum();
+    let max_turn = nodes.iter().map(|n| n.turn_seq).max().unwrap_or(1).max(1);
+    let cache_known = total_unknown == 0 && (total_cached > 0 || nodes.is_empty());
+
+    let calc_break = |start: u32, count: u32, turn_seq: u32| -> u32 {
+        if cache_known {
+            total_cached.saturating_sub(start)
+        } else {
+            if turn_seq < max_turn || start < total_tokens.saturating_sub(count) {
+                let scope = if total_unknown > 0 {
+                    total_unknown
+                } else {
+                    total_tokens
+                };
+                scope.saturating_sub(start).max(count).max(1)
+            } else {
+                0
+            }
+        }
+    };
 
     match op {
         MutationOp::PruneOrStub {
@@ -265,7 +290,7 @@ pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32,
                     };
                 if matches {
                     let saved = (node.token_span.count as i32) - stub_tok;
-                    let kv_break = total_cached.saturating_sub(node.token_span.start);
+                    let kv_break = calc_break(node.token_span.start, node.token_span.count, node.turn_seq);
                     return (saved, kv_break);
                 }
             }
@@ -277,7 +302,7 @@ pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32,
             summary_text,
         } => {
             let mut target_tokens = 0u32;
-            let mut earliest_start = total_cached;
+            let mut earliest_start = total_tokens;
             for node in nodes {
                 if node.turn_seq >= *start_turn
                     && node.turn_seq <= *end_turn
@@ -292,7 +317,7 @@ pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32,
             }
             let summary_tok = estimate_tokens(summary_text) as i32;
             let saved = (target_tokens as i32) - summary_tok;
-            let kv_break = total_cached.saturating_sub(earliest_start);
+            let kv_break = calc_break(earliest_start, target_tokens, *start_turn);
             (saved, kv_break)
         }
         MutationOp::ShadowDedupe { file_path } => {
@@ -320,17 +345,19 @@ pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32,
                 }
             }
             let mut saved = 0i32;
-            let mut earliest_start = total_cached;
+            let mut earliest_start = total_tokens;
+            let mut affected_turn = 0u32;
             for (path, reads) in reads_by_path {
                 let write_turn = latest_write_by_path.get(&path).copied().unwrap_or(0);
                 for (i, r) in reads.iter().enumerate() {
                     if i + 1 < reads.len() || r.turn_seq < write_turn {
                         saved += (r.token_span.count as i32) - 24;
                         earliest_start = earliest_start.min(r.token_span.start);
+                        affected_turn = affected_turn.max(r.turn_seq);
                     }
                 }
             }
-            (saved, total_cached.saturating_sub(earliest_start))
+            (saved, calc_break(earliest_start, 1, affected_turn))
         }
         MutationOp::GateToolsAndSkills {
             disabled_tools,
@@ -338,7 +365,7 @@ pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32,
             ..
         } => {
             let mut saved = 0i32;
-            let mut earliest = total_cached;
+            let mut earliest = total_tokens;
             for node in nodes {
                 if let NodeKind::McpToolSchema {
                     server_name,
@@ -356,7 +383,7 @@ pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32,
                     }
                 }
             }
-            (saved, total_cached.saturating_sub(earliest))
+            (saved, calc_break(earliest, 1, 0))
         }
         MutationOp::PinContext { content, .. } => {
             // PinContext is injected at the tail -> 0 KV cache break!

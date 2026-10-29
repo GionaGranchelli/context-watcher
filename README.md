@@ -86,7 +86,7 @@ Unlike `/compact` (which calls an LLM to rewrite your history into a lossy Engli
 
 | Tier / ID | What It Collects | KV-Cache Impact |
 | :--- | :--- | :--- |
-| **`min`** (`cache_safe_boost`) | Only candidates with `kv_break_tokens == 0` (uncached duplicate reads, uncached tail bloat, rule reminders) | **0 cached prefix tokens broken** |
+| **`min`** (`cache_safe_boost`) | Only verified zero-break candidates (`kv_break_tokens == 0`; preserves 100% of history when cache telemetry is unverified) | **0 cached prefix tokens broken** |
 | **`clean`** (`clean_code_state`) | All earlier file reads covered by a later identical read | May modify prefix |
 | **`mid`** (`surgical_log_diet`) | Completed past-turn tool logs (`>100` tok) and unsigned thinking | May modify prefix |
 | **`max`** (`max_token_diet`) | Combines `clean` + `mid` + low-salience rule reminders | May modify prefix |

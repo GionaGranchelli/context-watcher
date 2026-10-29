@@ -16,7 +16,7 @@ export interface TokenSpan {
   count: number;
 }
 
-export type KvNodeStatus = 'cached_hit' | 'newly_cached' | 'cache_invalidated' | 'uncached';
+export type KvNodeStatus = 'cached_hit' | 'newly_cached' | 'cache_invalidated' | 'uncached' | 'unknown';
 
 export interface ContextNode {
   id: string;
@@ -39,6 +39,7 @@ export interface KvCacheReport {
   hit_ratio: number;
   divergence_token_index: number | null;
   invalidation_cause: Record<string, any> | null;
+  telemetry_available?: boolean;
 }
 
 export interface LintFinding {

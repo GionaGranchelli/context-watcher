@@ -120,13 +120,15 @@ fn unknown_cache_is_not_a_hit_and_minimum_plan_preserves_history() {
         None,
     )
     .unwrap();
-    for n in &mut turn.nodes {
-        n.kv_status = KvNodeStatus::CachedHit;
-    }
+    // CW-100: When provider telemetry is None, the optimizer must never treat
+    // unverified cache state as zero-break cost. Minimum plan ("cache_safe_boost")
+    // must strictly preserve history and exclude prefix mutations without requiring
+    // manual tampering of node kv_status.
     let plans = cw_core::optimizer::build_optimization_plans(&turn);
     let min = plans.iter().find(|p| p.id == "cache_safe_boost").unwrap();
-    assert!(min.items.is_empty());
+    assert!(min.items.is_empty(), "Unverified prefix must not qualify for cache_safe_boost");
     assert_eq!(min.kv_cache_break_tokens, 0);
+
     let previous = turn.nodes.clone();
     let report = cw_core::radix::analyze_kv_cache(
         Some(&previous),
@@ -135,6 +137,22 @@ fn unknown_cache_is_not_a_hit_and_minimum_plan_preserves_history() {
         None,
     );
     assert_eq!(report.hit_tokens, 0);
+    assert!(!report.telemetry_available, "Telemetry must be marked unavailable when actual_cached_tokens is None");
+    // Prefix-matching nodes without provider telemetry must be marked Unknown
+    assert_eq!(turn.nodes[0].kv_status, KvNodeStatus::Unknown);
+
+    // Verify optimizer evaluation with explicit KvNodeStatus::Unknown nodes
+    let plans_after_unknown = cw_core::optimizer::build_optimization_plans(&turn);
+    let min_unknown = plans_after_unknown.iter().find(|p| p.id == "cache_safe_boost").unwrap();
+    assert!(min_unknown.items.is_empty(), "Unknown cache prefix must never be included in cache_safe_boost");
+    assert_eq!(min_unknown.kv_cache_break_tokens, 0);
+
+    // Other plans (e.g. clean_code_state) can still identify dedupe opportunities,
+    // but their kv_break_tokens must be non-zero (not masquerading as free)!
+    let clean = plans_after_unknown.iter().find(|p| p.id == "clean_code_state").unwrap();
+    assert!(!clean.items.is_empty());
+    assert!(clean.kv_cache_break_tokens > 0, "Unknown cache invalidation must compute non-zero break cost");
+
     let report = cw_core::radix::analyze_kv_cache(
         None,
         &mut turn.nodes,
@@ -142,6 +160,7 @@ fn unknown_cache_is_not_a_hit_and_minimum_plan_preserves_history() {
         Some(1_000_000),
     );
     assert!(report.hit_ratio <= 1.0);
+    assert!(report.telemetry_available);
 }
 #[test]
 fn metadata_stripping_never_removes_application_keys() {

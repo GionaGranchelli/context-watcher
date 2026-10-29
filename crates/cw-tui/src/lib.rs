@@ -352,6 +352,7 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
                 KvNodeStatus::NewlyCached => ("🟡 NEW ", Color::Yellow),
                 KvNodeStatus::CacheInvalidated => ("🔴 BRK ", Color::Red),
                 KvNodeStatus::Uncached => ("⚪ TAIL", Color::Gray),
+                KvNodeStatus::Unknown => ("🟣 UNK ", Color::Magenta),
             };
             let line = Line::from(vec![
                 Span::styled(badge, Style::default().fg(color)),

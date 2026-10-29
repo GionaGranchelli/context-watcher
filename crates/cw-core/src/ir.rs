@@ -130,6 +130,7 @@ pub enum KvNodeStatus {
     NewlyCached,
     CacheInvalidated,
     Uncached,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -376,6 +377,8 @@ pub struct KvCacheReport {
     pub hit_ratio: f32,
     pub divergence_token_index: Option<u32>,
     pub invalidation_cause: Option<CacheInvalidationCause>,
+    #[serde(default)]
+    pub telemetry_available: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

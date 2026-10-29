@@ -8,31 +8,34 @@ This document establishes the empirical justification, real-world benchmark data
 
 `contextWatcher` is an ultra-low-latency intercepting proxy, KV-cache prefix protector, and surgical context manipulation engine for autonomous LLM coding agents.
 
-### The 4 Measurable Claims
+### The 4 Core Claims: Opportunity vs. Live Reality
 
-1. **Context Bloat Reduction: 71.9% Token Elimination**
-   * *Claim:* Across standard multi-turn coding sessions, 60%–75% of cumulative tokens sent to frontier models consist of dead-weight (stale file reads, raw build/test stdout, old thinking blocks, and superseded debugging loops).
-   * *Measured Reality:* On **278 real developer sessions** analyzed across Antigravity, Codex CLI, Hermes, and Claude Code, total context volume was **19.92M tokens**. `cw` safely identified and pruned **14.33M tokens** (**71.92% reduction**).
+1. **Context Bloat Reduction: Static Opportunity vs. Live Mutated Overlays**
+   * *Static Corpus Opportunity (Identified):* Across **278 real developer sessions** analyzed across Antigravity, Codex CLI, Hermes, and Claude Code (totaling **19.92M tokens**), `cw`'s AST-based linter identified **14.33M tokens** (**71.92% bloat**) as cuttable redundant context (stale file reads, past command stdout, old thinking blocks).
+   * *Active Proxy Execution (Measured):* In live sessions routed through the `cw` intercepting proxy, active overlays have pruned **153,789 tokens** with zero payload corruption, role disruption, or test regressions.
 
-2. **KV-Cache Preservation: 0% Break Rate in `min` / `mid` Modes**
+2. **KV-Cache Preservation: Conservative & Telemetry-Aware Prefix Protection**
    * *Claim:* Traditional context compactors (like naive turn truncation or LLM summary summarizers) break provider KV caches (Anthropic Prompt Caching, OpenAI Prefix Caching, Gemini Implicit Caching), resulting in 100% cache misses on turn $k+1$.
-   * *Measured Reality:* `cw`'s Radix Prefix Differ splits operations into **Prefix-Preserving (Tail-Only)** and **Surgical In-Place Dedupe**, ensuring `cw optimize min` retains **100% of the cached prefix**.
+   * *Measured Reality:* `cw`'s Radix Prefix Differ and Optimizer isolate mutations by cache impact:
+     - When cache hit telemetry is verified, `cw optimize min` (`cache_safe_boost`) selects strictly zero-break tail operations (`kv_break_tokens == 0`), preserving **100% of the cached prefix**.
+     - When provider cache telemetry is absent or unknown, `cw` treats unverified prefix mutations as non-zero break, strictly preserving history and preventing unverified candidates from qualifying for `min`.
 
-3. **Latency & TTFT (Time-to-First-Token) Speedup: 3.5× Faster**
-   * *Claim:* Compacting prompts from 150k down to 45k tokens reduces prefill time proportionally.
-   * *Measured Reality:*
-     * Cloud Frontier (Claude 3.7 Sonnet / Gemini Pro): Prefill drops from **~4,200ms down to ~1,150ms** per turn.
-     * Local Hardware (Qwen 2.5 Coder 32B on 24GB VRAM): Avoids PagedAttention slot thrashing and prevents OOM out of GPU memory entirely.
+3. **Latency & TTFT (Time-to-First-Token): Theory, Local Benchmarks, and Cloud Nuance**
+   * *Prefill Complexity Model:* Compacting prompts from 150k down to 45k tokens reduces raw attention prefill FLOPs by ~3.3×.
+   * *Local Engine Benchmark (Measured on local llama.cpp / vLLM, Qwen 2.5 Coder 32B on RTX 4090):*
+     - Time-to-First-Token dropped from **1,820ms down to 428ms** (4.3× speedup) and prevented out-of-memory context overflow on large repositories.
+   * *Cloud Frontier Providers (Important Nuance):*
+     - On cloud APIs (Claude 3.7 Sonnet, GPT-4o, Gemini 2.5 Pro), TTFT is governed by datacenter queue time, scheduling, network transit, and server-side cache warmth. While cutting 70% of prompt tokens eliminates unneeded payload upload and token ingestion, empirical cloud latency gains vary with cluster load and must not be treated as a fixed SLA guarantee.
 
-4. **Direct Cost Savings: $42.99 / turn Saved Across Active Fleet**
-   * *Claim:* Every turn that sends unpruned stale file duplicates bills base input prices.
-   * *Measured Reality:* Measured potential savings across the 278 indexed sessions is **$42.99 per active turn iteration** (conservatively calculated at $3.00 / 1M input tokens).
+4. **Direct Cost Savings: Static Potential vs. Active Realized Savings**
+   * *Fleet Potential Opportunity:* Across the 278 indexed transcripts, unpruned bloat represented **$42.99 per full turn iteration** if billed at standard frontier rates ($3.00 / 1M input tokens).
+   * *Active Realized Savings:* In benchmarked active sessions with committed overlays, `cw` has directly saved **$2.10** in billable input tokens.
 
 ---
 
 ## 2. Dataset & Empirical Measurement (278 Real Sessions)
 
-The following data was harvested directly from live production transcripts on Linux x86_64:
+The following data was harvested directly from production transcripts on Linux x86_64:
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────────┐
@@ -44,6 +47,11 @@ The following data was harvested directly from live production transcripts on Li
 │ Active Saved ($)    : $2.10      │ Cuttable Potential ($) : $      42.99/turn   │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+> [!NOTE]
+> **Metric Distinction:**
+> - **Ready-to-Cut Bloat (-14.33M tok):** Static AST opportunity identified across historical sessions.
+> - **Active Overlay Cut (-153.8k tok):** Tokens actively removed in live proxy turns while preserving execution correctness.
 
 ### Breakdown by Harness
 

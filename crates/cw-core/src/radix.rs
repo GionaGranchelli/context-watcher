@@ -18,6 +18,7 @@ pub fn analyze_kv_cache(
 
     let Some(prev) = prev_nodes else {
         // First turn of the session: everything is newly written to cache
+        let telemetry_available = actual_cached_tokens.is_some();
         let hit = actual_cached_tokens.unwrap_or(0).min(total_curr_tokens);
         for &idx in &curr_order {
             curr_nodes[idx].kv_status = if curr_nodes[idx].token_span.end <= hit && hit > 0 {
@@ -38,6 +39,7 @@ pub fn analyze_kv_cache(
             },
             divergence_token_index: None,
             invalidation_cause: None,
+            telemetry_available,
         };
     };
 
@@ -81,6 +83,7 @@ pub fn analyze_kv_cache(
     }
 
     // 2. Reconcile with provider telemetry if available
+    let telemetry_available = actual_cached_tokens.is_some();
     let effective_hit_tokens = match actual_cached_tokens {
         Some(actual) if actual == 0 && matched_prefix_tokens >= 1024 => 0, // Cache TTL expired
         Some(actual) => actual.min(total_curr_tokens),
@@ -96,15 +99,30 @@ pub fn analyze_kv_cache(
 
     for &idx in &curr_order {
         let span = curr_nodes[idx].token_span;
-        if span.end <= effective_hit_tokens && effective_hit_tokens > 0 {
-            curr_nodes[idx].kv_status = KvNodeStatus::CachedHit;
-            hit_tokens += span.count;
-        } else if (prefix_broke || ttl_expired) && span.start < total_prev_tokens {
-            curr_nodes[idx].kv_status = KvNodeStatus::CacheInvalidated;
-            invalidated_tokens += span.count;
+        if telemetry_available {
+            if span.end <= effective_hit_tokens && effective_hit_tokens > 0 {
+                curr_nodes[idx].kv_status = KvNodeStatus::CachedHit;
+                hit_tokens += span.count;
+            } else if (prefix_broke || ttl_expired) && span.start < total_prev_tokens {
+                curr_nodes[idx].kv_status = KvNodeStatus::CacheInvalidated;
+                invalidated_tokens += span.count;
+            } else {
+                curr_nodes[idx].kv_status = KvNodeStatus::NewlyCached;
+                newly_cached_tokens += span.count;
+            }
         } else {
-            curr_nodes[idx].kv_status = KvNodeStatus::NewlyCached;
-            newly_cached_tokens += span.count;
+            // When provider cache telemetry is absent, nodes matching the previous prefix
+            // have unknown cache state. They cannot be assumed to be CachedHit, but also
+            // cannot be treated as having zero cache-invalidation cost.
+            if span.end <= matched_prefix_tokens && matched_prefix_tokens > 0 {
+                curr_nodes[idx].kv_status = KvNodeStatus::Unknown;
+            } else if prefix_broke && span.start < total_prev_tokens {
+                curr_nodes[idx].kv_status = KvNodeStatus::CacheInvalidated;
+                invalidated_tokens += span.count;
+            } else {
+                curr_nodes[idx].kv_status = KvNodeStatus::NewlyCached;
+                newly_cached_tokens += span.count;
+            }
         }
     }
 
@@ -169,6 +187,7 @@ pub fn analyze_kv_cache(
             None
         },
         invalidation_cause,
+        telemetry_available,
     }
 }
 
@@ -207,6 +226,15 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
     let mut graph_edges = Vec::new();
 
     let root_id = "radix_root".to_string();
+    let root_kv = if latest_turn.kv_cache_report.telemetry_available {
+        if latest_turn.kv_cache_report.hit_tokens > 0 {
+            KvNodeStatus::CachedHit
+        } else {
+            KvNodeStatus::NewlyCached
+        }
+    } else {
+        KvNodeStatus::Unknown
+    };
     graph_nodes.push(RadixGraphNode {
         id: root_id.clone(),
         label: format!(
@@ -217,7 +245,7 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
         group: "root".to_string(),
         turn_seq: 0,
         tokens: latest_turn.token_usage.input_tokens,
-        kv_status: KvNodeStatus::CachedHit,
+        kv_status: root_kv,
         lint_badges: vec![],
         node_id: None,
         raw_json_pointer: None,
@@ -227,13 +255,19 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
     // Aggregate MCP tool schemas into one collapsible group node so 50 tools don't clutter the canvas
     let mut mcp_tokens = 0u32;
     let mut mcp_count = 0u32;
-    let mut mcp_kv = KvNodeStatus::CachedHit;
+    let mut mcp_kv = if latest_turn.kv_cache_report.telemetry_available {
+        KvNodeStatus::CachedHit
+    } else {
+        KvNodeStatus::Unknown
+    };
     for n in &latest_turn.nodes {
         if matches!(n.kind, NodeKind::McpToolSchema { .. }) {
             mcp_tokens += n.token_span.count;
             mcp_count += 1;
             if n.kv_status == KvNodeStatus::CacheInvalidated {
                 mcp_kv = KvNodeStatus::CacheInvalidated;
+            } else if n.kv_status == KvNodeStatus::Unknown && mcp_kv != KvNodeStatus::CacheInvalidated {
+                mcp_kv = KvNodeStatus::Unknown;
             }
         }
     }

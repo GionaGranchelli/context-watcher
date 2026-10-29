@@ -1,6 +1,6 @@
 use crate::ir::{
-    ContextTurn, KvNodeStatus, LintRuleId, MutationOp, MutationRule, MutationStatus, NodeKind,
-    ProviderKind, ToolSemanticMeta,
+    ContextTurn, LintRuleId, MutationOp, MutationRule, MutationStatus, NodeKind, ProviderKind,
+    ToolSemanticMeta,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -59,12 +59,6 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         return Vec::new();
     }
     let total_tokens = turn.token_usage.input_tokens.max(1);
-    let total_cached: u32 = turn
-        .nodes
-        .iter()
-        .filter(|n| n.kv_status == KvNodeStatus::CachedHit)
-        .map(|n| n.token_span.count)
-        .sum();
     let max_turn = turn
         .nodes
         .iter()
@@ -72,6 +66,17 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         .max()
         .unwrap_or(1)
         .max(1);
+
+    // Compute kv_break_tokens using centralized prefix-invalidation calculator
+    let compute_kv_break = |start: u32, count: u32, is_append: bool| -> u32 {
+        crate::radix::calculate_kv_break_tokens(
+            start,
+            count,
+            is_append,
+            total_tokens,
+            Some(&turn.kv_cache_report),
+        )
+    };
 
     // Identify stale/duplicate file read nodes from linter findings
     let mut stale_or_dup_node_ids: HashSet<String> = HashSet::new();
@@ -170,7 +175,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
             };
             let after_tok = 14u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
-            let kv_break = total_cached.saturating_sub(n.token_span.start);
+            let kv_break = compute_kv_break(n.token_span.start, tok, false);
             stale_file_items.push(OptimizationCandidateItem {
                 item_id: format!("dedupe_{}", n.id),
                 node_id: Some(n.id.clone()),
@@ -221,7 +226,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
             if !is_fresh_file && !is_cw_or_skill && !is_unread_tail && tok > 100 {
                 let after_tok = 16u32.min(tok);
                 let saved = (tok as i32) - (after_tok as i32);
-                let kv_break = total_cached.saturating_sub(n.token_span.start);
+                let kv_break = compute_kv_break(n.token_span.start, tok, false);
                 let item = OptimizationCandidateItem {
                     item_id: format!("cut_tool_{}", n.id),
                     node_id: Some(n.id.clone()),
@@ -282,7 +287,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         {
             let after_tok = 8u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
-            let kv_break = total_cached.saturating_sub(n.token_span.start);
+            let kv_break = compute_kv_break(n.token_span.start, tok, false);
             let think_item = OptimizationCandidateItem {
                 item_id: format!("cut_think_{}", n.id),
                 node_id: Some(n.id.clone()),
@@ -321,7 +326,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         } = &n.kind
             && !called_tools.iter().any(|c| c.contains(tool_name))
         {
-            let kv_break = total_cached.saturating_sub(n.token_span.start);
+            let kv_break = compute_kv_break(n.token_span.start, tok, false);
             gate_tool_items.push(OptimizationCandidateItem {
                 item_id: format!("gate_{}", n.id),
                 node_id: Some(n.id.clone()),
@@ -359,15 +364,12 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
     let fold_end = max_turn.saturating_sub(1);
 
     // Assemble the 5 Strategy Plans
-    // Strategy 1 (cache_safe_boost / min): Zero-KV-break candidates only
-    // (low-salience rule reminders + uncached duplicate reads and uncached tail bloat).
+    // Strategy 1 (cache_safe_boost / min): Strictly prefix-preserving candidates only.
+    // Retains 100% of historical tokens; pins critical rules from the middle attention trough (<42%) to the high-attention tail.
+    // Never modifies historical tokens or the tokenized prefix, ensuring 0% KV-cache break on both Turn N and Turn N+1.
     let mut strategy1_seen = HashSet::new();
     let mut strategy1_items = Vec::new();
-    for item in pin_items
-        .iter()
-        .chain(stale_file_items.iter().filter(|i| i.kv_break_tokens == 0))
-        .chain(tail_bloat_items.iter().filter(|i| i.kv_break_tokens == 0))
-    {
+    for item in &pin_items {
         let key = item.node_id.clone().unwrap_or_else(|| item.item_id.clone());
         if strategy1_seen.insert(key) {
             strategy1_items.push(item.clone());

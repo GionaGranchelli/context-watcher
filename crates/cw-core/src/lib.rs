@@ -290,7 +290,8 @@ mod tests {
             estimated_kv_break_tokens: 0,
             created_at: Utc::now(),
         };
-        let (_, _kv_break) = estimate_mutation_impact(&rule.op, &turn.nodes);
+        let (_, _kv_break) =
+            estimate_mutation_impact(&rule.op, &turn.nodes, Some(&turn.kv_cache_report));
         let report = apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[rule], 4);
         assert_eq!(report.applied_rule_ids, vec!["mut_1".to_string()]);
 

@@ -796,6 +796,7 @@ async fn main() -> Result<()> {
                     KvNodeStatus::NewlyCached => "🟡 NEW ",
                     KvNodeStatus::CacheInvalidated => "🔴 BRK ",
                     KvNodeStatus::Uncached => "⚪ TAIL",
+                    KvNodeStatus::Unknown => "🟣 UNK ",
                 };
                 let badges = if gnode.lint_badges.is_empty() {
                     String::new()

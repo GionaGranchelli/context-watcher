@@ -18,6 +18,7 @@ pub fn analyze_kv_cache(
 
     let Some(prev) = prev_nodes else {
         // First turn of the session: everything is newly written to cache
+        let telemetry_available = actual_cached_tokens.is_some();
         let hit = actual_cached_tokens.unwrap_or(0).min(total_curr_tokens);
         for &idx in &curr_order {
             curr_nodes[idx].kv_status = if curr_nodes[idx].token_span.end <= hit && hit > 0 {
@@ -38,6 +39,7 @@ pub fn analyze_kv_cache(
             },
             divergence_token_index: None,
             invalidation_cause: None,
+            telemetry_available,
         };
     };
 
@@ -81,6 +83,7 @@ pub fn analyze_kv_cache(
     }
 
     // 2. Reconcile with provider telemetry if available
+    let telemetry_available = actual_cached_tokens.is_some();
     let effective_hit_tokens = match actual_cached_tokens {
         Some(actual) if actual == 0 && matched_prefix_tokens >= 1024 => 0, // Cache TTL expired
         Some(actual) => actual.min(total_curr_tokens),
@@ -96,15 +99,30 @@ pub fn analyze_kv_cache(
 
     for &idx in &curr_order {
         let span = curr_nodes[idx].token_span;
-        if span.end <= effective_hit_tokens && effective_hit_tokens > 0 {
-            curr_nodes[idx].kv_status = KvNodeStatus::CachedHit;
-            hit_tokens += span.count;
-        } else if (prefix_broke || ttl_expired) && span.start < total_prev_tokens {
-            curr_nodes[idx].kv_status = KvNodeStatus::CacheInvalidated;
-            invalidated_tokens += span.count;
+        if telemetry_available {
+            if span.end <= effective_hit_tokens && effective_hit_tokens > 0 {
+                curr_nodes[idx].kv_status = KvNodeStatus::CachedHit;
+                hit_tokens += span.count;
+            } else if (prefix_broke || ttl_expired) && span.start < total_prev_tokens {
+                curr_nodes[idx].kv_status = KvNodeStatus::CacheInvalidated;
+                invalidated_tokens += span.count;
+            } else {
+                curr_nodes[idx].kv_status = KvNodeStatus::NewlyCached;
+                newly_cached_tokens += span.count;
+            }
         } else {
-            curr_nodes[idx].kv_status = KvNodeStatus::NewlyCached;
-            newly_cached_tokens += span.count;
+            // When provider cache telemetry is absent, nodes matching the previous prefix
+            // have unknown cache state. They cannot be assumed to be CachedHit, but also
+            // cannot be treated as having zero cache-invalidation cost.
+            if span.end <= matched_prefix_tokens && matched_prefix_tokens > 0 {
+                curr_nodes[idx].kv_status = KvNodeStatus::Unknown;
+            } else if prefix_broke && span.start < total_prev_tokens {
+                curr_nodes[idx].kv_status = KvNodeStatus::CacheInvalidated;
+                invalidated_tokens += span.count;
+            } else {
+                curr_nodes[idx].kv_status = KvNodeStatus::NewlyCached;
+                newly_cached_tokens += span.count;
+            }
         }
     }
 
@@ -169,6 +187,45 @@ pub fn analyze_kv_cache(
             None
         },
         invalidation_cause,
+        telemetry_available,
+    }
+}
+
+/// Centralized calculator for estimated KV-cache prefix break cost (in tokens).
+///
+/// Architectural Invariants:
+/// 1. Pure append-only operations (`is_append_only == true`, such as `PinContext` appending
+///    `<cw_pinned_context>` at the prompt tail) never replace or modify historical tokens,
+///    guaranteeing 0 KV cache break on Turn N and Turn N+1.
+/// 2. Any in-place modification or replacement (`is_append_only == false`), even if targeting
+///    the final node of the turn, alters the tokenized prefix that the provider cached during Turn N.
+///    On Turn N+1, modifying token `start_token` invalidates provider cache reuse for all tokens
+///    from `start_token` to `total_tokens`.
+/// 3. When cache telemetry is absent or unverified (`report.telemetry_available == false`),
+///    cache state cannot be assumed to be free; we conservatively compute non-zero invalidation.
+pub fn calculate_kv_break_tokens(
+    start_token: u32,
+    token_count: u32,
+    is_append_only: bool,
+    total_tokens: u32,
+    report: Option<&KvCacheReport>,
+) -> u32 {
+    // Pure append-only operations at prompt tail never modify historical context.
+    if is_append_only {
+        return 0;
+    }
+
+    let telemetry_available = report.map(|r| r.telemetry_available).unwrap_or(false);
+
+    // Any in-place modification or replacement at start_token invalidates all cached
+    // prefix tokens from start_token to total_tokens on subsequent requests.
+    if telemetry_available {
+        total_tokens.saturating_sub(start_token)
+    } else {
+        total_tokens
+            .saturating_sub(start_token)
+            .max(token_count)
+            .max(1)
     }
 }
 
@@ -207,6 +264,15 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
     let mut graph_edges = Vec::new();
 
     let root_id = "radix_root".to_string();
+    let root_kv = if latest_turn.kv_cache_report.telemetry_available {
+        if latest_turn.kv_cache_report.hit_tokens > 0 {
+            KvNodeStatus::CachedHit
+        } else {
+            KvNodeStatus::NewlyCached
+        }
+    } else {
+        KvNodeStatus::Unknown
+    };
     graph_nodes.push(RadixGraphNode {
         id: root_id.clone(),
         label: format!(
@@ -217,7 +283,7 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
         group: "root".to_string(),
         turn_seq: 0,
         tokens: latest_turn.token_usage.input_tokens,
-        kv_status: KvNodeStatus::CachedHit,
+        kv_status: root_kv,
         lint_badges: vec![],
         node_id: None,
         raw_json_pointer: None,
@@ -227,13 +293,21 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
     // Aggregate MCP tool schemas into one collapsible group node so 50 tools don't clutter the canvas
     let mut mcp_tokens = 0u32;
     let mut mcp_count = 0u32;
-    let mut mcp_kv = KvNodeStatus::CachedHit;
+    let mut mcp_kv = if latest_turn.kv_cache_report.telemetry_available {
+        KvNodeStatus::CachedHit
+    } else {
+        KvNodeStatus::Unknown
+    };
     for n in &latest_turn.nodes {
         if matches!(n.kind, NodeKind::McpToolSchema { .. }) {
             mcp_tokens += n.token_span.count;
             mcp_count += 1;
             if n.kv_status == KvNodeStatus::CacheInvalidated {
                 mcp_kv = KvNodeStatus::CacheInvalidated;
+            } else if n.kv_status == KvNodeStatus::Unknown
+                && mcp_kv != KvNodeStatus::CacheInvalidated
+            {
+                mcp_kv = KvNodeStatus::Unknown;
             }
         }
     }

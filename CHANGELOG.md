@@ -5,6 +5,16 @@ All notable changes to `contextWatcher` (`cw`) are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-10-29
+
+### Changed
+- **Web UI Proportional Token Treemap & "Lost-in-the-Middle Trough" Redesign (`web/src/App.svelte`):**
+  - Expanded output/context classification into **13 distinct color-coded types** (`Terminal & Shell Outputs`, `Search & Grep Outputs`, `File Reads (Fresh)`, `File Reads (Stale / Dup)`, `File Edits & Diffs`, `MCP & Other Tool Outputs`, `User Prompts`, `Assistant Replies & Calls`, `Assistant Thinking`, `System & Identity`, `Rules & Instructions`, `MCP & Native Tool Schemas`, `Skills Catalog`, and `Pinned & Folded Summaries`).
+  - Added **Balanced Perceptual Scale vs. Exact Linear Scale** toggle and **`By Output Type` vs. `By Attention Zone (Trough Split)`** grouping so large 350k+ token conversations remain 100% legible without dominant tool outputs squashing smaller categories into unlabeled slivers.
+  - Added diagonal amber hatching on treemap tiles showing the exact share of each category trapped in the **Lost-in-the-Middle Trough (`<42% Salience`)**, plus a full-width 100% stacked composition ribbon and 3-zone attention distribution strip.
+  - Redesigned the **Positional Context Map & "Lost-in-the-Middle Trough" U-Curve** with token-balanced auto-binning (`positionalContextBins`), a dedicated top 3-zone header bar, an external `54px` left Y-axis gutter (`100%` / `42%` / `0%`), a bottom token position ruler, and a filterable **Context Block Explorer** with 1-click **`📌 Pin to High-Attention Tail`**.
+  - Removed the `1120px` max-width cap on the central workspace so analytics, treemap, and timeline views utilize the full screen width.
+
 ## [0.2.3] - 2026-10-29
 
 ### Added

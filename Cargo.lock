@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "cw-cli"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "axum",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "cw-core"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "blake3",
  "chrono",
@@ -577,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "cw-harnesses"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "blake3",
  "chrono",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "cw-mcp"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "cw-core",
@@ -609,7 +609,7 @@ dependencies = [
 
 [[package]]
 name = "cw-proxy"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "axum",
@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "cw-store"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "blake3",
  "chrono",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "cw-tui"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "chrono",

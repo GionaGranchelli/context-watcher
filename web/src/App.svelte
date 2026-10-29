@@ -87,8 +87,12 @@
   let groupByMode = $state<'project_first' | 'harness_first'>('project_first');
   let collapsedProjects = $state<Record<string, boolean>>({});
 
-  // Interactive hover states for Treemap & Attention Candles
+  // Interactive hover & drill-down states for Treemap & Attention Trough
   let hoveredTreemapName = $state<string | null>(null);
+  let selectedTreemapCategory = $state<string | null>(null);
+  let treemapScaleMode = $state<'perceptual' | 'linear'>('perceptual');
+  let treemapGroupMode = $state<'by_type' | 'by_zone'>('by_type');
+  let filterTroughOnly = $state<boolean>(false);
   let hoveredCandleNodeId = $state<string | null>(null);
   let hoveredTabId = $state<string | null>(null);
 
@@ -335,110 +339,653 @@
     return Array.from(byTurn.values()).sort((a, b) => a.turnSeq - b.turnSeq);
   });
 
-  // Compute D3 Treemap layout from CategoryBreakdown
+  const TROUGH_SALIENCE_THRESHOLD = 0.42;
+
+  type OutputCategoryMeta = {
+    key: string;
+    name: string;
+    shortName: string;
+    color: string;
+    group: 'Tool Outputs' | 'Conversation' | 'Harness & Prefix';
+    whatMatters: string;
+    canCut: string;
+  };
+
+  const OUTPUT_CATEGORY_CATALOG: Record<string, OutputCategoryMeta> = {
+    terminal_outputs: {
+      key: 'terminal_outputs',
+      name: 'Terminal & Shell Outputs',
+      shortName: 'Terminal Out',
+      color: '#f59e0b',
+      group: 'Tool Outputs',
+      whatMatters: 'Build logs, test runs, and shell stdout/stderr. Older runs dominate bloat in long sessions.',
+      canCut: 'High (Safe to stub old logs)'
+    },
+    search_outputs: {
+      key: 'search_outputs',
+      name: 'Search & Grep Outputs',
+      shortName: 'Search / Grep',
+      color: '#ec4899',
+      group: 'Tool Outputs',
+      whatMatters: 'Directory listings, ripgrep matches, and web search results.',
+      canCut: 'High (Once target files are found)'
+    },
+    file_reads_fresh: {
+      key: 'file_reads_fresh',
+      name: 'File Reads (Fresh)',
+      shortName: 'Fresh Files',
+      color: '#10b981',
+      group: 'Tool Outputs',
+      whatMatters: 'Latest code state of files the agent is actively working on.',
+      canCut: 'Low (Keep active files)'
+    },
+    file_reads_stale: {
+      key: 'file_reads_stale',
+      name: 'File Reads (Stale / Dup)',
+      shortName: 'Stale / Dup Files',
+      color: '#ea580c',
+      group: 'Tool Outputs',
+      whatMatters: 'Outdated or duplicate file contents superseded by later edits or re-reads.',
+      canCut: 'High (Shadow-Dedupe)'
+    },
+    file_edits_outputs: {
+      key: 'file_edits_outputs',
+      name: 'File Edits & Diffs',
+      shortName: 'Edits & Diffs',
+      color: '#06b6d4',
+      group: 'Tool Outputs',
+      whatMatters: 'Confirmation outputs and patches from write/edit tool calls.',
+      canCut: 'Medium (Stub old patch confirmations)'
+    },
+    other_tool_outputs: {
+      key: 'other_tool_outputs',
+      name: 'MCP & Other Tool Outputs',
+      shortName: 'MCP / Tool Out',
+      color: '#eab308',
+      group: 'Tool Outputs',
+      whatMatters: 'Structured JSON or text returned by MCP servers and custom tools.',
+      canCut: 'Medium (Review before pruning)'
+    },
+    assistant_thinking: {
+      key: 'assistant_thinking',
+      name: 'Assistant Thinking',
+      shortName: 'Thinking',
+      color: '#a855f7',
+      group: 'Conversation',
+      whatMatters: 'Internal reasoning chains. Past reasoning rarely helps future turns once acted upon.',
+      canCut: 'High (Safe to prune old thoughts)'
+    },
+    assistant_replies: {
+      key: 'assistant_replies',
+      name: 'Assistant Replies & Calls',
+      shortName: 'Assistant & Calls',
+      color: '#3b82f6',
+      group: 'Conversation',
+      whatMatters: 'Assistant explanations and tool call arguments.',
+      canCut: 'Medium (Fold old turns)'
+    },
+    user_prompts: {
+      key: 'user_prompts',
+      name: 'User Prompts',
+      shortName: 'User Prompts',
+      color: '#38bdf8',
+      group: 'Conversation',
+      whatMatters: 'User instructions, constraints, and task goals.',
+      canCut: 'Keep (Core user intent)'
+    },
+    mcp_tool_schemas: {
+      key: 'mcp_tool_schemas',
+      name: 'MCP & Native Tool Schemas',
+      shortName: 'Tool Schemas',
+      color: '#6366f1',
+      group: 'Harness & Prefix',
+      whatMatters: 'JSON schemas for registered tools. Gate off unused MCP servers.',
+      canCut: 'High (Gate unused MCP tools)'
+    },
+    rules_and_instructions: {
+      key: 'rules_and_instructions',
+      name: 'Rules & Instructions',
+      shortName: 'Rules (AGENTS.md)',
+      color: '#14b8a6',
+      group: 'Harness & Prefix',
+      whatMatters: 'Project guidelines (AGENTS.md, CLAUDE.md). Pin to tail if trapped in the middle trough.',
+      canCut: 'Keep (Pin if salience < 42%)'
+    },
+    system_and_identity: {
+      key: 'system_and_identity',
+      name: 'System & Identity',
+      shortName: 'System Prompt',
+      color: '#0284c7',
+      group: 'Harness & Prefix',
+      whatMatters: 'Base harness system prompt and identity instructions at the prefix anchor.',
+      canCut: 'Keep (System core)'
+    },
+    skills_catalog: {
+      key: 'skills_catalog',
+      name: 'Skills Catalog',
+      shortName: 'Skills',
+      color: '#8b5cf6',
+      group: 'Harness & Prefix',
+      whatMatters: 'Descriptions of available agent skills and slash commands.',
+      canCut: 'Low'
+    },
+    pinned_and_folded: {
+      key: 'pinned_and_folded',
+      name: 'Pinned & Folded Summaries',
+      shortName: 'Pinned / Folded',
+      color: '#059669',
+      group: 'Harness & Prefix',
+      whatMatters: 'Compact summaries of folded turns and high-attention tail reminders.',
+      canCut: 'Keep (Already optimized)'
+    }
+  };
+
+  let staleOrDupNodeIds = $derived.by(() => {
+    const set = new Set<string>();
+    if (!latestTurn) return set;
+    for (const f of latestTurn.lint_findings) {
+      if (f.rule_id === 'CW-L001' || f.rule_id === 'CW-L002') {
+        for (const id of f.affected_node_ids) set.add(id);
+      }
+    }
+    return set;
+  });
+
+  function classifyNodeCategory(node: ContextNode, staleSet: Set<string>): OutputCategoryMeta {
+    const k = node.kind;
+    const kindName = k.kind;
+    if (kindName === 'system_prompt') return OUTPUT_CATEGORY_CATALOG.system_and_identity;
+    if (kindName === 'injected_rule') return OUTPUT_CATEGORY_CATALOG.rules_and_instructions;
+    if (kindName === 'skill_catalog') return OUTPUT_CATEGORY_CATALOG.skills_catalog;
+    if (kindName === 'mcp_tool_schema') return OUTPUT_CATEGORY_CATALOG.mcp_tool_schemas;
+    if (kindName === 'user_message') return OUTPUT_CATEGORY_CATALOG.user_prompts;
+    if (kindName === 'assistant_thinking') return OUTPUT_CATEGORY_CATALOG.assistant_thinking;
+    if (kindName === 'pinned_context' || kindName === 'folded_turn_summary') {
+      return OUTPUT_CATEGORY_CATALOG.pinned_and_folded;
+    }
+    if (kindName === 'tool_result') {
+      const semType = k.semantic_meta?.semantic_type;
+      const toolName = String(k.tool_name || '').toLowerCase();
+      if (semType === 'file_read' || /(^|_)(read|view|cat)(_|$)/.test(toolName)) {
+        return staleSet.has(node.id)
+          ? OUTPUT_CATEGORY_CATALOG.file_reads_stale
+          : OUTPUT_CATEGORY_CATALOG.file_reads_fresh;
+      }
+      if (semType === 'file_write' || /(edit|write|patch|replace)/.test(toolName)) {
+        return OUTPUT_CATEGORY_CATALOG.file_edits_outputs;
+      }
+      if (/(grep|search|glob|find|ripgrep|web_search)/.test(toolName)) {
+        return OUTPUT_CATEGORY_CATALOG.search_outputs;
+      }
+      if (
+        semType === 'command_exec' ||
+        /(terminal|bash|shell|exec|command|cmd|run)/.test(toolName)
+      ) {
+        return OUTPUT_CATEGORY_CATALOG.terminal_outputs;
+      }
+      return OUTPUT_CATEGORY_CATALOG.other_tool_outputs;
+    }
+    return OUTPUT_CATEGORY_CATALOG.assistant_replies;
+  }
+
+  function attentionZoneOfNode(node: ContextNode, totalTok: number): 'prefix' | 'trough' | 'tail' {
+    if (node.attention_salience < TROUGH_SALIENCE_THRESHOLD) return 'trough';
+    const midTok = (node.token_span.start + node.token_span.end) / 2;
+    return midTok <= totalTok * 0.45 ? 'prefix' : 'tail';
+  }
+
+  // Compute rich CategoryBreakdown + Node sub-blocks + Lost-in-the-Middle Trough metrics
   let treemapCategories = $derived.by(() => {
     if (!latestTurn) return [];
-    const cb = latestTurn.category_breakdown;
+    const nodes = latestTurn.nodes;
+    const staleSet = staleOrDupNodeIds;
     const total = Math.max(
       1,
-      cb.mcp_and_native_tools +
-        cb.system_and_identity +
-        cb.rules_and_instructions +
-        cb.skills_catalog +
-        cb.file_reads_fresh +
-        cb.file_reads_stale_or_duplicate +
-        cb.command_outputs +
-        cb.assistant_thinking +
-        cb.assistant_responses_and_calls +
-        cb.user_prompts +
-        cb.pinned_and_folded
+      nodes.reduce((acc, n) => acc + Math.max(0, n.token_span.count), 0)
     );
-    return [
-      {
-        name: 'Conversation & Calls',
-        value: cb.assistant_responses_and_calls + cb.user_prompts,
-        color: '#3b82f6',
-        whatMatters: 'Keep recent turns; older debugging back-and-forth can be folded.',
-        canCut: 'Medium (Fold old turns)'
-      },
-      {
-        name: 'Command Outputs',
-        value: cb.command_outputs,
-        color: '#d97706',
-        whatMatters: 'Review older outputs before removing them; they may contain unique facts.',
-        canCut: 'High (Safe to prune old logs)'
-      },
-      {
-        name: 'Assistant Thinking',
-        value: cb.assistant_thinking,
-        color: '#a855f7',
-        whatMatters: 'Past internal reasoning blocks rarely help future turns once the assistant acted.',
-        canCut: 'High (Safe to prune old thoughts)'
-      },
-      {
-        name: 'File Reads (Fresh)',
-        value: cb.file_reads_fresh,
-        color: '#10b981',
-        whatMatters: 'Latest code state of files the agent is actively working on.',
-        canCut: 'Low (Keep active files)'
-      },
-      {
-        name: 'File Reads (Stale/Dup)',
-        value: cb.file_reads_stale_or_duplicate,
-        color: '#ea580c',
-        whatMatters: 'Outdated or duplicate file contents superseded by later edits or re-reads.',
-        canCut: 'Review range coverage before dedupe'
-      },
-      {
-        name: 'MCP & Native Tools',
-        value: cb.mcp_and_native_tools,
-        color: '#6366f1',
-        whatMatters: 'JSON schemas for tools. Gate off MCP servers you are not using.',
-        canCut: 'High (Gate unused MCP tools)'
-      },
-      {
-        name: 'Rules & Instructions',
-        value: cb.rules_and_instructions,
-        color: '#14b8a6',
-        whatMatters: 'Project guidelines (AGENTS.md, CLAUDE.md). Pin if attention drops.',
-        canCut: 'Keep (Core instructions)'
-      },
-      {
-        name: 'System & Identity',
-        value: cb.system_and_identity,
-        color: '#0284c7',
-        whatMatters: 'Base harness system prompt and identity instructions.',
-        canCut: 'Keep (System core)'
-      },
-      {
-        name: 'Skills Catalog',
-        value: cb.skills_catalog,
-        color: '#7c3aed',
-        whatMatters: 'Descriptions of available agent skills.',
-        canCut: 'Low'
-      },
-      {
-        name: 'Pinned & Folded',
-        value: cb.pinned_and_folded,
-        color: '#059669',
-        whatMatters: 'Compact summaries of folded turns and high-attention tail reminders.',
-        canCut: 'Keep (Already optimized)'
+
+    const byCat = new Map<
+      string,
+      OutputCategoryMeta & {
+        value: number;
+        troughTokens: number;
+        prefixTokens: number;
+        tailTokens: number;
+        nodeCount: number;
+        troughNodeCount: number;
+        nodes: ContextNode[];
       }
-    ]
+    >();
+
+    for (const n of nodes) {
+      const tok = Math.max(0, n.token_span.count);
+      if (tok === 0) continue;
+      const meta = classifyNodeCategory(n, staleSet);
+      if (!byCat.has(meta.key)) {
+        byCat.set(meta.key, {
+          ...meta,
+          value: 0,
+          troughTokens: 0,
+          prefixTokens: 0,
+          tailTokens: 0,
+          nodeCount: 0,
+          troughNodeCount: 0,
+          nodes: []
+        });
+      }
+      const entry = byCat.get(meta.key)!;
+      entry.value += tok;
+      entry.nodeCount += 1;
+      entry.nodes.push(n);
+      const zone = attentionZoneOfNode(n, total);
+      if (zone === 'trough') {
+        entry.troughTokens += tok;
+        entry.troughNodeCount += 1;
+      } else if (zone === 'prefix') {
+        entry.prefixTokens += tok;
+      } else {
+        entry.tailTokens += tok;
+      }
+    }
+
+    // Fallback to latestTurn.category_breakdown if nodes array is empty
+    if (byCat.size === 0) {
+      const cb = latestTurn.category_breakdown;
+      const fallbackPairs: [OutputCategoryMeta, number][] = [
+        [OUTPUT_CATEGORY_CATALOG.terminal_outputs, cb.command_outputs],
+        [OUTPUT_CATEGORY_CATALOG.assistant_replies, cb.assistant_responses_and_calls],
+        [OUTPUT_CATEGORY_CATALOG.user_prompts, cb.user_prompts],
+        [OUTPUT_CATEGORY_CATALOG.assistant_thinking, cb.assistant_thinking],
+        [OUTPUT_CATEGORY_CATALOG.file_reads_fresh, cb.file_reads_fresh],
+        [OUTPUT_CATEGORY_CATALOG.file_reads_stale, cb.file_reads_stale_or_duplicate],
+        [OUTPUT_CATEGORY_CATALOG.mcp_tool_schemas, cb.mcp_and_native_tools],
+        [OUTPUT_CATEGORY_CATALOG.rules_and_instructions, cb.rules_and_instructions],
+        [OUTPUT_CATEGORY_CATALOG.system_and_identity, cb.system_and_identity],
+        [OUTPUT_CATEGORY_CATALOG.skills_catalog, cb.skills_catalog],
+        [OUTPUT_CATEGORY_CATALOG.pinned_and_folded, cb.pinned_and_folded]
+      ];
+      const fallbackTotal = Math.max(1, fallbackPairs.reduce((a, [, v]) => a + v, 0));
+      return fallbackPairs
+        .filter(([, v]) => v > 0)
+        .map(([meta, val]) => ({
+          ...meta,
+          value: val,
+          troughTokens: 0,
+          prefixTokens: val,
+          tailTokens: 0,
+          nodeCount: 1,
+          troughNodeCount: 0,
+          nodes: [] as ContextNode[],
+          pct: ((val / fallbackTotal) * 100).toFixed(1),
+          pctNum: (val / fallbackTotal) * 100,
+          troughPct: '0.0',
+          troughPctNum: 0
+        }))
+        .sort((a, b) => b.value - a.value);
+    }
+
+    return Array.from(byCat.values())
       .filter((d) => d.value > 0)
-      .map((d) => ({
-        ...d,
-        pct: ((d.value / total) * 100).toFixed(1)
-      }))
+      .map((d) => {
+        const pctNum = (d.value / total) * 100;
+        const troughPctNum = d.value > 0 ? (d.troughTokens / d.value) * 100 : 0;
+        return {
+          ...d,
+          pct: pctNum >= 0.1 ? pctNum.toFixed(1) : '<0.1',
+          pctNum,
+          troughPct: troughPctNum.toFixed(0),
+          troughPctNum
+        };
+      })
       .sort((a, b) => b.value - a.value);
   });
 
-  let treemapLeaves = $derived.by(() => {
-    if (treemapCategories.length === 0) return [];
-    const data = { name: 'root', children: treemapCategories };
-    const root = hierarchy<any>(data).sum((d: any) => d.value || 0).sort((a, b) => (b.value || 0) - (a.value || 0));
-    const layout = treemap<any>().size([540, 290]).paddingInner(3).paddingOuter(3);
-    return layout(root).leaves();
+  // Summary of the 3 Positional Attention Zones (Primacy Prefix / Lost-in-the-Middle Trough / Recency Tail)
+  let attentionZoneSummary = $derived.by(() => {
+    if (!latestTurn || latestTurn.nodes.length === 0) {
+      return {
+        totalTokens: 0,
+        prefixTokens: 0,
+        troughTokens: 0,
+        tailTokens: 0,
+        troughPct: '0.0',
+        troughNodeCount: 0,
+        troughStartToken: 0,
+        troughEndToken: 0,
+        troughRulesCount: 0,
+        zones: [] as {
+          id: 'prefix' | 'trough' | 'tail';
+          name: string;
+          shortLabel: string;
+          subtitle: string;
+          color: string;
+          tokens: number;
+          pct: string;
+          nodeCount: number;
+        }[]
+      };
+    }
+    const nodes = latestTurn.nodes;
+    const total = Math.max(1, nodes.reduce((acc, n) => acc + Math.max(0, n.token_span.count), 0));
+    let prefixTokens = 0;
+    let troughTokens = 0;
+    let tailTokens = 0;
+    let prefixNodes = 0;
+    let troughNodes = 0;
+    let tailNodes = 0;
+    let troughStart = Infinity;
+    let troughEnd = 0;
+    let troughRulesCount = 0;
+
+    for (const n of nodes) {
+      const tok = Math.max(0, n.token_span.count);
+      const zone = attentionZoneOfNode(n, total);
+      if (zone === 'trough') {
+        troughTokens += tok;
+        troughNodes += 1;
+        if (n.token_span.start < troughStart) troughStart = n.token_span.start;
+        if (n.token_span.end > troughEnd) troughEnd = n.token_span.end;
+        if (n.kind.kind === 'injected_rule' || n.kind.kind === 'system_prompt') {
+          troughRulesCount += 1;
+        }
+      } else if (zone === 'prefix') {
+        prefixTokens += tok;
+        prefixNodes += 1;
+      } else {
+        tailTokens += tok;
+        tailNodes += 1;
+      }
+    }
+
+    return {
+      totalTokens: total,
+      prefixTokens,
+      troughTokens,
+      tailTokens,
+      troughPct: ((troughTokens / total) * 100).toFixed(1),
+      troughNodeCount: troughNodes,
+      troughStartToken: troughStart === Infinity ? 0 : troughStart,
+      troughEndToken: troughEnd,
+      troughRulesCount,
+      zones: [
+        {
+          id: 'prefix' as const,
+          name: 'Primacy Prefix Anchor (High Recall)',
+          shortLabel: 'Prefix Anchor (≥42% Salience)',
+          subtitle: 'Start of prompt — strong attention & KV cache anchor',
+          color: '#10b981',
+          tokens: prefixTokens,
+          pct: ((prefixTokens / total) * 100).toFixed(1),
+          nodeCount: prefixNodes
+        },
+        {
+          id: 'trough' as const,
+          name: 'Lost-in-the-Middle Trough (<42% Salience)',
+          shortLabel: '⚠️ Lost-in-the-Middle Trough',
+          subtitle: 'Middle valley — lowest LLM recall; bloated logs here dilute attention',
+          color: '#f59e0b',
+          tokens: troughTokens,
+          pct: ((troughTokens / total) * 100).toFixed(1),
+          nodeCount: troughNodes
+        },
+        {
+          id: 'tail' as const,
+          name: 'Recency Tail Window (High Recall)',
+          shortLabel: 'Recency Tail (≥42% Salience)',
+          subtitle: 'End of prompt — highest model focus & active turn context',
+          color: '#3b82f6',
+          tokens: tailTokens,
+          pct: ((tailTokens / total) * 100).toFixed(1),
+          nodeCount: tailNodes
+        }
+      ]
+    };
+  });
+
+  const TREEMAP_WIDTH = 820;
+  const TREEMAP_HEIGHT = 420;
+
+  // Build adaptive 2-level or zone-grouped D3 Treemap layout that stays readable at 350k+ tokens
+  let treemapLayoutData = $derived.by(() => {
+    if (treemapCategories.length === 0) return { groups: [] as any[], leaves: [] as any[] };
+    const total = Math.max(1, treemapCategories.reduce((acc, c) => acc + c.value, 0));
+
+    const scaleWeight = (rawTokens: number) => {
+      if (rawTokens <= 0) return 0;
+      if (treemapScaleMode === 'linear') return rawTokens;
+      // Perceptual power scale (exponent 0.60) + minimum 2.5% visual floor so small output types are always legible
+      const minFloor = Math.pow(total * 0.012, 0.6);
+      return Math.max(minFloor, Math.pow(rawTokens, 0.6));
+    };
+
+    if (treemapGroupMode === 'by_zone') {
+      const zoneDefs = [
+        {
+          id: 'prefix',
+          name: 'Primacy Prefix (High Recall ≥42%)',
+          borderColor: '#10b981',
+          bgTint: 'rgba(16, 185, 129, 0.10)'
+        },
+        {
+          id: 'trough',
+          name: '⚠️ Lost-in-the-Middle Trough (<42% Salience)',
+          borderColor: '#f59e0b',
+          bgTint: 'rgba(245, 158, 11, 0.14)'
+        },
+        {
+          id: 'tail',
+          name: 'Recency Tail (High Recall ≥42%)',
+          borderColor: '#3b82f6',
+          bgTint: 'rgba(59, 130, 246, 0.10)'
+        }
+      ];
+
+      const children = zoneDefs
+        .map((z) => {
+          const subCats = treemapCategories
+            .map((cat) => {
+              const zoneTok =
+                z.id === 'trough'
+                  ? cat.troughTokens
+                  : z.id === 'prefix'
+                    ? cat.prefixTokens
+                    : cat.tailTokens;
+              if (zoneTok <= 0) return null;
+              return {
+                name: cat.name,
+                shortName: cat.shortName,
+                categoryKey: cat.key,
+                color: cat.color,
+                rawTokens: zoneTok,
+                weight: scaleWeight(zoneTok),
+                pct: ((zoneTok / total) * 100).toFixed(1),
+                troughTokens: z.id === 'trough' ? zoneTok : 0,
+                troughPctNum: z.id === 'trough' ? 100 : 0,
+                isTroughZone: z.id === 'trough',
+                zoneName: z.name,
+                nodeCount: cat.nodeCount,
+                whatMatters: cat.whatMatters,
+                canCut: cat.canCut
+              };
+            })
+            .filter(Boolean);
+          const rawZoneTotal = subCats.reduce((acc, c: any) => acc + c.rawTokens, 0);
+          return {
+            name: z.name,
+            zoneId: z.id,
+            borderColor: z.borderColor,
+            bgTint: z.bgTint,
+            rawTokens: rawZoneTotal,
+            pct: ((rawZoneTotal / total) * 100).toFixed(1),
+            children: subCats
+          };
+        })
+        .filter((z) => z.children.length > 0);
+
+      const root = hierarchy<any>({ name: 'root', children })
+        .sum((d: any) => d.weight || 0)
+        .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+      const layout = treemap<any>()
+        .size([TREEMAP_WIDTH, TREEMAP_HEIGHT])
+        .paddingTop(24)
+        .paddingInner(3)
+        .paddingOuter(4);
+
+      const laidOut = layout(root);
+      return {
+        groups: laidOut.children || [],
+        leaves: laidOut.leaves()
+      };
+    }
+
+    // Default `by_type`: Each output category is subdivided into its Prefix/Tail vs Lost-in-the-Middle Trough slices (or top nodes)
+    const children = treemapCategories.map((cat) => ({
+      ...cat,
+      categoryKey: cat.key,
+      rawTokens: cat.value,
+      weight: scaleWeight(cat.value),
+      isTroughZone: cat.troughPctNum >= 50
+    }));
+
+    const root = hierarchy<any>({ name: 'root', children })
+      .sum((d: any) => d.weight || 0)
+      .sort((a, b) => (b.value || 0) - (a.value || 0));
+
+    const layout = treemap<any>()
+      .size([TREEMAP_WIDTH, TREEMAP_HEIGHT])
+      .paddingInner(4)
+      .paddingOuter(4);
+
+    const laidOut = layout(root);
+    return {
+      groups: [] as any[],
+      leaves: laidOut.leaves()
+    };
+  });
+
+  // Token-proportional binned columns for the Positional Context & Lost-in-the-Middle Trough Map
+  // Scales cleanly from 5 nodes up to 2,000+ nodes without flex gap overflow
+  let positionalContextBins = $derived.by(() => {
+    if (!latestTurn || latestTurn.nodes.length === 0) return [];
+    const nodes = latestTurn.nodes;
+    const staleSet = staleOrDupNodeIds;
+    const total = Math.max(1, nodes.reduce((acc, n) => acc + Math.max(0, n.token_span.count), 0));
+    const maxBins = 96;
+
+    if (nodes.length <= maxBins) {
+      return nodes.map((n, idx) => {
+        const cat = classifyNodeCategory(n, staleSet);
+        const tok = Math.max(1, n.token_span.count);
+        return {
+          binId: n.id,
+          primaryNode: n,
+          nodes: [n],
+          turnSeqStart: n.turn_seq,
+          turnSeqEnd: n.turn_seq,
+          tokens: tok,
+          widthWeight: Math.max(total * 0.006, tok),
+          salience: n.attention_salience,
+          inTrough: n.attention_salience < TROUGH_SALIENCE_THRESHOLD,
+          color: cat.color,
+          categoryName: cat.name,
+          categoryKey: cat.key,
+          kvStatus: n.kv_status,
+          index: idx
+        };
+      });
+    }
+
+    // Group consecutive nodes into ~96 token-balanced bins for large conversations
+    const targetBinTokens = Math.max(1, total / maxBins);
+    const bins: {
+      binId: string;
+      primaryNode: ContextNode;
+      nodes: ContextNode[];
+      turnSeqStart: number;
+      turnSeqEnd: number;
+      tokens: number;
+      widthWeight: number;
+      salience: number;
+      inTrough: boolean;
+      color: string;
+      categoryName: string;
+      categoryKey: string;
+      kvStatus: ContextNode['kv_status'];
+      index: number;
+    }[] = [];
+
+    let currentNodes: ContextNode[] = [];
+    let currentTokens = 0;
+
+    const flushBin = () => {
+      if (currentNodes.length === 0) return;
+      // Pick the largest node in the bin as primary representative
+      let largest = currentNodes[0];
+      let weightedSalience = 0;
+      let tokSum = 0;
+      for (const cn of currentNodes) {
+        const t = Math.max(1, cn.token_span.count);
+        if (t > largest.token_span.count) largest = cn;
+        weightedSalience += cn.attention_salience * t;
+        tokSum += t;
+      }
+      const avgSalience = tokSum > 0 ? weightedSalience / tokSum : largest.attention_salience;
+      const cat = classifyNodeCategory(largest, staleSet);
+      bins.push({
+        binId: largest.id,
+        primaryNode: largest,
+        nodes: currentNodes,
+        turnSeqStart: currentNodes[0].turn_seq,
+        turnSeqEnd: currentNodes[currentNodes.length - 1].turn_seq,
+        tokens: tokSum,
+        widthWeight: Math.max(total * 0.006, tokSum),
+        salience: avgSalience,
+        inTrough: avgSalience < TROUGH_SALIENCE_THRESHOLD,
+        color: cat.color,
+        categoryName: cat.name,
+        categoryKey: cat.key,
+        kvStatus: largest.kv_status,
+        index: bins.length
+      });
+      currentNodes = [];
+      currentTokens = 0;
+    };
+
+    for (const n of nodes) {
+      const t = Math.max(1, n.token_span.count);
+      currentNodes.push(n);
+      currentTokens += t;
+      if (currentTokens >= targetBinTokens && bins.length < maxBins - 1) {
+        flushBin();
+      }
+    }
+    flushBin();
+    return bins;
+  });
+
+  // Filtered nodes for the interactive Category & Lost-in-the-Middle Trough Drill-Down Explorer
+  let filteredExplorerNodes = $derived.by(() => {
+    if (!latestTurn) return [];
+    const staleSet = staleOrDupNodeIds;
+    return latestTurn.nodes
+      .filter((n) => {
+        if (n.token_span.count <= 0) return false;
+        const cat = classifyNodeCategory(n, staleSet);
+        if (selectedTreemapCategory && cat.name !== selectedTreemapCategory && cat.key !== selectedTreemapCategory) {
+          return false;
+        }
+        if (filterTroughOnly && n.attention_salience >= TROUGH_SALIENCE_THRESHOLD) {
+          return false;
+        }
+        return true;
+      })
+      .map((n) => ({
+        node: n,
+        category: classifyNodeCategory(n, staleSet),
+        inTrough: n.attention_salience < TROUGH_SALIENCE_THRESHOLD
+      }))
+      .sort((a, b) => b.node.token_span.count - a.node.token_span.count);
   });
 
   let activeCandleNode = $derived<ContextNode | null>(
@@ -1345,8 +1892,8 @@
         {/if}
       </nav>
 
-      <!-- Main Scrollable Content Area -->
-      <main style="flex: 1; overflow-y: auto; padding: 24px; max-width: 1120px; width: 100%; margin: 0 auto; box-sizing: border-box;">
+      <!-- Main Scrollable Content Area (Full-Width Central Workspace) -->
+      <main style="flex: 1; overflow-y: auto; padding: 20px 28px; width: 100%; max-width: none; box-sizing: border-box;">
         {#if !latestTurn}
           <div style="text-align: center; padding: 90px 20px; color: #71717a;">
             <h2 style="color: #e4e4e7; font-size: 16px; font-weight: 600; margin-bottom: 6px;">Select a Session</h2>
@@ -1704,61 +2251,305 @@
         {:else if activeTab === 'analytics'}
           <!-- VIEW 3: ANALYTICS & RADIX TREE (Focused Sub-Views) -->
           {#if analyticsSubView === 'treemap'}
-            <div style="display: grid; grid-template-columns: 540px 1fr; gap: 20px; align-items: start; margin-bottom: 24px;">
-              <div>
-                <div style="font-size: 13px; font-weight: 600; color: #e4e4e7; margin-bottom: 10px;">
-                  Proportional Token Treemap
+            <!-- 1. Full-Context Composition Ribbon + Lost-in-the-Middle Trough Summary Banner -->
+            <div style="background: #141418; border: 1px solid #1f1f26; border-radius: 10px; padding: 14px 16px; margin-bottom: 18px; display: flex; flex-direction: column; gap: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                  <span style="font-size: 13px; font-weight: 600; color: #f4f4f5;">
+                    Full Context Composition ({attentionZoneSummary.totalTokens.toLocaleString()} tok across {treemapCategories.length} output & context types)
+                  </span>
+                  {#if attentionZoneSummary.troughTokens > 0}
+                    <button
+                      onclick={() => (filterTroughOnly = !filterTroughOnly)}
+                      style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; cursor: pointer; border: 1px solid {filterTroughOnly ? '#fbbf24' : 'rgba(245, 158, 11, 0.45)'}; background: {filterTroughOnly ? 'rgba(245, 158, 11, 0.28)' : 'rgba(245, 158, 11, 0.14)'}; color: #fcd34d;"
+                      title="Click to filter the explorer to blocks trapped in the Lost-in-the-Middle attention trough (<42% salience)"
+                    >
+                      <span>⚠️ Lost-in-the-Middle Trough: {attentionZoneSummary.troughTokens.toLocaleString()} tok ({attentionZoneSummary.troughPct}%)</span>
+                      {#if attentionZoneSummary.troughRulesCount > 0}
+                        <span style="background: #dc2626; color: #fff; padding: 1px 6px; border-radius: 999px; font-size: 10.5px;">
+                          {attentionZoneSummary.troughRulesCount} rule{attentionZoneSummary.troughRulesCount > 1 ? 's' : ''} at risk
+                        </span>
+                      {/if}
+                    </button>
+                  {/if}
                 </div>
-                <svg width="540" height="290" style="background: #141418; border-radius: 8px; border: 1px solid #1f1f26; max-width: 100%;">
-                  {#each treemapLeaves as leaf}
+
+                <!-- Scale & Grouping Controls so large conversations stay 100% legible -->
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                  <div style="display: flex; background: #0f0f12; padding: 2px; border-radius: 6px; border: 1px solid #27272a; font-size: 11px;">
+                    <button
+                      onclick={() => (treemapGroupMode = 'by_type')}
+                      style="padding: 4px 9px; border-radius: 4px; border: none; cursor: pointer; font-weight: 600; background: {treemapGroupMode === 'by_type' ? '#27272a' : 'transparent'}; color: {treemapGroupMode === 'by_type' ? '#ffffff' : '#a1a1aa'};"
+                    >
+                      By Output Type
+                    </button>
+                    <button
+                      onclick={() => (treemapGroupMode = 'by_zone')}
+                      style="padding: 4px 9px; border-radius: 4px; border: none; cursor: pointer; font-weight: 600; background: {treemapGroupMode === 'by_zone' ? '#d97706' : 'transparent'}; color: {treemapGroupMode === 'by_zone' ? '#ffffff' : '#a1a1aa'};"
+                    >
+                      By Attention Zone (Trough Split)
+                    </button>
+                  </div>
+
+                  <div style="display: flex; background: #0f0f12; padding: 2px; border-radius: 6px; border: 1px solid #27272a; font-size: 11px;">
+                    <button
+                      onclick={() => (treemapScaleMode = 'perceptual')}
+                      title="Perceptual power scale keeps smaller output types visible and labeled even when a single tool log is 80% of a 300k-token session"
+                      style="padding: 4px 9px; border-radius: 4px; border: none; cursor: pointer; font-weight: 600; background: {treemapScaleMode === 'perceptual' ? '#2563eb' : 'transparent'}; color: {treemapScaleMode === 'perceptual' ? '#ffffff' : '#a1a1aa'};"
+                    >
+                      Balanced Scale (All Visible)
+                    </button>
+                    <button
+                      onclick={() => (treemapScaleMode = 'linear')}
+                      title="Strict 1:1 token area proportionality"
+                      style="padding: 4px 9px; border-radius: 4px; border: none; cursor: pointer; font-weight: 600; background: {treemapScaleMode === 'linear' ? '#2563eb' : 'transparent'}; color: {treemapScaleMode === 'linear' ? '#ffffff' : '#a1a1aa'};"
+                    >
+                      Exact Linear
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 100% Proportional Stacked Composition Bar (Always shows exact proportions + Trough Hatching) -->
+              <div style="display: flex; height: 18px; border-radius: 6px; overflow: hidden; border: 1px solid #27272a; background: #09090b;">
+                {#each treemapCategories as cat}
+                  <div
+                    role="button"
+                    tabindex="0"
+                    onmouseenter={() => (hoveredTreemapName = cat.name)}
+                    onmouseleave={() => (hoveredTreemapName = null)}
+                    onclick={() => (selectedTreemapCategory = selectedTreemapCategory === cat.name ? null : cat.name)}
+                    onkeydown={(e) => e.key === 'Enter' && (selectedTreemapCategory = selectedTreemapCategory === cat.name ? null : cat.name)}
+                    title={`${cat.name}: ${cat.value.toLocaleString()} tok (${cat.pct}%) · ${cat.troughTokens.toLocaleString()} tok (${cat.troughPct}%) in Lost-in-the-Middle Trough`}
+                    style="flex: {Math.max(0.35, cat.pctNum)}; background: {cat.color}; border-right: 1px solid #09090b; cursor: pointer; opacity: {hoveredTreemapName && hoveredTreemapName !== cat.name ? '0.35' : '0.95'}; position: relative;"
+                  ></div>
+                {/each}
+              </div>
+
+              <!-- 3-Zone Attention Distribution Strip (Prefix Anchor vs Lost-in-the-Middle Trough vs Recency Tail) -->
+              <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+                {#each attentionZoneSummary.zones as z}
+                  <div
+                    role="button"
+                    tabindex="0"
+                    onclick={() => {
+                      if (z.id === 'trough') filterTroughOnly = !filterTroughOnly;
+                      else filterTroughOnly = false;
+                    }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        if (z.id === 'trough') filterTroughOnly = !filterTroughOnly;
+                        else filterTroughOnly = false;
+                      }
+                    }}
+                    style="background: {z.id === 'trough' ? 'rgba(245, 158, 11, 0.09)' : '#0f0f12'}; border: 1px solid {z.id === 'trough' ? (filterTroughOnly ? '#fbbf24' : 'rgba(245, 158, 11, 0.38)') : '#27272a'}; border-radius: 7px; padding: 8px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 3px;"
+                  >
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px;">
+                      <span style="font-weight: 600; color: {z.color};">{z.shortLabel}</span>
+                      <span style="font-weight: 700; color: #f4f4f5;">{z.tokens.toLocaleString()} tok ({z.pct}%)</span>
+                    </div>
+                    <div style="font-size: 10.5px; color: #a1a1aa; display: flex; justify-content: space-between;">
+                      <span>{z.subtitle}</span>
+                      <span style="color: #71717a; flex-shrink: 0; margin-left: 6px;">{z.nodeCount} blocks</span>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
+
+            <!-- 2. Proportional Token Treemap + Interactive Category & Trough Breakdown -->
+            <div style="display: grid; grid-template-columns: minmax(520px, 1.65fr) minmax(360px, 1fr); gap: 18px; align-items: stretch; margin-bottom: 20px;">
+              <div style="background: #141418; border: 1px solid #1f1f26; border-radius: 10px; padding: 14px; display: flex; flex-direction: column;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; flex-wrap: wrap;">
+                  <div style="font-size: 13px; font-weight: 600; color: #e4e4e7;">
+                    Proportional Token Treemap
+                    <span style="font-size: 11px; font-weight: 400; color: #a1a1aa; margin-left: 6px;">
+                      ({treemapGroupMode === 'by_zone' ? 'Grouped by Attention Zone' : 'Grouped by Output Type'} · Click any tile to inspect)
+                    </span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 10px; font-size: 11px; color: #a1a1aa;">
+                    <span style="display: inline-flex; align-items: center; gap: 4px;">
+                      <span style="width: 10px; height: 10px; border-radius: 2px; border: 1.5px dashed #fbbf24; background: rgba(245, 158, 11, 0.25);"></span>
+                      Hatched / Amber = Lost-in-the-Middle Trough (&lt;42% Salience)
+                    </span>
+                  </div>
+                </div>
+
+                <svg
+                  viewBox={`0 0 ${TREEMAP_WIDTH} ${TREEMAP_HEIGHT}`}
+                  style="width: 100%; height: auto; min-height: 360px; flex: 1; background: #09090b; border-radius: 8px; border: 1px solid #27272a; display: block;"
+                >
+                  <defs>
+                    <pattern id="trough-hatch" width="8" height="8" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+                      <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(251, 191, 36, 0.36)" stroke-width="2.5" />
+                    </pattern>
+                  </defs>
+
+                  <!-- Zone group containers when in 'by_zone' mode -->
+                  {#each treemapLayoutData.groups as grp}
+                    <g transform="translate({grp.x0},{grp.y0})">
+                      <rect
+                        width={Math.max(0, grp.x1 - grp.x0)}
+                        height={Math.max(0, grp.y1 - grp.y0)}
+                        fill={grp.data.bgTint}
+                        stroke={grp.data.borderColor}
+                        stroke-width="1.5"
+                        rx="6"
+                      />
+                      {#if grp.x1 - grp.x0 > 90}
+                        <text x="8" y="16" fill={grp.data.borderColor} font-size="11" font-weight="700">
+                          {grp.data.name} · {grp.data.rawTokens?.toLocaleString()} tok ({grp.data.pct}%)
+                        </text>
+                      {/if}
+                    </g>
+                  {/each}
+
+                  <!-- Individual Output / Context Type Tiles -->
+                  {#each treemapLayoutData.leaves as leaf}
+                    {@const w = Math.max(0, leaf.x1 - leaf.x0)}
+                    {@const h = Math.max(0, leaf.y1 - leaf.y0)}
+                    {@const isHovered = hoveredTreemapName === leaf.data.name}
+                    {@const isSelected = selectedTreemapCategory === leaf.data.name}
+                    {@const troughRatio = Math.min(1, Math.max(0, (leaf.data.troughPctNum || 0) / 100))}
                     <g
                       role="button"
                       tabindex="0"
                       transform="translate({leaf.x0},{leaf.y0})"
                       onmouseenter={() => (hoveredTreemapName = leaf.data.name)}
                       onmouseleave={() => (hoveredTreemapName = null)}
-                      onclick={() => (hoveredTreemapName = leaf.data.name)}
-                      onkeydown={(e) => e.key === 'Enter' && (hoveredTreemapName = leaf.data.name)}
+                      onclick={() => {
+                        selectedTreemapCategory = selectedTreemapCategory === leaf.data.name ? null : leaf.data.name;
+                        if (leaf.data.isTroughZone) filterTroughOnly = true;
+                      }}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') {
+                          selectedTreemapCategory = selectedTreemapCategory === leaf.data.name ? null : leaf.data.name;
+                        }
+                      }}
                       style="cursor: pointer;"
                     >
+                      <title>{`${leaf.data.name}: ${(leaf.data.rawTokens ?? leaf.data.value ?? 0).toLocaleString()} tok (${leaf.data.pct}%)${leaf.data.troughTokens > 0 ? ` · ⚠️ ${leaf.data.troughTokens.toLocaleString()} tok (${Math.round(leaf.data.troughPctNum)}%) in Lost-in-the-Middle Trough` : ''}`}</title>
                       <rect
-                        width={Math.max(0, leaf.x1 - leaf.x0)}
-                        height={Math.max(0, leaf.y1 - leaf.y0)}
+                        width={w}
+                        height={h}
                         fill={leaf.data.color}
-                        stroke={hoveredTreemapName === leaf.data.name ? '#ffffff' : '#09090b'}
-                        stroke-width={hoveredTreemapName === leaf.data.name ? '2' : '1'}
-                        rx="4"
-                        opacity={hoveredTreemapName && hoveredTreemapName !== leaf.data.name ? '0.45' : '0.88'}
+                        stroke={isSelected || isHovered ? '#ffffff' : leaf.data.troughPctNum >= 40 ? '#fbbf24' : '#09090b'}
+                        stroke-width={isSelected || isHovered ? '2.2' : leaf.data.troughPctNum >= 40 ? '1.5' : '1'}
+                        rx="5"
+                        opacity={hoveredTreemapName && !isHovered ? '0.42' : '0.88'}
                       />
-                      {#if leaf.x1 - leaf.x0 > 70 && leaf.y1 - leaf.y0 > 32}
-                        <text x="8" y="18" fill="#ffffff" font-size="11.5" font-weight="600">{leaf.data.name}</text>
-                        <text x="8" y="33" fill="#e4e4e7" font-size="10.5">{leaf.value?.toLocaleString()} tok ({leaf.data.pct}%)</text>
+
+                      <!-- Proportional Lost-in-the-Middle Trough sub-overlay inside each category tile -->
+                      {#if troughRatio > 0.03 && w > 16 && h > 16}
+                        <rect
+                          x={w * (1 - troughRatio)}
+                          y="0"
+                          width={w * troughRatio}
+                          height={h}
+                          fill="url(#trough-hatch)"
+                          rx="4"
+                          pointer-events="none"
+                        />
+                      {/if}
+
+                      {#if w > 42 && h > 22}
+                        <text
+                          x="7"
+                          y="16"
+                          fill="#ffffff"
+                          font-size={w > 110 ? '11.5' : '10'}
+                          font-weight="700"
+                          style="text-shadow: 0 1px 2px rgba(0,0,0,0.65); pointer-events: none;"
+                        >
+                          {w > 115 ? leaf.data.name : leaf.data.shortName || leaf.data.name.slice(0, 12)}
+                        </text>
+                      {/if}
+                      {#if w > 58 && h > 36}
+                        <text
+                          x="7"
+                          y="31"
+                          fill="#f4f4f5"
+                          font-size="10.5"
+                          font-weight="500"
+                          style="text-shadow: 0 1px 2px rgba(0,0,0,0.65); pointer-events: none;"
+                        >
+                          {(leaf.data.rawTokens ?? leaf.data.value ?? 0).toLocaleString()} tok ({leaf.data.pct}%)
+                        </text>
+                      {/if}
+                      {#if w > 95 && h > 54 && (leaf.data.troughTokens || 0) > 0}
+                        <text
+                          x="7"
+                          y="46"
+                          fill="#fde68a"
+                          font-size="10"
+                          font-weight="700"
+                          style="text-shadow: 0 1px 3px rgba(0,0,0,0.85); pointer-events: none;"
+                        >
+                          ⚠️ {Math.round(leaf.data.troughPctNum)}% in Trough ({leaf.data.troughTokens.toLocaleString()} tok)
+                        </text>
                       {/if}
                     </g>
                   {/each}
                 </svg>
               </div>
 
-              <div>
-                <div style="font-size: 13px; font-weight: 600; color: #e4e4e7; margin-bottom: 10px;">
-                  Category Breakdown
+              <!-- Right Column: Complete Output & Context Type Table (All Categories Always Visible + Trough Share) -->
+              <div style="background: #141418; border: 1px solid #1f1f26; border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 13px; font-weight: 600; color: #e4e4e7;">
+                    Output & Context Breakdown ({treemapCategories.length} types)
+                  </span>
+                  {#if selectedTreemapCategory || filterTroughOnly}
+                    <button
+                      onclick={() => {
+                        selectedTreemapCategory = null;
+                        filterTroughOnly = false;
+                      }}
+                      style="background: #27272a; color: #f4f4f5; border: 1px solid #3f3f46; border-radius: 5px; padding: 3px 8px; font-size: 11px; cursor: pointer;"
+                    >
+                      Clear Filter
+                    </button>
+                  {/if}
                 </div>
-                <div style="background: #141418; border: 1px solid #1f1f26; border-radius: 8px; padding: 8px; display: flex; flex-direction: column; gap: 4px;">
+
+                <div style="display: flex; flex-direction: column; gap: 4px; max-height: 365px; overflow-y: auto; padding-right: 2px;">
                   {#each treemapCategories as cat}
+                    {@const isSelected = selectedTreemapCategory === cat.name}
                     <div
                       role="button"
                       tabindex="0"
                       onmouseenter={() => (hoveredTreemapName = cat.name)}
                       onmouseleave={() => (hoveredTreemapName = null)}
-                      style="padding: 7px 10px; border-radius: 6px; background: {hoveredTreemapName === cat.name ? '#1f1f26' : 'transparent'}; display: flex; justify-content: space-between; align-items: center; font-size: 12px;"
+                      onclick={() => (selectedTreemapCategory = isSelected ? null : cat.name)}
+                      onkeydown={(e) => e.key === 'Enter' && (selectedTreemapCategory = isSelected ? null : cat.name)}
+                      style="padding: 8px 10px; border-radius: 7px; border: 1px solid {isSelected ? cat.color : hoveredTreemapName === cat.name ? '#3f3f46' : '#1f1f26'}; background: {isSelected ? 'rgba(59, 130, 246, 0.12)' : hoveredTreemapName === cat.name ? '#1c1c22' : '#0f0f12'}; display: flex; flex-direction: column; gap: 5px; font-size: 12px; cursor: pointer;"
                     >
-                      <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="width: 8px; height: 8px; border-radius: 2px; background: {cat.color};"></span>
-                        <span style="color: #e4e4e7; font-weight: 500;">{cat.name}</span>
+                      <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                          <span style="width: 10px; height: 10px; border-radius: 3px; background: {cat.color}; flex-shrink: 0;"></span>
+                          <span style="color: #f4f4f5; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                            {cat.name}
+                          </span>
+                          <span style="color: #71717a; font-size: 10.5px; flex-shrink: 0;">({cat.nodeCount})</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                          <span style="color: #e4e4e7; font-weight: 600;">{cat.value.toLocaleString()} tok</span>
+                          <span style="color: #a1a1aa; font-weight: 600; min-width: 44px; text-align: right;">{cat.pct}%</span>
+                        </div>
                       </div>
-                      <div style="display: flex; align-items: center; gap: 10px;">
-                        <span style="color: #a1a1aa;">{cat.value.toLocaleString()} tok</span>
-                        <span style="color: #71717a; width: 42px; text-align: right;">{cat.pct}%</span>
+
+                      <!-- Mini proportion bar + Lost-in-the-Middle Trough indicator per category -->
+                      <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 10.5px;">
+                        <div style="flex: 1; height: 5px; border-radius: 999px; background: #18181b; overflow: hidden; display: flex;">
+                          <div style="width: {Math.max(3, cat.pctNum)}%; background: {cat.color}; height: 100%;"></div>
+                        </div>
+                        {#if cat.troughTokens > 0}
+                          <span style="color: #fbbf24; font-weight: 600; flex-shrink: 0;" title={`${cat.troughTokens.toLocaleString()} tokens (${cat.troughNodeCount} blocks) of ${cat.name} sit in the Lost-in-the-Middle Trough (<42% salience)`}>
+                            ⚠️ {cat.troughTokens.toLocaleString()} tok ({cat.troughPct}%) in Trough
+                          </span>
+                        {:else}
+                          <span style="color: #10b981; flex-shrink: 0;">✓ High-attention zone</span>
+                        {/if}
                       </div>
                     </div>
                   {/each}
@@ -1766,78 +2557,279 @@
               </div>
             </div>
 
-            <!-- KV Cache Tape & Attention Curve (Click-Only Selection + Wrapping Detail Card) -->
-            <div style="background: #141418; padding: 16px; border-radius: 10px; border: 1px solid #1f1f26;">
-              <div style="font-size: 13px; font-weight: 600; color: #e4e4e7; margin-bottom: 10px;">
-                KV Cache Prefix Tape & Positional Attention Curve (Click any bar to select and inspect below)
+            <!-- 3. Positional Context Window & "Lost-in-the-Middle Trough" U-Curve Map -->
+            <div style="background: #141418; padding: 16px; border-radius: 10px; border: 1px solid #1f1f26; margin-bottom: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+                <div>
+                  <div style="font-size: 13px; font-weight: 600; color: #f4f4f5;">
+                    Positional Context Map &amp; "Lost-in-the-Middle Trough" U-Curve
+                  </div>
+                  <div style="font-size: 11.5px; color: #a1a1aa; margin-top: 2px;">
+                    Left-to-right token position (`0` → `{attentionZoneSummary.totalTokens.toLocaleString()}` tok). Bars are colored by Output Type; height shows LLM positional recall (`Salience %`).
+                  </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px; font-size: 11px; color: #a1a1aa; flex-wrap: wrap;">
+                  <span style="display: inline-flex; align-items: center; gap: 5px;">
+                    <span style="width: 9px; height: 9px; border-radius: 2px; background: #10b981;"></span> Prefix Anchor
+                  </span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px; color: #fbbf24; font-weight: 600;">
+                    <span style="width: 9px; height: 9px; border-radius: 2px; background: rgba(245, 158, 11, 0.45); border: 1px solid #f59e0b;"></span>
+                    Lost-in-the-Middle Trough (&lt;42% Salience)
+                  </span>
+                  <span style="display: inline-flex; align-items: center; gap: 5px;">
+                    <span style="width: 9px; height: 9px; border-radius: 2px; background: #3b82f6;"></span> Recency Tail
+                  </span>
+                </div>
               </div>
 
-              <div style="display: flex; height: 22px; border-radius: 4px; overflow: hidden; margin-bottom: 14px;">
-                {#each latestTurn.nodes as n}
+              <!-- KV Cache Prefix Tape (Token-proportional across bins) -->
+              <div style="font-size: 10.5px; color: #a1a1aa; margin-bottom: 4px; display: flex; justify-content: space-between;">
+                <span>KV Cache Prefix Status Tape (Green = Cached Hit · Blue = Newly Cached · Red = Invalidated)</span>
+                <span>Hit Ratio: {(latestTurn.kv_cache_report.hit_ratio * 100).toFixed(1)}%</span>
+              </div>
+              <div style="display: flex; height: 16px; border-radius: 4px; overflow: hidden; margin-bottom: 12px; border: 1px solid #27272a;">
+                {#each positionalContextBins as bin}
                   <div
                     role="button"
                     tabindex="0"
                     onclick={() => {
-                      hoveredCandleNodeId = n.id;
-                      selectedNodeId = n.id;
+                      hoveredCandleNodeId = bin.primaryNode.id;
+                      selectedNodeId = bin.primaryNode.id;
                     }}
                     onkeydown={(e) => {
                       if (e.key === 'Enter') {
-                        hoveredCandleNodeId = n.id;
-                        selectedNodeId = n.id;
+                        hoveredCandleNodeId = bin.primaryNode.id;
+                        selectedNodeId = bin.primaryNode.id;
                       }
                     }}
-                    title={`${humanToolActionLabel(n)} (${n.token_span.count} tok)`}
-                    style="flex: {Math.max(1, n.token_span.count)}; background: {kvColor(n.kv_status)}; border-right: 1px solid #09090b; outline: {activeCandleNode?.id === n.id ? '2px solid #ffffff' : 'none'}; opacity: {activeCandleNode?.id === n.id ? '1' : '0.78'}; cursor: pointer;"
+                    title={`Turn #${bin.turnSeqStart}${bin.turnSeqEnd !== bin.turnSeqStart ? `..#${bin.turnSeqEnd}` : ''} · ${bin.categoryName} (${bin.tokens.toLocaleString()} tok · KV: ${bin.kvStatus})`}
+                    style="flex: {bin.widthWeight}; background: {kvColor(bin.kvStatus)}; border-right: 1px solid #09090b; opacity: {activeCandleNode?.id === bin.primaryNode.id ? '1' : '0.82'}; cursor: pointer;"
                   ></div>
                 {/each}
               </div>
 
-              <div style="display: flex; align-items: flex-end; height: 74px; gap: 2px; border-bottom: 1px solid #27272a;">
-                {#each latestTurn.nodes as n}
-                  <div
-                    role="button"
-                    tabindex="0"
-                    onclick={() => {
-                      hoveredCandleNodeId = n.id;
-                      selectedNodeId = n.id;
-                    }}
-                    onkeydown={(e) => {
-                      if (e.key === 'Enter') {
-                        hoveredCandleNodeId = n.id;
-                        selectedNodeId = n.id;
-                      }
-                    }}
-                    title={`Turn ${n.turn_seq}: ${humanToolActionLabel(n)} (${n.token_span.count} tok · Salience ${(n.attention_salience * 100).toFixed(0)}%)`}
-                    style="flex: 1; height: {Math.max(8, Math.round(n.attention_salience * 68))}px; background: {activeCandleNode?.id === n.id ? '#ffffff' : n.attention_salience < 0.4 ? '#d97706' : '#3b82f6'}; border-radius: 2px 2px 0 0; cursor: pointer;"
-                  ></div>
-                {/each}
+              <!-- Scalable Positional U-Curve + Clean Zone Banner & Left Salience Axis (No Overlapping Labels) -->
+              <div style="background: #09090b; border: 1px solid #27272a; border-radius: 8px; overflow: hidden;">
+                <!-- Top Zone Header Bar (Separated cleanly above the chart canvas) -->
+                <div style="display: grid; grid-template-columns: 1fr 1.4fr 1fr; align-items: center; padding: 8px 14px; background: #101014; border-bottom: 1px solid #22222a; font-size: 11.5px; gap: 8px;">
+                  <div style="display: flex; align-items: center; gap: 6px; color: #10b981; font-weight: 600;">
+                    <span>← Primacy Prefix (High Recall)</span>
+                    <span style="color: #71717a; font-weight: 500; font-size: 11px;">
+                      ({(attentionZoneSummary.prefixTokens / 1000).toFixed(1)}k tok)
+                    </span>
+                  </div>
+
+                  <div style="display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;">
+                    <span style="padding: 2px 10px; border-radius: 999px; background: rgba(245, 158, 11, 0.16); border: 1px solid rgba(245, 158, 11, 0.45); color: #fcd34d; font-weight: 700; font-size: 11px;">
+                      ⚠️ Lost-in-the-Middle Trough (&lt;42% Salience)
+                    </span>
+                    {#if attentionZoneSummary.troughTokens > 0}
+                      <span style="color: #fde68a; font-size: 11px; font-weight: 600;">
+                        {(attentionZoneSummary.troughStartToken / 1000).toFixed(1)}k – {(attentionZoneSummary.troughEndToken / 1000).toFixed(1)}k tok ({attentionZoneSummary.troughTokens.toLocaleString()} tok · {attentionZoneSummary.troughPct}%)
+                      </span>
+                    {:else}
+                      <span style="color: #71717a; font-size: 11px;">0 tok in trough</span>
+                    {/if}
+                  </div>
+
+                  <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; color: #60a5fa; font-weight: 600;">
+                    <span style="color: #71717a; font-weight: 500; font-size: 11px;">
+                      ({(attentionZoneSummary.tailTokens / 1000).toFixed(1)}k tok)
+                    </span>
+                    <span>Recency Tail (High Recall) →</span>
+                  </div>
+                </div>
+
+                <!-- Chart Body: Left Y-Axis Gutter + Uncluttered Bar Canvas -->
+                <div style="display: grid; grid-template-columns: 54px 1fr; align-items: stretch; padding: 12px 12px 6px 8px;">
+                  <!-- Left Y-Axis Labels (Outside the bars for 100% readability) -->
+                  <div style="position: relative; height: 148px; border-right: 1px solid #27272a; padding-right: 8px; font-size: 10.5px; color: #a1a1aa; user-select: none;">
+                    <span style="position: absolute; top: 0; right: 8px; color: #10b981; font-weight: 600;">100%</span>
+                    <span
+                      style="position: absolute; bottom: {Math.round(TROUGH_SALIENCE_THRESHOLD * 148) - 7}px; right: 8px; color: #fbbf24; font-weight: 700;"
+                      title="42% Salience threshold: blocks below this line sit in the Lost-in-the-Middle Trough"
+                    >
+                      42%
+                    </span>
+                    <span style="position: absolute; bottom: 0; right: 8px; color: #71717a;">0%</span>
+                  </div>
+
+                  <!-- Bar Plotting Area -->
+                  <div style="position: relative; height: 148px; padding-left: 6px;">
+                    <!-- Subtle 100% and 42% Trough Cutoff Guide Lines (No text overlapping bars) -->
+                    <div
+                      style="position: absolute; left: 0; right: 0; top: 0; border-top: 1px dotted rgba(63, 63, 70, 0.5); pointer-events: none;"
+                    ></div>
+                    <div
+                      style="position: absolute; left: 0; right: 0; bottom: {Math.round(TROUGH_SALIENCE_THRESHOLD * 148)}px; border-top: 1.5px dashed rgba(251, 191, 36, 0.65); pointer-events: none; z-index: 2;"
+                    ></div>
+
+                    <div style="display: flex; align-items: stretch; height: 148px; gap: 1.5px;">
+                      {#each positionalContextBins as bin}
+                        {@const isSelected = activeCandleNode?.id === bin.primaryNode.id}
+                        {@const matchesCategory = !selectedTreemapCategory || bin.categoryName === selectedTreemapCategory}
+                        {@const barHeightPx = Math.max(10, Math.round(bin.salience * 144))}
+                        <div
+                          role="button"
+                          tabindex="0"
+                          onclick={() => {
+                            hoveredCandleNodeId = bin.primaryNode.id;
+                            selectedNodeId = bin.primaryNode.id;
+                          }}
+                          onkeydown={(e) => {
+                            if (e.key === 'Enter') {
+                              hoveredCandleNodeId = bin.primaryNode.id;
+                              selectedNodeId = bin.primaryNode.id;
+                            }
+                          }}
+                          title={`Turn #${bin.turnSeqStart}${bin.turnSeqEnd !== bin.turnSeqStart ? `..#${bin.turnSeqEnd}` : ''} · ${bin.categoryName}: ${humanToolActionLabel(bin.primaryNode)} (${bin.tokens.toLocaleString()} tok · Salience ${(bin.salience * 100).toFixed(0)}%${bin.inTrough ? ' · ⚠️ Lost-in-the-Middle Trough' : ''})`}
+                          style="flex: {bin.widthWeight}; min-width: 2px; display: flex; align-items: flex-end; background: {bin.inTrough ? 'rgba(245, 158, 11, 0.14)' : 'transparent'}; border-top: {bin.inTrough ? '2.5px solid #f59e0b' : '2.5px solid transparent'}; cursor: pointer;"
+                        >
+                          <div
+                            style="width: 100%; height: {barHeightPx}px; background: {isSelected ? '#ffffff' : bin.color}; border: {isSelected ? '1px solid #ffffff' : bin.inTrough ? '1px solid rgba(251, 191, 36, 0.7)' : 'none'}; border-radius: 2px 2px 0 0; opacity: {matchesCategory && (!filterTroughOnly || bin.inTrough) ? '0.94' : '0.20'};"
+                          ></div>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Bottom X-Axis Token Position Ruler -->
+                <div style="display: flex; justify-content: space-between; padding: 4px 14px 8px 68px; font-size: 10.5px; color: #71717a; border-top: 1px solid #18181b;">
+                  <span>0 tok (Start)</span>
+                  <span>{((attentionZoneSummary.totalTokens * 0.25) / 1000).toFixed(1)}k tok (25%)</span>
+                  <span>{((attentionZoneSummary.totalTokens * 0.5) / 1000).toFixed(1)}k tok (50%)</span>
+                  <span>{((attentionZoneSummary.totalTokens * 0.75) / 1000).toFixed(1)}k tok (75%)</span>
+                  <span>{(attentionZoneSummary.totalTokens / 1000).toFixed(1)}k tok (End)</span>
+                </div>
               </div>
 
               {#if activeCandleNode}
-                <div style="margin-top: 14px; padding: 14px 16px; border-radius: 8px; background: #0f0f12; border: 1px solid #27272a; display: flex; flex-direction: column; gap: 10px; font-size: 12.5px;">
+                {@const activeCat = classifyNodeCategory(activeCandleNode, staleOrDupNodeIds)}
+                {@const activeInTrough = activeCandleNode.attention_salience < TROUGH_SALIENCE_THRESHOLD}
+                <div style="margin-top: 14px; padding: 14px 16px; border-radius: 8px; background: #0f0f12; border: 1px solid {activeInTrough ? 'rgba(245, 158, 11, 0.5)' : '#27272a'}; display: flex; flex-direction: column; gap: 10px; font-size: 12.5px;">
                   <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid #1f1f26; padding-bottom: 8px;">
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                       <span style="padding: 2px 7px; border-radius: 4px; background: #27272a; color: #f4f4f5; font-size: 11px; font-weight: 600;">
                         Turn {activeCandleNode.turn_seq}
                       </span>
+                      <span style="padding: 2px 8px; border-radius: 4px; background: {activeCat.color}22; border: 1px solid {activeCat.color}66; color: #f4f4f5; font-size: 11px; font-weight: 600;">
+                        {activeCat.name}
+                      </span>
                       <strong style="color: #ffffff; font-size: 13px;">{humanToolActionLabel(activeCandleNode)}</strong>
                       <span style="color: #60a5fa; font-weight: 600;">{activeCandleNode.token_span.count.toLocaleString()} tok</span>
-                      <span style="color: #a1a1aa;">· Salience {(activeCandleNode.attention_salience * 100).toFixed(0)}%</span>
+                      <span style="color: {activeInTrough ? '#fbbf24' : '#10b981'}; font-weight: 600;">
+                        · Salience {(activeCandleNode.attention_salience * 100).toFixed(0)}% {activeInTrough ? '(⚠️ Lost-in-the-Middle Trough)' : ''}
+                      </span>
                       <span style="color: {kvColor(activeCandleNode.kv_status)}; font-size: 11.5px;">· {activeCandleNode.kv_status}</span>
                     </div>
-                    <button
-                      onclick={() => inspectNode(activeCandleNode!.id)}
-                      style="background: #27272a; color: #ffffff; border: 1px solid #3f3f46; border-radius: 5px; padding: 5px 10px; font-size: 11.5px; cursor: pointer; flex-shrink: 0;"
-                    >
-                      Open in Inspector Drawer
-                    </button>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      {#if activeInTrough && (activeCandleNode.kind.kind === 'injected_rule' || activeCandleNode.kind.kind === 'user_message')}
+                        <button
+                          onclick={() =>
+                            applyMutation(
+                              {
+                                op: 'pin_context',
+                                label: humanToolActionLabel(activeCandleNode!),
+                                content: nodeDisplayText(activeCandleNode!).slice(0, 240),
+                                source_node_id: activeCandleNode!.id
+                              },
+                              'committed',
+                              'Pinned instruction to high-attention tail (0 KV cache break).'
+                            )}
+                          style="background: #d97706; color: #ffffff; border: none; border-radius: 5px; padding: 5px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer;"
+                        >
+                          📌 Pin to High-Attention Tail
+                        </button>
+                      {/if}
+                      <button
+                        onclick={() => inspectNode(activeCandleNode!.id)}
+                        style="background: #27272a; color: #ffffff; border: 1px solid #3f3f46; border-radius: 5px; padding: 5px 10px; font-size: 11.5px; cursor: pointer; flex-shrink: 0;"
+                      >
+                        Open in Inspector Drawer
+                      </button>
+                    </div>
                   </div>
                   <div style="color: #d4d4d8; line-height: 1.55; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere;">
                     <MarkdownText text={nodeDisplayText(activeCandleNode)} rawMode={rawMarkdownMode} maxHeight="none" compact={true} />
                   </div>
                 </div>
               {/if}
+            </div>
+
+            <!-- 4. Context & Lost-in-the-Middle Trough Node Explorer -->
+            <div style="background: #141418; padding: 16px; border-radius: 10px; border: 1px solid #1f1f26;">
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                  <span style="font-size: 13px; font-weight: 600; color: #f4f4f5;">
+                    Context Block Explorer ({filteredExplorerNodes.length} blocks)
+                  </span>
+                  {#if selectedTreemapCategory}
+                    <span style="padding: 2px 8px; border-radius: 999px; background: #27272a; color: #e4e4e7; font-size: 11px; font-weight: 600;">
+                      Category: {selectedTreemapCategory}
+                    </span>
+                  {/if}
+                  {#if filterTroughOnly}
+                    <span style="padding: 2px 8px; border-radius: 999px; background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.45); color: #fcd34d; font-size: 11px; font-weight: 600;">
+                      ⚠️ Lost-in-the-Middle Trough Only (&lt;42% Salience)
+                    </span>
+                  {/if}
+                </div>
+                <button
+                  onclick={() => (filterTroughOnly = !filterTroughOnly)}
+                  style="padding: 5px 10px; border-radius: 6px; border: 1px solid {filterTroughOnly ? '#fbbf24' : '#27272a'}; background: {filterTroughOnly ? 'rgba(245, 158, 11, 0.2)' : '#0f0f12'}; color: {filterTroughOnly ? '#fcd34d' : '#a1a1aa'}; font-size: 11.5px; font-weight: 600; cursor: pointer;"
+                >
+                  {filterTroughOnly ? 'Showing Trough Only — Click for All' : 'Show Only Lost-in-the-Middle Trough Blocks'}
+                </button>
+              </div>
+
+              <div style="display: flex; flex-direction: column; gap: 6px; max-height: 340px; overflow-y: auto;">
+                {#each filteredExplorerNodes.slice(0, 80) as item}
+                  <div
+                    role="button"
+                    tabindex="0"
+                    onclick={() => {
+                      hoveredCandleNodeId = item.node.id;
+                      selectedNodeId = item.node.id;
+                    }}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        hoveredCandleNodeId = item.node.id;
+                        selectedNodeId = item.node.id;
+                      }
+                    }}
+                    style="padding: 9px 12px; border-radius: 7px; background: {activeCandleNode?.id === item.node.id ? '#1c1c24' : '#0f0f12'}; border: 1px solid {item.inTrough ? 'rgba(245, 158, 11, 0.35)' : '#1f1f26'}; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; cursor: pointer;"
+                  >
+                    <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+                      <span style="width: 8px; height: 8px; border-radius: 2px; background: {item.category.color}; flex-shrink: 0;"></span>
+                      <span style="padding: 1px 6px; border-radius: 4px; background: #18181b; color: #a1a1aa; font-size: 10.5px; flex-shrink: 0;">
+                        T#{item.node.turn_seq}
+                      </span>
+                      <span style="color: #a1a1aa; font-size: 11px; flex-shrink: 0;">{item.category.shortName}</span>
+                      <strong style="color: #f4f4f5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {humanToolActionLabel(item.node)}
+                      </strong>
+                      <span style="color: #71717a; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {nodeDisplayText(item.node).slice(0, 90).replace(/\s+/g, ' ')}
+                      </span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0;">
+                      {#if item.inTrough}
+                        <span style="padding: 2px 7px; border-radius: 4px; background: rgba(245, 158, 11, 0.16); color: #fcd34d; font-size: 10.5px; font-weight: 600;">
+                          ⚠️ Trough {(item.node.attention_salience * 100).toFixed(0)}%
+                        </span>
+                      {:else}
+                        <span style="color: #10b981; font-size: 11px;">
+                          Salience {(item.node.attention_salience * 100).toFixed(0)}%
+                        </span>
+                      {/if}
+                      <span style="color: #e4e4e7; font-weight: 600; min-width: 68px; text-align: right;">
+                        {item.node.token_span.count.toLocaleString()} tok
+                      </span>
+                    </div>
+                  </div>
+                {/each}
+              </div>
             </div>
 
           {:else if analyticsSubView === 'advisor'}

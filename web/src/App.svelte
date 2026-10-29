@@ -631,7 +631,7 @@
         const troughPctNum = d.value > 0 ? (d.troughTokens / d.value) * 100 : 0;
         return {
           ...d,
-          pct: pctNum >= 10 ? pctNum.toFixed(1) : pctNum >= 0.1 ? pctNum.toFixed(1) : '<0.1',
+          pct: pctNum >= 0.1 ? pctNum.toFixed(1) : '<0.1',
           pctNum,
           troughPct: troughPctNum.toFixed(0),
           troughPctNum

@@ -676,7 +676,7 @@ async fn api_create_mutation(
 ) -> impl IntoResponse {
     let latest_turn = state.store.get_latest_turn(&id).ok().flatten();
     let (saved, kv_break) = match &latest_turn {
-        Some(t) => estimate_mutation_impact(&req.op, &t.nodes),
+        Some(t) => estimate_mutation_impact(&req.op, &t.nodes, Some(&t.kv_cache_report)),
         None => (0, 0),
     };
 
@@ -915,7 +915,8 @@ async fn api_auto_optimize(
         } else {
             for finding in &latest.lint_findings {
                 if let Some(op) = &finding.suggested_mutation {
-                    let (saved, kv_break) = estimate_mutation_impact(op, &latest.nodes);
+                    let (saved, kv_break) =
+                        estimate_mutation_impact(op, &latest.nodes, Some(&latest.kv_cache_report));
                     let rule = MutationRule {
                         id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
                         session_id: id.clone(),

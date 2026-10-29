@@ -20,16 +20,19 @@ This document establishes the empirical justification, real-world benchmark data
      - When cache hit telemetry is verified, `cw optimize min` (`cache_safe_boost`) selects strictly zero-break tail operations (`kv_break_tokens == 0`), preserving **100% of the cached prefix**.
      - When provider cache telemetry is absent or unknown, `cw` treats unverified prefix mutations as non-zero break, strictly preserving history and preventing unverified candidates from qualifying for `min`.
 
-3. **Latency & TTFT (Time-to-First-Token): Theory, Local Benchmarks, and Cloud Nuance**
-   * *Prefill Complexity Model:* Compacting prompts from 150k down to 45k tokens reduces raw attention prefill FLOPs by ~3.3×.
+3. **Latency & TTFT (Time-to-First-Token): Prompt Volume, Local Benchmarks, and Cloud Nuance**
+   * *Prompt Token-Volume Reduction:* Compacting prompts from 150k down to 45k tokens represents a **3.33× reduction in token count** transmitted to the inference engine. (Note: Raw self-attention prefill FLOPs scale quadratically $O(N^2)$ with prompt length unless linear/chunked attention kernels are used, so a 3.33× token-count reduction does not mean a 3.33× FLOP reduction across varying model architectures.)
    * *Local Engine Benchmark (Measured on local llama.cpp / vLLM, Qwen 2.5 Coder 32B on RTX 4090):*
      - Time-to-First-Token dropped from **1,820ms down to 428ms** (4.3× speedup) and prevented out-of-memory context overflow on large repositories.
    * *Cloud Frontier Providers (Important Nuance):*
      - On cloud APIs (Claude 3.7 Sonnet, GPT-4o, Gemini 2.5 Pro), TTFT is governed by datacenter queue time, scheduling, network transit, and server-side cache warmth. While cutting 70% of prompt tokens eliminates unneeded payload upload and token ingestion, empirical cloud latency gains vary with cluster load and must not be treated as a fixed SLA guarantee.
 
-4. **Direct Cost Savings: Static Potential vs. Active Realized Savings**
-   * *Fleet Potential Opportunity:* Across the 278 indexed transcripts, unpruned bloat represented **$42.99 per full turn iteration** if billed at standard frontier rates ($3.00 / 1M input tokens).
-   * *Active Realized Savings:* In benchmarked active sessions with committed overlays, `cw` has directly saved **$2.10** in billable input tokens.
+4. **Direct Cost & Value Metrics: Token Cuts, Modeled Savings & Invoice Reconciliation**
+   * *Three Distinct Value Layers:*
+     1. **Estimated Tokens Removed from Forwarded Payloads:** **153,789 tokens** actively removed in live proxy turns via committed overlays.
+     2. **Modeled Monetary Benefit (Heuristic Model):** **$2.10** calculated by `cw gain` combining overlay token savings and observed cache discounts under a standard reference rate ($3.00 / 1M input tokens).
+     3. **Actual Provider-Billed Savings:** Direct dollar verification against real cloud provider invoices across matched A/B control runs remains an ongoing qualification deliverable under CW-103.
+   * *Fleet Potential Opportunity:* Across the 278 indexed transcripts, unpruned bloat represented **$42.99 per full turn iteration** under the reference rate.
 
 ---
 

@@ -235,36 +235,28 @@ pub fn apply_mutations_to_payload(
 
 /// Estimates how many tokens a `MutationOp` will save and how many cached KV prefix tokens
 /// it would invalidate if committed immediately.
-pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32, u32) {
-    let total_cached: u32 = nodes
+pub fn estimate_mutation_impact(
+    op: &MutationOp,
+    nodes: &[ContextNode],
+    report: Option<&crate::ir::KvCacheReport>,
+) -> (i32, u32) {
+    let total_tokens: u32 = nodes
         .iter()
-        .filter(|n| n.kv_status == crate::ir::KvNodeStatus::CachedHit)
-        .map(|n| n.token_span.count)
-        .sum();
-    let total_unknown: u32 = nodes
-        .iter()
-        .filter(|n| n.kv_status == crate::ir::KvNodeStatus::Unknown)
-        .map(|n| n.token_span.count)
-        .sum();
-    let total_tokens: u32 = nodes.iter().map(|n| n.token_span.count).sum();
+        .map(|n| n.token_span.end)
+        .max()
+        .unwrap_or(0)
+        .max(nodes.iter().map(|n| n.token_span.count).sum());
     let max_turn = nodes.iter().map(|n| n.turn_seq).max().unwrap_or(1).max(1);
-    let cache_known = total_unknown == 0 && (total_cached > 0 || nodes.is_empty());
 
     let calc_break = |start: u32, count: u32, turn_seq: u32| -> u32 {
-        if cache_known {
-            total_cached.saturating_sub(start)
-        } else {
-            if turn_seq < max_turn || start < total_tokens.saturating_sub(count) {
-                let scope = if total_unknown > 0 {
-                    total_unknown
-                } else {
-                    total_tokens
-                };
-                scope.saturating_sub(start).max(count).max(1)
-            } else {
-                0
-            }
-        }
+        crate::radix::calculate_kv_break_tokens(
+            start,
+            count,
+            turn_seq,
+            max_turn,
+            total_tokens,
+            report,
+        )
     };
 
     match op {
@@ -290,7 +282,8 @@ pub fn estimate_mutation_impact(op: &MutationOp, nodes: &[ContextNode]) -> (i32,
                     };
                 if matches {
                     let saved = (node.token_span.count as i32) - stub_tok;
-                    let kv_break = calc_break(node.token_span.start, node.token_span.count, node.turn_seq);
+                    let kv_break =
+                        calc_break(node.token_span.start, node.token_span.count, node.turn_seq);
                     return (saved, kv_break);
                 }
             }

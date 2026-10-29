@@ -1,6 +1,6 @@
 use crate::ir::{
-    ContextTurn, KvNodeStatus, LintRuleId, MutationOp, MutationRule, MutationStatus, NodeKind,
-    ProviderKind, ToolSemanticMeta,
+    ContextTurn, LintRuleId, MutationOp, MutationRule, MutationStatus, NodeKind, ProviderKind,
+    ToolSemanticMeta,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -59,21 +59,6 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         return Vec::new();
     }
     let total_tokens = turn.token_usage.input_tokens.max(1);
-    let total_cached: u32 = turn
-        .nodes
-        .iter()
-        .filter(|n| n.kv_status == KvNodeStatus::CachedHit)
-        .map(|n| n.token_span.count)
-        .sum();
-    let total_unknown: u32 = turn
-        .nodes
-        .iter()
-        .filter(|n| n.kv_status == KvNodeStatus::Unknown)
-        .map(|n| n.token_span.count)
-        .sum();
-    let telemetry_available = turn.kv_cache_report.telemetry_available;
-    let has_unknown = total_unknown > 0;
-    let cache_known = telemetry_available && !has_unknown;
     let max_turn = turn
         .nodes
         .iter()
@@ -82,28 +67,16 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         .unwrap_or(1)
         .max(1);
 
-    // Compute kv_break_tokens for candidate items.
-    // When cache telemetry is known and verified:
-    //   - If total_cached > 0: mutating before total_cached breaks (total_cached - start) cached tokens.
-    //   - If total_cached == 0: telemetry verified 0 tokens were cached on this turn (0 break).
-    // When cache telemetry is UNKNOWN (telemetry unavailable or Unknown nodes present):
-    //   - Prefix or historical turn mutations CANNOT be treated as 0 break.
-    //   - We conservatively estimate non-zero cache invalidation impact so unknown cache is never free.
+    // Compute kv_break_tokens using centralized prefix-invalidation calculator
     let compute_kv_break = |start: u32, count: u32, turn_seq: u32| -> u32 {
-        if cache_known {
-            total_cached.saturating_sub(start)
-        } else {
-            if turn_seq < max_turn || start < total_tokens.saturating_sub(count) {
-                let prefix_scope = if total_unknown > 0 {
-                    total_unknown
-                } else {
-                    total_tokens
-                };
-                prefix_scope.saturating_sub(start).max(count).max(1)
-            } else {
-                0
-            }
-        }
+        crate::radix::calculate_kv_break_tokens(
+            start,
+            count,
+            turn_seq,
+            max_turn,
+            total_tokens,
+            Some(&turn.kv_cache_report),
+        )
     };
 
     // Identify stale/duplicate file read nodes from linter findings
@@ -392,15 +365,12 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
     let fold_end = max_turn.saturating_sub(1);
 
     // Assemble the 5 Strategy Plans
-    // Strategy 1 (cache_safe_boost / min): Zero-KV-break candidates only
-    // (low-salience rule reminders + uncached duplicate reads and uncached tail bloat).
+    // Strategy 1 (cache_safe_boost / min): Strictly prefix-preserving candidates only.
+    // Retains 100% of historical tokens; pins critical rules from the middle attention trough (<42%) to the high-attention tail.
+    // Never modifies historical tokens or the tokenized prefix, ensuring 0% KV-cache break on both Turn N and Turn N+1.
     let mut strategy1_seen = HashSet::new();
     let mut strategy1_items = Vec::new();
-    for item in pin_items
-        .iter()
-        .chain(stale_file_items.iter().filter(|i| cache_known && i.kv_break_tokens == 0))
-        .chain(tail_bloat_items.iter().filter(|i| cache_known && i.kv_break_tokens == 0))
-    {
+    for item in &pin_items {
         let key = item.node_id.clone().unwrap_or_else(|| item.item_id.clone());
         if strategy1_seen.insert(key) {
             strategy1_items.push(item.clone());

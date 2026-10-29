@@ -191,6 +191,42 @@ pub fn analyze_kv_cache(
     }
 }
 
+/// Centralized calculator for estimated KV-cache prefix break cost (in tokens).
+///
+/// Architectural Invariants (Finding 1 & Finding 2):
+/// 1. Pure tail operations (e.g. `PinContext` appending `<cw_pinned_context>` at prompt tail)
+///    never modify historical context, guaranteeing 0 KV cache break on Turn N and Turn N+1.
+/// 2. Any mutation to historical context (`turn_seq < max_turn` or `start_token < total_tokens`)
+///    modifies the tokenized prefix that the provider ingested and cached on Turn N.
+///    On Turn N+1, modifying token `start_token` invalidates provider cache reuse for all tokens
+///    from `start_token` to `total_tokens`.
+/// 3. When cache telemetry is absent or unverified (`report.telemetry_available == false`),
+///    cache state cannot be assumed to be free; we conservatively compute non-zero invalidation.
+pub fn calculate_kv_break_tokens(
+    start_token: u32,
+    token_count: u32,
+    turn_seq: u32,
+    max_turn: u32,
+    total_tokens: u32,
+    report: Option<&KvCacheReport>,
+) -> u32 {
+    let telemetry_available = report.map(|r| r.telemetry_available).unwrap_or(false);
+
+    // Strictly tail operations (such as PinContext appending to prompt tail) do not mutate the historical prefix.
+    if turn_seq >= max_turn && start_token >= total_tokens.saturating_sub(token_count) {
+        return 0;
+    }
+
+    if telemetry_available {
+        total_tokens.saturating_sub(start_token)
+    } else {
+        total_tokens
+            .saturating_sub(start_token)
+            .max(token_count)
+            .max(1)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RadixGraphNode {
     pub id: String,
@@ -266,7 +302,9 @@ pub fn build_radix_graph(latest_turn: &ContextTurn, all_turns: &[ContextTurn]) -
             mcp_count += 1;
             if n.kv_status == KvNodeStatus::CacheInvalidated {
                 mcp_kv = KvNodeStatus::CacheInvalidated;
-            } else if n.kv_status == KvNodeStatus::Unknown && mcp_kv != KvNodeStatus::CacheInvalidated {
+            } else if n.kv_status == KvNodeStatus::Unknown
+                && mcp_kv != KvNodeStatus::CacheInvalidated
+            {
                 mcp_kv = KvNodeStatus::Unknown;
             }
         }

@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostAndPerfReport {
+    pub basis: String,
     pub model_family: String,
     pub is_local_model: bool,
     pub turn_cost_usd: f64,
@@ -88,7 +89,7 @@ pub fn detect_local_engine(model: &str, provider: ProviderKind) -> (bool, &'stat
     (false, "cloud")
 }
 
-/// Calculates real-world USD ($) cost, KV Cache ($) savings, `cw` overlay ($) savings,
+/// Estimates USD ($) cost, KV Cache ($) savings, `cw` overlay ($) savings,
 /// and prefill latency (ms) for any `ContextTurn`.
 pub fn calculate_cost_and_perf(
     turn: &ContextTurn,
@@ -148,7 +149,7 @@ pub fn calculate_cost_and_perf(
     let saved_prefill_ms_by_overlays = ((saved_overlay_tok as u64) * 1000) / prefill_tps.max(1);
 
     CostAndPerfReport {
-        model_family: family.to_string(),
+        basis: "heuristic token spans, legacy family rates, and fixed throughput; not billing or measured latency".into(),        model_family: family.to_string(),
         is_local_model: is_local,
         turn_cost_usd,
         unoptimized_cost_usd,
@@ -408,18 +409,14 @@ pub fn inject_local_engine_kv_optimizations(
 /// Strips any internal `cw_*` metadata fields (`cw_timestamp`, `cw_turn_seq`, etc.) from a JSON
 /// payload before forwarding to strict upstream LLM providers (Anthropic, OpenAI, Gemini).
 pub fn strip_internal_cw_fields(val: &mut Value) {
-    match val {
-        Value::Object(map) => {
-            map.retain(|k, _| !k.starts_with("cw_"));
-            for v in map.values_mut() {
-                strip_internal_cw_fields(v);
+    for key in ["messages", "input", "contents"] {
+        if let Some(items) = val.get_mut(key).and_then(Value::as_array_mut) {
+            for item in items {
+                if let Some(map) = item.as_object_mut() {
+                    map.remove("cw_timestamp");
+                    map.remove("cw_turn_seq");
+                }
             }
         }
-        Value::Array(arr) => {
-            for item in arr.iter_mut() {
-                strip_internal_cw_fields(item);
-            }
-        }
-        _ => {}
     }
 }

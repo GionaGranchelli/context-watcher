@@ -213,6 +213,7 @@ export interface LocalModelAnalysis {
 }
 
 export interface AutoPilotConfig {
+  safety_version?: number;
   enabled: boolean;
   zero_break_tail_hygiene: boolean;
   tail_max_tool_tokens: number;

@@ -6,7 +6,7 @@ dynamically by executing the compiled `cw` Rust binary against real recorded
 multi-turn agent transcripts (`benchmark/fixtures/*.jsonl`), inspecting the
 resulting SQLite state (`turns`, `mutations`), running the real Python unit test
 suites in `benchmark/artifacts*`, and optionally querying a live OpenAI /
-llama.cpp endpoint (`--upstream http://...`) to measure hardware TTFT.
+llama.cpp endpoint (`--upstream http://...`) for historical reference only. Live qualification uses continuation_benchmark.py.
 
 Usage:
     python3 benchmark/run_benchmark.py
@@ -59,21 +59,10 @@ BENCHMARK_CASES = [
 
 
 def find_or_build_cw_binary() -> Path:
-    """Locate an existing `cw` binary or build it via cargo."""
-    for candidate in [
-        REPO_ROOT / "target" / "release" / "cw",
-        REPO_ROOT / "target" / "debug" / "cw",
-    ]:
-        if candidate.exists() and os.access(candidate, os.X_OK):
-            return candidate
-
-    print("Building `cw` binary via `cargo build -p cw-cli`...")
-    subprocess.run(
-        ["cargo", "build", "-p", "cw-cli"],
-        cwd=REPO_ROOT,
-        check=True,
-    )
-    return REPO_ROOT / "target" / "debug" / "cw"
+    """Build current sources, respecting an isolated Cargo target directory."""
+    subprocess.run(["cargo", "build", "-p", "cw-cli"], cwd=REPO_ROOT, check=True)
+    target = Path(os.environ.get("CARGO_TARGET_DIR", REPO_ROOT / "target"))
+    return target / "debug" / "cw"
 
 
 def extract_recorded_hardware_telemetry(jsonl_path: Path) -> dict:
@@ -178,31 +167,10 @@ def query_latest_turn_from_db(db_path: Path, session_id: str) -> dict:
         conn.close()
 
 
-def measure_live_upstream_ttft(upstream_url: str, api_key: str, payload: dict) -> float | None:
-    """Optionally send the payload to a live OpenAI-compatible /v1/chat/completions endpoint and measure TTFT."""
-    if not upstream_url or not payload:
-        return None
-    url = upstream_url.rstrip("/") + "/v1/chat/completions"
-    req_body = {
-        "model": payload.get("model", "default"),
-        "messages": payload.get("messages", []),
-        "max_tokens": 1,
-        "stream": False,
-    }
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    data = json.dumps(req_body).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    t0 = time.perf_counter()
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            resp.read()
-        return round((time.perf_counter() - t0) * 1000.0, 2)
-    except Exception as exc:
-        print(f"  [!] Live upstream probe failed ({exc})", file=sys.stderr)
-        return None
+def measure_live_upstream_ttft(upstream_url: str, api_key: str, payload: dict) -> None:
+    if upstream_url:
+        raise ValueError("Imported analysis envelopes are not provider requests. Use continuation_benchmark.py for live task qualification.")
+    return None
 
 
 def benchmark_single_case(cw_bin: Path, case: dict, upstream_url: str | None, api_key: str) -> dict:
@@ -274,7 +242,7 @@ def benchmark_single_case(cw_bin: Path, case: dict, upstream_url: str | None, ap
             )
 
             t_opt = time.perf_counter()
-            subprocess.run(
+            opt_proc = subprocess.run(
                 [
                     str(cw_bin),
                     "--db",
@@ -288,11 +256,19 @@ def benchmark_single_case(cw_bin: Path, case: dict, upstream_url: str | None, ap
                 ],
                 capture_output=True,
                 text=True,
-                check=True,
+                check=False,
             )
             opt_ms = round((time.perf_counter() - t_opt) * 1000.0, 2)
+            if opt_proc.returncode:
+                if "Unknown strategy" in opt_proc.stderr:
+                    tiers[strat] = {"strategy":strat,"status":"unsupported","reason":"No eligible plan for this imported format or signed/incomplete history"}
+                    continue
+                raise RuntimeError(f"Optimization failed: {opt_proc.stderr}")
 
-            tier_state = query_latest_turn_from_db(tier_db, session_id)
+            tier_state = json.loads(subprocess.run(
+                [str(cw_bin), "--db", str(tier_db), "preview", "--session", session_id],
+                capture_output=True, text=True, check=True,
+            ).stdout)
             t_turn = tier_state["turn"]
             opt_tokens = t_turn["token_usage"]["input_tokens"]
             saved_tokens = t_turn["token_usage"]["saved_by_mutations"]
@@ -324,6 +300,9 @@ def benchmark_single_case(cw_bin: Path, case: dict, upstream_url: str | None, ap
             "session_id": session_id,
             "recorded_hardware_telemetry": hw_telemetry,
             "artifact_unit_tests": unit_tests,
+            "quality_status": "not measured: tests exercise preexisting artifacts, not a model continuation",
+            "token_basis": "estimated from imported text; not provider wire usage",
+            "timing_basis": "single local processing samples; not a model speed comparison",
             "cw_engine_latencies_ms": {
                 "import_ms": import_ms,
                 "hud_json_ms": hud_ms,
@@ -343,10 +322,11 @@ def benchmark_single_case(cw_bin: Path, case: dict, upstream_url: str | None, ap
 
 def main():
     parser = argparse.ArgumentParser(description="Run live reproducible contextWatcher benchmarks.")
+    parser.add_argument("--output-dir", type=Path, default=REPO_ROOT / "benchmark" / "results")
     parser.add_argument(
         "--upstream",
-        default=os.environ.get("CW_LLAMACPP_UPSTREAM"),
-        help="Optional live OpenAI/llama.cpp server URL (e.g. http://127.0.0.1:8080) to measure live hardware TTFT",
+        default=None,
+        help="Deprecated; use continuation_benchmark.py for explicit live qualification",
     )
     parser.add_argument(
         "--api-key",
@@ -357,7 +337,7 @@ def main():
 
     cw_bin = find_or_build_cw_binary()
     print("=" * 92)
-    print(f"contextWatcher Live Reproducible Benchmark Suite (Binary: {cw_bin.relative_to(REPO_ROOT)})")
+    print(f"contextWatcher Offline Fixture Analysis (Binary: {cw_bin})")
     print("=" * 92)
 
     results = []
@@ -382,6 +362,9 @@ def main():
         )
 
         for strat_key, t in res["optimization_tiers"].items():
+            if t.get("status") == "unsupported":
+                print(f"  Tier {strat_key.upper()}: unsupported ({t['reason']})")
+                continue
             print(
                 f"  Tier {strat_key.upper():<3} : {t['context_tokens']:,} tok "
                 f"(-{t['tokens_saved']:,} tok / -{t['reduction_pct']}%) | "
@@ -407,7 +390,7 @@ def main():
                 }
             )
 
-    out_dir = REPO_ROOT / "benchmark" / "results"
+    out_dir = args.output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     out_json = out_dir / "live_benchmark_results.json"
     out_csv = out_dir / "live_benchmark_results.csv"
@@ -416,7 +399,7 @@ def main():
         json.dump(
             {
                 "generated_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "cw_binary": str(cw_bin.relative_to(REPO_ROOT)),
+                "cw_binary": str(cw_bin),
                 "cases": results,
             },
             f,
@@ -430,7 +413,7 @@ def main():
             writer.writerows(csv_rows)
 
     print("\n" + "=" * 92)
-    print(f"Done! Live computed results written to:\n  - {out_json.relative_to(REPO_ROOT)}\n  - {out_csv.relative_to(REPO_ROOT)}")
+    print(f"Done! Offline estimated results written to:\n  - {out_json}\n  - {out_csv}")
     print("=" * 92)
 
 

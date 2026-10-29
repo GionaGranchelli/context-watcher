@@ -432,6 +432,18 @@ pub struct CategoryBreakdown {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContextTurn {
+    #[serde(default)]
+    pub analysis_complete: bool,
+    #[serde(default)]
+    pub normalization_provider: Option<ProviderKind>,
+    #[serde(default)]
+    pub observed_usage: Option<Value>,
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub first_body_byte_ms: Option<u64>,
+    #[serde(default)]
+    pub applied_mutation_ids: Vec<String>,
     pub id: TurnId,
     pub session_id: SessionId,
     pub parent_turn_id: Option<TurnId>,

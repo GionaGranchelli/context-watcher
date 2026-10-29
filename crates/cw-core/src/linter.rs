@@ -133,11 +133,18 @@ pub fn analyze_context_health(
             let mut dup_nodes = Vec::new();
             let mut dup_tokens = 0u32;
             for &(node_idx, _, tok_count, _, _) in &reads[..reads.len() - 1] {
+                if !reads.iter().any(|&(later, _, _, _, _)| {
+                    later > node_idx
+                        && crate::mutation::read_is_covered_by(&nodes[node_idx], &nodes[later])
+                }) {
+                    continue;
+                }
                 stale_or_dup_node_indices.insert(node_idx);
                 dup_nodes.push(nodes[node_idx].id.clone());
                 dup_tokens += tok_count;
             }
-            findings.push(LintFinding {
+            if !dup_nodes.is_empty() {
+                findings.push(LintFinding {
                 rule_id: LintRuleId::DuplicateFileRead,
                 severity: LintSeverity::Warning,
                 title: format!("Duplicate File Reads ({}x): {path}", reads.len()),
@@ -151,6 +158,7 @@ pub fn analyze_context_health(
                     file_path: Some(path.clone()),
                 }),
             });
+            }
         }
 
         let freshness = if pinned_paths
@@ -467,6 +475,16 @@ fn check_file_modified_on_disk(
         Path::new(root).join(path)
     };
 
+    let root = workspace_root?;
+    let root = std::fs::canonicalize(root).ok()?;
+    let resolved = std::fs::canonicalize(resolved).ok()?;
+    if !resolved.starts_with(&root) {
+        return None;
+    }
+    let metadata = std::fs::metadata(&resolved).ok()?;
+    if !metadata.is_file() || metadata.len() > 4_194_304 {
+        return None;
+    }
     let Ok(disk_content) = std::fs::read_to_string(&resolved) else {
         return None;
     };

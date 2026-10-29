@@ -1,4 +1,7 @@
-use crate::ir::{ContextTurn, KvNodeStatus, LintRuleId, MutationOp, NodeKind, ToolSemanticMeta};
+use crate::ir::{
+    ContextTurn, KvNodeStatus, LintRuleId, MutationOp, MutationRule, MutationStatus, NodeKind,
+    ProviderKind, ToolSemanticMeta,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -40,9 +43,21 @@ pub struct OptimizationStrategyPlan {
 }
 
 /// Generates all 5 interactive Optimization Strategy Plans for a `ContextTurn`,
-/// calculating exact Before -> After token counts, KV cache impact, health score jumps,
-/// and per-node selectable items.
+/// with heuristic per-node estimates. Use the payload variant for whole-plan totals.
 pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyPlan> {
+    if !turn.analysis_complete
+        || turn.nodes.iter().any(|node| {
+            matches!(
+                &node.kind,
+                NodeKind::AssistantThinking {
+                    signature: Some(_),
+                    ..
+                }
+            )
+        })
+    {
+        return Vec::new();
+    }
     let total_tokens = turn.token_usage.input_tokens.max(1);
     let total_cached: u32 = turn
         .nodes
@@ -76,7 +91,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
     let mut tail_bloat_items = Vec::new();
     let mut stale_file_items = Vec::new();
     let mut log_and_thought_items = Vec::new();
-    let mut fold_items = Vec::new();
+    let fold_items: Vec<OptimizationCandidateItem> = Vec::new();
     let mut gate_tool_items = Vec::new();
 
     // Track which MCP servers were actually called
@@ -138,21 +153,20 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         }
 
         // 2. Stale or duplicate file reads
-        if stale_or_dup_node_ids.contains(&n.id) {
-            let (path, call_id) = match &n.kind {
+        if stale_or_dup_node_ids.contains(&n.id)
+            && turn
+                .nodes
+                .iter()
+                .skip_while(|other| other.id != n.id)
+                .skip(1)
+                .any(|newer| crate::mutation::read_is_covered_by(n, newer))
+        {
+            let path = match &n.kind {
                 NodeKind::ToolResult {
-                    call_id,
                     semantic_meta: Some(ToolSemanticMeta::FileRead { path, .. }),
                     ..
-                } => (
-                    Some(path.clone()),
-                    if call_id.is_empty() {
-                        None
-                    } else {
-                        Some(call_id.clone())
-                    },
-                ),
-                _ => (None, None),
+                } => Some(path.clone()),
+                _ => None,
             };
             let after_tok = 14u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
@@ -174,21 +188,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                 tokens_after: after_tok,
                 saved_tokens: saved,
                 kv_break_tokens: kv_break,
-                mutation_op: MutationOp::PruneOrStub {
-                    target_fingerprint: Some(n.fingerprint.0.clone()),
-                    target_call_id: call_id.clone(),
-                    target_json_pointer: if call_id.is_none() {
-                        Some(n.raw_json_pointer.clone())
-                    } else {
-                        None
-                    },
-                    stub_text: format!(
-                        "[cw:shadow_deduped path=\"{}\" turn={} saved_tokens={}]",
-                        path.unwrap_or_else(|| n.kind.short_label()),
-                        n.turn_seq,
-                        saved.max(0)
-                    ),
-                },
+                mutation_op: MutationOp::ShadowDedupe { file_path: path },
             });
         }
 
@@ -272,8 +272,13 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         }
 
         // 4. Old Assistant Thinking blocks
-        if matches!(n.kind, NodeKind::AssistantThinking { .. })
-            && (n.turn_seq < max_turn || tok > 50)
+        if matches!(
+            n.kind,
+            NodeKind::AssistantThinking {
+                signature: None,
+                ..
+            }
+        ) && n.turn_seq < max_turn
         {
             let after_tok = 8u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
@@ -350,54 +355,24 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         }
     }
 
-    // Build Trajectory Fold candidate for earlier turns (1 .. max_turn-1)
-    let fold_end = if max_turn > 1 { max_turn - 1 } else { 1 };
-    let mut foldable_tokens = 0u32;
-    let mut earliest_fold_start = total_cached;
-    for n in &turn.nodes {
-        if n.turn_seq <= fold_end
-            && matches!(
-                n.kind,
-                NodeKind::ToolResult { .. } | NodeKind::AssistantThinking { .. }
-            )
-        {
-            foldable_tokens += n.token_span.count;
-            earliest_fold_start = earliest_fold_start.min(n.token_span.start);
-        }
-    }
-    if foldable_tokens > 0 {
-        let after_tok = 28u32.min(foldable_tokens);
-        fold_items.push(OptimizationCandidateItem {
-            item_id: format!("fold_1_{fold_end}"),
-            node_id: None,
-            turn_seq: fold_end,
-            timestamp: None,
-            title: format!("Fold Intermediate Turns #1..#{fold_end} Trajectory"),
-            action_kind: "fold_turns".to_string(),
-            what_we_do: format!(
-                "Collapses all intermediate tool outputs and thinking blocks across Turns #1..#{fold_end} ({foldable_tokens} tok) into a single outcome summary while keeping user prompts, assistant answers, and the latest turn verbatim."
-            ),
-            why_it_matters: "Prevents in-context error imitation from past debugging steps and reclaims massive context space between sub-tasks.".to_string(),
-            content_preview: format!(
-                "[cw:folded_subtree turns=1..{fold_end}] Completed initial exploration and tool executions."
-            ),
-            tokens_before: foldable_tokens,
-            tokens_after: after_tok,
-            saved_tokens: (foldable_tokens as i32) - (after_tok as i32),
-            kv_break_tokens: total_cached.saturating_sub(earliest_fold_start),
-            mutation_op: MutationOp::FoldSubtree {
-                start_turn: 1,
-                end_turn: fold_end,
-                summary_text: format!(
-                    "Folded intermediate tool outputs and reasoning from Turns 1..{fold_end}."
-                ),
-            },
-        });
-    }
+    // Automatic folds cannot preserve factual outcomes without a reviewed summary.
+    let fold_end = max_turn.saturating_sub(1);
 
     // Assemble the 5 Strategy Plans
-    let mut strategy1_items = pin_items.clone();
-    strategy1_items.extend(tail_bloat_items);
+    // Strategy 1 (cache_safe_boost / min): Zero-KV-break candidates only
+    // (low-salience rule reminders + uncached duplicate reads and uncached tail bloat).
+    let mut strategy1_seen = HashSet::new();
+    let mut strategy1_items = Vec::new();
+    for item in pin_items
+        .iter()
+        .chain(stale_file_items.iter().filter(|i| i.kv_break_tokens == 0))
+        .chain(tail_bloat_items.iter().filter(|i| i.kv_break_tokens == 0))
+    {
+        let key = item.node_id.clone().unwrap_or_else(|| item.item_id.clone());
+        if strategy1_seen.insert(key) {
+            strategy1_items.push(item.clone());
+        }
+    }
 
     let mut strategy2_items = stale_file_items.clone();
     if strategy2_items.is_empty() {
@@ -426,7 +401,6 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                     .into_iter()
                     .filter(|i| i.turn_seq > fold_end),
             )
-            .chain(gate_tool_items)
             .chain(pin_items)
         {
             let key = item.node_id.clone().unwrap_or_else(|| item.item_id.clone());
@@ -438,7 +412,6 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         for item in stale_file_items
             .into_iter()
             .chain(log_and_thought_items)
-            .chain(gate_tool_items)
             .chain(pin_items)
         {
             let key = item.node_id.clone().unwrap_or_else(|| item.item_id.clone());
@@ -451,11 +424,11 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
     vec![
         finalize_plan(
             "cache_safe_boost",
-            "🛡️ 1. Cache-Safe Attention & Tail Boost",
-            "Zero KV Cache invalidation • Pins forgotten middle rules to the high-attention tail",
-            "🟢 100% Cache-Safe (0 KV Break)",
-            "Leaves your cached token prefix 100% untouched. Identifies rules and constraints sitting in the '<45% Lost-in-the-Middle' attention trough and injects them as a lightweight <cw_pinned_context> reminder at the very end of the prompt, while trimming only uncached tail bloat.",
-            "Boosts instruction adherence on early project rules from ~30% salience up to ~98% recency salience, with 0ms extra Time-To-First-Token (TTFT) latency.",
+            "🛡️ 1. Preserve Prefix (Minimum)",
+            "Zero-KV-break candidates only (uncached duplicate reads, uncached tail bloat, and rule reminders)",
+            "🟢 0% KV Cache Break",
+            "Selects only mutations with zero cached-prefix invalidation (kv_break_tokens == 0) while leaving any cached prefix untouched.",
+            "Preserves cached prefix tokens; use clean_code_state ('clean') to deduplicate covered reads inside an already-cached prefix.",
             total_tokens,
             turn.health_score,
             strategy1_items,
@@ -464,10 +437,10 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         finalize_plan(
             "clean_code_state",
             "🔁 2. Clean Code State (Stale & Duplicate File Eviction)",
-            "Eliminates outdated & duplicate file reads so the model only sees current code",
+            "Removes earlier reads only when a later successful read covers identical contents",
             "🟡 Surgical Prefix Dedupe",
-            "Scans all read_file / edit_file calls across the session. Replaces older duplicate file reads and reads superseded by later edits (or modified on disk) with a 1-line pointer ([cw:shadow_deduped]), while keeping the newest read of every file 100% verbatim.",
-            "Eliminates contradictory versions of the same source file in the attention window—stopping the model from hallucinating deleted functions or stale line numbers.",
+            "Compares successful file reads and their line ranges. Disjoint ranges, changed text, failed reads and unique contents remain intact.",
+            "May reduce repeated text. Continuation quality requires a separate task test.",
             total_tokens,
             turn.health_score,
             strategy2_items,
@@ -479,7 +452,7 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
             "Cuts old command outputs, stack traces, and completed thinking blocks",
             "🟡 High Savings • Preserves Full Conversation",
             "Keeps all user requests, assistant answers, and fresh file reads intact, but compacts verbose command/tool outputs (cargo test, ls, grep, stack traces) and raw thinking blocks from completed turns into concise 1-line stubs.",
-            "Strips high-entropy terminal noise and old chain-of-thought monologue that dilute model attention, typically cutting 25%–55% of context bloat.",
+            "Estimated savings depend on the selected nodes. Signed blocks and current unread results are preserved.",
             total_tokens,
             turn.health_score,
             strategy3_items,
@@ -488,10 +461,10 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         finalize_plan(
             "deep_trajectory_fold",
             "📁 4. Deep Trajectory Fold (Sub-Task Compaction)",
-            "Collapses intermediate debugging turns into a single outcome summary",
+            "Automatic trajectory folding is unavailable without a verified outcome summary",
             "🟠 Deep Compaction (Best Between Sub-Tasks)",
-            "Collapses all intermediate tool results and reasoning across earlier turns into a single structured outcome summary node, while preserving user prompts, final assistant responses, and the latest turn.",
-            "Prevents in-context error imitation (where an LLM statistically repeats errors because the context is full of failed attempts) and frees maximum room for the next feature.",
+            "No automatic folds are proposed. Manual folds require a user-supplied summary and retain originals in the store.",
+            "Continuation quality is not inferred from token reduction.",
             total_tokens,
             turn.health_score,
             strategy4_items,
@@ -500,16 +473,67 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         finalize_plan(
             "max_token_diet",
             "🔥 5. Max Token Diet (Full All-In-One Optimization)",
-            "Combines Stale File Eviction + Log & Thinking Diet + Unused Tool Gating + Tail Pinning",
-            "🔥 Maximum Token & Quality Gain (Single KV Rebuild)",
-            "Batches together Stale/Duplicate File Eviction, Old Command Log & Thinking Compaction, Unused MCP Tool Schema Gating, and High-Attention Rule Pinning into a single atomic commit.",
-            "Delivers the highest possible token reduction and jumps Context Health to ~98/100 while paying the KV cache prefix rebuild cost only once.",
+            "Combines covered-read dedupe, eligible old outputs and optional reminders",
+            "Prefix may change; review before applying",
+            "Combines the available conservative candidates. Tool schemas and automatic folds are preserved.",
+            "Savings and cache effects are estimates; no health or quality increase is assumed.",
             total_tokens,
             turn.health_score,
             strategy5_items,
             35,
         ),
     ]
+}
+
+/// Apply each complete plan to a copy so overlapping edits are counted only once.
+pub fn build_optimization_plans_for_payload(
+    turn: &ContextTurn,
+    payload: &serde_json::Value,
+    provider: ProviderKind,
+) -> Vec<OptimizationStrategyPlan> {
+    if !crate::normalizer::supports_mutation_payload(payload, provider)
+        || crate::mutation::has_signed_content(payload)
+    {
+        return Vec::new();
+    }
+    let mut plans = build_optimization_plans(turn);
+    let count = |value: &serde_json::Value| {
+        crate::normalizer::parse_request_to_nodes(value, provider, turn.sequence_number)
+            .map(|nodes| nodes.iter().map(|n| n.token_span.count).sum::<u32>())
+            .unwrap_or(0)
+    };
+    let before = count(payload);
+    for plan in &mut plans {
+        let rules: Vec<_> = plan
+            .items
+            .iter()
+            .map(|item| MutationRule {
+                id: item.item_id.clone(),
+                session_id: turn.session_id.clone(),
+                op: item.mutation_op.clone(),
+                status: MutationStatus::Committed,
+                estimated_saved_tokens: 0,
+                estimated_kv_break_tokens: 0,
+                created_at: turn.created_at,
+            })
+            .collect();
+        let mut preview = payload.clone();
+        crate::mutation::apply_mutations_to_payload(
+            &mut preview,
+            provider,
+            &rules,
+            turn.sequence_number,
+        );
+        plan.tokens_before = before;
+        plan.tokens_after = count(&preview);
+        plan.saved_tokens = before.saturating_sub(plan.tokens_after);
+        plan.saved_pct = if before > 0 {
+            plan.saved_tokens as f32 / before as f32 * 100.0
+        } else {
+            0.0
+        };
+    }
+    plans
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -539,11 +563,8 @@ fn finalize_plan(
     } else {
         kv_break.div_ceil(saved_tokens).max(1)
     };
-    let health_after = if items.is_empty() {
-        health_before
-    } else {
-        (health_before.saturating_add(health_bonus)).min(100)
-    };
+    let _ = health_bonus;
+    let health_after = health_before;
 
     OptimizationStrategyPlan {
         id: id.to_string(),

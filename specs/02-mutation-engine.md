@@ -1,5 +1,7 @@
 # Spec 02: Surgical Mutation Engine, Deterministic Overlays, Firewall & Replay
 
+> Safety implementation contract (2026-10-29): [COMPATIBILITY.md](../docs/COMPATIBILITY.md) and [REMEDIATION.md](../docs/REMEDIATION.md) supersede conflicting guarantee language below. The remaining text describes the original target design, not proof of completed or measured capabilities.
+
 **Status:** Approved  
 **Related Tickets:** `CW-024` – `CW-033`
 
@@ -94,6 +96,7 @@ When an optimization is triggered (via `/cw optimize min|mid|max`, MCP `cw_optim
     - [Pinned File]: crates/cw-core/src/ir.rs#L12-L48
     </cw_pinned_context>
     ```
+  * For OpenAI Responses requests, the block is added as an `input_text` item to the final supported `input` message. If the payload has no supported message tail, the mutation is reported as unapplied.
   * **Result:** Maximum model attention + **0% KV Cache invalidation**!
 
 ### 2.6 `NormalizePrefix` (Auto-Cache Stabilization)

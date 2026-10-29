@@ -1,0 +1,138 @@
+{
+  "schema": "contextwatcher.continuation-evidence.v1",
+  "run_date": "2026-10-29",
+  "scope": "Small task-retention qualification; not a general quality or performance benchmark",
+  "harness": {
+    "name": "OMP",
+    "version": "18.12.6"
+  },
+  "model": {
+    "family": "Qwen-family local model",
+    "model_id": "omitted",
+    "endpoint_class": "private OpenAI-compatible local inference endpoint",
+    "endpoint_address": "omitted"
+  },
+  "build": {
+    "cw_binary_sha256": "32f00b3a97589bd877372c238bcc63b3b01937959727fab91ca184126e815e6a",
+    "checked_in_runner_sha256": "9b1c2315be77c6d71fca17b7517cf17e4b557b57384f8a2fdcc991482f0e5adc",
+    "source_revision": "built from an uncommitted worktree; exact source commit not recorded"
+  },
+  "tasks": [
+    {
+      "name": "bucket-boundary-and-type-contract",
+      "independent_sessions": 3,
+      "task_template_repeated": true,
+      "checks_per_passing_answer": 12,
+      "answers_passed": 15,
+      "answers_total": 15,
+      "behavior": [
+        "reject bool and non-integers with TypeError",
+        "reject negative integers with ValueError",
+        "return copper for 0 through 6",
+        "return silver for 7 through 22",
+        "return jade for 23 and above"
+      ]
+    },
+    {
+      "name": "normalize-tags",
+      "independent_sessions": 1,
+      "task_template_repeated": false,
+      "checks_per_passing_answer": 12,
+      "answers_passed": 5,
+      "answers_total": 5,
+      "behavior": [
+        "require a list of strings or raise TypeError",
+        "strip whitespace and lowercase strings",
+        "omit empty strings",
+        "deduplicate while keeping first occurrence order",
+        "return a new list"
+      ],
+      "note": "Saved native answer passed recheck with the checked-in checker; initial runner record used an earlier checker/deadline."
+    },
+    {
+      "name": "state-transition-contract",
+      "independent_sessions": 1,
+      "task_template_repeated": false,
+      "checks_per_passing_answer": 12,
+      "answers_passed": 4,
+      "answers_total": 5,
+      "behavior": [
+        "queued plus start returns running",
+        "running plus complete returns done",
+        "running plus fail returns failed",
+        "failed plus retry returns queued",
+        "non-strings raise TypeError and all other pairs raise ValueError"
+      ],
+      "failure": "Native-compaction answer leaked KeyError for a valid state with an unsupported event; contract requires ValueError."
+    }
+  ],
+  "arms": [
+    {
+      "name": "baseline",
+      "trials": 5,
+      "answers_passed": 5,
+      "answers_total": 5,
+      "assertions_passed": 60
+    },
+    {
+      "name": "min",
+      "trials": 5,
+      "answers_passed": 5,
+      "answers_total": 5,
+      "assertions_passed": 60,
+      "source_unchanged": 5,
+      "exports_changed": 0,
+      "estimated_saved_tokens_per_trial": [0, 0, 0, 0, 0]
+    },
+    {
+      "name": "mid",
+      "trials": 5,
+      "answers_passed": 5,
+      "answers_total": 5,
+      "assertions_passed": 60,
+      "source_unchanged": 5,
+      "exports_changed": 5,
+      "estimated_saved_tokens_per_trial": [1421, 1421, 1421, 1421, 1421]
+    },
+    {
+      "name": "max",
+      "trials": 5,
+      "answers_passed": 5,
+      "answers_total": 5,
+      "assertions_passed": 60,
+      "source_unchanged": 5,
+      "exports_changed": 5,
+      "estimated_saved_tokens_per_trial": [1421, 1421, 1421, 1421, 1421]
+    },
+    {
+      "name": "native",
+      "trials": 5,
+      "answers_passed": 4,
+      "answers_total": 5,
+      "assertions_passed": 48,
+      "native_compactions_succeeded": 5
+    }
+  ],
+  "aggregate": {
+    "sessions": 5,
+    "task_families": 3,
+    "generated_answers": 25,
+    "passed": 24,
+    "assertions_passed": 288,
+    "failures": 1
+  },
+  "measurement_notes": [
+    "The 1,421-token figure is contextWatcher analyzer output, not provider-measured token usage.",
+    "The normalize-tags native answer was rechecked with the checked-in checker after the initial runner record.",
+    "Native compaction RPC succeeded in all five sessions; one resulting answer still failed its behavior contract.",
+    "No latency, cost, cache-hit, or speedup result was measured.",
+    "Trials used one model and harness; only five sessions were run across the three synthetic task families."
+  ],
+  "privacy": {
+    "credentials_included": false,
+    "exact_model_id_included": false,
+    "endpoint_address_included": false,
+    "raw_sessions_or_logs_included": false,
+    "local_paths_included": false
+  }
+}

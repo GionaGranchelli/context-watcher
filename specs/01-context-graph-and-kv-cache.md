@@ -1,5 +1,7 @@
 # Spec 01: Context Graph, Radix Prefix Tree, KV Cache X-Ray & Health Linter
 
+> Safety implementation contract (2026-10-29): [COMPATIBILITY.md](../docs/COMPATIBILITY.md) and [REMEDIATION.md](../docs/REMEDIATION.md) supersede conflicting guarantee language below. The remaining text describes the original target design, not proof of completed or measured capabilities.
+
 **Status:** Approved  
 **Related Tickets:** `CW-012` – `CW-016`
 

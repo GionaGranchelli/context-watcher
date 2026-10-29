@@ -30,7 +30,9 @@ jobs:
         run: |
           cd web
           npm ci
+          npm run check
           npm run build
+          npm audit --audit-level=high
           
       - name: Format Check
         run: cargo fmt --all -- --check
@@ -38,5 +40,10 @@ jobs:
       - name: Clippy Linter
         run: cargo clippy --workspace --all-targets -- -D warnings
         
+      - name: Dependency advisories
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit
+
       - name: Run Tests
         run: cargo test --workspace --verbose

@@ -11,7 +11,6 @@ use cw_core::{
         ContextTurn, HarnessKind, KvNodeStatus, MutationOp, MutationRule, MutationStatus, Session,
     },
     local_llm::{analyze_local_model_kv, calculate_cost_and_perf},
-    optimizer::build_optimization_plans,
     radix::build_radix_graph,
     slot_bridge::{
         DEFAULT_PAGED_ATTENTION_BLOCK_SIZE, EngineSlotInfo, SlotSplicingAction, SlotSplicingPlan,
@@ -30,6 +29,8 @@ use cw_tui::run_tui;
 use rust_embed::Embed;
 use std::path::PathBuf;
 use uuid::Uuid;
+
+mod update;
 
 #[derive(Embed)]
 #[folder = "../../web/build/"]
@@ -52,6 +53,29 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Update cw from the latest release (or build from the latest main branch)
+    Update {
+        /// Build from the latest main branch instead of downloading a release
+        #[arg(long)]
+        from_source: bool,
+        /// Install integrations but leave the running daemon untouched
+        #[arg(long)]
+        no_restart: bool,
+    },
+    /// Print the private local control credential for connecting the web UI
+    AuthToken,
+    /// Explicitly purge cw history and owned exports; never deletes the source transcript
+    Purge {
+        #[arg(long)]
+        session: String,
+        #[arg(long, default_value_t = 0)]
+        keep_turns: usize,
+    },
+    /// Print an estimated mutation preview without forwarding or rewriting history
+    Preview {
+        #[arg(long)]
+        session: String,
+    },
     /// Start the contextWatcher daemon (Control/Web UI server + HTTP/SSE Proxy + Transcript Watcher)
     Serve {
         #[arg(long, default_value_t = 4400)]
@@ -69,10 +93,13 @@ enum Commands {
         #[command(subcommand)]
         action: DaemonAction,
     },
-    /// Wrap and launch an agent harness (agy, codex, pi, opencode, aider, claude) with proxy env vars injected
+    /// Wrap and launch an agent harness (agy, codex, pi, opencode, aider, claude, hermes) with proxy env vars injected
     Wrap {
         #[arg(long, default_value_t = 4401)]
         proxy_port: u16,
+        /// Stable ID for multiple wrapper invocations in one harness conversation
+        #[arg(long)]
+        session_id: Option<String>,
         #[arg(required = true, trailing_var_arg = true)]
         cmd: Vec<String>,
     },
@@ -116,7 +143,7 @@ enum Commands {
         /// Stage optimizations into the Cache-Safe Draft Queue instead of committing immediately
         #[arg(long)]
         draft: bool,
-        /// Target a specific session ID (defaults to the most recent session unless --all / --project / --agent is set)
+        /// Target a session ID; otherwise require a unique exact workspace match
         #[arg(long)]
         session: Option<String>,
         /// Apply the strategy across ALL sessions across all projects and agents
@@ -128,7 +155,7 @@ enum Commands {
         /// Apply the strategy across all sessions belonging to a specific agent harness (`antigravity`, `codex`, `hermes`, `claude_code`)
         #[arg(long)]
         agent: Option<String>,
-        /// Also sync compacted overlays back to on-disk .jsonl transcripts (.bak created automatically)
+        /// Also export a separate compacted .jsonl copy alongside the transcript (leaving the source transcript unchanged)
         #[arg(long)]
         sync_back: bool,
     },
@@ -187,7 +214,7 @@ enum Commands {
         #[arg(long, default_value = "http://127.0.0.1:4400")]
         daemon_url: String,
     },
-    /// Safely write committed compactions back to the harness's on-disk .jsonl transcript (.bak backup created automatically)
+    /// Export a separate compacted .jsonl copy of the harness transcript (leaving the source transcript unchanged)
     SyncBack {
         #[arg(long)]
         session: Option<String>,
@@ -211,7 +238,7 @@ enum Commands {
         /// Set optimization strategy for self-healing (min, mid, max, clean_code_state, etc.)
         #[arg(long)]
         strategy: Option<String>,
-        /// Automatically sync self-healed mutations to disk transcript files (.jsonl + .bak)
+        /// Legacy setting retained for compatibility; automatic transcript writes are disabled
         #[arg(long)]
         sync_to_disk: Option<bool>,
     },
@@ -278,7 +305,7 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// One-command plugin, MCP, hook & background service installer for Antigravity, Codex, Claude Code, Pi & Hermes
+    /// Install contextWatcher integrations for Antigravity, Codex, Claude Code, Pi & Hermes
     Init {
         /// Only preview what files will be created or modified without writing to disk
         #[arg(long)]
@@ -294,7 +321,7 @@ enum Commands {
         #[arg(long)]
         session: Option<String>,
     },
-    /// Alias for `cw init`: install contextWatcher Skill & MCP config for Antigravity, Claude Code, Codex, OpenCode & Pi
+    /// Alias for `cw init`: install contextWatcher integrations for supported harnesses, including Hermes
     InstallIntegrations,
 }
 
@@ -337,12 +364,122 @@ fn default_db_path() -> PathBuf {
     cw_core::home_dir().join(".local/share/context-watcher/cw.db")
 }
 
+fn valid_proxy_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+fn without_cw_headers(existing: &str) -> String {
+    let lines: Vec<String> = existing
+        .lines()
+        .filter(|line| !is_cw_header(line))
+        .map(str::to_owned)
+        .collect();
+    lines.join("\n")
+}
+
+fn without_cw_comma_separated_headers(existing: &str) -> String {
+    let mut headers = Vec::new();
+    let mut start = 0;
+    for (index, ch) in existing.char_indices() {
+        if ch == ','
+            && existing[index + 1..]
+                .split_once(':')
+                .is_some_and(|(name, _)| !name.trim().is_empty() && !name.contains(','))
+        {
+            headers.push(&existing[start..index]);
+            start = index + 1;
+        }
+    }
+    headers.push(&existing[start..]);
+    headers
+        .into_iter()
+        .filter(|header| !is_cw_header(header))
+        .map(str::trim)
+        .filter(|header| !header.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn is_cw_header(header: &str) -> bool {
+    header
+        .split_once(':')
+        .is_some_and(|(name, _)| name.trim().to_ascii_lowercase().starts_with("x-cw-"))
+}
+
+fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
+    [
+        "model_provider=\"context_watcher\"".to_owned(),
+        "model_providers.context_watcher.name=\"contextWatcher\"".to_owned(),
+        format!(
+            "model_providers.context_watcher.base_url=\"http://127.0.0.1:{proxy_port}/openai/v1\""
+        ),
+        "model_providers.context_watcher.wire_api=\"responses\"".to_owned(),
+        "model_providers.context_watcher.requires_openai_auth=true".to_owned(),
+        "model_providers.context_watcher.env_key=\"OPENAI_API_KEY\"".to_owned(),
+        "model_providers.context_watcher.env_http_headers={\"x-cw-session-id\"=\"CW_SESSION_ID\",\"x-cw-control-token\"=\"CW_CONTROL_TOKEN\"}".to_owned(),
+        "shell_environment_policy.filters.CW_CONTROL_TOKEN=\"exclude\"".to_owned(),
+    ]
+    .into_iter()
+    .flat_map(|setting| ["--config".to_owned(), setting])
+    .collect()
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let db_path = cli.db.unwrap_or_else(default_db_path);
 
     match cli.command {
+        Commands::Update {
+            from_source,
+            no_restart,
+        } => {
+            update::run(from_source, no_restart).await?;
+        }
+        Commands::Purge {
+            session,
+            keep_turns,
+        } => {
+            let store = CwStore::open(&db_path)?;
+            println!(
+                "Removed {} cw turn records. Source transcripts were not changed.",
+                store.purge_history(&session, keep_turns)?
+            );
+        }
+        Commands::Preview { session } => {
+            let store = CwStore::open(&db_path)?;
+            let latest = store
+                .get_latest_turn(&session)?
+                .ok_or_else(|| anyhow::anyhow!("No recorded turn"))?;
+            let meta = store
+                .get_session(&session)?
+                .ok_or_else(|| anyhow::anyhow!("Session not found"))?;
+            let mut payload = store
+                .get_turn_raw_payload(&latest.id)?
+                .ok_or_else(|| anyhow::anyhow!("Original unavailable"))?;
+            let provider = latest.normalization_provider.unwrap_or(meta.provider);
+            cw_core::mutation::apply_mutations_to_payload(
+                &mut payload,
+                provider,
+                &store.list_mutations(&session)?,
+                latest.sequence_number,
+            );
+            let preview = recompute_latest_turn_in_store(&store, &session)
+                .ok_or_else(|| anyhow::anyhow!("Preview unavailable"))?;
+            println!(
+                "{}",
+                serde_json::to_string(
+                    &serde_json::json!({"turn":preview,"payload":payload,"basis":"estimated mutation preview; not an upstream measurement"})
+                )?
+            );
+        }
+        Commands::AuthToken => {
+            println!("{}", cw_core::control::control_token(true)?);
+        }
         Commands::Mcp { daemon_url } => {
             run_mcp_stdio_server(&daemon_url).await?;
         }
@@ -372,7 +509,8 @@ async fn main() -> Result<()> {
             });
             spawn_transcript_watcher(store.clone(), ws_root);
 
-            let state = DaemonState::new(store);
+            let mut state = DaemonState::new(store);
+            state.control_token = cw_core::control::control_token(true)?;
             let proxy_app = build_proxy_router(state.clone());
             let ui_and_api_app = build_api_router(state).fallback(serve_embedded_web_ui);
 
@@ -385,6 +523,7 @@ async fn main() -> Result<()> {
             println!("│ • Intercepting Proxy   : http://{proxy_addr:<31} │");
             println!("│   - Anthropic Base URL : http://{proxy_addr}/anthropic          │");
             println!("│   - OpenAI Base URL    : http://{proxy_addr}/openai/v1          │");
+            println!("│   - DeepSeek Base URL  : http://{proxy_addr}/deepseek           │");
             println!("│   - Gemini Base URL    : http://{proxy_addr}/gemini             │");
             println!("│   - Ollama Local Proxy : http://{proxy_addr}/ollama             │");
             println!("│   - llama.cpp Proxy    : http://{proxy_addr}/llamacpp           │");
@@ -422,11 +561,52 @@ async fn main() -> Result<()> {
                 status_daemon(port)?;
             }
         },
-        Commands::Wrap { proxy_port, cmd } => {
+        Commands::Wrap {
+            proxy_port,
+            session_id,
+            cmd,
+        } => {
             let bin = &cmd[0];
-            let args = &cmd[1..];
-            let session_id = format!("wrap_{}_{}", bin, &Uuid::new_v4().to_string()[..6]);
-            let status = std::process::Command::new(bin)
+            let is_codex = PathBuf::from(bin)
+                .file_stem()
+                .is_some_and(|name| name.eq_ignore_ascii_case("codex"));
+            let is_hermes = PathBuf::from(bin)
+                .file_stem()
+                .is_some_and(|name| name.eq_ignore_ascii_case("hermes"));
+            let is_gemini = PathBuf::from(bin)
+                .file_stem()
+                .is_some_and(|name| name.eq_ignore_ascii_case("gemini"));
+            let mut args = Vec::new();
+            if is_codex {
+                args.extend(codex_proxy_config_args(proxy_port));
+            }
+            args.extend(cmd[1..].iter().cloned());
+            if is_hermes && cmd.get(1).is_some_and(|arg| arg == "chat") {
+                // Hermes config takes precedence over DEEPSEEK_BASE_URL; its chat CLI flag wins.
+                args.extend([
+                    "--base-url".to_owned(),
+                    format!("http://127.0.0.1:{proxy_port}/deepseek"),
+                ]);
+            }
+            let session_id = session_id.or_else(|| std::env::var("CW_SESSION_ID").ok());
+            if session_id
+                .as_deref()
+                .is_some_and(|id| !valid_proxy_session_id(id))
+            {
+                anyhow::bail!("Invalid session ID; use 1-128 ASCII letters, digits, '_' or '-'");
+            }
+            let token = if is_codex {
+                Some(cw_core::control::control_token(true)?)
+            } else {
+                None
+            };
+            let anthropic_headers =
+                without_cw_headers(&std::env::var("ANTHROPIC_CUSTOM_HEADERS").unwrap_or_default());
+            let gemini_headers = without_cw_comma_separated_headers(
+                &std::env::var("GEMINI_CLI_CUSTOM_HEADERS").unwrap_or_default(),
+            );
+            let mut process = std::process::Command::new(bin);
+            process
                 .args(args)
                 .env(
                     "ANTHROPIC_BASE_URL",
@@ -437,11 +617,38 @@ async fn main() -> Result<()> {
                     format!("http://127.0.0.1:{proxy_port}/openai/v1"),
                 )
                 .env(
-                    "GEMINI_API_BASE_URL",
+                    "OPENAI_API_BASE",
+                    format!("http://127.0.0.1:{proxy_port}/openai/v1"),
+                )
+                .env(
+                    "GOOGLE_GEMINI_BASE_URL",
                     format!("http://127.0.0.1:{proxy_port}/gemini"),
                 )
-                .env("CW_SESSION_ID", &session_id)
-                .status()?;
+                .env("ANTHROPIC_CUSTOM_HEADERS", anthropic_headers);
+            if is_gemini {
+                process.env("GEMINI_CLI_CUSTOM_HEADERS", gemini_headers);
+            }
+            process
+                .env_remove("CW_CONTROL_TOKEN")
+                .env_remove("CW_CONTROL_TOKEN_FILE");
+            if let Some(token) = token {
+                process.env("CW_CONTROL_TOKEN", token);
+            }
+            if is_hermes {
+                process.env_remove("CW_SESSION_ID").env(
+                    "DEEPSEEK_BASE_URL",
+                    format!("http://127.0.0.1:{proxy_port}/deepseek"),
+                );
+                process.env("CW_CONTROL_TOKEN_FILE", cw_core::control::token_path());
+                if let Some(session_id) = session_id.as_deref() {
+                    process.env("CW_SESSION_ID", session_id);
+                }
+            } else if let Some(session_id) = session_id.as_deref() {
+                process.env("CW_SESSION_ID", session_id);
+            } else {
+                process.env("CW_SESSION_ID", format!("wrap_{}", Uuid::new_v4().simple()));
+            }
+            let status = process.status()?;
             std::process::exit(status.code().unwrap_or(1));
         }
         Commands::Tui { session } => {
@@ -463,6 +670,13 @@ async fn main() -> Result<()> {
                 return Ok(());
             };
             let mutations = store.list_mutations(&sess_id)?;
+            if let Ok(ap_cfg) = store.get_autopilot_config()
+                && ap_cfg.safety_version < 2
+            {
+                println!(
+                    "⚠️  Migration Notice: Legacy Auto-Pilot configuration (safety_version < 2) was disabled during the safety upgrade. Run `cw autopilot --enable` to re-enable automatic background optimization."
+                );
+            }
 
             println!(
                 "Session      : {} ({} • {})",
@@ -641,7 +855,7 @@ async fn main() -> Result<()> {
                     let Some(turn) = store.get_latest_turn(&s.id)? else {
                         continue;
                     };
-                    let plans = build_optimization_plans(&turn);
+                    let plans = store.optimization_plans(&turn)?;
                     let Some(plan) = plans.iter().find(|p| p.id == strat_id) else {
                         anyhow::bail!(
                             "Unknown strategy '{}'. Valid IDs: cache_safe_boost, clean_code_state, surgical_log_diet, deep_trajectory_fold, max_token_diet",
@@ -714,7 +928,7 @@ async fn main() -> Result<()> {
                 println!("No turns recorded for session {sess_id}.");
                 return Ok(());
             };
-            let plans = build_optimization_plans(&turn);
+            let plans = store.optimization_plans(&turn)?;
 
             if strategy.is_none() || dry_run {
                 println!(
@@ -784,6 +998,11 @@ async fn main() -> Result<()> {
             }
 
             if !dry_run && let Some(strat_id) = strategy {
+                if strat_id == "deep_trajectory_fold" {
+                    anyhow::bail!(
+                        "Automatic trajectory folding is unavailable without a verified outcome summary; use `cw fold <start_turn> <end_turn> --summary \"...\"` or `cw_fold_turns`"
+                    );
+                }
                 let Some(plan) = plans.iter().find(|p| p.id == strat_id) else {
                     anyhow::bail!(
                         "Unknown strategy '{}'. Valid IDs: cache_safe_boost, clean_code_state, surgical_log_diet, deep_trajectory_fold, max_token_diet",
@@ -825,7 +1044,8 @@ async fn main() -> Result<()> {
                         }
                     }
                     if sync_back {
-                        let _ = sync_mutations_to_transcript_on_disk(&store, &sess_id);
+                        let report = sync_mutations_to_transcript_on_disk(&store, &sess_id)?;
+                        println!("Exported compacted copy: {}", report.export_path);
                     }
                 }
                 println!(
@@ -1004,10 +1224,10 @@ async fn main() -> Result<()> {
                 anyhow::bail!("No active session found");
             };
             let report = sync_mutations_to_transcript_on_disk(&store, &sess_id)?;
-            println!("✅ Synced compacted context back to harness transcript on disk!");
+            println!("Exported a compacted copy; source transcript unchanged.");
             println!("  • Session         : {}", report.session_id);
             println!("  • Transcript Path : {}", report.transcript_path);
-            println!("  • Safe Backup     : {}", report.backup_path);
+            println!("  • Export Path     : {}", report.export_path);
             println!("  • Steps Compacted : {}", report.steps_compacted);
             println!(
                 "  • Disk Size       : {} bytes -> {} bytes (-{} bytes)",
@@ -1091,6 +1311,7 @@ async fn main() -> Result<()> {
         } => {
             let store = CwStore::open(&db_path)?;
             let mut cfg = store.get_autopilot_config()?;
+            let migrated_from_legacy = cfg.safety_version < 2;
             let mut changed = false;
             if enable {
                 cfg.enabled = true;
@@ -1113,6 +1334,10 @@ async fn main() -> Result<()> {
             }
             if changed {
                 store.set_autopilot_config(&cfg)?;
+            } else if migrated_from_legacy {
+                println!(
+                    "⚠️  Migration Notice: Legacy Auto-Pilot configuration (safety_version < 2) was disabled during the safety upgrade. Run `cw autopilot --enable` to re-enable automatic background optimization."
+                );
             }
             println!(
                 "Auto-Pilot Status: {}",
@@ -1123,7 +1348,7 @@ async fn main() -> Result<()> {
                 }
             );
             println!(
-                "  1. Zero-Break Tail Hygiene : {} (spill >{} tok tool outputs to /tmp/cw_logs/)",
+                "  1. Legacy tail hygiene     : {} (threshold {} tok; automatic spills disabled)",
                 cfg.zero_break_tail_hygiene, cfg.tail_max_tool_tokens
             );
             println!(
@@ -1236,204 +1461,29 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-struct CallerContext {
-    detected_harness: Option<HarnessKind>,
-    open_transcripts: Vec<String>,
-}
-
-fn detect_caller_context() -> CallerContext {
-    let mut detected_harness = None;
-    let mut open_transcripts = Vec::new();
-
-    if let Ok(h) = std::env::var("CW_HARNESS") {
-        detected_harness = Some(HarnessKind::from_str_lossy(&h));
-    } else if let Ok(agent) = std::env::var("AI_AGENT")
-        && agent.contains("hermes")
-    {
-        detected_harness = Some(HarnessKind::Hermes);
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        let mut current_pid = std::process::id();
-        for _ in 0..6 {
-            let status_path = format!("/proc/{current_pid}/status");
-            let Ok(status_str) = std::fs::read_to_string(&status_path) else {
-                break;
-            };
-
-            let mut ppid: Option<u32> = None;
-            for line in status_str.lines() {
-                if let Some(rest) = line.strip_prefix("PPid:")
-                    && let Ok(p) = rest.trim().parse::<u32>()
-                {
-                    ppid = Some(p);
-                    break;
-                }
-            }
-
-            let Some(parent_pid) = ppid else { break };
-            if parent_pid == 0 || parent_pid == 1 {
-                break;
-            }
-
-            let comm = std::fs::read_to_string(format!("/proc/{parent_pid}/comm"))
-                .unwrap_or_default()
-                .trim()
-                .to_lowercase();
-            let cmdline = std::fs::read_to_string(format!("/proc/{parent_pid}/cmdline"))
-                .unwrap_or_default()
-                .to_lowercase();
-
-            if detected_harness.is_none() {
-                if comm == "omp" || cmdline.contains("omp") {
-                    detected_harness = Some(HarnessKind::Omp);
-                } else if (comm == "pi" || cmdline.contains("pi-agent"))
-                    && !comm.contains("python")
-                    && !comm.contains("pip")
-                {
-                    detected_harness = Some(HarnessKind::Pi);
-                } else if comm.contains("codex") || cmdline.contains("codex") {
-                    detected_harness = Some(HarnessKind::Codex);
-                } else if comm.contains("claude") || cmdline.contains("claude") {
-                    detected_harness = Some(HarnessKind::ClaudeCode);
-                } else if comm.contains("hermes") || cmdline.contains("hermes") {
-                    detected_harness = Some(HarnessKind::Hermes);
-                } else if comm.contains("agy") || cmdline.contains("antigravity") {
-                    detected_harness = Some(HarnessKind::Antigravity);
-                }
-            }
-
-            if let Ok(entries) = std::fs::read_dir(format!("/proc/{parent_pid}/fd")) {
-                for entry in entries.flatten() {
-                    if let Ok(link) = std::fs::read_link(entry.path()) {
-                        let path_str = link.to_string_lossy();
-                        if (path_str.ends_with(".jsonl") || path_str.ends_with(".db"))
-                            && (path_str.contains("/.omp/")
-                                || path_str.contains("/.pi/")
-                                || path_str.contains("/.codex/")
-                                || path_str.contains("/.claude/")
-                                || path_str.contains("/.gemini/")
-                                || path_str.contains("/.hermes/"))
-                        {
-                            open_transcripts.push(path_str.to_string());
-                        }
-                    }
-                }
-            }
-
-            current_pid = parent_pid;
-        }
-    }
-
-    CallerContext {
-        detected_harness,
-        open_transcripts,
-    }
-}
-
 fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<String>> {
-    if let Some(s) = explicit {
-        return Ok(Some(s));
+    let selected = explicit
+        .or_else(|| std::env::var("CW_SESSION_ID").ok())
+        .filter(|s| !s.trim().is_empty());
+    if let Some(id) = selected {
+        anyhow::ensure!(store.get_session(&id)?.is_some(), "Session not found: {id}");
+        return Ok(Some(id));
     }
-    if let Ok(env_sess) = std::env::var("CW_SESSION_ID")
-        && !env_sess.trim().is_empty()
-    {
-        return Ok(Some(env_sess.trim().to_string()));
-    }
-
-    let ctx = detect_caller_context();
-    let mut sources = store.list_session_sources().unwrap_or_default();
-    if sources.is_empty() {
-        cw_harnesses::scan_and_import_all_transcripts_once(store);
-        sources = store.list_session_sources().unwrap_or_default();
-    }
-
-    // 1. Direct open file descriptor match: if caller process has an active session file open
-    for open_file in &ctx.open_transcripts {
-        for (sess_id, src_path) in &sources {
-            if (open_file == src_path
-                || src_path.ends_with(open_file)
-                || open_file.ends_with(src_path))
-                && let Some(sess) = store.get_session(sess_id).ok().flatten()
-            {
-                if let Some(ref caller_h) = ctx.detected_harness
-                    && &sess.harness != caller_h
-                {
-                    continue;
-                }
-                return Ok(Some(sess_id.clone()));
-            }
-        }
-        if let Some(file_name) = std::path::Path::new(open_file)
-            .file_name()
-            .and_then(|n| n.to_str())
-            && let Some((_, uuid_part)) = file_name.split_once('_')
-        {
-            let slug = &uuid_part[..uuid_part.len().min(12)];
-            for sess_id in sources.keys() {
-                if sess_id.contains(slug)
-                    && let Some(sess) = store.get_session(sess_id).ok().flatten()
-                {
-                    if let Some(ref caller_h) = ctx.detected_harness
-                        && &sess.harness != caller_h
-                    {
-                        continue;
-                    }
-                    return Ok(Some(sess_id.clone()));
-                }
-            }
-        }
-    }
-
+    let cwd = std::env::current_dir()?;
     let sessions = store.list_sessions()?;
-    if sessions.is_empty() {
-        return Ok(None);
-    }
-
-    let cwd = std::env::current_dir().ok();
-    let cwd_str = cwd.as_ref().map(|c| c.to_string_lossy().to_string());
-
-    // 2. Score candidate sessions by harness match and workspace proximity
-    let mut scored: Vec<(&Session, i32)> = sessions
+    let matching: Vec<_> = sessions
         .iter()
-        .map(|s| {
-            let mut score = 0i32;
-
-            // Harness match
-            if let Some(ref caller_h) = ctx.detected_harness {
-                if &s.harness == caller_h {
-                    score += 500;
-                } else {
-                    score -= 500;
-                }
-            }
-
-            // Workspace match
-            if let (Some(cwd_path), Some(ws)) = (&cwd_str, &s.workspace_root) {
-                if ws == cwd_path {
-                    score += 300; // Exact match
-                } else if cwd_path.starts_with(ws) {
-                    score += 150; // Inside project workspace
-                } else if ws.starts_with(cwd_path) {
-                    score += 30; // Project is a subfolder
-                }
-            }
-
-            (s, score)
+        .filter(|s| {
+            s.workspace_root
+                .as_deref()
+                .is_some_and(|root| std::path::Path::new(root) == cwd)
         })
         .collect();
-
-    // Stable sort preserves recency order for equal scores
-    scored.sort_by_key(|b| std::cmp::Reverse(b.1));
-
-    if let Some((best_session, score)) = scored.first()
-        && *score > -300
-    {
-        return Ok(Some(best_session.id.clone()));
+    match matching.as_slice() {
+        [] => Ok(None),
+        [session] => Ok(Some(session.id.clone())),
+        _ => anyhow::bail!("Several sessions match this workspace. Pass --session explicitly."),
     }
-
-    Ok(sessions.first().map(|s| s.id.clone()))
 }
 
 fn save_cli_mutation(store: &CwStore, session_id: &str, op: MutationOp, draft: bool) -> Result<()> {
@@ -1483,14 +1533,8 @@ fn project_label_from_workspace(ws: Option<&str>) -> String {
 }
 
 fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
-    let mut sessions = store.list_sessions()?;
-    if sessions.is_empty() {
-        // Automatically attempt fast synchronous discovery of on-disk transcripts (like rtk discover)
-        let discovered = cw_harnesses::scan_and_import_all_transcripts_once(store);
-        if discovered > 0 {
-            sessions = store.list_sessions()?;
-        }
-    }
+    let sessions = store.list_sessions()?;
+
     if sessions.is_empty() {
         println!(
             "┌──────────────────────────────────────────────────────────────────────────────────┐"
@@ -1548,7 +1592,7 @@ fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
         let Some(turn) = store.get_latest_turn(&s.id)? else {
             continue;
         };
-        let plans = build_optimization_plans(&turn);
+        let plans = store.optimization_plans(&turn)?;
         let max_cut = plans
             .iter()
             .find(|p| p.id == "max_token_diet")
@@ -2054,7 +2098,7 @@ async fn run_slot_bridge_report(
                 slack_tokens,
             } => {
                 println!(
-                    "  Action Result            : 🔵 BlockAlignmentPad: recommend expanding {:?} -> {:?} (+{} tok) for 100% clean page unmap",
+                    "  Action Result            : 🔵 BlockAlignmentPad: estimated expansion {:?} -> {:?} (+{} tok); physical unmap unsupported",
                     original_range, aligned_range, slack_tokens
                 );
             }
@@ -2098,7 +2142,8 @@ fn run_hud_report(
 
     let plans = latest_turn
         .as_ref()
-        .map(build_optimization_plans)
+        .map(|turn| store.optimization_plans(turn))
+        .transpose()?
         .unwrap_or_default();
     let cuttable = plans
         .iter()
@@ -2477,14 +2522,14 @@ When invoked for `/context-watcher` or `/cw` with any subcommand or level (`min`
 
 ### Direct Shell Commands:
 - **Optimization:**
-  - `min`: `~/.local/bin/cw optimize -s min --sync-back`
-  - `mid`: `~/.local/bin/cw optimize -s mid --sync-back`
-  - `max`: `~/.local/bin/cw optimize -s max --sync-back`
+  - `min`: `~/.local/bin/cw optimize -s min --sync-back` (0-KV-break uncached duplicate reads/tail bloat + rule reminders; use `clean_code_state` for full covered read deduplication)
+  - `mid`: `~/.local/bin/cw optimize -s mid --sync-back` (compacts old tool/command outputs and unsigned thinking blocks)
+  - `max`: `~/.local/bin/cw optimize -s max --sync-back` (combines covered read deduplication, old tool/thinking compaction, and rule reminders; use `cw_fold_turns` with an explicit summary to fold turns)
 - **Inspection:**
   - `status`: `~/.local/bin/cw status`
   - `gain`: `~/.local/bin/cw gain`
 
-If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, you may call it with `{"strategy_id": "<level>", "sync_to_disk": true}`. Otherwise, execute the shell command above directly.
+If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, you may call it with `{"strategy_id": "<level>", "export_compacted": true}` (which applies the session overlay and exports a separate compacted `.jsonl` copy without modifying the source transcript in-place). Otherwise, execute the shell command above directly.
 "#;
 
     let skill_cw_md = r#"---
@@ -2500,14 +2545,14 @@ When invoked for `/cw` or `/context-watcher` with any subcommand or level (`min`
 
 ### Direct Shell Commands:
 - **Optimization:**
-  - `min`: `~/.local/bin/cw optimize -s min --sync-back`
-  - `mid`: `~/.local/bin/cw optimize -s mid --sync-back`
-  - `max`: `~/.local/bin/cw optimize -s max --sync-back`
+  - `min`: `~/.local/bin/cw optimize -s min --sync-back` (0-KV-break uncached duplicate reads/tail bloat + rule reminders; use `clean_code_state` for full covered read deduplication)
+  - `mid`: `~/.local/bin/cw optimize -s mid --sync-back` (compacts old tool/command outputs and unsigned thinking blocks)
+  - `max`: `~/.local/bin/cw optimize -s max --sync-back` (combines covered read deduplication, old tool/thinking compaction, and rule reminders; use `cw_fold_turns` with an explicit summary to fold turns)
 - **Inspection:**
   - `status`: `~/.local/bin/cw status`
   - `gain`: `~/.local/bin/cw gain`
 
-If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, you may call it with `{"strategy_id": "<level>", "sync_to_disk": true}`. Otherwise, execute the shell command above directly.
+If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, you may call it with `{"strategy_id": "<level>", "export_compacted": true}` (which applies the session overlay and exports a separate compacted `.jsonl` copy without modifying the source transcript in-place). Otherwise, execute the shell command above directly.
 "#;
 
     let agy_mcp_json = serde_json::to_string_pretty(&serde_json::json!({
@@ -2539,12 +2584,12 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
         let _ = std::fs::write(
             agy_commands_dir.join("cw.toml"),
             "description = \"Run contextWatcher compaction: /cw optimize min|mid|max, /cw gain, or /cw status\"\n\
-             prompt = \"Execute contextWatcher optimization with intensity {{args}} (min, mid, or max). Call tool cw_optimize_strategy with strategy_id: '{{args}}' and sync_to_disk: true to compact context bloat.\"\n",
+             prompt = \"Execute contextWatcher optimization with intensity {{args}} (min, mid, or max). Call tool cw_optimize_strategy with strategy_id: '{{args}}' and export_compacted: true to apply session overlays and export a compacted copy.\"\n",
         );
         let _ = std::fs::write(
             agy_commands_dir.join("context-watcher.toml"),
             "description = \"Run contextWatcher compaction: /context-watcher optimize min|mid|max, gain, or status\"\n\
-             prompt = \"Execute contextWatcher optimization with intensity {{args}} (min, mid, or max). Call tool cw_optimize_strategy with strategy_id: '{{args}}' and sync_to_disk: true to compact context bloat.\"\n",
+             prompt = \"Execute contextWatcher optimization with intensity {{args}} (min, mid, or max). Call tool cw_optimize_strategy with strategy_id: '{{args}}' and export_compacted: true to apply session overlays and export a compacted copy.\"\n",
         );
         let _ = std::fs::write(
             agy_commands_dir.join("cw-gain.toml"),
@@ -2633,7 +2678,7 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
 
             let claude_cmd_content = "# /cw [optimize min|mid|max | gain | status]\n\n\
                  Execute contextWatcher optimization with arguments: `$ARGUMENTS`.\n\
-                 - If `$ARGUMENTS` starts with `optimize` or `opt` or is `min`, `mid`, or `max`: call tool `cw_optimize_strategy` with `strategy_id` set to the level (defaulting to `\"mid\"`) and `sync_to_disk: true`.\n\
+                 - If `$ARGUMENTS` starts with `optimize` or `opt` or is `min`, `mid`, or `max`: call tool `cw_optimize_strategy` with `strategy_id` set to the level (defaulting to `\"mid\"`) and `export_compacted: true`.\n\
                  - If `$ARGUMENTS` is `gain`: run `cw gain` via Bash.\n\
                  - If `$ARGUMENTS` is `status`: call tool `cw_context_status`.\n";
 
@@ -2684,14 +2729,43 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
     if hermes_dir.exists() {
         let hermes_skill_cw_dir = hermes_dir.join("skills/cw");
         let hermes_skill_full_dir = hermes_dir.join("skills/context-watcher");
+        let hermes_plugin_dir = hermes_dir.join("plugins/context-watcher");
         if !dry_run {
             let _ = std::fs::create_dir_all(&hermes_skill_cw_dir);
             let _ = std::fs::create_dir_all(&hermes_skill_full_dir);
             let _ = std::fs::write(hermes_skill_cw_dir.join("SKILL.md"), skill_cw_md);
             let _ = std::fs::write(hermes_skill_full_dir.join("SKILL.md"), skill_md);
+            std::fs::create_dir_all(&hermes_plugin_dir)?;
+            std::fs::write(
+                hermes_plugin_dir.join("plugin.yaml"),
+                include_str!("../../../plugins/hermes/context-watcher/plugin.yaml"),
+            )?;
+            std::fs::write(
+                hermes_plugin_dir.join("__init__.py"),
+                include_str!("../../../plugins/hermes/context-watcher/__init__.py"),
+            )?;
+            if std::process::Command::new("hermes")
+                .args([
+                    "plugins",
+                    "enable",
+                    "context-watcher",
+                    "--no-allow-tool-override",
+                ])
+                .status()
+                .is_ok_and(|status| status.success())
+            {
+                println!("           Hermes contextWatcher middleware enabled for new sessions.");
+            } else {
+                println!(
+                    "           Run `hermes plugins enable context-watcher` to activate proxy middleware."
+                );
+            }
+            println!(
+                "           Launch with `cw wrap hermes chat` (resume with `cw wrap hermes chat --resume <id>`); direct `hermes` calls bypass the cw proxy."
+            );
         }
         println!(
-            "  [5/6] Hermes Agent Skill     : {} (/context-watcher & /cw skills)",
+            "  [5/6] Hermes Skill + Plugin  : {} (/context-watcher & /cw; enable proxy middleware)",
             hermes_skill_full_dir.display()
         );
     }
@@ -2808,4 +2882,38 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
     println!("   cw status            # Inspect latest active session health & KV cache hit ratio");
     println!("   cw optimize          # Run or preview the 5 compaction strategies");
     Ok(())
+}
+
+#[cfg(test)]
+mod wrap_tests {
+    use super::*;
+    #[test]
+    fn wrapper_removes_cw_credentials_from_harness_environment() {
+        let headers = without_cw_headers(
+            "x-existing: yes\nx-cw-session-id: forged\nX-CW-CONTROL-TOKEN: stale\nX-CW-PRIVATE: value",
+        );
+        assert_eq!(headers, "x-existing: yes");
+        assert_eq!(
+            without_cw_comma_separated_headers(
+                "x-existing: yes, x-cw-session-id: forged, authorization: Bearer a,b, X-CW-PRIVATE: stale"
+            ),
+            "x-existing: yes, authorization: Bearer a,b"
+        );
+        assert!(valid_proxy_session_id("pi_session-12"));
+        assert!(!valid_proxy_session_id("../other"));
+        assert!(!valid_proxy_session_id(""));
+    }
+
+    #[test]
+    fn codex_wrapper_uses_proxy_provider_and_environment_backed_headers() {
+        let args = codex_proxy_config_args(5432);
+        let settings = args.join(" ");
+        assert!(settings.contains("model_provider=\"context_watcher\""));
+        assert!(settings.contains("127.0.0.1:5432/openai/v1"));
+        assert!(settings.contains("x-cw-session-id\"=\"CW_SESSION_ID"));
+        assert!(settings.contains("x-cw-control-token\"=\"CW_CONTROL_TOKEN"));
+        assert!(settings.contains("env_key=\"OPENAI_API_KEY\""));
+        assert!(settings.contains("shell_environment_policy.filters.CW_CONTROL_TOKEN"));
+        assert!(!settings.contains("private-token"));
+    }
 }

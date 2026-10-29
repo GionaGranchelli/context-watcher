@@ -9,7 +9,15 @@ pub async fn run_mcp_stdio_server(daemon_api_url: &str) -> Result<()> {
     let stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
     let mut reader = BufReader::new(stdin).lines();
-    let client = reqwest::Client::new();
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::AUTHORIZATION,
+        format!("Bearer {}", cw_core::control::control_token(true)?).parse()?,
+    );
+    let client = reqwest::Client::builder()
+        .default_headers(headers)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?;
 
     while let Some(line) = reader.next_line().await? {
         if line.trim().is_empty() {
@@ -116,7 +124,7 @@ pub fn mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string", "description": "Optional session ID (defaults to latest active session)" }
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or the unique session matching the current workspace; pass explicitly when several sessions share the workspace)" }
                 }
             }
         },
@@ -126,7 +134,7 @@ pub fn mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to unique current-workspace match)" },
                     "file_path": { "type": "string", "description": "Optional specific file path to deduplicate" }
                 }
             }
@@ -137,7 +145,7 @@ pub fn mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to unique current-workspace match)" },
                     "file_path": { "type": "string", "description": "Optional specific file path to deduplicate" }
                 }
             }
@@ -148,7 +156,7 @@ pub fn mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to unique current-workspace match)" },
                     "start_turn": { "type": "integer" },
                     "end_turn": { "type": "integer" },
                     "outcome_summary": { "type": "string" }
@@ -162,7 +170,7 @@ pub fn mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to unique current-workspace match)" },
                     "call_id": { "type": "string" },
                     "summary": { "type": "string" }
                 },
@@ -175,7 +183,7 @@ pub fn mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to unique current-workspace match)" },
                     "label": { "type": "string" },
                     "content": { "type": "string" }
                 },
@@ -188,7 +196,7 @@ pub fn mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to unique current-workspace match)" },
                     "label": { "type": "string", "description": "Optional label substring to unpin only matching items. Omit to clear all pins." },
                     "clear_all_mutations": { "type": "boolean", "description": "If true, clears all active mutations (pins, prunes, folds) for the session." }
                 }
@@ -200,7 +208,7 @@ pub fn mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to unique current-workspace match)" },
                     "disable_servers": { "type": "array", "items": { "type": "string" } },
                     "disable_tools": { "type": "array", "items": { "type": "string" } }
                 }
@@ -208,18 +216,22 @@ pub fn mcp_tool_definitions() -> Value {
         },
         {
             "name": "cw_optimize_strategy",
-            "description": "Applies a context optimization intensity level (`min`, `mid`, `max`) or named strategy (`cache_safe_boost`, `clean_code_state`, `surgical_log_diet`, `deep_trajectory_fold`, `max_token_diet`) and optionally syncs the compacted context back to the harness's disk transcript.",
+            "description": "Applies a context optimization intensity level (`min`, `mid`, `max`) or named strategy (`cache_safe_boost`, `clean_code_state`, `surgical_log_diet`, `max_token_diet`) as a session overlay, and optionally exports a separate compacted `.jsonl` copy (leaving the source harness transcript unchanged).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "session_id": { "type": "string" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to unique current-workspace match)" },
                     "strategy_id": {
                         "type": "string",
-                        "description": "Intensity level (`min` | `mid` | `max`) or Strategy ID (`cache_safe_boost` | `clean_code_state` | `surgical_log_diet` | `deep_trajectory_fold` | `max_token_diet`)"
+                        "description": "Intensity level (`min` | `mid` | `max`) or Strategy ID (`cache_safe_boost` | `clean_code_state` | `surgical_log_diet` | `max_token_diet`). Use `cw_fold_turns` for explicit turn folding."
+                    },
+                    "export_compacted": {
+                        "type": "boolean",
+                        "description": "If true, exports a separate compacted `.jsonl` copy to cw's export directory while leaving the source transcript untouched."
                     },
                     "sync_to_disk": {
                         "type": "boolean",
-                        "description": "If true, writes compacted steps back to the session's .jsonl transcript on disk (creating a .bak backup first)."
+                        "description": "Legacy alias for `export_compacted`: exports a separate compacted `.jsonl` copy without modifying the source transcript in-place."
                     }
                 },
                 "required": ["strategy_id"]
@@ -250,32 +262,18 @@ async fn execute_mcp_tool(
     }
 
     let base = base_url.trim_end_matches('/');
-    let session_id = match args.get("session_id").and_then(|v| v.as_str()) {
-        Some(s) if !s.is_empty() => s.to_string(),
-        _ => {
-            let sessions: Vec<Value> = client
-                .get(format!("{base}/api/v1/sessions"))
-                .send()
-                .await?
-                .json()
-                .await?;
-            sessions
-                .first()
-                .and_then(|s| s.get("id"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("default")
-                .to_string()
-        }
-    };
+    let session_id = resolve_mcp_session_id(client, base, args).await?;
 
+    let graph: Value = client
+        .get(format!("{base}/api/v1/sessions/{session_id}/graph"))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let revision = graph.get("revision").and_then(Value::as_str).unwrap_or("");
     match tool_name {
         "cw_context_status" => {
-            let graph: Value = client
-                .get(format!("{base}/api/v1/sessions/{session_id}/graph"))
-                .send()
-                .await?
-                .json()
-                .await?;
             let Some(turn) = graph.get("latest_turn").filter(|t| !t.is_null()) else {
                 return Ok(format!("Session '{session_id}' has no recorded turns yet."));
             };
@@ -362,13 +360,14 @@ async fn execute_mcp_tool(
             let only_pins = !clear_all;
             let mut req = client
                 .delete(format!("{base}/api/v1/sessions/{session_id}/mutations"))
+                .header(reqwest::header::IF_MATCH, revision)
                 .query(&[("only_pins", only_pins.to_string())]);
             if let Some(label) = args.get("label").and_then(|v| v.as_str())
                 && !label.trim().is_empty()
             {
                 req = req.query(&[("label", label.trim().to_string())]);
             }
-            let resp: Value = req.send().await?.json().await?;
+            let resp: Value = req.send().await?.error_for_status()?.json().await?;
             Ok(serde_json::to_string_pretty(&resp)?)
         }
         "cw_gate_tools" => {
@@ -402,32 +401,36 @@ async fn execute_mcp_tool(
                 .get("strategy_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or("max_token_diet");
-            let sync_to_disk = args
-                .get("sync_to_disk")
+            let export_compacted = args
+                .get("export_compacted")
+                .or_else(|| args.get("sync_to_disk"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
 
             let opt_resp: Value = client
                 .post(format!("{base}/api/v1/sessions/{session_id}/optimize"))
+                .header(reqwest::header::IF_MATCH, revision)
                 .json(&json!({
                     "strategy_id": strategy_id,
                     "status": "committed"
                 }))
                 .send()
                 .await?
+                .error_for_status()?
                 .json()
                 .await?;
 
-            if sync_to_disk {
+            if export_compacted {
                 let sync_resp: Value = client
                     .post(format!("{base}/api/v1/sessions/{session_id}/sync-back"))
                     .send()
                     .await?
+                    .error_for_status()?
                     .json()
                     .await?;
                 Ok(serde_json::to_string_pretty(&json!({
                     "optimize": opt_resp,
-                    "disk_sync": sync_resp
+                    "export": sync_resp
                 }))?)
             } else {
                 Ok(serde_json::to_string_pretty(&opt_resp)?)
@@ -437,20 +440,100 @@ async fn execute_mcp_tool(
     }
 }
 
+async fn resolve_mcp_session_id(
+    client: &reqwest::Client,
+    base: &str,
+    args: &Value,
+) -> Result<String> {
+    if let Some(s) = args
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(s.to_string());
+    }
+    if let Ok(env_id) = std::env::var("CW_SESSION_ID") {
+        let trimmed = env_id.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+    let sessions: Vec<Value> = client
+        .get(format!("{base}/api/v1/sessions"))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let cwd = std::env::current_dir().ok();
+    resolve_session_from_list(&sessions, cwd.as_deref())
+}
+
+pub fn resolve_session_from_list(
+    sessions: &[Value],
+    cwd: Option<&std::path::Path>,
+) -> Result<String> {
+    if let Some(cwd_path) = cwd {
+        let matching: Vec<&str> = sessions
+            .iter()
+            .filter(|s| {
+                s.get("workspace_root")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|root| std::path::Path::new(root) == cwd_path)
+            })
+            .filter_map(|s| s.get("id").and_then(|v| v.as_str()))
+            .collect();
+        match matching.as_slice() {
+            [single] => return Ok((*single).to_string()),
+            many if many.len() > 1 => {
+                anyhow::bail!(
+                    "Multiple sessions match workspace '{}': [{}]. Pass session_id explicitly.",
+                    cwd_path.display(),
+                    many.join(", ")
+                );
+            }
+            _ => {}
+        }
+    }
+    let available: Vec<&str> = sessions
+        .iter()
+        .filter_map(|s| s.get("id").and_then(|v| v.as_str()))
+        .take(10)
+        .collect();
+    if available.is_empty() {
+        anyhow::bail!("No active sessions recorded yet; pass session_id explicitly.");
+    }
+    anyhow::bail!(
+        "No unique session matches the current workspace; pass session_id explicitly (candidates: [{}]).",
+        available.join(", ")
+    )
+}
+
 async fn post_mutation(
     client: &reqwest::Client,
     base: &str,
     session_id: &str,
     op: MutationOp,
 ) -> Result<String> {
+    let graph: Value = client
+        .get(format!("{base}/api/v1/sessions/{session_id}/graph"))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let revision = graph.get("revision").and_then(Value::as_str).unwrap_or("");
     let resp: Value = client
         .post(format!("{base}/api/v1/sessions/{session_id}/mutations"))
+        .header(reqwest::header::IF_MATCH, revision)
         .json(&json!({
             "op": op,
             "status": MutationStatus::Committed
         }))
         .send()
         .await?
+        .error_for_status()?
         .json()
         .await?;
     Ok(serde_json::to_string_pretty(&resp)?)
@@ -526,5 +609,44 @@ mod tests {
                 .unwrap()
                 .contains("Unknown tool")
         );
+    }
+
+    #[test]
+    fn test_resolve_session_from_list_workspace_matching() {
+        let sessions = vec![
+            json!({
+                "id": "sess_alpha",
+                "workspace_root": "/tmp/project-alpha"
+            }),
+            json!({
+                "id": "sess_beta_1",
+                "workspace_root": "/tmp/project-beta"
+            }),
+            json!({
+                "id": "sess_beta_2",
+                "workspace_root": "/tmp/project-beta"
+            }),
+        ];
+
+        // 1. Unique workspace match resolves unambiguously
+        let resolved =
+            resolve_session_from_list(&sessions, Some(std::path::Path::new("/tmp/project-alpha")))
+                .unwrap();
+        assert_eq!(resolved, "sess_alpha");
+
+        // 2. Multiple sessions in the same workspace return an error listing the candidate IDs
+        let err_multi =
+            resolve_session_from_list(&sessions, Some(std::path::Path::new("/tmp/project-beta")))
+                .unwrap_err()
+                .to_string();
+        assert!(err_multi.contains("sess_beta_1"));
+        assert!(err_multi.contains("sess_beta_2"));
+
+        // 3. Unmatched workspace returns an error listing available candidates
+        let err_none =
+            resolve_session_from_list(&sessions, Some(std::path::Path::new("/tmp/project-gamma")))
+                .unwrap_err()
+                .to_string();
+        assert!(err_none.contains("sess_alpha"));
     }
 }

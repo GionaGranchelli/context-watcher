@@ -32,15 +32,14 @@ pub fn apply_mutations_to_payload(
     rules: &[MutationRule],
     turn_seq: u32,
 ) -> MutationApplicationReport {
-    // Always strip any existing `<cw_pinned_context>` blocks first to prevent
-    // duplicate registries or nested `<cw_pinned_context>` across turns/syncs.
-    strip_existing_pinned_context_in_payload(payload);
-
     let active_rules: Vec<&MutationRule> = rules
         .iter()
         .filter(|r| r.status == MutationStatus::Committed)
         .collect();
-    if active_rules.is_empty() {
+    if active_rules.is_empty()
+        || has_signed_content(payload)
+        || !crate::normalizer::supports_mutation_payload(payload, provider)
+    {
         return MutationApplicationReport::default();
     }
 
@@ -60,6 +59,7 @@ pub fn apply_mutations_to_payload(
 
     let mut applied_ids = Vec::new();
     let mut pinned_blocks: Vec<(String, String)> = Vec::new();
+    let mut pin_rule_ids = Vec::new();
 
     for rule in &active_rules {
         let mut applied = false;
@@ -70,17 +70,14 @@ pub fn apply_mutations_to_payload(
                 target_json_pointer,
                 stub_text,
             } => {
-                let is_tail_hygiene_spill = stub_text.contains("[cw:auto_pilot");
                 // Match node by fingerprint, call_id, or direct pointer
                 for (node_idx, node) in before_nodes.iter().enumerate() {
-                    if !is_tail_hygiene_spill
-                        && is_protected_tool_result(
-                            node,
-                            node_idx,
-                            before_nodes.len(),
-                            last_assistant_idx,
-                        )
-                    {
+                    if is_protected_tool_result(
+                        node,
+                        node_idx,
+                        before_nodes.len(),
+                        last_assistant_idx,
+                    ) {
                         continue;
                     }
                     let fp_match = target_fingerprint
@@ -93,16 +90,16 @@ pub fn apply_mutations_to_payload(
                         }
                         _ => false,
                     };
-                    // Only fall back to positional pointer matching if neither fingerprint nor call_id was specified,
-                    // or if fingerprint also matches, preventing stale `/messages/N` pointer collisions across turns.
-                    let ptr_match = target_fingerprint.is_none()
-                        && target_call_id.is_none()
-                        && target_json_pointer
-                            .as_ref()
-                            .map(|p| p == &node.raw_json_pointer)
-                            .unwrap_or(false);
-
-                    if (fp_match || call_match || ptr_match)
+                    let identity_matches = if target_fingerprint.is_some() {
+                        fp_match && (target_call_id.is_none() || call_match)
+                    } else {
+                        call_match
+                    };
+                    let location_matches = target_json_pointer
+                        .as_ref()
+                        .is_none_or(|p| p == &node.raw_json_pointer);
+                    if identity_matches
+                        && location_matches
                         && replace_node_text_at_pointer(payload, &node.raw_json_pointer, stub_text)
                     {
                         applied = true;
@@ -124,12 +121,10 @@ pub fn apply_mutations_to_payload(
                     ) {
                         continue;
                     }
-                    let is_foldable_kind =
-                        matches!(
-                            node.kind,
-                            NodeKind::ToolResult { .. } | NodeKind::AssistantThinking { .. }
-                        ) || (matches!(node.kind, NodeKind::AssistantText { .. })
-                            && node.turn_seq < *end_turn);
+                    let is_foldable_kind = matches!(
+                        node.kind,
+                        NodeKind::ToolResult { .. } | NodeKind::AssistantThinking { .. }
+                    );
                     if node.turn_seq >= *start_turn
                         && node.turn_seq <= *end_turn
                         && is_foldable_kind
@@ -154,54 +149,27 @@ pub fn apply_mutations_to_payload(
                 }
             }
             MutationOp::ShadowDedupe { file_path } => {
-                // Find all FileRead tool results and deduplicate earlier reads of the same file
-                // or reads superseded by a later FileWrite
-                let mut reads_by_path: HashMap<String, Vec<&ContextNode>> = HashMap::new();
-                let mut latest_write_by_path: HashMap<String, u32> = HashMap::new();
-
-                for node in &before_nodes {
-                    match &node.kind {
-                        NodeKind::ToolCall {
-                            semantic_meta: Some(ToolSemanticMeta::FileWrite { path, .. }),
-                            ..
-                        }
-                        | NodeKind::ToolResult {
-                            semantic_meta: Some(ToolSemanticMeta::FileWrite { path, .. }),
-                            ..
-                        } => {
-                            latest_write_by_path.insert(path.clone(), node.turn_seq);
-                        }
-                        NodeKind::ToolResult {
-                            semantic_meta: Some(ToolSemanticMeta::FileRead { path, .. }),
-                            ..
-                        } if file_path.as_ref().map(|fp| fp == path).unwrap_or(true) => {
-                            reads_by_path.entry(path.clone()).or_default().push(node);
-                        }
-                        _ => {}
+                for (idx, read) in before_nodes.iter().enumerate() {
+                    let NodeKind::ToolResult {
+                        semantic_meta: Some(ToolSemanticMeta::FileRead { path, .. }),
+                        ..
+                    } = &read.kind
+                    else {
+                        continue;
+                    };
+                    if file_path.as_ref().is_some_and(|wanted| wanted != path) {
+                        continue;
                     }
-                }
-
-                for (path, reads) in reads_by_path {
-                    let latest_write_turn = latest_write_by_path.get(&path).copied().unwrap_or(0);
-                    let latest_read_turn = reads.last().map(|n| n.turn_seq).unwrap_or(0);
-                    let supersede_turn = latest_write_turn.max(latest_read_turn);
-
-                    for (idx, read_node) in reads.iter().enumerate() {
-                        let is_older_dup = idx + 1 < reads.len();
-                        let is_stale_from_write = read_node.turn_seq < latest_write_turn;
-                        if is_older_dup || is_stale_from_write {
-                            let stub = format!(
-                                "[cw:shadow_deduped path=\"{path}\" superseded_by_turn={supersede_turn} saved_tokens={}]",
-                                read_node.token_span.count
-                            );
-                            if replace_node_text_at_pointer(
-                                payload,
-                                &read_node.raw_json_pointer,
-                                &stub,
-                            ) {
-                                applied = true;
-                            }
-                        }
+                    if let Some(newer) = before_nodes[idx + 1..]
+                        .iter()
+                        .find(|newer| read_is_covered_by(read, newer))
+                    {
+                        let stub = format!(
+                            "[cw:shadow_deduped path={path:?} superseded_by_turn={}]",
+                            newer.turn_seq
+                        );
+                        applied |=
+                            replace_node_text_at_pointer(payload, &read.raw_json_pointer, &stub);
                     }
                 }
             }
@@ -231,6 +199,7 @@ pub fn apply_mutations_to_payload(
                     if !already_exists {
                         pinned_blocks.push((clean_label, clean_content));
                     }
+                    pin_rule_ids.push(rule.id.clone());
                     applied = true;
                 }
             }
@@ -251,8 +220,8 @@ pub fn apply_mutations_to_payload(
         }
     }
 
-    if !pinned_blocks.is_empty() {
-        inject_pinned_context_at_tail(payload, &pinned_blocks);
+    if !pinned_blocks.is_empty() && !inject_pinned_context_at_tail(payload, &pinned_blocks) {
+        applied_ids.retain(|id| !pin_rule_ids.contains(id));
     }
 
     let after_nodes = parse_request_to_nodes(payload, provider, turn_seq).unwrap_or_default();
@@ -425,6 +394,25 @@ pub fn evaluate_firewall(
             FirewallTrigger::SingleToolResultTokensExceed { max_tokens } => {
                 for n in nodes {
                     if matches!(n.kind, NodeKind::ToolResult { .. })
+                        && !is_protected_tool_result(
+                            n,
+                            nodes
+                                .iter()
+                                .position(|candidate| candidate.id == n.id)
+                                .unwrap_or(0),
+                            nodes.len(),
+                            nodes
+                                .iter()
+                                .rposition(|candidate| {
+                                    matches!(
+                                        candidate.kind,
+                                        NodeKind::ToolCall { .. }
+                                            | NodeKind::AssistantText { .. }
+                                            | NodeKind::AssistantThinking { .. }
+                                    )
+                                })
+                                .unwrap_or(0),
+                        )
                         && n.token_span.count > *max_tokens
                     {
                         matching_pointers
@@ -459,6 +447,12 @@ pub fn evaluate_firewall(
             continue;
         }
 
+        if !matches!(rule.action, FirewallAction::PauseForHumanApproval { .. })
+            && (has_signed_content(payload)
+                || !crate::normalizer::supports_mutation_payload(payload, provider))
+        {
+            continue;
+        }
         match &rule.action {
             FirewallAction::PauseForHumanApproval { .. } => {
                 verdict.paused_by_rule = Some(rule.clone());
@@ -469,6 +463,27 @@ pub fn evaluate_firewall(
                 tail_chars,
             } => {
                 for (ptr, orig_text) in matching_pointers {
+                    if nodes.iter().enumerate().any(|(index, node)| {
+                        node.raw_json_pointer == ptr
+                            && is_protected_tool_result(
+                                node,
+                                index,
+                                nodes.len(),
+                                nodes
+                                    .iter()
+                                    .rposition(|n| {
+                                        matches!(
+                                            n.kind,
+                                            NodeKind::ToolCall { .. }
+                                                | NodeKind::AssistantText { .. }
+                                                | NodeKind::AssistantThinking { .. }
+                                        )
+                                    })
+                                    .unwrap_or(0),
+                            )
+                    }) {
+                        continue;
+                    }
                     if orig_text.len() > head_chars + tail_chars {
                         let head: String = orig_text.chars().take(*head_chars).collect();
                         let tail_vec: Vec<char> = orig_text.chars().collect();
@@ -505,7 +520,10 @@ pub fn evaluate_firewall(
 }
 
 fn replace_node_text_at_pointer(payload: &mut Value, pointer: &str, new_text: &str) -> bool {
-    let base_ptr = pointer.split('#').next().unwrap_or(pointer);
+    if pointer.contains('#') {
+        return false;
+    }
+    let base_ptr = pointer;
     let Some(target) = payload.pointer_mut(base_ptr) else {
         return false;
     };
@@ -515,18 +533,36 @@ fn replace_node_text_at_pointer(payload: &mut Value, pointer: &str, new_text: &s
             *s = new_text.to_string();
             true
         }
+        Value::Array(blocks)
+            if !blocks.is_empty()
+                && blocks.iter().all(|block| {
+                    matches!(
+                        block.get("type").and_then(Value::as_str),
+                        Some("text" | "input_text" | "output_text")
+                    ) && block.get("text").is_some_and(Value::is_string)
+                }) =>
+        {
+            for (index, block) in blocks.iter_mut().enumerate() {
+                block["text"] = Value::String(if index == 0 {
+                    new_text.to_owned()
+                } else {
+                    String::new()
+                });
+            }
+            true
+        }
         Value::Object(map) => {
             if map.contains_key("thinking") {
                 map.insert("thinking".to_string(), Value::String(new_text.to_string()));
                 return true;
             }
-            if map.contains_key("content") {
-                map.insert("content".to_string(), Value::String(new_text.to_string()));
-                return true;
-            }
-            if map.contains_key("output") {
-                map.insert("output".to_string(), Value::String(new_text.to_string()));
-                return true;
+            for key in ["content", "output"] {
+                if map
+                    .get_mut(key)
+                    .is_some_and(|value| replace_text_value(value, new_text))
+                {
+                    return true;
+                }
             }
             if map.contains_key("text") {
                 map.insert("text".to_string(), Value::String(new_text.to_string()));
@@ -540,6 +576,34 @@ fn replace_node_text_at_pointer(payload: &mut Value, pointer: &str, new_text: &s
                 return true;
             }
             false
+        }
+        _ => false,
+    }
+}
+
+fn replace_text_value(value: &mut Value, text: &str) -> bool {
+    match value {
+        Value::String(current) => {
+            *current = text.to_owned();
+            true
+        }
+        Value::Array(blocks)
+            if !blocks.is_empty()
+                && blocks.iter().all(|b| {
+                    matches!(
+                        b.get("type").and_then(Value::as_str),
+                        Some("text" | "input_text" | "output_text")
+                    ) && b.get("text").is_some_and(Value::is_string)
+                }) =>
+        {
+            for (i, b) in blocks.iter_mut().enumerate() {
+                b["text"] = Value::String(if i == 0 {
+                    text.to_owned()
+                } else {
+                    String::new()
+                });
+            }
+            true
         }
         _ => false,
     }
@@ -666,6 +730,15 @@ fn is_protected_tool_result(
     else {
         return false;
     };
+    if matches!(
+        &node.kind,
+        NodeKind::ToolResult {
+            semantic_meta: Some(ToolSemanticMeta::FileRead { .. }),
+            ..
+        }
+    ) {
+        return true;
+    }
     // Never prune an unread tool result at the tail of the prompt before the assistant responds
     if (last_assistant_idx > 0 && node_idx > last_assistant_idx) || node_idx + 1 == total_nodes {
         return true;
@@ -682,54 +755,16 @@ fn is_protected_tool_result(
         || content.contains("SKILL.md")
 }
 
-fn strip_existing_pinned_context_in_payload(payload: &mut Value) {
-    if let Some(messages) = payload.get_mut("messages").and_then(|v| v.as_array_mut()) {
-        for msg in messages.iter_mut() {
-            match msg.get_mut("content") {
-                Some(Value::String(s)) => {
-                    if s.contains("<cw_pinned_context>") {
-                        *s = PINNED_CONTEXT_RE.replace_all(s, "").to_string();
-                    }
-                }
-                Some(Value::Array(arr)) => {
-                    arr.retain_mut(|block| {
-                        if let Some(Value::String(text)) = block.get_mut("text")
-                            && text.contains("<cw_pinned_context>")
-                        {
-                            *text = PINNED_CONTEXT_RE.replace_all(text, "").to_string();
-                            return !text.trim().is_empty();
-                        }
-                        true
-                    });
-                }
-                _ => {}
-            }
-        }
-    }
-    if let Some(contents) = payload.get_mut("contents").and_then(|v| v.as_array_mut()) {
-        for content in contents.iter_mut() {
-            if let Some(parts) = content.get_mut("parts").and_then(|v| v.as_array_mut()) {
-                parts.retain_mut(|part| {
-                    if let Some(Value::String(text)) = part.get_mut("text")
-                        && text.contains("<cw_pinned_context>")
-                    {
-                        *text = PINNED_CONTEXT_RE.replace_all(text, "").to_string();
-                        return !text.trim().is_empty();
-                    }
-                    true
-                });
-            }
-        }
-    }
-}
-
-fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)]) {
+fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)]) -> bool {
     let mut block = String::from("\n<cw_pinned_context>\n");
     for (label, content) in pinned {
         block.push_str(&format!("- [{label}]: {content}\n"));
     }
     block.push_str("</cw_pinned_context>");
 
+    if contains_text(payload, &block) {
+        return true;
+    }
     // Try Anthropic / OpenAI `messages` array tail
     if let Some(messages) = payload.get_mut("messages").and_then(|v| v.as_array_mut())
         && let Some(last_msg) = messages.last_mut()
@@ -737,14 +772,43 @@ fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)
         match last_msg.get_mut("content") {
             Some(Value::String(s)) => {
                 s.push_str(&block);
-                return;
+                return true;
             }
             Some(Value::Array(arr)) => {
                 arr.push(json!({
                     "type": "text",
                     "text": block
                 }));
-                return;
+                return true;
+            }
+            _ => {}
+        }
+    }
+
+    // Responses API input accepts text blocks inside a message item.
+    if let Some(input) = payload.get_mut("input") {
+        match input {
+            Value::String(text) => {
+                text.push_str(&block);
+                return true;
+            }
+            Value::Array(items) => {
+                if let Some(message) = items
+                    .last_mut()
+                    .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+                {
+                    match message.get_mut("content") {
+                        Some(Value::String(text)) => {
+                            text.push_str(&block);
+                            return true;
+                        }
+                        Some(Value::Array(content)) => {
+                            content.push(json!({"type": "input_text", "text": block}));
+                            return true;
+                        }
+                        _ => {}
+                    }
+                }
             }
             _ => {}
         }
@@ -756,5 +820,133 @@ fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)
         && let Some(parts) = last_content.get_mut("parts").and_then(|v| v.as_array_mut())
     {
         parts.push(json!({ "text": block }));
+        return true;
+    }
+    false
+}
+
+/// Signed requests are opaque until a provider-specific edit capability is qualified.
+pub fn has_signed_content(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => {
+            map.contains_key("signature")
+                || map.contains_key("thinkingSignature")
+                || map.contains_key("thoughtSignature")
+                || map.contains_key("encrypted_content")
+                || map.values().any(has_signed_content)
+        }
+        Value::Array(items) => items.iter().any(has_signed_content),
+        _ => false,
+    }
+}
+
+pub fn read_is_covered_by(older: &ContextNode, newer: &ContextNode) -> bool {
+    match (&older.kind, &newer.kind) {
+        (
+            NodeKind::ToolResult {
+                is_error: false,
+                content: old,
+                semantic_meta:
+                    Some(ToolSemanticMeta::FileRead {
+                        path: p,
+                        start_line: a,
+                        end_line: b,
+                        ..
+                    }),
+                ..
+            },
+            NodeKind::ToolResult {
+                is_error: false,
+                content: new,
+                semantic_meta:
+                    Some(ToolSemanticMeta::FileRead {
+                        path: q,
+                        start_line: c,
+                        end_line: d,
+                        ..
+                    }),
+                ..
+            },
+        ) if p == q => match (a, b, c, d) {
+            (Some(a), Some(b), Some(c), Some(d)) if c <= a && d >= b => {
+                let count = b.saturating_sub(*a).saturating_add(1) as usize;
+                old.lines().count() == count
+                    && new
+                        .lines()
+                        .skip(a.saturating_sub(*c) as usize)
+                        .take(count)
+                        .eq(old.lines())
+            }
+            (Some(_), Some(_), Some(_), Some(_)) => false,
+            _ => old == new && a == c && b == d,
+        },
+        _ => false,
+    }
+}
+
+fn contains_text(value: &Value, wanted: &str) -> bool {
+    match value {
+        Value::String(text) => text.contains(wanted),
+        Value::Array(items) => items.iter().any(|item| contains_text(item, wanted)),
+        Value::Object(map) => map.values().any(|item| contains_text(item, wanted)),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn pin_rule() -> MutationRule {
+        MutationRule {
+            id: "pin-1".into(),
+            session_id: "session-1".into(),
+            op: MutationOp::PinContext {
+                label: "test".into(),
+                content: "retain this".into(),
+                source_node_id: None,
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn pin_is_injected_into_responses_input_messages() {
+        let mut payload = json!({
+            "model": "test",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "question"}]
+            }]
+        });
+
+        let report =
+            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+
+        assert_eq!(report.applied_rule_ids, ["pin-1"]);
+        let blocks = payload["input"][0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[1]["type"], "input_text");
+        assert!(blocks[1]["text"].as_str().unwrap().contains("retain this"));
+    }
+
+    #[test]
+    fn pin_is_not_reported_applied_without_a_supported_tail() {
+        let mut payload = json!({
+            "model": "test",
+            "input": [{"type": "function_call", "call_id": "call-1", "name": "tool"}]
+        });
+        let original = payload.clone();
+
+        let report =
+            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+
+        assert!(report.applied_rule_ids.is_empty());
+        assert_eq!(payload, original);
     }
 }

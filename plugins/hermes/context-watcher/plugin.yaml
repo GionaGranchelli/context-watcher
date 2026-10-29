@@ -1,0 +1,5 @@
+name: context-watcher
+version: 0.1.0
+description: Route Hermes DeepSeek requests through the local contextWatcher proxy with authenticated session identity.
+provides_middleware:
+  - llm_request

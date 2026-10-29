@@ -7,12 +7,12 @@ use crate::optimizer::{build_optimization_plans, resolve_strategy_alias};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fs;
-use std::path::PathBuf;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutoPilotConfig {
+    #[serde(default)]
+    pub safety_version: u8,
     pub enabled: bool,
     /// Rule 1: Automatically truncate oversized tool outputs on the latest turn (>4,000 tok)
     /// to head 40 lines + tail 60 lines and spill full log to `/tmp/cw_logs/<call_id>.log` (0 KV break).
@@ -38,8 +38,9 @@ pub struct AutoPilotConfig {
 impl Default for AutoPilotConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
-            zero_break_tail_hygiene: true,
+            safety_version: 2,
+            enabled: false,
+            zero_break_tail_hygiene: false,
             tail_max_tool_tokens: 4_000,
             auto_cache_safe_pin: false,
             pin_min_context_tokens: 60_000,
@@ -50,7 +51,7 @@ impl Default for AutoPilotConfig {
             auto_heal_low_health: true,
             min_health_score: 75,
             heal_strategy: "clean_code_state".to_string(),
-            auto_sync_to_disk: true,
+            auto_sync_to_disk: false,
         }
     }
 }
@@ -81,83 +82,9 @@ pub fn evaluate_autopilot_policies(
 
     let mut report = AutoPilotReport::default();
     let total_tokens: u32 = nodes.iter().map(|n| n.token_span.count).sum();
-    let max_turn = nodes.iter().map(|n| n.turn_seq).max().unwrap_or(turn_seq);
     let (is_local, _) = detect_local_engine(model, provider);
 
-    // Policy 1: Zero-Break Tail Hygiene (Spill oversized latest-turn tool outputs to `/tmp/cw_logs/`)
-    if config.zero_break_tail_hygiene {
-        for node in nodes {
-            if node.turn_seq == max_turn
-                && node.token_span.count > config.tail_max_tool_tokens
-                && let NodeKind::ToolResult {
-                    call_id,
-                    tool_name,
-                    content,
-                    ..
-                } = &node.kind
-            {
-                if content.contains("[cw:auto_pilot") || content.contains("[cw:pruned") {
-                    continue;
-                }
-                let lines: Vec<&str> = content.lines().collect();
-                if lines.len() > 110 {
-                    let safe_call_id: String = call_id
-                        .chars()
-                        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
-                        .take(36)
-                        .collect();
-                    let log_dir = PathBuf::from("/tmp/cw_logs");
-                    let _ = fs::create_dir_all(&log_dir);
-                    let log_path = log_dir.join(format!(
-                        "{}_{}.log",
-                        session_id,
-                        if safe_call_id.is_empty() {
-                            &node.id
-                        } else {
-                            &safe_call_id
-                        }
-                    ));
-                    let _ = fs::write(&log_path, content);
-                    let log_path_str = log_path.to_string_lossy().to_string();
-
-                    let head = lines[..40].join("\n");
-                    let tail = lines[lines.len() - 60..].join("\n");
-                    let omitted_lines = lines.len().saturating_sub(100);
-                    let stub = format!(
-                        "{head}\n\n... [cw:auto_pilot Zero-Break Tail Hygiene truncated {omitted_lines} middle lines ({} tok) from `{tool_name}`. Full raw output saved to `{log_path_str}` — use grep/read_file on that path if needed] ...\n\n{tail}",
-                        node.token_span.count
-                    );
-
-                    let rule = MutationRule {
-                        id: format!("ap_tail_{}", &Uuid::new_v4().to_string()[..8]),
-                        session_id: session_id.to_string(),
-                        op: MutationOp::PruneOrStub {
-                            target_fingerprint: Some(node.fingerprint.0.clone()),
-                            target_call_id: if call_id.is_empty() {
-                                None
-                            } else {
-                                Some(call_id.clone())
-                            },
-                            target_json_pointer: Some(node.raw_json_pointer.clone()),
-                            stub_text: stub,
-                        },
-                        status: MutationStatus::Committed,
-                        estimated_saved_tokens: (node.token_span.count as i32).saturating_sub(450),
-                        estimated_kv_break_tokens: 0,
-                        created_at: Utc::now(),
-                    };
-                    report.spilled_log_files.push(log_path_str);
-                    report.generated_mutations.push(rule);
-                }
-            }
-        }
-        if !report.spilled_log_files.is_empty() {
-            report
-                .triggered_policies
-                .push("zero_break_tail_hygiene".to_string());
-        }
-    }
-
+    // Tail results must reach the model unchanged; log spilling is not an automatic policy.
     // Policy 2: Auto Cache-Safe Pin (when total tokens > threshold and rule salience < 42%)
     if config.auto_cache_safe_pin && total_tokens >= config.pin_min_context_tokens {
         let mut pinned_any = false;
@@ -330,7 +257,7 @@ pub fn generate_ambient_savings_pulse(
         1.0
     };
 
-    let kv_hit = turn.kv_cache_report.hit_ratio;
+    let kv_hit = turn.kv_cache_report.hit_ratio.clamp(0.0, 1.0) * 100.0;
     let cost_saved = perf.saved_by_cw_overlays_usd + perf.saved_by_kv_cache_usd;
 
     let formatted_message = if perf.is_local_model {
@@ -338,11 +265,11 @@ pub fn generate_ambient_savings_pulse(
         let ttft_after_s = ttft_after_ms as f64 / 1000.0;
         if ttft_before_s >= 2.0 {
             format!(
-                "⚡ [cw] We saved you {tokens_saved} tokens (-{saved_pct:.1}%) | KV Cache {kv_hit:.1}% preserved | TTFT: {ttft_before_s:.1}s -> {ttft_after_s:.1}s ({speedup:.0}x faster) | 0 VRAM waste"
+                "⚡ [cw] Estimated context reduction: {tokens_saved} tokens (-{saved_pct:.1}%) | KV Cache {kv_hit:.1}% preserved | Modeled prefill: {ttft_before_s:.1}s -> {ttft_after_s:.1}s ({speedup:.0}x faster) | VRAM not measured"
             )
         } else {
             format!(
-                "⚡ [cw] We saved you {tokens_saved} tokens (-{saved_pct:.1}%) | KV Cache {kv_hit:.1}% preserved | TTFT: {ttft_before_ms}ms -> {ttft_after_ms}ms ({speedup:.1}x faster) | 0 VRAM waste"
+                "⚡ [cw] Estimated context reduction: {tokens_saved} tokens (-{saved_pct:.1}%) | KV Cache {kv_hit:.1}% preserved | Modeled prefill: {ttft_before_ms}ms -> {ttft_after_ms}ms ({speedup:.1}x faster) | VRAM not measured"
             )
         }
     } else {
@@ -350,11 +277,11 @@ pub fn generate_ambient_savings_pulse(
         let ttft_after_s = ttft_after_ms as f64 / 1000.0;
         if ttft_before_s >= 2.0 {
             format!(
-                "⚡ [cw] We saved you {tokens_saved} tokens (-{saved_pct:.1}%) | KV Cache {kv_hit:.1}% preserved | TTFT: {ttft_before_s:.1}s -> {ttft_after_s:.1}s ({speedup:.0}x faster) | ${cost_saved:.2} saved"
+                "⚡ [cw] Estimated context reduction: {tokens_saved} tokens (-{saved_pct:.1}%) | KV Cache {kv_hit:.1}% preserved | Modeled prefill: {ttft_before_s:.1}s -> {ttft_after_s:.1}s ({speedup:.0}x faster) | ${cost_saved:.2} estimated savings"
             )
         } else {
             format!(
-                "⚡ [cw] We saved you {tokens_saved} tokens (-{saved_pct:.1}%) | KV Cache {kv_hit:.1}% preserved | TTFT: {ttft_before_ms}ms -> {ttft_after_ms}ms ({speedup:.1}x faster) | ${cost_saved:.2} saved"
+                "⚡ [cw] Estimated context reduction: {tokens_saved} tokens (-{saved_pct:.1}%) | KV Cache {kv_hit:.1}% preserved | Modeled prefill: {ttft_before_ms}ms -> {ttft_after_ms}ms ({speedup:.1}x faster) | ${cost_saved:.2} estimated savings"
             )
         }
     };
@@ -366,7 +293,7 @@ pub fn generate_ambient_savings_pulse(
         cumulative_tokens_saved: cumulative_saved.max(tokens_saved),
         total_input_tokens: total_in,
         saved_percentage: saved_pct,
-        kv_cache_hit_ratio: kv_hit,
+        kv_cache_hit_ratio: turn.kv_cache_report.hit_ratio.clamp(0.0, 1.0),
         ttft_before_ms,
         ttft_after_ms,
         speedup_factor: speedup,

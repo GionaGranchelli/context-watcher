@@ -2,10 +2,7 @@ use chrono::{DateTime, Utc};
 use cw_core::{
     analyze_turn_from_payload,
     autopilot::{generate_ambient_savings_pulse, should_emit_savings_pulse},
-    ir::{
-        ContextTurn, HarnessKind, MutationOp, MutationRule, MutationStatus, NodeKind, ProviderKind,
-        Session,
-    },
+    ir::{ContextTurn, HarnessKind, MutationRule, MutationStatus, NodeKind, ProviderKind, Session},
     mutation::apply_mutations_to_payload,
     optimizer::{build_optimization_plans, resolve_strategy_alias},
 };
@@ -24,7 +21,7 @@ use std::{
 pub struct TranscriptSyncReport {
     pub session_id: String,
     pub transcript_path: String,
-    pub backup_path: String,
+    pub export_path: String,
     pub steps_compacted: usize,
     pub bytes_before: u64,
     pub bytes_after: u64,
@@ -473,13 +470,17 @@ pub fn import_generic_jsonl_transcript(
         .unwrap_or("session");
     // For Codex `rollout-2026-10-19T09-46-31-01a15320-58da-...`, use the UUID suffix so sessions don't collide on `rollout-2026`
     let id_slug = if stem.starts_with("rollout-") && stem.len() > 28 {
-        &stem[28..]
+        stem.get(28..).unwrap_or(stem)
     } else if let Some((_, uuid_part)) = stem.split_once('_') {
         uuid_part
     } else {
         stem
     };
-    let mut session_id = format!("{}_{}", harness.as_str(), &id_slug[..id_slug.len().min(12)]);
+    let mut session_id = format!(
+        "{}_{}",
+        harness.as_str(),
+        id_slug.chars().take(12).collect::<String>()
+    );
 
     let file = fs::File::open(path)?;
     let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
@@ -895,6 +896,7 @@ pub fn import_generic_jsonl_transcript(
     };
 
     let payload = json!({
+        "cw_analysis_incomplete": file_len > 2_000_000,
         "model": detected_model,
         "max_tokens": 8192,
         "system": system_text,
@@ -986,7 +988,13 @@ fn check_and_apply_auto_heal(
     workspace_root: Option<&str>,
 ) -> bool {
     let ap_cfg = store.get_autopilot_config().unwrap_or_default();
-    if !ap_cfg.enabled || !ap_cfg.auto_heal_low_health {
+    if !ap_cfg.enabled
+        || !ap_cfg.auto_heal_low_health
+        || payload
+            .get("cw_analysis_incomplete")
+            .and_then(Value::as_bool)
+            == Some(true)
+    {
         return false;
     }
     if turn.health_score >= ap_cfg.min_health_score {
@@ -1071,10 +1079,6 @@ fn check_and_apply_auto_heal(
 
             *turn = updated_turn;
         }
-
-        if ap_cfg.auto_sync_to_disk {
-            let _ = sync_mutations_to_transcript_on_disk(store, session_id);
-        }
     }
     applied_any
 }
@@ -1098,239 +1102,156 @@ fn extract_codex_content_text(val: Option<&Value>) -> String {
     }
 }
 
-/// Safely writes committed `contextWatcher` compactions back to the harness's on-disk `.jsonl`
-/// transcript file (creating a `.jsonl.bak` backup first) so non-proxy harnesses (AGY, Claude Code,
-/// Codex, OpenCode, Pi) immediately benefit from the reduced context on session resume.
+/// Exports selected compactions to a private copy. Never replaces a harness-owned transcript.
 pub fn sync_mutations_to_transcript_on_disk(
     store: &CwStore,
     session_id: &str,
 ) -> Result<TranscriptSyncReport, HarnessError> {
-    let Some((transcript_path_str, _)) = store.get_session_source_path(session_id)? else {
+    use std::io::Write;
+    let Some((source, _)) = store.get_session_source_path(session_id)? else {
         return Err(HarnessError::NoTranscriptSource(session_id.to_string()));
     };
-    let transcript_path = PathBuf::from(&transcript_path_str);
-    if !transcript_path.exists() {
-        return Err(HarnessError::NoTranscriptSource(transcript_path_str));
+    let path = Path::new(&source);
+    if !fs::symlink_metadata(path)?.file_type().is_file() {
+        return Err(std::io::Error::other("Transcript source must be a regular file").into());
     }
-
-    let backup_path = PathBuf::from(format!("{transcript_path_str}.bak"));
-    if !backup_path.exists() {
-        fs::copy(&transcript_path, &backup_path)?;
-    }
-
-    let bytes_before = fs::metadata(&transcript_path).map(|m| m.len()).unwrap_or(0);
-    let rules = store.list_mutations(session_id)?;
-    let committed_rules: Vec<_> = rules
-        .into_iter()
-        .filter(|r| r.status == MutationStatus::Committed)
-        .collect();
-
-    // Collect stubbed/compacted content strings from committed rules and the latest turn's nodes
-    let mut compacted_by_call_id: HashMap<String, String> = HashMap::new();
-    let mut folded_turns: Vec<(u32, u32, String)> = Vec::new();
-    for r in &committed_rules {
-        match &r.op {
-            MutationOp::FoldSubtree {
-                start_turn,
-                end_turn,
-                summary_text,
-            } => {
-                folded_turns.push((*start_turn, *end_turn, summary_text.clone()));
-            }
-            MutationOp::PruneOrStub {
-                target_call_id: Some(cid),
-                stub_text,
-                ..
-            } if !cid.is_empty() => {
-                compacted_by_call_id.insert(cid.clone(), stub_text.clone());
-            }
-            _ => {}
-        }
-    }
-
+    let original = fs::read_to_string(path)?;
+    let mut replacements = HashMap::new();
     if let Some(turn) = store.get_latest_turn(session_id)? {
-        for node in &turn.nodes {
-            if let NodeKind::ToolResult {
-                call_id, content, ..
-            } = &node.kind
-                && (content.starts_with("[cw:pruned")
-                    || content.starts_with("[cw:shadow_deduped")
-                    || content.starts_with("[cw:folded")
-                    || content.contains("[cw:auto_pilot"))
-            {
-                compacted_by_call_id.insert(call_id.clone(), content.clone());
-            }
-        }
-    }
-
-    let bak_path = format!("{}.bak", transcript_path.display());
-    if !std::path::Path::new(&bak_path).exists() {
-        let _ = fs::copy(&transcript_path, &bak_path);
-    }
-
-    let raw_text = fs::read_to_string(&transcript_path)?;
-    let mut new_lines = Vec::new();
-    let mut steps_compacted = 0usize;
-    let mut current_turn = 0u32;
-
-    for (line_idx, line) in raw_text.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let Ok(mut val) = serde_json::from_str::<Value>(line) else {
-            new_lines.push(line.to_string());
-            continue;
-        };
-
-        let step_type = val
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if step_type == "USER_INPUT"
-            || val.get("role").and_then(|v| v.as_str()) == Some("user")
-            || val
-                .get("message")
-                .and_then(|m| m.get("role"))
-                .and_then(|r| r.as_str())
-                == Some("user")
-        {
-            current_turn += 1;
-        }
-
-        let synthetic_res_id = format!("agy_res_{line_idx}");
-        let mut modified = false;
-
-        // Check if this step's turn is folded
-        for (start_t, end_t, summary) in &folded_turns {
-            if current_turn >= *start_t
-                && current_turn <= *end_t
-                && step_type != "USER_INPUT"
-                && let Some(obj) = val.as_object_mut()
-            {
-                if obj.contains_key("thinking") {
-                    obj.insert(
-                        "thinking".to_string(),
-                        Value::String(format!(
-                            "[cw:folded_turns {}..{}] {}",
-                            start_t, end_t, summary
-                        )),
-                    );
-                    modified = true;
-                }
-                if step_type != "PLANNER_RESPONSE" && obj.contains_key("content") {
-                    obj.insert(
-                        "content".to_string(),
-                        Value::String(format!(
-                            "[cw:folded_turns {}..{}] {}",
-                            start_t, end_t, summary
-                        )),
-                    );
-                    modified = true;
-                }
-            }
-        }
-
-        // Check if this step matches a compacted tool result or oversized output
-        if !modified {
-            let actual_call_id = val
-                .get("toolCallId")
-                .or_else(|| val.get("tool_call_id"))
-                .or_else(|| val.get("call_id"))
-                .or_else(|| {
-                    val.get("message")
-                        .and_then(|m| m.get("toolCallId").or_else(|| m.get("tool_call_id")))
-                })
-                .or_else(|| val.get("item").and_then(|i| i.get("call_id")))
-                .and_then(|v| v.as_str());
-
-            let matched_stub = actual_call_id
-                .and_then(|cid| compacted_by_call_id.get(cid))
-                .or_else(|| compacted_by_call_id.get(&synthetic_res_id));
-
-            if let Some(stub) = matched_stub {
-                if let Some(msg) = val.get_mut("message").and_then(|m| m.as_object_mut()) {
-                    if let Some(content_arr) = msg.get_mut("content").and_then(|c| c.as_array_mut())
-                    {
-                        if let Some(first) = content_arr.first_mut().and_then(|f| f.as_object_mut())
-                        {
-                            first.insert("text".to_string(), Value::String(stub.clone()));
-                        } else {
-                            msg.insert(
-                                "content".to_string(),
-                                json!([{"type": "text", "text": stub}]),
-                            );
-                        }
-                    } else {
-                        msg.insert("content".to_string(), Value::String(stub.clone()));
-                    }
-                    modified = true;
-                } else if let Some(item) = val.get_mut("item").and_then(|i| i.as_object_mut()) {
-                    item.insert("output".to_string(), Value::String(stub.clone()));
-                    modified = true;
-                } else if let Some(obj) = val.as_object_mut() {
-                    obj.insert("content".to_string(), Value::String(stub.clone()));
-                    modified = true;
-                }
-            } else if step_type != "USER_INPUT"
-                && step_type != "PLANNER_RESPONSE"
-                && !committed_rules.is_empty()
-            {
-                let content_len = val
-                    .get("content")
-                    .and_then(|c| c.as_str())
-                    .filter(|s| s.len() > 1600 && !s.starts_with("[cw:"))
-                    .map(|s| s.len());
-                if let Some(len) = content_len
-                    && let Some(obj) = val.as_object_mut()
+        let session = store.get_session(session_id)?;
+        if let (Some(mut raw), Some(session)) = (store.get_turn_raw_payload(&turn.id)?, session) {
+            let rules = store.list_mutations(session_id)?;
+            let provider = turn.normalization_provider.unwrap_or(session.provider);
+            let before =
+                cw_core::normalizer::parse_request_to_nodes(&raw, provider, turn.sequence_number)?;
+            apply_mutations_to_payload(&mut raw, provider, &rules, turn.sequence_number);
+            let after =
+                cw_core::normalizer::parse_request_to_nodes(&raw, provider, turn.sequence_number)?;
+            for (old, new) in before.iter().zip(&after) {
+                if let (
+                    NodeKind::ToolResult {
+                        call_id,
+                        content: old_text,
+                        ..
+                    },
+                    NodeKind::ToolResult { content, .. },
+                ) = (&old.kind, &new.kind)
+                    && !call_id.is_empty()
+                    && old_text != content
                 {
-                    let stub = format!(
-                        "[cw:synced_compaction original_bytes={len} session=\"{session_id}\"]"
-                    );
-                    obj.insert("content".to_string(), Value::String(stub));
-                    modified = true;
+                    replacements.insert(call_id.clone(), (old_text.clone(), content.clone()));
                 }
             }
         }
-
-        if modified {
-            steps_compacted += 1;
-        }
-        new_lines.push(serde_json::to_string(&val).unwrap_or_else(|_| line.to_string()));
     }
-
-    let out_content = format!("{}\n", new_lines.join("\n"));
-    let tmp_path = format!(
-        "{}.cw_tmp_{}",
-        transcript_path.display(),
-        std::process::id()
-    );
-    fs::write(&tmp_path, &out_content)?;
-    fs::rename(&tmp_path, &transcript_path)?;
-
-    // Also sync `transcript_full.jsonl` if this is an Antigravity session
-    let full_path = transcript_path.with_file_name("transcript_full.jsonl");
-    if full_path.exists() {
-        let full_bak = PathBuf::from(format!("{}.bak", full_path.to_string_lossy()));
-        if !full_bak.exists() {
-            let _ = fs::copy(&full_path, &full_bak);
+    if original.lines().any(|line| {
+        serde_json::from_str::<Value>(line)
+            .is_ok_and(|value| cw_core::mutation::has_signed_content(&value))
+    }) {
+        replacements.clear();
+    }
+    let mut output = String::new();
+    let mut steps_compacted = 0;
+    for line in original.split_inclusive('\n') {
+        let mut changed = false;
+        if let Ok(mut value) = serde_json::from_str::<Value>(line) {
+            let record = if value.get("message").is_some() {
+                &mut value["message"]
+            } else if value.get("item").is_some() {
+                &mut value["item"]
+            } else {
+                &mut value
+            };
+            let role = record
+                .get("role")
+                .or_else(|| record.get("type"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if matches!(role, "tool" | "toolResult" | "function_call_output") {
+                let cid = record
+                    .get("tool_call_id")
+                    .or_else(|| record.get("toolCallId"))
+                    .or_else(|| record.get("call_id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if let Some((old, new)) = replacements.get(cid) {
+                    let field = if record.get("output").is_some() {
+                        "output"
+                    } else {
+                        "content"
+                    };
+                    match record.get(field) {
+                        Some(Value::String(text)) if text == old => {
+                            record[field] = Value::String(new.clone());
+                            changed = true;
+                        }
+                        Some(Value::Array(items))
+                            if items.iter().all(|item| {
+                                item.get("type").and_then(Value::as_str) == Some("text")
+                            }) && items
+                                .iter()
+                                .filter_map(|item| item.get("text").and_then(Value::as_str))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                                == *old =>
+                        {
+                            if let Some(items) = record[field].as_array_mut() {
+                                for (index, item) in items.iter_mut().enumerate() {
+                                    item["text"] = Value::String(if index == 0 {
+                                        new.clone()
+                                    } else {
+                                        String::new()
+                                    });
+                                }
+                                changed = true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if changed {
+                output.push_str(
+                    &serde_json::to_string(&value)
+                        .map_err(cw_core::normalizer::NormalizeError::from)?,
+                );
+                if line.ends_with('\n') {
+                    output.push('\n');
+                }
+                steps_compacted += 1;
+            }
         }
-        let full_tmp = format!("{}.cw_tmp_{}", full_path.display(), std::process::id());
-        if fs::write(&full_tmp, &out_content).is_ok() {
-            let _ = fs::rename(&full_tmp, &full_path);
+        if !changed {
+            output.push_str(line);
         }
     }
-
-    let bytes_after = fs::metadata(&transcript_path).map(|m| m.len()).unwrap_or(0);
-    store.set_session_source_path(session_id, &transcript_path_str, bytes_after)?;
-
+    let export_path = format!("{source}.cw-export-{}.jsonl", uuid::Uuid::new_v4());
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&export_path)?;
+    if let Err(error) = file
+        .write_all(output.as_bytes())
+        .and_then(|()| file.sync_all())
+    {
+        let _ = fs::remove_file(&export_path);
+        return Err(error.into());
+    }
+    if let Err(error) = store.record_export(session_id, &export_path, output.as_bytes()) {
+        let _ = fs::remove_file(&export_path);
+        return Err(error.into());
+    }
     Ok(TranscriptSyncReport {
         session_id: session_id.to_string(),
-        transcript_path: transcript_path_str,
-        backup_path: backup_path.to_string_lossy().to_string(),
+        transcript_path: source,
+        export_path,
         steps_compacted,
-        bytes_before,
-        bytes_after,
+        bytes_before: original.len() as u64,
+        bytes_after: output.len() as u64,
     })
 }
 
@@ -1392,93 +1313,63 @@ pub fn scan_and_import_all_transcripts_once(store: &CwStore) -> usize {
     count_after.saturating_sub(count_before)
 }
 
-/// Spawns an incremental background watcher task that scans Antigravity (`~/.gemini/antigravity-cli/brain`),
-/// Claude Code (`~/.claude/projects`), Codex (`~/.codex/sessions`), OpenCode (`~/.local/share/opencode`),
-/// and Pi (`~/.pi/sessions`) transcript directories, tracking `(mtime, byte_len)` per file.
-pub fn spawn_transcript_watcher(store: CwStore, _default_workspace: Option<String>) {
+/// Watches only explicitly imported JSONL sources in the selected workspace.
+/// shortcut: changed files are reparsed as bounded snapshots; add format-specific cursors before large-history live qualification.
+pub fn spawn_transcript_watcher(store: CwStore, workspace: Option<String>) {
     tokio::spawn(async move {
-        let mut file_state: HashMap<PathBuf, (SystemTime, u64)> = HashMap::new();
-        let home_path = cw_core::home_dir();
-        let agy_brain_dir = home_path.join(".gemini/antigravity-cli/brain");
-        let claude_dir = home_path.join(".claude/projects");
-        let codex_dir = home_path.join(".codex/sessions");
-        let hermes_db = home_path.join(".hermes/state.db");
-        let hermes_wal = home_path.join(".hermes/state.db-wal");
-        let opencode_dir = home_path.join(".local/share/opencode");
-        let opencode_db = home_path.join(".local/share/opencode/opencode.db");
-        let opencode_wal = home_path.join(".local/share/opencode/opencode.db-wal");
-        let pi_dir = home_path.join(".pi/sessions");
-        let pi_agent_dir = home_path.join(".pi/agent/sessions");
-        let omp_dir = home_path.join(".omp/agent/sessions");
-
+        let mut seen: HashMap<PathBuf, (SystemTime, u64)> = HashMap::new();
         loop {
-            // 1. Antigravity transcripts
-            if agy_brain_dir.exists()
-                && let Ok(entries) = fs::read_dir(&agy_brain_dir)
-            {
-                for entry in entries.flatten() {
-                    let transcript = entry.path().join(".system_generated/logs/transcript.jsonl");
-                    if transcript.exists()
-                        && let Ok(meta) = fs::metadata(&transcript)
-                        && let Ok(mtime) = meta.modified()
-                    {
-                        let sig = (mtime, meta.len());
-                        if file_state.get(&transcript).copied() != Some(sig) {
-                            file_state.insert(transcript.clone(), sig);
-                            let _ = import_agy_transcript(&transcript, &store, None);
+            let snapshot = store.clone();
+            let filter = workspace.clone();
+            let previous = seen.clone();
+            if let Ok(updated) = tokio::task::spawn_blocking(move || {
+                let mut seen = previous;
+                if let Ok(sources) = snapshot.list_session_sources() {
+                    for (id, source) in sources {
+                        let Ok(Some(session)) = snapshot.get_session(&id) else {
+                            continue;
+                        };
+                        if filter
+                            .as_ref()
+                            .is_some_and(|root| session.workspace_root.as_ref() != Some(root))
+                        {
+                            continue;
+                        }
+                        let path = PathBuf::from(source);
+                        if path.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+                            continue;
+                        }
+                        let Ok(meta) = fs::metadata(&path) else {
+                            continue;
+                        };
+                        let Ok(time) = meta.modified() else {
+                            continue;
+                        };
+                        let signature = (time, meta.len());
+                        if seen.get(&path) == Some(&signature) {
+                            continue;
+                        }
+                        let result = if session.harness == HarnessKind::Antigravity {
+                            import_agy_transcript(&path, &snapshot, session.workspace_root.clone())
+                        } else {
+                            import_generic_jsonl_transcript(
+                                &path,
+                                session.harness,
+                                &snapshot,
+                                session.workspace_root.clone(),
+                            )
+                        };
+                        if result.is_ok() {
+                            seen.insert(path, signature);
                         }
                     }
                 }
-            }
-
-            // 2. Hermes Agent SQLite state database (`~/.hermes/state.db` + `-wal`)
-            let hermes_watch_target = if hermes_wal.exists() {
-                &hermes_wal
-            } else {
-                &hermes_db
-            };
-            if hermes_db.exists()
-                && let Ok(meta) = fs::metadata(hermes_watch_target)
-                && let Ok(mtime) = meta.modified()
+                seen
+            })
+            .await
             {
-                let sig = (mtime, meta.len());
-                if file_state.get(&hermes_db).copied() != Some(sig) {
-                    file_state.insert(hermes_db.clone(), sig);
-                    let _ = import_hermes_state_db(&hermes_db, &store, 18);
-                }
+                seen = updated;
             }
-
-            // 3. OpenCode V2 SQLite state database (`~/.local/share/opencode/opencode.db` + `-wal`)
-            let opencode_watch_target = if opencode_wal.exists() {
-                &opencode_wal
-            } else {
-                &opencode_db
-            };
-            if opencode_db.exists()
-                && let Ok(meta) = fs::metadata(opencode_watch_target)
-                && let Ok(mtime) = meta.modified()
-            {
-                let sig = (mtime, meta.len());
-                if file_state.get(&opencode_db).copied() != Some(sig) {
-                    file_state.insert(opencode_db.clone(), sig);
-                    let _ = import_opencode_state_db(&opencode_db, &store, 18);
-                }
-            }
-
-            // 4. Claude Code, Codex, OpenCode, and Pi/OMP JSONL transcripts
-            for (dir, harness) in [
-                (&claude_dir, HarnessKind::ClaudeCode),
-                (&codex_dir, HarnessKind::Codex),
-                (&opencode_dir, HarnessKind::OpenCode),
-                (&pi_dir, HarnessKind::Pi),
-                (&pi_agent_dir, HarnessKind::Pi),
-                (&omp_dir, HarnessKind::Omp),
-            ] {
-                if dir.exists() {
-                    scan_jsonl_dir_recursively(dir, harness, &store, &mut file_state, 0);
-                }
-            }
-
             tokio::time::sleep(Duration::from_secs(4)).await;
         }
     });
@@ -1502,6 +1393,7 @@ fn scan_jsonl_dir_recursively(
         if p.is_dir() {
             scan_jsonl_dir_recursively(&p, harness, store, file_state, depth + 1);
         } else if p.extension().and_then(|e| e.to_str()) == Some("jsonl")
+            && !p.to_string_lossy().contains(".cw-export-")
             && !p.to_string_lossy().ends_with(".bak")
             && !matches!(
                 p.file_name().and_then(|n| n.to_str()),
@@ -2195,6 +2087,7 @@ pub fn import_opencode_state_db(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cw_core::ir::MutationOp;
     use std::path::Path;
 
     #[test]
@@ -2238,10 +2131,16 @@ mod tests {
             .unwrap();
 
         let report = sync_mutations_to_transcript_on_disk(&store, &sess_id).unwrap();
-        assert!(Path::new(&report.backup_path).exists());
-        assert!(report.steps_compacted >= 1);
-        let updated = fs::read_to_string(&tmp_transcript).unwrap();
-        assert!(updated.contains("[cw:folded_turns 1..1] Folded Turn 1"));
+        assert!(Path::new(&report.export_path).exists());
+        assert_eq!(report.steps_compacted, 0);
+        assert_eq!(
+            fs::read(&tmp_transcript).unwrap(),
+            fs::read(fixture).unwrap()
+        );
+        assert_eq!(
+            fs::read(&report.export_path).unwrap(),
+            fs::read(&tmp_transcript).unwrap()
+        );
         let _ = fs::remove_dir_all(&tmp_dir);
     }
 
@@ -2319,7 +2218,7 @@ mod tests {
 "#,
             tmp_dir.display()
         );
-        fs::write(&transcript, content).unwrap();
+        fs::write(&transcript, &content).unwrap();
 
         let sess_id =
             import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
@@ -2332,11 +2231,10 @@ mod tests {
         );
         assert!(mutations.iter().any(|m| m.id.starts_with("ap_heal_")));
 
-        // Check that the transcript file on disk was automatically synced
-        let updated_content = fs::read_to_string(&transcript).unwrap();
-        assert!(
-            updated_content.contains("[cw:shadow_deduped"),
-            "Transcript on disk should contain shadow deduped content"
+        assert_eq!(
+            fs::read_to_string(&transcript).unwrap(),
+            content,
+            "Automatic analysis must not rewrite the source"
         );
 
         let _ = fs::remove_dir_all(&tmp_dir);

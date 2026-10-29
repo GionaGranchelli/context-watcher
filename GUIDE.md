@@ -1,177 +1,78 @@
-# User Guide: `contextWatcher` (`cw`)
+# Local usage
 
-> **The ultra-fast, local-first context killer and KV-cache optimizer for AI coding harnesses.**  
-> Cut 60%–98% of context bloat, eliminate stale file hallucinations, prevent local GPU prefill freezes, and lock in 90% cloud cache discounts.
+Start `cw serve`, open `http://127.0.0.1:4400`, and connect with the token printed by `cw auth-token`. The default configuration observes traffic. Upgrading a legacy configuration leaves automatic mutation disabled until deliberately enabled again.
 
----
+Update an installed binary with `cw update`. By default this downloads the latest release, verifies its SHA-256 checksum, atomically installs it to `~/.local/bin/cw`, refreshes integrations, and restarts the daemon. `cw update --no-restart` skips the restart; `cw update --from-source` builds the latest `main` branch first. The release checksum is hosted with the release and does not provide signature-based publisher verification.
 
-## ⚡ 1. Installation
+## Provider routing
 
-### Option A: The One-Liner (Fastest — Linux & macOS)
+Send requests through the loopback proxy, normally port 4401:
 
-Run the universal installer. It detects your OS and architecture, downloads the binary, sets up `$PATH`, and runs `cw init` automatically:
+| Provider | Proxy path | Upstream setting |
+|---|---|---|
+| OpenAI Chat / Responses | `/openai/v1/chat/completions`, `/openai/v1/responses` | `CW_OPENAI_UPSTREAM` |
+| Anthropic | `/anthropic/v1/messages` | `CW_ANTHROPIC_UPSTREAM` |
+| Gemini | `/gemini/v1beta/models/...` | `CW_GEMINI_UPSTREAM` |
 
-```bash
-curl -fsSL https://constant-labs.com/cw-install.sh | sh
+Pass the provider's own API credential as usual. No automatic endpoint fallback is performed. Unknown fields and signed blocks remain in the raw request; unsupported active formats remain observation-only.
+
+## Session selection
+
+An active proxy integration must send both `x-cw-session-id` and `x-cw-control-token`. The session ID accepts ASCII letters, digits, underscore and hyphen, up to 128 characters. Reusing a session with incompatible provider, model or workspace metadata is rejected.
+
+`cw wrap [--session-id ID] <command>` injects proxy routing. For Hermes, `cw init` installs and enables the `llm_request` plugin; use `cw wrap hermes chat ...` to route built-in DeepSeek requests through CW. The wrapper supplies Hermes' `chat --base-url` because its configured provider URL overrides `DEEPSEEK_BASE_URL`. The plugin adds session headers only for CW's loopback endpoint and does not expose the CW token through the shell environment. Two-turn mock testing verified session binding and pin reapplication; a live Hermes/DeepSeek resume test confirmed the same session was recorded across turns. Other Hermes providers remain unverified. For other wrappers, `CW_SESSION_ID` alone does not authenticate a session. Codex supplies authenticated headers and excludes `CW_CONTROL_TOKEN` from shell subprocesses. Anthropic clients remain observation-only because a Claude Code probe showed its Bash tool inherits `ANTHROPIC_CUSTOM_HEADERS`; `cw wrap` strips `x-cw-*` credentials from their environment. Gemini CLI and Antigravity complete local API-key mock requests through `cw wrap`, but do not bind the wrapper session ID; their current paths are observation-only. OpenCode, Pi, and Aider each passed a local mock when their own provider settings supplied the CW headers, but `cw wrap` does not create those settings; use them only with OS-level isolation for untrusted tools. Aider receives its documented `OPENAI_API_BASE` endpoint alias. OpenRouter live checks verified Anthropic-routed signature streaming and Gemini normalized reasoning passthrough; native Gemini signature preservation and direct Anthropic connectivity remain unverified. Native Aider Markdown import is unsupported.
+
+For direct Hermes launches, set `model.base_url` in `~/.hermes/config.yaml` to `http://127.0.0.1:4401/deepseek` and keep the context-watcher plugin enabled. A plain Hermes launch and resume were verified against CW on 2026-10-29; the test session was healthy, so no overlay fired.
+
+CLI commands accept `--session <id>`. Without an explicit ID or `CW_SESSION_ID`, session selection requires a unique exact workspace match. MCP calls also accept an optional `session_id` and fall back to `CW_SESSION_ID` or a unique exact workspace match (returning candidate session IDs when multiple sessions match). Multiple matching IDE sessions require selection in the tool window.
+
+## Import, inspect and preview
+
+```sh
+cw import /path/to/copy.jsonl --harness omp
+cw status --session <id>
+cw optimize min --session <id> --dry-run
+cw optimize mid --session <id>
+cw preview --session <id>
 ```
 
-*(Direct GitHub URL fallback):*
-```bash
-curl -fsSL https://raw.githubusercontent.com/GionaGranchelli/context-watcher/main/install.sh | sh
+Import only the sources you intend to inspect. The daemon watcher follows registered JSONL sources in the selected workspace; it does not scan every harness home directory. Large sampled imports are marked incomplete and cannot authorize full-history mutation.
+
+An optimization command stores overlays. `preview` applies them to an original in memory and prints an estimated turn and payload. It does not call a model or rewrite an actual forwarded turn. `min` (`cache_safe_boost`) selects only zero-KV-break candidates (`kv_break_tokens == 0`, preserving any `CachedHit` prefix). Other plans can invalidate a prefix and discard information; review their selected nodes.
+
+A pin is a reminder, not proof of improved adherence. Generic fold markers are not factual summaries. Automatic trajectory folding and unused-tool removal are disabled.
+
+## Export and resume
+
+```sh
+cw sync-back --session <id>
+# Or export while creating selected rules:
+cw optimize mid --session <id> --sync-back
 ```
 
-### Option B: Build From Source via Cargo
+The legacy command name now means **export a separate copy**. Read the printed export path. Original transcript bytes are unchanged, including long user instructions and unknown records. Only exactly mapped eligible tool-result changes are exported; unsupported changes are omitted. A proxy pin is not automatically an equivalent native transcript instruction.
 
-```bash
-git clone git@github.com:GionaGranchelli/context-watcher.git
-cd context-watcher
-cargo install --path crates/cw-cli
-cw init
+No in-place replacement is supported. Resume an exported copy only with a harness/version you have tested, after the original writer has stopped. The importer does not establish a live harness reload boundary.
+
+## Control API changes
+
+All control endpoints except health require the private bearer token. Browser origins must match the UI host and port, or the explicitly configured `CW_UI_ORIGIN`. WebSockets require authenticated subprotocols and reconnect with a state reload.
+
+Retrieve `/api/v1/sessions/<id>/graph`, then use its `revision` as `If-Match` for mutation creation, plan application, draft commit, clear and deletion. Missing revisions return 428; stale revisions return 412. A preview is returned separately from the actual latest turn. Persistence failures return an error instead of a successful empty result.
+
+## Retention
+
+```sh
+cw purge --session <id> --keep-turns 20
+cw purge --session <id>
 ```
 
-Verify the binary is available on your PATH:
-```bash
-cw --version
-# Output: cw 0.2.0
-```
+The second command removes cw's session records and tracked exports only when export contents still match cw's recorded hash. Changed exports require manual review. Shared blobs referenced by another session are kept. Source transcripts are never deleted. During a schema safety migration, automatic `pre-safety-*.db` recovery snapshots are created only when the existing database is `<= 64 MB` and are skipped for larger databases (rather than creating a truncated backup); any created snapshots are separate private files and must be retained or deleted deliberately.
 
-`cw init` automatically discovers your installed AI coding harnesses and sets up integrations:
-* **Antigravity (AGY):** Configures the native `/context-watcher` MCP server and skill in `~/.gemini/antigravity-cli/`.
-* **Claude Code:** Registers the `contextwatcher` MCP server at user scope (via `claude mcp add`, or `~/.claude.json`) and `/cw` slash commands in `~/.claude/commands/`.
-* **Codex CLI:** Hooks into session rollouts in `~/.codex/`.
-* **Pi / OMP:** Installs extension hooks in `~/.pi/agent/settings.json`.
-* **Hermes Agent:** Configures state database watchers in `~/.hermes/`.
-* **OpenCode:** Auto-watched transcripts in `~/.local/share/opencode/` + MCP server configuration.
-* **Aider & Custom Agents:** Transparent proxy (`cw wrap <cmd>`) + native MCP server (`cw mcp`).
+The store is plaintext. Private permissions reduce access by other users; they do not protect against software running as your user or provide secure erasure.
 
-### 🤖 Tell Your AI Agent to Set This Up
+## Reading metrics
 
-Using **OpenCode**, **Cursor**, **Windsurf**, or a custom agent? You can paste this prompt directly into your agent's chat:
+Provider-observed usage is stored separately from estimated spans. First-body-byte timing is not necessarily first-token latency. A completed request, failed request, blocked approval, imported snapshot and preview have different outcomes. Per-rule token attribution remains unknown when changes overlap.
 
-> "Read the contextWatcher guide at https://github.com/GionaGranchelli/context-watcher/blob/main/GUIDE.md. Configure contextWatcher for this project by connecting to the local MCP server (`cw mcp`) or setting up the proxy wrapper (`cw wrap`) so our conversational context, duplicate file reads, and KV-cache are automatically monitored and optimized."
-
----
-
-## 🧠 3. How `contextWatcher` Works (Zero-Touch Ambient Mode)
-
-The best tool is one you never have to think about.
-
-Once installed, `cw` runs invisibly in the background. As you code with Claude Code, Antigravity, or local models:
-1. It continuously monitors context window health.
-2. It detects stale duplicate file reads and runaway terminal logs.
-3. It autonomously applies prefix-safe garbage collection before your prompt hits the model.
-4. It drops a friendly ambient savings pulse when significant memory or time is saved:
-
-```text
-⚡ [cw] We saved you 12,966 tokens | KV Cache: 98.2% preserved | TTFT: 171s -> 1.6s (105x faster) | $0.18 saved
-```
-
----
-
-## 📊 4. The Daily Driver Commands
-
-### 1. Show Your Token & Cost Savings (`cw gain`)
-View your lifetime and per-harness token diet and dollar savings:
-```bash
-cw gain
-```
-```text
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│ contextWatcher (`cw gain`) — Token, KV Cache & Cost Savings Analytics           │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│ Sessions Analyzed   : 280        │ Active Context Volume :     19495587 tok     │
-│ Active Overlay Cut  : -586165 tok │ Ready-to-Cut Bloat    :    -13893977 tok     │
-│ KV Cache Hit Ratio  : 98.2     % │ Avg Context Health    :           95/100     │
-│ Active Saved ($)    : $2.64      │ Cuttable Potential ($) : $      41.68/turn   │
-└──────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 2. View Recent Ambient Pulses (`cw pulse`)
-Check the latest background notifications delivered by the autonomous healer:
-```bash
-cw pulse
-# or for a specific session:
-cw pulse --session <session-id>
-```
-
-### 3. Check Real-Time Context & KV Cache Health (`cw status`)
-Inspect the current session's token consumption, KV-cache prefix status, and VRAM footprint:
-```bash
-cw status
-```
-
-### 4. Real-Time Statusline HUD (`cw hud`)
-Add `cw hud` to your shell prompt (Starship, bash, zsh) or `tmux` statusline (<1ms latency):
-```bash
-# Standard status line:
-cw hud
-# Output: 🟢 28.2k tok | 98.2% KV | -12.9k CW diet | 95/100 Health
-
-# Ultra-compact (for tmux / zellij):
-cw hud --compact
-# Output: 🟢 28k [98% KV] (-13k) H:95
-
-# Positional Attention ECG (detects Lost-in-the-Middle dead zones):
-cw hud --ecg
-```
-
----
-
-## 🎛️ 5. Manual Optimization Tiers (`min`, `mid`, `max`)
-
-You can invoke optimization at any time from your agent chat prompt or the CLI:
-
-### Tier 1: `/cw optimize min` (Cache-Safe Boost)
-* **What it does:** Replaces duplicate/superseded reads of the same file with 1-line pointer tombstones. Pins architectural rules to the tail.
-* **KV-Cache Impact:** 🟢 **0% Cache Invalidation (100% Cache Safe).**
-* **When to use:** Fast, active editing loops where you want zero cache-rebuild delay on Claude or local models.
-
-### Tier 2: `/cw optimize mid` (Surgical Log Diet — Default)
-* **What it does:** Strips noisy past terminal outputs (`cargo test`, compiler logs, long directory listings) and removes completed `<thinking>` monologues from earlier turns.
-* **Token Reduction:** 🟡 **50% to 85% cut.**
-* **When to use:** Your everyday workhorse. Reclaims tens of thousands of tokens while preserving 100% of code and conversation.
-
-### Tier 3: `/cw optimize max` (Max Token Diet)
-* **What it does:** Everything in `min` and `mid` + temporarily disables unused MCP tool schemas + folds intermediate trial-and-error debugging trajectories.
-* **Token Reduction:** 🔥 **70% to 98% cut.**
-* **When to use:** Context emergencies (>100k tokens), long marathons, or running local models on strict 8k/16k context limits.
-
----
-
-## 🐝 6. Advanced Features: Swarm Multiplexing & PagedAttention
-
-### Multi-Agent Swarm Prefix Multiplexing (`cw swarm`)
-When multiple agents work on the same repo (e.g. Lead, Coder, Tester, Auditor):
-* `cw swarm` groups them by `(workspace, model)` and extracts their shared root prefix (system prompt, tools, rules).
-* Local engines (`llama.cpp`, `vLLM`) keep only **1 physical copy** of the shared prefix in GPU memory, avoiding redundant prefill.
-```bash
-cw swarm
-```
-
-### Engine-Level PagedAttention & Slot Bridge (`cw slot`)
-For local servers (`llama-server`, `vLLM`):
-* Inspect active KV slots and VRAM usage.
-* Simulate outward block-aligned physical page unmapping (16-token page granularity) to drop dead context blocks without recomputing prefill.
-```bash
-cw slot --engine http://127.0.0.1:8095
-cw slot --engine http://127.0.0.1:8095 --splice-range 2000..6800
-```
-
----
-
-## ❓ FAQ
-
-**Q: Does contextWatcher change my code?**  
-A: Never. `cw` only optimizes the conversational context window sent to the LLM. It preserves the newest version of all files byte-for-byte.
-
-**Q: Does it work with cloud providers (Claude, OpenAI, Gemini)?**  
-A: Yes! By keeping the prompt prefix stable, `cw` locks in the 90% prompt-caching discount on Anthropic and OpenAI, saving significant API billing.
-
-**Q: How is this different from harness `/compact`?**  
-A: Harness `/compact` calls an LLM to generate a fuzzy English summary, taking 20s and completely destroying your KV-cache prefix. `cw` runs in pure Rust in <2ms with $0.00 cost, keeping exact code and preserving your KV cache.
-
----
-
-## 📄 License
-
-Dual-licensed under [Apache-2.0](LICENSE-APACHE) and [MIT](LICENSE-MIT).
+Dollar, prefill, attention and KV memory calculations use heuristics. Physical allocation, real slot ownership and engine page unmapping are not measured or executed. Compare task continuation with independent tests before relying on a reduction.

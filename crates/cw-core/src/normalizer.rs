@@ -397,6 +397,18 @@ fn parse_openai(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>) {
         deconstruct_system_text(instr, "/instructions", 1, None, nodes);
     }
 
+    if let Some(text) = payload.get("input").and_then(Value::as_str) {
+        push_node(
+            nodes,
+            1,
+            "/input",
+            Role::User,
+            NodeKind::UserMessage {
+                text: text.to_owned(),
+            },
+            None,
+        );
+    }
     // 3. Messages or Input (`/messages` or `/input`)
     let (arr_key, messages_opt) =
         if let Some(m) = payload.get("messages").and_then(|v| v.as_array()) {
@@ -451,6 +463,41 @@ fn parse_openai(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>) {
                             is_error,
                             content,
                             semantic_meta: sem,
+                        },
+                        None,
+                    );
+                }
+                "function_call" => {
+                    let call_id = msg
+                        .get("call_id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let tool_name = msg
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("tool")
+                        .to_string();
+                    let arguments = match msg.get("arguments") {
+                        Some(Value::String(s)) => {
+                            serde_json::from_str(s).unwrap_or(Value::String(s.clone()))
+                        }
+                        Some(v) => v.clone(),
+                        None => Value::Null,
+                    };
+                    let semantic_meta = infer_call_semantic_meta(&tool_name, &arguments);
+                    call_meta_by_id
+                        .insert(call_id.clone(), (tool_name.clone(), semantic_meta.clone()));
+                    push_node(
+                        nodes,
+                        approx_turn,
+                        &ptr,
+                        Role::Assistant,
+                        NodeKind::ToolCall {
+                            call_id,
+                            tool_name,
+                            arguments,
+                            semantic_meta,
                         },
                         None,
                     );
@@ -776,11 +823,16 @@ fn push_node(
     kind: NodeKind,
     cache_control: Option<CacheControlBreakpoint>,
 ) {
-    let ordinal = nodes.len().to_string();
+    let identity = match &kind {
+        NodeKind::ToolCall { call_id, .. } | NodeKind::ToolResult { call_id, .. } => {
+            call_id.as_str()
+        }
+        _ => raw_json_pointer,
+    };
     let fp = NodeFingerprint::compute(
         role,
         kind.kind_tag(),
-        &ordinal,
+        identity,
         &kind.text_for_tokenization(),
     );
     nodes.push(ContextNode {
@@ -873,12 +925,23 @@ pub fn infer_call_semantic_meta(tool_name: &str, args: &Value) -> Option<ToolSem
             .or_else(|| args.get("offset"))
             .and_then(|v| v.as_u64())
             .map(|n| n as u32);
-        let end_line = args
+        let mut end_line = args
             .get("EndLine")
             .or_else(|| args.get("end_line"))
             .or_else(|| args.get("limit"))
             .and_then(|v| v.as_u64())
             .map(|n| n as u32);
+        if args
+            .get("EndLine")
+            .or_else(|| args.get("end_line"))
+            .is_none()
+        {
+            end_line = args.get("limit").and_then(Value::as_u64).map(|limit| {
+                start_line
+                    .unwrap_or(1)
+                    .saturating_add(limit.saturating_sub(1) as u32)
+            });
+        }
         return Some(ToolSemanticMeta::FileRead {
             path: p,
             start_line,
@@ -958,5 +1021,80 @@ pub fn enrich_result_semantic_meta(
             Some(ToolSemanticMeta::CommandExec { command, exit_code })
         }
         other => other,
+    }
+}
+
+/// Active edits require a complete, supported text representation.
+pub fn supports_mutation_payload(payload: &Value, provider: ProviderKind) -> bool {
+    fn content(value: &Value) -> bool {
+        match value {
+            Value::String(_) | Value::Null => true,
+            Value::Array(blocks) => {
+                blocks
+                    .iter()
+                    .all(|block| match block.get("type").and_then(Value::as_str) {
+                        Some(
+                            "text" | "input_text" | "output_text" | "thinking" | "tool_use"
+                            | "toolCall",
+                        ) => true,
+                        Some("tool_result") => block.get("content").is_none_or(content),
+                        _ => false,
+                    })
+            }
+            _ => false,
+        }
+    }
+    if payload
+        .get("cw_analysis_incomplete")
+        .and_then(Value::as_bool)
+        == Some(true)
+        || payload
+            .get("previous_response_id")
+            .is_some_and(|v| !v.is_null())
+        || payload.get("conversation").is_some_and(|v| !v.is_null())
+    {
+        return false;
+    }
+    if provider == ProviderKind::Gemini {
+        return payload
+            .get("contents")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().all(|item| {
+                    item.get("parts")
+                        .and_then(Value::as_array)
+                        .is_some_and(|parts| {
+                            parts.iter().all(|part| {
+                                part.as_object().is_some_and(|map| {
+                                    map.keys().all(|key| {
+                                        matches!(
+                                            key.as_str(),
+                                            "text" | "functionCall" | "functionResponse"
+                                        )
+                                    })
+                                })
+                            })
+                        })
+                })
+            });
+    }
+    if let Some(items) = payload.get("messages").and_then(Value::as_array) {
+        return items
+            .iter()
+            .all(|item| item.get("content").is_none_or(content));
+    }
+    match payload.get("input") {
+        Some(Value::String(_)) => true,
+        Some(Value::Array(items)) => {
+            items
+                .iter()
+                .all(|item| match item.get("type").and_then(Value::as_str) {
+                    Some("function_call") => true,
+                    Some("function_call_output") => item.get("output").is_none_or(content),
+                    Some("message") | None => item.get("content").is_some_and(content),
+                    _ => false,
+                })
+        }
+        _ => false,
     }
 }

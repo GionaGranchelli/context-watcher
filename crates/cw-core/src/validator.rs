@@ -27,7 +27,7 @@ pub enum ProtocolViolation {
     CorruptedStructure(String),
 }
 
-/// Validates that an outbound LLM request payload satisfies strict upstream provider schemas.
+/// Checks locally modeled structural constraints; this is not full provider validation.
 ///
 /// Returns `Ok(())` if valid, or `Err(ProtocolViolation)` if the payload contains
 /// structural defects (orphan tools, broken role alternation, invalid thinking block positions)
@@ -53,7 +53,6 @@ fn validate_anthropic_payload(payload: &Value) -> Result<(), ProtocolViolation> 
         return Ok(());
     }
 
-    let mut prev_role: Option<&str> = None;
     let mut known_tool_use_ids: HashSet<String> = HashSet::new();
 
     for (idx, msg) in messages.iter().enumerate() {
@@ -67,14 +66,7 @@ fn validate_anthropic_payload(payload: &Value) -> Result<(), ProtocolViolation> 
             return Err(ProtocolViolation::InvalidFirstMessageRole(role.to_string()));
         }
 
-        // 2. Strict role alternation (user <-> assistant)
-        if let Some(prev) = prev_role
-            && prev == role
-        {
-            return Err(ProtocolViolation::ConsecutiveRoles(role.to_string(), idx));
-        }
-        prev_role = Some(role);
-
+        // Consecutive roles are combined by the Messages API.
         // 3. Inspect content blocks
         if let Some(content_arr) = msg.get("content").and_then(|c| c.as_array()) {
             let mut seen_text_block = false;
@@ -210,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn test_anthropic_detects_consecutive_roles() {
+    fn test_anthropic_accepts_consecutive_roles() {
         let payload = json!({
             "model": "claude-3-7-sonnet",
             "messages": [
@@ -220,10 +212,7 @@ mod tests {
         });
 
         let res = validate_protocol_invariants(&payload, ProviderKind::Anthropic);
-        assert_eq!(
-            res,
-            Err(ProtocolViolation::ConsecutiveRoles("user".to_string(), 1))
-        );
+        assert_eq!(res, Ok(()));
     }
 
     #[test]

@@ -94,7 +94,7 @@ fn test_recorded_openai_fixture_and_failed_loop_folding() {
 }
 
 #[test]
-fn test_recorded_gemini_fixture_and_firewall_auto_truncate() {
+fn test_recorded_gemini_fixture_preserves_protected_read() {
     let raw_str = include_str!("fixtures/gemini/turn1.json");
     let mut payload: Value = serde_json::from_str(raw_str).unwrap();
     assert_eq!(
@@ -118,7 +118,8 @@ fn test_recorded_gemini_fixture_and_firewall_auto_truncate() {
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].path, "Cargo.toml");
 
-    // Verify Firewall regex trigger + AutoTruncateHeadTail action
+    let original = payload.clone();
+    // A regex rule cannot override signed-content and file-read protections.
     let fw_rules = vec![FirewallRule {
         id: "fw_1".into(),
         session_id: None,
@@ -141,5 +142,6 @@ fn test_recorded_gemini_fixture_and_firewall_auto_truncate() {
         &fw_rules,
         1,
     );
-    assert_eq!(verdict.auto_applied_actions.len(), 1);
+    assert!(verdict.auto_applied_actions.is_empty());
+    assert_eq!(payload, original);
 }

@@ -14,6 +14,10 @@ use std::sync::{Arc, Mutex};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("Session changed; refresh the plan before applying it")]
+    Conflict,
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("Serialization error: {0}")]
@@ -32,17 +36,65 @@ impl CwStore {
         if let Some(parent) = path.as_ref().parent() {
             let _ = std::fs::create_dir_all(parent);
         }
+        let path = path.as_ref();
+        if let Ok(meta) = std::fs::symlink_metadata(path)
+            && !meta.file_type().is_file()
+        {
+            return Err(StoreError::Io(std::io::Error::other(
+                "Database must be a regular file",
+            )));
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        drop(file);
         let conn = Connection::open(path)?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
              PRAGMA foreign_keys = ON;",
         )?;
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        let existing: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions')",
+            [],
+            |r| r.get(0),
+        )?;
+        let db_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if existing && version < 1 && db_size <= 64 * 1024 * 1024 {
+            let backup =
+                path.with_extension(format!("pre-safety-{}.db", uuid::Uuid::new_v4().simple()));
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let file = options.open(&backup)?;
+            conn.execute("VACUUM INTO ?1", params![backup.to_string_lossy().as_ref()])?;
+            file.sync_all()?;
+        }
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
         store.init_schema()?;
         store.seed_default_firewall_rules()?;
+        store
+            .conn
+            .lock()
+            .map_err(|_| StoreError::LockPoisoned)?
+            .execute_batch("PRAGMA user_version = 1;")?;
         Ok(store)
     }
 
@@ -152,6 +204,15 @@ impl CwStore {
             );",
         )?;
 
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS wire_requests(turn_id TEXT PRIMARY KEY,body BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS request_sequences(session_id TEXT PRIMARY KEY,seq INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS exports(session_id TEXT NOT NULL,path TEXT PRIMARY KEY,content_hash TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS mutation_effectiveness_v2 (
+            mutation_id TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL,
+            tokens_saved INTEGER NOT NULL, kv_cache_hit_rate REAL NOT NULL, ttft_ms INTEGER, created_at TEXT NOT NULL,
+            PRIMARY KEY(mutation_id,turn_id));
+            INSERT OR IGNORE INTO mutation_effectiveness_v2 SELECT * FROM mutation_effectiveness;")?;
+
         // Ensure any sessions originating from ~/.omp/ are properly categorized as OMP
         let _ = conn.execute(
             "UPDATE sessions
@@ -180,7 +241,7 @@ impl CwStore {
                 head_chars: 12_000,
                 tail_chars: 8_000,
             },
-            enabled: true,
+            enabled: false,
         };
         self.upsert_firewall_rule(&default_rule)?;
         Ok(())
@@ -221,7 +282,7 @@ impl CwStore {
                 workspace_root = excluded.workspace_root,
                 model = excluded.model,
                 title = COALESCE(excluded.title, sessions.title),
-                created_at = excluded.created_at,
+                created_at = sessions.created_at,
                 updated_at = excluded.updated_at",
             params![
                 session.id,
@@ -240,13 +301,10 @@ impl CwStore {
 
     pub fn list_sessions(&self) -> Result<Vec<Session>, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
-        let mut stmt = conn.prepare(
-            "SELECT id, parent_session_id, harness, workspace_root, model, provider, title, created_at, updated_at
-             FROM sessions ORDER BY updated_at DESC",
-        )?;
+        let mut stmt=conn.prepare("SELECT id,parent_session_id,harness,workspace_root,model,provider,title,created_at,updated_at FROM sessions ORDER BY updated_at DESC,id ASC")?;
         let rows = stmt.query_map([], |row| {
-            let created_str: String = row.get(7)?;
-            let updated_str: String = row.get(8)?;
+            let created: String = row.get(7)?;
+            let updated: String = row.get(8)?;
             Ok(Session {
                 id: row.get(0)?,
                 parent_session_id: row.get(1)?,
@@ -255,14 +313,49 @@ impl CwStore {
                 model: row.get(4)?,
                 provider: ProviderKind::from_str_lossy(&row.get::<_, String>(5)?),
                 title: row.get(6)?,
-                created_at: DateTime::parse_from_rfc3339(&created_str)
+                created_at: DateTime::parse_from_rfc3339(&created)
                     .map(|d| d.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now()),
-                updated_at: DateTime::parse_from_rfc3339(&updated_str)
+                updated_at: DateTime::parse_from_rfc3339(&updated)
                     .map(|d| d.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now()),
             })
         })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    pub fn list_sessions_page(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Session>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, parent_session_id, harness, workspace_root, model, provider, title, created_at, updated_at
+             FROM sessions ORDER BY updated_at DESC LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(
+            params![limit.min(1000) as i64, offset.min(i64::MAX as usize) as i64],
+            |row| {
+                let created_str: String = row.get(7)?;
+                let updated_str: String = row.get(8)?;
+                Ok(Session {
+                    id: row.get(0)?,
+                    parent_session_id: row.get(1)?,
+                    harness: HarnessKind::from_str_lossy(&row.get::<_, String>(2)?),
+                    workspace_root: row.get(3)?,
+                    model: row.get(4)?,
+                    provider: ProviderKind::from_str_lossy(&row.get::<_, String>(5)?),
+                    title: row.get(6)?,
+                    created_at: DateTime::parse_from_rfc3339(&created_str)
+                        .map(|d| d.with_timezone(&Utc))
+                        .unwrap_or_else(|_| Utc::now()),
+                    updated_at: DateTime::parse_from_rfc3339(&updated_str)
+                        .map(|d| d.with_timezone(&Utc))
+                        .unwrap_or_else(|_| Utc::now()),
+                })
+            },
+        )?;
         let mut out = Vec::new();
         for r in rows {
             out.push(r?);
@@ -271,8 +364,124 @@ impl CwStore {
     }
 
     pub fn get_session(&self, session_id: &str) -> Result<Option<Session>, StoreError> {
-        let sessions = self.list_sessions()?;
-        Ok(sessions.into_iter().find(|s| s.id == session_id))
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.query_row(
+            "SELECT id, parent_session_id, harness, workspace_root, model, provider, title, created_at, updated_at FROM sessions WHERE id = ?1",
+            params![session_id], |row| Ok(Session {
+                id: row.get(0)?, parent_session_id: row.get(1)?,
+                harness: HarnessKind::from_str_lossy(&row.get::<_, String>(2)?),
+                workspace_root: row.get(3)?, model: row.get(4)?,
+                provider: ProviderKind::from_str_lossy(&row.get::<_, String>(5)?), title: row.get(6)?,
+                created_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(7)?).map(|d|d.with_timezone(&Utc)).unwrap_or_default(),
+                updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).map(|d|d.with_timezone(&Utc)).unwrap_or_default(),
+            })
+        ).optional().map_err(StoreError::from)
+    }
+
+    pub fn record_export(
+        &self,
+        session_id: &str,
+        path: &str,
+        content: &[u8],
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute(
+            "INSERT INTO exports(session_id,path,content_hash) VALUES (?1,?2,?3)",
+            params![session_id, path, blake3::hash(content).to_hex().to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Explicit retention only. Harness-owned transcripts are never deleted.
+    pub fn purge_history(&self, session_id: &str, keep_turns: usize) -> Result<usize, StoreError> {
+        let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let ids = {
+            let mut stmt=tx.prepare("SELECT id FROM turns WHERE session_id=?1 ORDER BY seq_num DESC,created_at DESC LIMIT -1 OFFSET ?2")?;
+            stmt.query_map(
+                params![session_id, keep_turns.min(i64::MAX as usize) as i64],
+                |r| r.get::<_, String>(0),
+            )?
+            .collect::<Result<Vec<_>, _>>()?
+        };
+        for id in &ids {
+            tx.execute("DELETE FROM wire_requests WHERE turn_id=?1", params![id])?;
+            tx.execute(
+                "DELETE FROM mutation_effectiveness_v2 WHERE turn_id=?1",
+                params![id],
+            )?;
+            tx.execute(
+                "DELETE FROM mutation_effectiveness WHERE turn_id=?1",
+                params![id],
+            )?;
+            tx.execute("DELETE FROM turns WHERE id=?1", params![id])?;
+        }
+        if keep_turns == 0 {
+            let exports = {
+                let mut stmt =
+                    tx.prepare("SELECT path,content_hash FROM exports WHERE session_id=?1")?;
+                stmt.query_map(params![session_id], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+            };
+            for (path, expected) in exports {
+                match std::fs::symlink_metadata(&path) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error.into()),
+                    Ok(meta) => {
+                        if !meta.file_type().is_file() {
+                            return Err(StoreError::Io(std::io::Error::other(
+                                "Refusing to purge a replaced export",
+                            )));
+                        }
+                        if blake3::hash(&std::fs::read(&path)?).to_hex().as_str() != expected {
+                            return Err(StoreError::Io(std::io::Error::other(
+                                "Export changed; review it before purging",
+                            )));
+                        }
+                        std::fs::remove_file(path)?;
+                    }
+                }
+            }
+            for table in [
+                "exports",
+                "request_sequences",
+                "ambient_pulses",
+                "mutations",
+                "file_states",
+                "session_sources",
+                "firewall_rules",
+            ] {
+                tx.execute(
+                    &format!("DELETE FROM {table} WHERE session_id=?1"),
+                    params![session_id],
+                )?;
+            }
+            tx.execute("DELETE FROM sessions WHERE id=?1", params![session_id])?;
+        }
+        tx.execute("DELETE FROM blobs WHERE hash NOT IN (SELECT raw_request_hash FROM turns WHERE raw_request_hash IS NOT NULL UNION SELECT mutated_request_hash FROM turns WHERE mutated_request_hash IS NOT NULL UNION SELECT raw_response_hash FROM turns WHERE raw_response_hash IS NOT NULL)",[])?;
+        tx.commit()?;
+        Ok(ids.len())
+    }
+
+    pub fn save_wire_request(&self, turn_id: &str, body: &[u8]) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS wire_requests (turn_id TEXT PRIMARY KEY, body BLOB NOT NULL)")?;
+        conn.execute(
+            "INSERT OR IGNORE INTO wire_requests(turn_id,body) VALUES (?1,?2)",
+            params![turn_id, body],
+        )?;
+        Ok(())
+    }
+
+    pub fn reserve_turn_sequence(&self, session_id: &str) -> Result<u32, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS request_sequences (session_id TEXT PRIMARY KEY, seq INTEGER NOT NULL)")?;
+        Ok(conn.query_row(
+            "INSERT INTO request_sequences(session_id, seq) VALUES (?1, (SELECT COALESCE(MAX(seq_num),0)+1 FROM turns WHERE session_id=?1))
+             ON CONFLICT(session_id) DO UPDATE SET seq=MAX(request_sequences.seq, (SELECT COALESCE(MAX(seq_num),0) FROM turns WHERE session_id=?1))+1 RETURNING seq",
+            params![session_id], |r| r.get(0))?)
     }
 
     pub fn save_turn(
@@ -282,24 +491,41 @@ impl CwStore {
         mutated_req: Option<&Value>,
         raw_resp: Option<&Value>,
     ) -> Result<(), StoreError> {
-        let raw_req_hash = match raw_req {
-            Some(v) => Some(self.put_blob(v)?),
-            None => None,
+        let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let tx = conn.transaction()?;
+        let put = |value: Option<&Value>| -> Result<Option<String>, StoreError> {
+            let Some(value) = value else {
+                return Ok(None);
+            };
+            let json = serde_json::to_string(value)?;
+            let hash = blake3::hash(json.as_bytes()).to_hex().to_string();
+            tx.execute(
+                "INSERT OR IGNORE INTO blobs(hash,content_json) VALUES (?1,?2)",
+                params![hash, json],
+            )?;
+            Ok(Some(hash))
         };
-        let mut_req_hash = match mutated_req {
-            Some(v) => Some(self.put_blob(v)?),
-            None => None,
-        };
-        let raw_resp_hash = match raw_resp {
-            Some(v) => Some(self.put_blob(v)?),
-            None => None,
-        };
+        let raw_req_hash = put(raw_req)?;
+        let mut_req_hash = put(mutated_req)?;
+        let raw_resp_hash = put(raw_resp)?;
+
+        let prev_hashes: Option<(Option<String>, Option<String>, Option<String>)> = tx
+            .query_row(
+                "SELECT raw_request_hash, mutated_request_hash, raw_response_hash FROM turns WHERE id = ?1",
+                params![turn.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
 
         let turn_json = serde_json::to_string(turn)?;
-        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
-        conn.execute(
-            "INSERT OR REPLACE INTO turns (id, session_id, parent_turn_id, seq_num, turn_json, raw_request_hash, mutated_request_hash, raw_response_hash, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        tx.execute(
+            "INSERT INTO turns (id, session_id, parent_turn_id, seq_num, turn_json, raw_request_hash, mutated_request_hash, raw_response_hash, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO UPDATE SET
+                turn_json = excluded.turn_json,
+                raw_request_hash = COALESCE(excluded.raw_request_hash, turns.raw_request_hash),
+                mutated_request_hash = COALESCE(excluded.mutated_request_hash, turns.mutated_request_hash),
+                raw_response_hash = COALESCE(excluded.raw_response_hash, turns.raw_response_hash)",
             params![
                 turn.id,
                 turn.session_id,
@@ -312,24 +538,72 @@ impl CwStore {
                 turn.created_at.to_rfc3339(),
             ],
         )?;
-        conn.execute(
+
+        // Reclaim any blob hashes that were superseded by this turn update and are no longer referenced
+        let mut candidate_hashes = Vec::new();
+        if let Some((old_raw, old_mut, old_resp)) = prev_hashes {
+            if let Some(h) = old_raw {
+                candidate_hashes.push(h);
+            }
+            if let Some(h) = old_mut {
+                candidate_hashes.push(h);
+            }
+            if let Some(h) = old_resp {
+                candidate_hashes.push(h);
+            }
+        }
+        if let Some(h) = raw_req_hash {
+            candidate_hashes.push(h);
+        }
+        candidate_hashes.sort();
+        candidate_hashes.dedup();
+        for h in candidate_hashes {
+            let still_used: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM turns WHERE raw_request_hash = ?1 OR mutated_request_hash = ?1 OR raw_response_hash = ?1)",
+                params![h],
+                |r| r.get(0),
+            )?;
+            if !still_used {
+                tx.execute("DELETE FROM blobs WHERE hash = ?1", params![h])?;
+            }
+        }
+
+        tx.execute(
             "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
             params![turn.created_at.to_rfc3339(), turn.session_id],
         )?;
+        tx.commit()?;
         Ok(())
     }
 
     pub fn list_turns(&self, session_id: &str) -> Result<Vec<ContextTurn>, StoreError> {
+        self.list_turns_page(session_id, 100, 0)
+    }
+
+    pub fn list_turns_page(
+        &self,
+        session_id: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<ContextTurn>, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         let mut stmt = conn.prepare(
-            "SELECT turn_json FROM turns WHERE session_id = ?1 ORDER BY seq_num ASC, created_at ASC",
+            "SELECT turn_json FROM turns WHERE session_id = ?1 ORDER BY seq_num DESC, created_at DESC LIMIT ?2 OFFSET ?3",
         )?;
-        let rows = stmt.query_map(params![session_id], |row| row.get::<_, String>(0))?;
+        let rows = stmt.query_map(
+            params![
+                session_id,
+                limit.min(1000) as i64,
+                offset.min(i64::MAX as usize) as i64
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
         let mut out = Vec::new();
         for r in rows {
             let s = r?;
             out.push(serde_json::from_str(&s)?);
         }
+        out.reverse();
         Ok(out)
     }
 
@@ -352,7 +626,7 @@ impl CwStore {
         let hash_opt: Option<String> = {
             let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
             conn.query_row(
-                "SELECT COALESCE(raw_request_hash, mutated_request_hash) FROM turns WHERE id = ?1",
+                "SELECT raw_request_hash FROM turns WHERE id = ?1",
                 params![turn_id],
                 |row| row.get(0),
             )
@@ -380,31 +654,109 @@ impl CwStore {
         }
     }
 
-    pub fn save_mutation(&self, rule: &MutationRule) -> Result<(), StoreError> {
-        let existing = self.list_mutations(&rule.session_id).unwrap_or_default();
-        let json_str = serde_json::to_string(rule)?;
-        let status_str = match rule.status {
-            MutationStatus::Draft => "draft",
-            MutationStatus::Committed => "committed",
-            MutationStatus::Disabled => "disabled",
+    pub fn session_history_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<(Vec<ContextTurn>, Vec<MutationRule>, String), StoreError> {
+        let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let tx = conn.transaction()?;
+        let turns = {
+            let mut query=tx.prepare("SELECT turn_json FROM (SELECT turn_json,seq_num,created_at FROM turns WHERE session_id=?1 ORDER BY seq_num DESC,created_at DESC LIMIT 100) ORDER BY seq_num ASC,created_at ASC")?;
+            query
+                .query_map(params![session_id], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
         };
+        let rules = {
+            let mut query=tx.prepare("SELECT rule_json FROM mutations WHERE session_id=?1 ORDER BY created_at ASC,id ASC")?;
+            query
+                .query_map(params![session_id], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let revision = Self::revision(&tx, session_id)?;
+        tx.commit()?;
+        Ok((
+            turns
+                .into_iter()
+                .map(|s| serde_json::from_str(&s))
+                .collect::<Result<_, _>>()?,
+            rules
+                .into_iter()
+                .map(|s| serde_json::from_str(&s))
+                .collect::<Result<_, _>>()?,
+            revision,
+        ))
+    }
+
+    pub fn optimization_plans(
+        &self,
+        turn: &ContextTurn,
+    ) -> Result<Vec<cw_core::optimizer::OptimizationStrategyPlan>, StoreError> {
+        let Some(provider) = turn.normalization_provider else {
+            return Ok(Vec::new());
+        };
+        let Some(raw) = self.get_turn_raw_payload(&turn.id)? else {
+            return Ok(Vec::new());
+        };
+        Ok(cw_core::optimizer::build_optimization_plans_for_payload(
+            turn, &raw, provider,
+        ))
+    }
+
+    pub fn session_revision(&self, session_id: &str) -> Result<String, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
-        for prev in existing {
-            if prev.id != rule.id && prev.op.is_semantically_equivalent(&rule.op) {
-                let _ = conn.execute("DELETE FROM mutations WHERE id = ?1", params![prev.id]);
-            }
+        Self::revision(&conn, session_id)
+    }
+
+    fn revision(conn: &Connection, session_id: &str) -> Result<String, StoreError> {
+        let turn: Option<String> = conn
+            .query_row(
+                "SELECT turn_json FROM turns WHERE session_id=?1 ORDER BY seq_num DESC, created_at DESC, id DESC LIMIT 1",
+                params![session_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let mut query =
+            conn.prepare("SELECT rule_json FROM mutations WHERE session_id=?1 ORDER BY id")?;
+        let rules = query
+            .query_map(params![session_id], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(
+            blake3::hash(serde_json::to_string(&(turn, rules))?.as_bytes())
+                .to_hex()
+                .to_string(),
+        )
+    }
+
+    pub fn save_mutation(&self, rule: &MutationRule) -> Result<(), StoreError> {
+        self.save_mutations_at_revision(&rule.session_id, None, std::slice::from_ref(rule))
+    }
+
+    pub fn save_mutations_at_revision(
+        &self,
+        session_id: &str,
+        revision: Option<&str>,
+        rules: &[MutationRule],
+    ) -> Result<(), StoreError> {
+        let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if let Some(expected) = revision
+            && Self::revision(&tx, session_id)? != expected
+        {
+            return Err(StoreError::Conflict);
         }
-        conn.execute(
-            "INSERT OR REPLACE INTO mutations (id, session_id, rule_json, status, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                rule.id,
-                rule.session_id,
-                json_str,
-                status_str,
-                rule.created_at.to_rfc3339()
-            ],
-        )?;
+        for rule in rules {
+            if rule.session_id != session_id {
+                return Err(StoreError::Conflict);
+            }
+            let json = serde_json::to_string(rule)?;
+            let status = match rule.status {
+                MutationStatus::Draft => "draft",
+                MutationStatus::Committed => "committed",
+                MutationStatus::Disabled => "disabled",
+            };
+            tx.execute("INSERT INTO mutations(id,session_id,rule_json,status,created_at) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET rule_json=excluded.rule_json,status=excluded.status WHERE mutations.session_id=excluded.session_id",params![rule.id,rule.session_id,json,status,rule.created_at.to_rfc3339()])?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -438,10 +790,47 @@ impl CwStore {
         Ok(deleted)
     }
 
+    pub fn change_mutations_at_revision(
+        &self,
+        session_id: &str,
+        revision: &str,
+        remove_ids: &[String],
+        commit_drafts: bool,
+    ) -> Result<usize, StoreError> {
+        let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        if Self::revision(&tx, session_id)? != revision {
+            return Err(StoreError::Conflict);
+        }
+        let mut changed = 0;
+        for id in remove_ids {
+            changed += tx.execute(
+                "DELETE FROM mutations WHERE id=?1 AND session_id=?2",
+                params![id, session_id],
+            )?;
+        }
+        if commit_drafts {
+            let rules = {
+                let mut stmt = tx.prepare(
+                    "SELECT rule_json FROM mutations WHERE session_id=?1 AND status='draft'",
+                )?;
+                stmt.query_map(params![session_id], |r| r.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            for json in rules {
+                let mut rule: MutationRule = serde_json::from_str(&json)?;
+                rule.status = MutationStatus::Committed;
+                changed += tx.execute("UPDATE mutations SET status='committed',rule_json=?1 WHERE id=?2 AND session_id=?3", params![serde_json::to_string(&rule)?,rule.id,session_id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     pub fn list_mutations(&self, session_id: &str) -> Result<Vec<MutationRule>, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         let mut stmt = conn.prepare(
-            "SELECT rule_json FROM mutations WHERE session_id = ?1 ORDER BY created_at ASC",
+            "SELECT rule_json FROM mutations WHERE session_id = ?1 ORDER BY created_at ASC, id ASC",
         )?;
         let rows = stmt.query_map(params![session_id], |row| row.get::<_, String>(0))?;
         let mut out = Vec::new();
@@ -657,13 +1046,22 @@ impl CwStore {
             )
             .optional()?;
         match raw {
-            Some(s) => Ok(serde_json::from_str(&s).unwrap_or_default()),
+            Some(s) => {
+                let mut cfg: AutoPilotConfig = serde_json::from_str(&s)?;
+                if cfg.safety_version < 2 {
+                    cfg.enabled = false;
+                    cfg.auto_sync_to_disk = false;
+                }
+                Ok(cfg)
+            }
             None => Ok(AutoPilotConfig::default()),
         }
     }
 
     pub fn set_autopilot_config(&self, cfg: &AutoPilotConfig) -> Result<(), StoreError> {
-        let json_str = serde_json::to_string(cfg)?;
+        let mut cfg = cfg.clone();
+        cfg.safety_version = 2;
+        let json_str = serde_json::to_string(&cfg)?;
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         conn.execute(
             "INSERT OR REPLACE INTO settings (key, value_json) VALUES ('autopilot_config', ?1)",
@@ -678,7 +1076,7 @@ impl CwStore {
     ) -> Result<(), StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         conn.execute(
-            "INSERT OR REPLACE INTO mutation_effectiveness (
+            "INSERT OR REPLACE INTO mutation_effectiveness_v2 (
                 mutation_id, session_id, turn_id, tokens_saved, kv_cache_hit_rate, ttft_ms, created_at
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
@@ -703,7 +1101,7 @@ impl CwStore {
         if let Some(sid) = session_id {
             let mut stmt = conn.prepare(
                 "SELECT mutation_id, session_id, turn_id, tokens_saved, kv_cache_hit_rate, ttft_ms, created_at
-                 FROM mutation_effectiveness WHERE session_id = ?1 ORDER BY created_at DESC"
+                 FROM mutation_effectiveness_v2 WHERE session_id = ?1 ORDER BY created_at DESC"
             )?;
             let rows = stmt.query_map(params![sid], Self::row_to_effectiveness)?;
             for r in rows.flatten() {
@@ -712,7 +1110,7 @@ impl CwStore {
         } else {
             let mut stmt = conn.prepare(
                 "SELECT mutation_id, session_id, turn_id, tokens_saved, kv_cache_hit_rate, ttft_ms, created_at
-                 FROM mutation_effectiveness ORDER BY created_at DESC LIMIT 100"
+                 FROM mutation_effectiveness_v2 ORDER BY created_at DESC LIMIT 100"
             )?;
             let rows = stmt.query_map([], Self::row_to_effectiveness)?;
             for r in rows.flatten() {

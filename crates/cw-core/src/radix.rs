@@ -18,7 +18,7 @@ pub fn analyze_kv_cache(
 
     let Some(prev) = prev_nodes else {
         // First turn of the session: everything is newly written to cache
-        let hit = actual_cached_tokens.unwrap_or(0);
+        let hit = actual_cached_tokens.unwrap_or(0).min(total_curr_tokens);
         for &idx in &curr_order {
             curr_nodes[idx].kv_status = if curr_nodes[idx].token_span.end <= hit && hit > 0 {
                 KvNodeStatus::CachedHit
@@ -54,7 +54,8 @@ pub fn analyze_kv_cache(
         let c_idx = curr_order[step];
         let c_node = &curr_nodes[c_idx];
 
-        if p_node.kind.kind_tag() == c_node.kind.kind_tag()
+        if p_node.role == c_node.role
+            && p_node.kind.kind_tag() == c_node.kind.kind_tag()
             && p_node.kind.text_for_tokenization() == c_node.kind.text_for_tokenization()
         {
             matched_prefix_tokens = c_node.token_span.end;
@@ -83,7 +84,7 @@ pub fn analyze_kv_cache(
     let effective_hit_tokens = match actual_cached_tokens {
         Some(actual) if actual == 0 && matched_prefix_tokens >= 1024 => 0, // Cache TTL expired
         Some(actual) => actual.min(total_curr_tokens),
-        None => matched_prefix_tokens,
+        None => 0,
     };
 
     let ttl_expired = actual_cached_tokens == Some(0) && matched_prefix_tokens >= 1024;

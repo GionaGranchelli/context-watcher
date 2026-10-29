@@ -1,5 +1,7 @@
 # Spec 04: Harness Integrations (AGY, Codex, Pi, OpenCode, Claude), MCP Server & IntelliJ Plugin
 
+> Safety implementation contract (2026-10-29): [COMPATIBILITY.md](../docs/COMPATIBILITY.md) and [REMEDIATION.md](../docs/REMEDIATION.md) supersede conflicting guarantee language below. The remaining text describes the original target design, not proof of completed or measured capabilities.
+
 **Status:** Approved  
 **Related Tickets:** `CW-008` – `CW-010`, `CW-034` – `CW-040`
 
@@ -12,7 +14,8 @@ Different agent harnesses expose different extension points. `contextWatcher` us
 | Harness | 1. HTTP/SSE Proxy | 2. Local Disk Transcript Sync | 3. Native Plugin / MCP / Skill |
 | :--- | :--- | :--- | :--- |
 | **Antigravity (AGY)** | Via proxy config / env | `~/.gemini/antigravity-cli/brain/<id>/.system_generated/logs/transcript.jsonl` & `transcript_full.jsonl` | Native Skill (`skills/context-watcher/SKILL.md`) + `cw mcp` server |
-| **Codex CLI** | `OPENAI_BASE_URL=http://127.0.0.1:4401/openai/v1` | `~/.codex/sessions/**/*.jsonl` | Wrapper `cw wrap codex` + `cw mcp` server |
+| **Codex CLI** | Temporary custom Responses provider configured by `cw wrap codex` | `~/.codex/sessions/**/*.jsonl` | Wrapper `cw wrap codex` + `cw mcp` server |
+| **Hermes Agent** | Built-in DeepSeek endpoint routed by persistent `model.base_url` or `cw wrap hermes chat` via Hermes' `--base-url` option; authenticated session headers added by the Hermes `llm_request` plugin | `~/.hermes/state.db` explicit import only; no live write-back | `cw init` installs/enables the plugin; direct launches need `model.base_url: http://127.0.0.1:4401/deepseek`, or use the wrapper |
 | **Pi / OpenCode / Aider** | `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL` | `.opencode/`, `.aider.chat.history.md`, Pi session store | Plugin hooks + `cw mcp` server |
 | **Claude Code** | `ANTHROPIC_BASE_URL=http://127.0.0.1:4401/anthropic` | `~/.claude/projects/**/*.jsonl` | PreToolUse / PostToolUse hooks + `/cw` commands + `cw mcp` |
 

@@ -5,7 +5,9 @@
 
 ---
 
-## 🟢 Done
+## Historical implementation milestones
+
+These checkboxes record earlier implementation work, not current qualification. The remediation section and [support contract](docs/COMPATIBILITY.md) govern current behavior; unsupported claims below remain historical design descriptions.
 
 * [x] **CW-000** `[P0]` `[Arch]` Project vision, architecture, roadmap, specs, and `AGENTS.md` initialization.
 
@@ -157,10 +159,47 @@
 
 ---
 
-## 🚧 In Progress
-*(None — All 15 Epics & 4 Horizons Complete and Verified)*
+## Current status audit (2026-10-29)
+
+The checked tickets below are historical implementation milestones. They are not current acceptance evidence. See [the detailed board audit](docs/BOARD-AUDIT-2026-10-29.md) and [verified support contract](docs/COMPATIBILITY.md). The review found several tickets whose wording claims guarantees or end-to-end support that the current code does not provide.
+
+| Area | Current code status | Board correction needed |
+|---|---|---|
+| Core IR, CLI, UI, store, proxy and adapters | Code exists; workspace build/tests pass | Keep as implemented milestones, not feature qualification |
+| Observation, auth, approval and raw request capture | Safer defaults and mock coverage implemented | Real-provider and every-client header paths still need verification |
+| Mutations and overlays | Core operators exist with stricter identity and content guards | Generic folds/tool gates are not safe automatic compaction; pins may change prefix |
+| Transcript sync | Separate private JSONL export, source unchanged | CW-041 in-place `.bak` write-back across six harnesses is not implemented |
+| Autopilot | Config/API/UI and limited proposal logic remain | Automatic spill, sync and several self-heal behaviors are disabled |
+| Watchers | Registered JSONL snapshots are reparsed on blocking workers | No incremental cursor/all-home scan; SQLite harness sources are import-only |
+| Local engine/slots | Heuristics and preview endpoints exist | No physical page unmapping, exclusive slot ownership, or promised engine option injection |
+| Cache/cost/attention analytics | Estimates plus provider usage fields exist | No exact tokenizer/cache-boundary, quality or speed guarantees |
+| Clients | Web build/check and IntelliJ plugin build passed. Codex CLI 0.165.0 now uses a wrapper-supplied Responses provider with authenticated headers; local mock verified session reuse and pin reapplication. | Browser/IDE runtime and real-provider behavior remain unverified. |
+| Qualification | Five isolated sessions across three task families produced 24/25 passing answers. All baseline and cw strategy answers passed; one native transition answer failed its contract. | No broad quality/performance or hardware qualification. |
+
+### Remediation status
+
+| Ticket | Status | Current evidence / remaining work |
+|---|---|---|
+| **CW-R0** Evidence and finding ledger | Done | Baseline and review findings are recorded in `docs/BOARD-AUDIT-2026-10-29.md` and `docs/REMEDIATION.md`. |
+| **CW-R1** Observation defaults and capability labels | Done | Safer defaults and compatibility limits are documented. |
+| **CW-R2** Approvals and local control | Done for tested paths | API/proxy authorization tests pass; real-provider paths remain outside qualification. |
+| **CW-R3** Session identity and concurrent requests | Partial | Codex session reuse and overlay reapplication remain mock-verified. OMP/Claude request headers worked in mocks, but CW headers are now stripped from non-Codex children after a shell probe demonstrated credential exposure. |
+| **CW-R4** Immutable originals and mutation revisions | Done | Migration snapshots and revision checks are covered by store tests. |
+| **CW-R5** Selectors and conservative mutations | Done for covered shapes | Responses `input` pin injection now works; unsupported tails are reported unapplied. Other shapes remain fail-closed. |
+| **CW-R6** Transcript export and privacy | Done within support contract | Separate private exports and purge are covered; in-place transcript replacement is unsupported. |
+| **CW-R7** Provider and harness support contract | In Progress | Codex has authenticated overlay reapplication evidence. Hermes has an enabled `llm_request` plugin. Direct launches now use persistent `model.base_url: http://127.0.0.1:4401/deepseek`; plain launch plus resume recorded two turns under the same CW session on 2026-10-29. `cw wrap hermes chat` remains a per-process alternative. Isolated two-turn testing verified session binding and committed pin reapplication; live signature qualification is not claimed. Other Hermes providers and SQLite write-back remain unverified or unsupported. OpenCode 1.17.3, Pi 1.0.4, and Aider 0.86.2 passed local mock requests with native provider headers and bound the configured session; `cw wrap` does not create those settings, and same-user tool isolation is not established. An automated proxy test checks authenticated session selection, overlay application, and CW-header stripping. OMP/Claude wrapper auth is disabled after a shell probe exposed credentials to Claude Bash. Gemini CLI 0.42.0 and Antigravity CLI 1.4.10 completed local mock calls through `cw wrap`, but explicit wrapper session IDs were not attached; both remain observation-only. Gemini CLI's custom provider-header variable is unsafe for CW credentials: the installed 0.42.0 source preserves all `GEMINI_CLI_*` variables in shell-tool environments, including when environment redaction is enabled. The wrapper now strips inherited `x-cw-*` values from Gemini custom provider headers; focused CLI test passes. Do not bind sessions through that variable. A safe Gemini/Antigravity session transport remains open. Signed Anthropic request and SSE response fixtures pass byte-preservation checks. On 2026-10-29, OpenRouter-backed live checks passed for an Anthropic-routed Claude Haiku 5.5 streaming `signature_delta` and a Gemini tool response with nonempty normalized `reasoning_details`. OpenRouter did not return a native `thoughtSignature` in the Gemini response; direct Anthropic and native Gemini signature checks remain outstanding. |
+| **CW-R8** Cache planning and engine capabilities | Done as a conservative preview | Unknown usage stays unknown; physical page unmapping is not implemented. |
+| **CW-R9** Request/response lifecycle telemetry | Done for mock paths | Raw bytes and completed-stream paths are covered by mocks; no real-provider latency measurement exists. |
+| **CW-R10** Web and IDE client behavior | Deferred | Final acceptance task by user request. Web check/build, IntelliJ package build, and proxy API mutation test pass; interactive browser/IDE behavior remains unverified. |
+| **CW-R11** Storage and IO ownership | Partial | Blocking work and pagination are implemented; large-history and full database IO qualification remain open. |
+| **CW-R12** CI and product qualification | Partial | CI/docs and sanitized multi-task evidence are current; broad quality, performance, and hardware qualification remain open. |
+| **CW-090** Built-in updater | Done (implementation) | Release checksum verification, bounded downloads, safe binary extraction, atomic install, source build, integration refresh, and optional daemon restart are implemented. Six CLI tests and clippy pass; no live update was run against the user's installed binary. |
 
 ---
+
+## 🚧 In Progress
+
+* **CW-R7** Finish safe authenticated wrapper support beyond Codex and validate real-provider signature preservation. Hermes DeepSeek direct launches now use persistent `model.base_url`; plain launch and resume recorded the same CW session. `cw wrap hermes chat` remains a per-process alternative; the env-only base URL was ineffective in this credential-pool setup. Local overlay reapplication remains covered by isolated mock tests. Gemini CLI's custom header environment variable cannot safely carry CW auth because the CLI preserves all `GEMINI_CLI_*` variables in shell-tool environments. Find a session-binding transport that keeps auth out of model-invoked tools for Gemini CLI and Antigravity; their local mock calls route through the proxy but do not bind the requested CW session. OpenCode/Pi/Aider native headers and OpenRouter-to-Anthropic signature streaming have local/live evidence. Native Gemini `thoughtSignature` and direct Anthropic connectivity remain unvalidated.
 
 ## 📋 Ready
 *(None)*
@@ -168,4 +207,6 @@
 ---
 
 ## 🗂️ Backlog
-*(None)*
+
+* **CW-R11** Qualify bounded IO and session pagination against a large history fixture.
+* **CW-R12** Extend task-family and provider qualification before making broader quality or performance claims.

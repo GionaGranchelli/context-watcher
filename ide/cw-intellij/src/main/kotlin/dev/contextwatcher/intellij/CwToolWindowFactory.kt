@@ -7,6 +7,7 @@ import com.intellij.ui.content.ContentFactory
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import java.awt.BorderLayout
+import javax.swing.JOptionPane
 import javax.swing.JButton
 import javax.swing.JLabel
 import javax.swing.JPanel
@@ -23,6 +24,18 @@ class CwToolWindowFactory : ToolWindowFactory {
         dedupeBtn.addActionListener {
             project.getService(CwDaemonService::class.java).shadowDedupeFile(null)
         }
+        val selectBtn = JButton("Select session")
+        selectBtn.addActionListener {
+            val service = project.getService(CwDaemonService::class.java)
+            val sessions = service.availableSessions()
+            if (sessions.isNotEmpty()) {
+                val chosen = JOptionPane.showInputDialog(panel, service.connectionStatus, "contextWatcher",
+                    JOptionPane.QUESTION_MESSAGE, null, sessions.map { it.first }.toTypedArray(), sessions.first().first)
+                sessions.firstOrNull { it.first == chosen }?.let { service.selectSession(it.first) }
+            } else JOptionPane.showMessageDialog(panel, service.connectionStatus)
+
+        }
+        topBar.add(selectBtn)
         topBar.add(refreshBtn)
         topBar.add(dedupeBtn)
         panel.add(topBar, BorderLayout.NORTH)

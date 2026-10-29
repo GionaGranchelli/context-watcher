@@ -1,5 +1,7 @@
 # Spec 03: Web UI Dashboard (Svelte 5 + XYFlow + D3), Ratatui TUI & CLI
 
+> Safety implementation contract (2026-10-29): [COMPATIBILITY.md](../docs/COMPATIBILITY.md) and [REMEDIATION.md](../docs/REMEDIATION.md) supersede conflicting guarantee language below. The remaining text describes the original target design, not proof of completed or measured capabilities.
+
 **Status:** Approved  
 **Related Tickets:** `CW-017` – `CW-023`, `CW-033`
 
@@ -102,6 +104,9 @@ For terminal-centric workflows (tmux, Zellij, SSH), `cw tui` connects to the sam
 ```bash
 # Start daemon (Proxy on :4401, Web UI + API on :4400)
 cw serve [--port 4400] [--proxy-port 4401]
+
+# Update the installed CLI, refresh integrations, and restart the daemon
+cw update [--from-source] [--no-restart]
 
 # Launch any harness wrapped with contextWatcher proxy + session tracking
 cw wrap agy

@@ -17,6 +17,30 @@
     AutoPilotConfig
   } from './lib/types';
 
+  let controlToken = $state(sessionStorage.getItem('cw-control-token') || '');
+  let tokenInput = $state('');
+  let loadedSessionId = $state('');
+  let loadedRevision = $state('');
+  let graphRequest = 0;
+
+  async function apiFetch(url: string, init: RequestInit = {}) {
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${controlToken}`);
+    if (init.method && init.method !== 'GET' && url.includes('/sessions/') && (loadedSessionId !== activeSessionId || decodeURIComponent(url.split('/sessions/')[1].split('/')[0].split('?')[0]) !== loadedSessionId)) {
+      statusBanner = 'Wait for the selected session to load before making changes.';
+      throw new Error(statusBanner);
+    }
+    if (init.method && init.method !== 'GET' && url.includes('/sessions/')) headers.set('If-Match', loadedRevision);
+    const response = await fetch(url, { ...init, headers });
+    if (!response.ok) {
+      statusBanner = response.status === 401 ? 'Connect using the token from cw auth-token.' : `Request failed (${response.status}). Refresh before retrying.`;
+      throw new Error(statusBanner);
+    }
+    const revision = response.headers.get('x-cw-revision');
+    if (revision && url.includes(`/sessions/${activeSessionId}/`)) loadedRevision = revision;
+    return response;
+  }
+
   let sessions = $state<Session[]>([]);
   let activeSessionId = $state<string>('');
   let latestTurn = $state<ContextTurn | null>(null);
@@ -341,7 +365,7 @@
         name: 'Command Outputs',
         value: cb.command_outputs,
         color: '#d97706',
-        whatMatters: 'Only the latest command output or error summary matters; old verbose logs are safe to prune.',
+        whatMatters: 'Review older outputs before removing them; they may contain unique facts.',
         canCut: 'High (Safe to prune old logs)'
       },
       {
@@ -363,7 +387,7 @@
         value: cb.file_reads_stale_or_duplicate,
         color: '#ea580c',
         whatMatters: 'Outdated or duplicate file contents superseded by later edits or re-reads.',
-        canCut: '100% Safe to Cut (Shadow-Dedupe)'
+        canCut: 'Review range coverage before dedupe'
       },
       {
         name: 'MCP & Native Tools',
@@ -560,7 +584,7 @@
 
   async function fetchSessions() {
     try {
-      const res = await fetch('/api/v1/sessions');
+      const res = await apiFetch('/api/v1/sessions');
       sessions = await res.json();
       if (!activeSessionId && sessions.length > 0) {
         const withWorkspace = sessions.find((s) => s.workspace_root && s.title);
@@ -576,10 +600,14 @@
 
   async function fetchSessionGraph(sessionId: string) {
     if (!sessionId) return;
-    const res = await fetch(`/api/v1/sessions/${sessionId}/graph`);
-    if (!res.ok) return;
+    const request = ++graphRequest;
+    const res = await apiFetch(`/api/v1/sessions/${sessionId}/graph`);
     const data = await res.json();
-    latestTurn = data.latest_turn;
+    if (request !== graphRequest || activeSessionId !== sessionId) return;
+    const changedSession = loadedSessionId !== sessionId;
+    loadedSessionId = sessionId;
+    loadedRevision = data.revision;
+    latestTurn = data.mutation_preview || data.latest_turn;
     turns = data.turns || [];
     graphNodes = data.radix_graph?.nodes || [];
     graphEdges = data.radix_graph?.edges || [];
@@ -590,7 +618,7 @@
     localModelAnalysis = data.local_model_analysis || null;
     autopilotConfig = data.autopilot_config || null;
     transcriptSourcePath = data.transcript_source_path || null;
-    uncheckedItemIds = {};
+    if (changedSession) uncheckedItemIds = {};
     if (optimizationPlans.length > 0 && !optimizationPlans.some((p) => p.id === selectedStrategyId)) {
       const nonEmpty = optimizationPlans.find((p) => p.items.length > 0);
       selectedStrategyId = nonEmpty ? nonEmpty.id : optimizationPlans[0].id;
@@ -602,7 +630,7 @@
 
   async function applyMutation(op: Record<string, any>, status: 'committed' | 'draft' = 'committed', msg = 'Mutation applied') {
     if (!activeSessionId) return;
-    await fetch(`/api/v1/sessions/${activeSessionId}/mutations`, {
+    await apiFetch(`/api/v1/sessions/${activeSessionId}/mutations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ op, status })
@@ -613,14 +641,14 @@
 
   async function commitDrafts() {
     if (!activeSessionId) return;
-    await fetch(`/api/v1/sessions/${activeSessionId}/mutations/commit-drafts`, { method: 'POST' });
-    statusBanner = 'Committed all staged draft mutations (single KV cache rebuild).';
+    await apiFetch(`/api/v1/sessions/${activeSessionId}/mutations/commit-drafts`, { method: 'POST' });
+    statusBanner = 'Committed all staged draft mutations (cache impact estimated).';
     await fetchSessionGraph(activeSessionId);
   }
 
   async function deleteMutation(mutationId: string) {
     if (!activeSessionId) return;
-    await fetch(`/api/v1/sessions/${activeSessionId}/mutations/${mutationId}`, { method: 'DELETE' });
+    await apiFetch(`/api/v1/sessions/${activeSessionId}/mutations/${mutationId}`, { method: 'DELETE' });
     statusBanner = 'Reverted mutation overlay.';
     await fetchSessionGraph(activeSessionId);
   }
@@ -629,7 +657,7 @@
     if (!activeSessionId || !activeStrategyPlan) return;
     const selectedIds = checkedStrategyItems.map((i) => i.item_id);
     if (selectedIds.length === 0) return;
-    const res = await fetch(`/api/v1/sessions/${activeSessionId}/optimize`, {
+    const res = await apiFetch(`/api/v1/sessions/${activeSessionId}/optimize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -650,9 +678,10 @@
 
   async function bulkCutSafeItems() {
     if (!activeSessionId) return;
+    const targetSession = activeSessionId;
     const toCut = pruneAdvisorItems.filter((i) => i.verdict === 'cut_recommended' || i.verdict === 'can_compact');
     for (const item of toCut) {
-      await fetch(`/api/v1/sessions/${activeSessionId}/mutations`, {
+      await apiFetch(`/api/v1/sessions/${targetSession}/mutations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -673,7 +702,7 @@
 
   async function triggerForkReplay() {
     if (!activeSessionId) return;
-    const res = await fetch(`/api/v1/sessions/${activeSessionId}/replay`, {
+    const res = await apiFetch(`/api/v1/sessions/${activeSessionId}/replay`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -683,7 +712,7 @@
     });
     if (res.ok) {
       replayComparison = await res.json();
-      statusBanner = `Created Fork & Replay comparison (saved ${replayComparison?.saved_tokens ?? 0} tokens).`;
+      statusBanner = `Created mutation preview (saved ${replayComparison?.saved_tokens ?? 0} tokens).`;
       await fetchSessionGraph(activeSessionId);
     }
   }
@@ -761,7 +790,7 @@
       ]
     };
 
-    await fetch('/api/v1/ingest', {
+    await apiFetch('/api/v1/ingest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -835,7 +864,7 @@
       ]
     };
 
-    await fetch('/api/v1/ingest', {
+    await apiFetch('/api/v1/ingest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -856,12 +885,12 @@
 
   async function syncTranscriptToDisk() {
     if (!activeSessionId) return;
-    const res = await fetch(`/api/v1/sessions/${activeSessionId}/sync-back`, {
+    const res = await apiFetch(`/api/v1/sessions/${activeSessionId}/sync-back`, {
       method: 'POST'
     });
     const data = await res.json();
     if (res.ok) {
-      statusBanner = `Synced ${data.applied_mutations} mutation overlays back to disk. Backup saved at ${data.backup_path}`;
+      statusBanner = `Exported ${data.steps_compacted} records to ${data.export_path}. Original transcript unchanged.`;
       await fetchSessionGraph(activeSessionId);
     } else {
       statusBanner = `Sync-back note: ${data.error || 'Session is proxy-only or has no on-disk transcript.'}`;
@@ -869,7 +898,7 @@
   }
 
   async function saveAutoPilotConfig(updated: AutoPilotConfig) {
-    const res = await fetch('/api/v1/autopilot', {
+    const res = await apiFetch('/api/v1/autopilot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updated)
@@ -882,22 +911,32 @@
   }
 
   $effect(() => {
-    fetchSessions();
-    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/api/v1/ws`);
-    ws.onopen = () => (wsConnected = true);
-    ws.onclose = () => (wsConnected = false);
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        if (msg.event === 'turn_completed' || msg.event === 'mutations_updated') {
-          fetchSessions();
-        } else if (msg.event === 'firewall_intercepted') {
-          intercepts = [...intercepts, msg.intercept];
-        }
-      } catch {}
-    };
-    return () => ws.close();
+    const token = controlToken;
+    if (!token) return;
+    sessionStorage.setItem('cw-control-token', token);
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let socket: WebSocket | undefined;
+    function connect() {
+      if (disposed) return;
+      fetchSessions();
+      const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      socket = new WebSocket(`${proto}//${window.location.host}/api/v1/ws`, ['cw', `cw-token.${token}`]);
+      socket.onopen = () => { wsConnected = true; };
+      socket.onclose = () => {
+        wsConnected = false;
+        if (!disposed) timer = setTimeout(connect, 2000);
+      };
+      socket.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.event === 'turn_completed' || message.event === 'mutations_updated') fetchSessions();
+          else if (message.event === 'firewall_intercepted') intercepts = [...intercepts, message.intercept];
+        } catch { statusBanner = 'Received an unreadable update. Refresh the session.'; }
+      };
+    }
+    connect();
+    return () => { disposed = true; clearTimeout(timer); socket?.close(); };
   });
 
   function kvColor(status: string): string {
@@ -1028,7 +1067,7 @@
             onclick={syncTranscriptToDisk}
             style="background: #18181b; color: #10b981; border: 1px solid #065f46; border-radius: 6px; padding: 5px 10px; font-size: 12px; font-weight: 500; cursor: pointer;"
           >
-            Sync to Disk
+            Export Copy
           </button>
         {/if}
 
@@ -1048,6 +1087,12 @@
       </div>
     {/if}
   </header>
+
+  <form onsubmit={(event) => { event.preventDefault(); controlToken = tokenInput.trim(); tokenInput = ''; }} style="display:flex;gap:8px;padding:8px">
+    <label for="control-token">Local connection token (run cw auth-token)</label>
+    <input id="control-token" type="password" autocomplete="off" required pattern={'[A-Za-z0-9_-]{32,128}'} bind:value={tokenInput} />
+    <button type="submit">Connect</button>
+  </form>
 
   {#if statusBanner}
     <div style="background: #172554; color: #bfdbfe; padding: 6px 18px; font-size: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e3a8a;">
@@ -1519,7 +1564,7 @@
                     <div style="font-size: 11px; color: #71717a;">KV Cache Impact</div>
                     <div style="font-size: 13px; font-weight: 500; color: {liveStrategyScoreboard.kvBreakTokens === 0 ? '#10b981' : '#f59e0b'}; margin-top: 4px;">
                       {liveStrategyScoreboard.kvBreakTokens === 0
-                        ? '0 tokens invalidated (100% cache-safe)'
+                        ? 'Estimated break: 0 tokens (not a provider guarantee)'
                         : `Rebuilds ~${liveStrategyScoreboard.kvBreakTokens.toLocaleString()} tok (break-even: ${liveStrategyScoreboard.breakEvenTurns} turn${liveStrategyScoreboard.breakEvenTurns === 1 ? '' : 's'})`}
                     </div>
                   </div>
@@ -1944,9 +1989,8 @@
             {#if autopilotConfig}
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px;">
                 {#each [
-                  ['zero_break_tail_hygiene', `Zero-Break Tail Hygiene (>${autopilotConfig.tail_max_tool_tokens.toLocaleString()} tok)`, 'Truncates giant single command outputs to head/tail while saving the full raw output to /tmp/cw_logs/<call_id>.log.'],
-                  ['local_model_window_guard', 'Local Model Sliding-Window Guard (>85% num_ctx)', 'Folds older turns before a local model hits its num_ctx ceiling and suffers a full KV-cache shift.'],
-                  ['auto_cache_safe_pin', `Auto Cache-Safe Rule Pin (>${autopilotConfig.pin_min_context_tokens.toLocaleString()} tok)`, 'Appends a lightweight AGENTS.md reminder to the prompt tail with 0% KV cache break when salience drops below 40%.'],
+                  ['local_model_window_guard', 'Local Model Sliding-Window Guard (>85% num_ctx)', 'Advisory window threshold; automatic trajectory folds are disabled.'],
+                  ['auto_cache_safe_pin', `Optional Rule Reminder (>${autopilotConfig.pin_min_context_tokens.toLocaleString()} tok)`, 'Adds a heuristic reminder when explicitly enabled; it may change the cached prefix.'],
                   ['auto_diet_at_breakpoint', `Auto Diet at Breakpoint (>${autopilotConfig.breakpoint_tokens.toLocaleString()} tok)`, 'Triggers Surgical Log Diet + Clean Code State automatically on deep sessions.']
                 ] as [key, title, desc]}
                   <label style="display: flex; align-items: flex-start; gap: 10px; background: #141418; border: 1px solid #1f1f26; border-radius: 8px; padding: 12px 14px; cursor: pointer;">

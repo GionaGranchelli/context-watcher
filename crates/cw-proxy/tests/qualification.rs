@@ -230,6 +230,13 @@ async fn handle_mock_chat_completion(
     path: &str,
     captured: Arc<Mutex<Vec<CapturedRequest>>>,
 ) -> Response {
+    let body_str = String::from_utf8_lossy(&body);
+    // If this is Process A's request in the concurrent qualification test, hold the connection
+    // briefly so that Process B's concurrent request is guaranteed to overlap in-flight.
+    if body_str.contains("Prompt from Hermes Process A") {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+
     let json_val = serde_json::from_slice::<Value>(&body).ok();
     let is_stream = json_val
         .as_ref()
@@ -1377,15 +1384,83 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
             .unwrap();
     }
 
-    // Ensure Hermes client_env_passthrough includes contextWatcher environment variables
-    let _ = Command::new(&hermes_bin)
-        .args([
-            "config",
-            "set",
-            "terminal.client_env_passthrough",
-            r#"["CW_HERMES_OVERRIDE_FILE","CW_SESSION_ID","CW_CONTROL_TOKEN_FILE","CW_WORKSPACE"]"#,
-        ])
-        .status();
+    // Capture original Hermes client_env_passthrough to preserve existing entries and restore on completion
+    let output = Command::new(&hermes_bin)
+        .args(["config", "get", "--json", "terminal.client_env_passthrough"])
+        .output();
+
+    let mut original_json = None;
+    let mut existing_vars: Vec<String> = Vec::new();
+    if let Ok(ref out) = output {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for line in stdout.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[')
+                && trimmed.ends_with(']')
+                && let Ok(parsed) = serde_json::from_str::<Vec<String>>(trimmed)
+            {
+                original_json = Some(trimmed.to_string());
+                existing_vars = parsed;
+                break;
+            }
+        }
+    }
+
+    struct HermesConfigGuard {
+        hermes_bin: PathBuf,
+        original_config: Option<String>,
+        needed_restore: bool,
+    }
+
+    impl Drop for HermesConfigGuard {
+        fn drop(&mut self) {
+            if self.needed_restore {
+                if let Some(ref orig) = self.original_config {
+                    let _ = Command::new(&self.hermes_bin)
+                        .args(["config", "set", "terminal.client_env_passthrough", orig])
+                        .status();
+                } else {
+                    let _ = Command::new(&self.hermes_bin)
+                        .args(["config", "unset", "terminal.client_env_passthrough"])
+                        .status();
+                }
+            }
+        }
+    }
+
+    let mut updated = existing_vars.clone();
+    let mut changed = false;
+    for var in &[
+        "CW_HERMES_OVERRIDE_FILE",
+        "CW_SESSION_ID",
+        "CW_CONTROL_TOKEN_FILE",
+        "CW_WORKSPACE",
+    ] {
+        if !updated.iter().any(|v| v == *var) {
+            updated.push(var.to_string());
+            changed = true;
+        }
+    }
+
+    if changed {
+        let merged_json = serde_json::to_string(&updated).unwrap();
+        let status = Command::new(&hermes_bin)
+            .args([
+                "config",
+                "set",
+                "terminal.client_env_passthrough",
+                &merged_json,
+            ])
+            .status()
+            .expect("hermes config set failed to execute");
+        assert!(status.success(), "hermes config set must succeed");
+    }
+
+    let _config_guard = HermesConfigGuard {
+        hermes_bin: hermes_bin.clone(),
+        original_config: original_json,
+        needed_restore: changed,
+    };
 
     // -------------------------------------------------------------------------
     // Gate 1 & 2 & 3: Concurrent Launches, Isolated Handoff Files & Overlay Isolation

@@ -1,6 +1,10 @@
+import concurrent.futures
 import importlib.util
+import json
 import os
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -11,6 +15,12 @@ spec.loader.exec_module(plugin)
 
 
 class HermesMiddlewareTest(unittest.TestCase):
+    def setUp(self):
+        plugin._SESSION_OVERRIDES.clear()
+
+    def tearDown(self):
+        plugin._SESSION_OVERRIDES.clear()
+
     def test_adds_authenticated_session_headers_only_to_request_kwargs(self):
         with tempfile.TemporaryDirectory() as directory:
             token_file = Path(directory) / "control-token"
@@ -80,7 +90,6 @@ class HermesMiddlewareTest(unittest.TestCase):
             os.environ["CW_CONTROL_TOKEN_FILE"] = str(token_file)
 
             override_file = Path(directory) / "hermes-override-12345.json"
-            import json, time
             payload = {
                 "session_id": "bound_override_session_abc",
                 "workspace": "/tmp/test_workspace",
@@ -104,8 +113,8 @@ class HermesMiddlewareTest(unittest.TestCase):
                 )
                 # Assert file was deleted immediately on consumption
                 self.assertFalse(override_file.exists(), "Override file must be unlinked on read")
-                # Assert environment variable was purged
-                self.assertNotIn("CW_HERMES_OVERRIDE_FILE", os.environ)
+                # Assert os.environ was NOT mutated (P1 requirement)
+                self.assertEqual(os.environ.get("CW_HERMES_OVERRIDE_FILE"), str(override_file))
 
                 # 2. Subsequent request for same native session reuses cached binding
                 res2 = plugin._request_headers(
@@ -121,13 +130,64 @@ class HermesMiddlewareTest(unittest.TestCase):
                 os.environ.pop("CW_CONTROL_TOKEN_FILE", None)
                 os.environ.pop("CW_HERMES_OVERRIDE_FILE", None)
 
+    def test_client_env_takes_precedence_over_global_env(self):
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "control-token"
+            token_file.write_text("e" * 64, encoding="utf-8")
+            token_file.chmod(0o600)
+            os.environ["CW_CONTROL_TOKEN_FILE"] = str(token_file)
+
+            # Global env points to file 1
+            file1 = Path(directory) / "hermes-override-global.json"
+            file1.write_text(json.dumps({
+                "session_id": "global_session",
+                "workspace": "/tmp/ws_global",
+                "ts": time.time(),
+            }), encoding="utf-8")
+            file1.chmod(0o600)
+            os.environ["CW_HERMES_OVERRIDE_FILE"] = str(file1)
+
+            # Client env points to file 2
+            file2 = Path(directory) / "hermes-override-client.json"
+            file2.write_text(json.dumps({
+                "session_id": "client_session",
+                "workspace": "/tmp/ws_client",
+                "ts": time.time(),
+            }), encoding="utf-8")
+            file2.chmod(0o600)
+
+            try:
+                res = plugin._request_headers(
+                    request={},
+                    session_id="native-scoped-1",
+                    base_url="http://127.0.0.1:4401/deepseek",
+                    client_env={"CW_HERMES_OVERRIDE_FILE": str(file2)},
+                )
+                self.assertIsNotNone(res)
+                # Client-scoped env must win over global env
+                self.assertEqual(
+                    res["request"]["extra_headers"]["x-cw-session-id"],
+                    "client_session",
+                )
+                self.assertEqual(
+                    res["request"]["extra_headers"]["x-cw-workspace"],
+                    "/tmp/ws_client",
+                )
+                # file2 unlinked, file1 untouched
+                self.assertFalse(file2.exists())
+                self.assertTrue(file1.exists())
+            finally:
+                os.environ.pop("CW_CONTROL_TOKEN_FILE", None)
+                os.environ.pop("CW_HERMES_OVERRIDE_FILE", None)
+                if file1.exists():
+                    file1.unlink()
+
     def test_override_fails_safe_without_cross_binding(self):
         with tempfile.TemporaryDirectory() as directory:
             token_file = Path(directory) / "control-token"
             token_file.write_text("c" * 64, encoding="utf-8")
             token_file.chmod(0o600)
             os.environ["CW_CONTROL_TOKEN_FILE"] = str(token_file)
-            import json, time
 
             try:
                 # Scenario A: Nonexistent override file
@@ -170,17 +230,34 @@ class HermesMiddlewareTest(unittest.TestCase):
                     request={}, session_id="local-fail4", base_url="http://127.0.0.1:4401/deepseek"
                 )
                 self.assertIsNone(res_token, "Must reject override file containing control token")
+
+                # Scenario E: Symlink attack rejection
+                real_file = Path(directory) / "real-target.json"
+                real_file.write_text(json.dumps({"session_id": "s_sym", "ts": time.time()}), encoding="utf-8")
+                real_file.chmod(0o600)
+                sym_file = Path(directory) / "symlink-override.json"
+                os.symlink(str(real_file), str(sym_file))
+                os.environ["CW_HERMES_OVERRIDE_FILE"] = str(sym_file)
+                res_sym = plugin._request_headers(
+                    request={}, session_id="local-fail5", base_url="http://127.0.0.1:4401/deepseek"
+                )
+                self.assertIsNone(res_sym, "Must reject symlinked override files via O_NOFOLLOW")
             finally:
                 os.environ.pop("CW_CONTROL_TOKEN_FILE", None)
                 os.environ.pop("CW_HERMES_OVERRIDE_FILE", None)
 
-    def test_stress_20_distinct_concurrent_sessions_no_crossover(self):
+    def test_session_lifecycle_cleanup_hook(self):
+        plugin._SESSION_OVERRIDES["sess_to_clean"] = ("target_1", "/tmp", time.time())
+        self.assertIn("sess_to_clean", plugin._SESSION_OVERRIDES)
+        plugin.on_session_terminated(session_id="sess_to_clean")
+        self.assertNotIn("sess_to_clean", plugin._SESSION_OVERRIDES)
+
+    def test_stress_20_distinct_sequential_sessions_no_crossover(self):
         with tempfile.TemporaryDirectory() as directory:
             token_file = Path(directory) / "control-token"
             token_file.write_text("d" * 64, encoding="utf-8")
             token_file.chmod(0o600)
             os.environ["CW_CONTROL_TOKEN_FILE"] = str(token_file)
-            import json, time
 
             try:
                 now_ts = int(time.time())
@@ -194,12 +271,12 @@ class HermesMiddlewareTest(unittest.TestCase):
                     }), encoding="utf-8")
                     override_file.chmod(0o600)
 
-                    # Simulate consume per invocation
-                    os.environ["CW_HERMES_OVERRIDE_FILE"] = str(override_file)
+                    # Use client_env to prevent polluting process global env
                     res = plugin._request_headers(
                         request={},
                         session_id=f"native-hermes-{i}",
                         base_url="http://127.0.0.1:4401/deepseek",
+                        client_env={"CW_HERMES_OVERRIDE_FILE": str(override_file)},
                     )
                     self.assertIsNotNone(res)
                     self.assertEqual(
@@ -211,6 +288,7 @@ class HermesMiddlewareTest(unittest.TestCase):
                         res["request"]["extra_headers"]["x-cw-workspace"],
                         f"/tmp/ws_{i}",
                     )
+                    self.assertFalse(override_file.exists())
 
                 # Re-query all 20 native sessions in random order to assert cache isolation
                 import random
@@ -229,7 +307,161 @@ class HermesMiddlewareTest(unittest.TestCase):
                     )
             finally:
                 os.environ.pop("CW_CONTROL_TOKEN_FILE", None)
-                os.environ.pop("CW_HERMES_OVERRIDE_FILE", None)
+
+    def test_stress_20_distinct_concurrent_sessions_with_barrier(self):
+        """P1: Real concurrent workers with synchronization barrier forcing overlap at binding point."""
+        worker_count = 20
+        barrier = threading.Barrier(worker_count)
+        results = [None] * worker_count
+        errors = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "control-token"
+            token_file.write_text("f" * 64, encoding="utf-8")
+            token_file.chmod(0o600)
+
+            now_ts = int(time.time())
+            expected_sids = [f"conc_session_{i}_{now_ts}" for i in range(worker_count)]
+            override_files = []
+
+            for i in range(worker_count):
+                ov_path = Path(directory) / f"hermes-override-conc-{i}.json"
+                ov_path.write_text(json.dumps({
+                    "session_id": expected_sids[i],
+                    "workspace": f"/tmp/concurrent_ws_{i}",
+                    "ts": time.time(),
+                }), encoding="utf-8")
+                ov_path.chmod(0o600)
+                override_files.append(ov_path)
+
+            def worker_task(idx):
+                client_env = {
+                    "CW_CONTROL_TOKEN_FILE": str(token_file),
+                    "CW_HERMES_OVERRIDE_FILE": str(override_files[idx]),
+                }
+                # Force all 20 threads to synchronize right before calling the middleware
+                barrier.wait(timeout=10.0)
+                try:
+                    res = plugin._request_headers(
+                        request={},
+                        session_id=f"native-conc-hermes-{idx}",
+                        base_url="http://127.0.0.1:4401/deepseek",
+                        client_env=client_env,
+                    )
+                    results[idx] = res
+                except Exception as e:
+                    errors.append((idx, e))
+
+            threads = [threading.Thread(target=worker_task, args=(i,)) for i in range(worker_count)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10.0)
+
+            self.assertEqual(len(errors), 0, f"Thread errors occurred: {errors}")
+
+            # Verify every worker succeeded with 100% isolation
+            for i in range(worker_count):
+                res = results[i]
+                self.assertIsNotNone(res, f"Worker {i} returned None")
+                headers = res["request"]["extra_headers"]
+                self.assertEqual(
+                    headers["x-cw-session-id"],
+                    expected_sids[i],
+                    f"Crossover! Worker {i} expected {expected_sids[i]} got {headers['x-cw-session-id']}",
+                )
+                self.assertEqual(
+                    headers["x-cw-workspace"],
+                    f"/tmp/concurrent_ws_{i}",
+                )
+                self.assertEqual(headers["x-cw-control-token"], "f" * 64)
+                # Confirm override file was atomically consumed and unlinked
+                self.assertFalse(override_files[i].exists(), f"Override file {i} not unlinked")
+
+            # Assert all 20 sessions were recorded in _SESSION_OVERRIDES
+            self.assertEqual(len(plugin._SESSION_OVERRIDES), worker_count)
+
+            # Re-query concurrently to verify concurrent cached lookups
+            cached_results = [None] * worker_count
+            barrier_cached = threading.Barrier(worker_count)
+
+            def cached_worker_task(idx):
+                barrier_cached.wait(timeout=10.0)
+                res = plugin._request_headers(
+                    request={},
+                    session_id=f"native-conc-hermes-{idx}",
+                    base_url="http://127.0.0.1:4401/deepseek",
+                    client_env={"CW_CONTROL_TOKEN_FILE": str(token_file)},
+                )
+                cached_results[idx] = res
+
+            threads_cached = [threading.Thread(target=cached_worker_task, args=(i,)) for i in range(worker_count)]
+            for t in threads_cached:
+                t.start()
+            for t in threads_cached:
+                t.join(timeout=10.0)
+
+            for i in range(worker_count):
+                self.assertIsNotNone(cached_results[i])
+                self.assertEqual(
+                    cached_results[i]["request"]["extra_headers"]["x-cw-session-id"],
+                    expected_sids[i],
+                )
+
+    def test_concurrent_race_on_single_override_file_fails_safe_and_single_consumer(self):
+        """P1: Multiple concurrent threads racing on the exact same override file.
+        Exactly one thread must consume it; the rest must fail safe without crashing."""
+        worker_count = 10
+        barrier = threading.Barrier(worker_count)
+        results = [None] * worker_count
+        errors = []
+
+        with tempfile.TemporaryDirectory() as directory:
+            token_file = Path(directory) / "control-token"
+            token_file.write_text("g" * 64, encoding="utf-8")
+            token_file.chmod(0o600)
+
+            shared_override = Path(directory) / "hermes-override-shared.json"
+            shared_override.write_text(json.dumps({
+                "session_id": "single_winner_session",
+                "workspace": "/tmp/single_ws",
+                "ts": time.time(),
+            }), encoding="utf-8")
+            shared_override.chmod(0o600)
+
+            def race_worker(idx):
+                client_env = {
+                    "CW_CONTROL_TOKEN_FILE": str(token_file),
+                    "CW_HERMES_OVERRIDE_FILE": str(shared_override),
+                }
+                barrier.wait(timeout=10.0)
+                try:
+                    res = plugin._request_headers(
+                        request={},
+                        session_id=f"native-race-{idx}",
+                        base_url="http://127.0.0.1:4401/deepseek",
+                        client_env=client_env,
+                    )
+                    results[idx] = res
+                except Exception as e:
+                    errors.append((idx, e))
+
+            threads = [threading.Thread(target=race_worker, args=(i,)) for i in range(worker_count)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(timeout=10.0)
+
+            self.assertEqual(len(errors), 0, f"Errors in race: {errors}")
+            successful = [r for r in results if r is not None]
+            # Exactly one winner
+            self.assertEqual(len(successful), 1, "Exactly one thread must successfully consume the file")
+            self.assertEqual(
+                successful[0]["request"]["extra_headers"]["x-cw-session-id"],
+                "single_winner_session",
+            )
+            # File must be gone
+            self.assertFalse(shared_override.exists())
 
 
 if __name__ == "__main__":

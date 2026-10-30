@@ -47,3 +47,6 @@ jobs:
 
       - name: Run Tests
         run: cargo test --workspace --verbose
+
+      - name: Run Hermes Plugin Tests
+        run: python3 plugins/hermes/context-watcher/test_plugin.py

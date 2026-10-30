@@ -638,46 +638,55 @@ async fn main() -> Result<()> {
                 process.env("CW_CONTROL_TOKEN_FILE", cw_core::control::token_path());
                 if let Some(session_id) = session_id.as_deref() {
                     process.env("CW_SESSION_ID", session_id);
-                    if let Some(parent) = cw_core::control::token_path().parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                        let override_uuid = uuid::Uuid::new_v4().to_string();
-                        let override_path =
-                            parent.join(format!("hermes-override-{override_uuid}.json"));
-                        let cwd_str = std::env::current_dir()
-                            .ok()
-                            .map(|p| p.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        let payload = serde_json::json!({
-                            "session_id": session_id,
-                            "workspace": cwd_str,
-                            "ts": chrono::Utc::now().timestamp(),
-                        });
-                        if let Ok(bytes) = serde_json::to_vec(&payload) {
-                            let mut opts = std::fs::OpenOptions::new();
-                            opts.write(true).create_new(true);
-                            #[cfg(unix)]
-                            {
-                                use std::os::unix::fs::OpenOptionsExt;
-                                opts.mode(0o600);
-                            }
-                            if let Ok(mut f) = opts.open(&override_path) {
-                                use std::io::Write;
-                                let _ = f.write_all(&bytes);
-                                process.env("CW_HERMES_OVERRIDE_FILE", &override_path);
-                                hermes_override_file = Some(override_path);
-                            }
-                        }
+                    let parent = cw_core::control::token_path()
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("Failed to resolve control token parent directory")
+                        })?;
+                    std::fs::create_dir_all(&parent)?;
+                    let override_uuid = uuid::Uuid::new_v4().to_string();
+                    let override_path =
+                        parent.join(format!("hermes-override-{override_uuid}.json"));
+                    let cwd_str = std::env::current_dir()
+                        .ok()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let payload = serde_json::json!({
+                        "session_id": session_id,
+                        "workspace": cwd_str,
+                        "ts": chrono::Utc::now().timestamp(),
+                    });
+                    let bytes = serde_json::to_vec(&payload)?;
+                    let mut opts = std::fs::OpenOptions::new();
+                    opts.write(true).create_new(true);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        opts.mode(0o600);
                     }
+                    let mut f = opts.open(&override_path)?;
+                    use std::io::Write;
+                    f.write_all(&bytes)?;
+                    process.env("CW_HERMES_OVERRIDE_FILE", &override_path);
+                    hermes_override_file = Some(override_path);
                 }
             } else if let Some(session_id) = session_id.as_deref() {
                 process.env("CW_SESSION_ID", session_id);
             } else {
                 process.env("CW_SESSION_ID", format!("wrap_{}", Uuid::new_v4().simple()));
             }
-            let status = process.status()?;
-            if let Some(path) = hermes_override_file {
-                let _ = std::fs::remove_file(path);
+
+            struct OverrideFileCleanup(Option<std::path::PathBuf>);
+            impl Drop for OverrideFileCleanup {
+                fn drop(&mut self) {
+                    if let Some(path) = self.0.take() {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
             }
+            let _cleanup_guard = OverrideFileCleanup(hermes_override_file);
+            let status = process.status()?;
             std::process::exit(status.code().unwrap_or(1));
         }
         Commands::Tui { session } => {
@@ -2760,6 +2769,61 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
         );
     }
 
+    // Helper: merge contextWatcher variables into Hermes terminal.client_env_passthrough without clobbering existing configuration
+    fn merge_hermes_client_env_passthrough() -> anyhow::Result<()> {
+        const REQUIRED_VARS: &[&str] = &[
+            "CW_HERMES_OVERRIDE_FILE",
+            "CW_SESSION_ID",
+            "CW_CONTROL_TOKEN_FILE",
+            "CW_WORKSPACE",
+        ];
+
+        let output = std::process::Command::new("hermes")
+            .args(["config", "get", "--json", "terminal.client_env_passthrough"])
+            .output();
+
+        let mut existing_vars: Vec<String> = Vec::new();
+        if let Ok(out) = output {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            for line in stdout.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with('[')
+                    && trimmed.ends_with(']')
+                    && let Ok(parsed) = serde_json::from_str::<Vec<String>>(trimmed)
+                {
+                    existing_vars = parsed;
+                    break;
+                }
+            }
+        }
+
+        let mut updated = existing_vars.clone();
+        let mut changed = false;
+        for var in REQUIRED_VARS {
+            if !updated.iter().any(|v| v == *var) {
+                updated.push(var.to_string());
+                changed = true;
+            }
+        }
+
+        if changed {
+            let json_val = serde_json::to_string(&updated)?;
+            let status = std::process::Command::new("hermes")
+                .args([
+                    "config",
+                    "set",
+                    "terminal.client_env_passthrough",
+                    &json_val,
+                ])
+                .status()?;
+            if !status.success() {
+                anyhow::bail!("hermes config set returned non-zero exit code");
+            }
+        }
+
+        Ok(())
+    }
+
     // 5. Hermes Agent (~/.hermes/skills/context-watcher/ & skills/cw/)
     let hermes_dir = home_path.join(".hermes");
     if hermes_dir.exists() {
@@ -2780,15 +2844,12 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
                 hermes_plugin_dir.join("__init__.py"),
                 include_str!("../../../plugins/hermes/context-watcher/__init__.py"),
             )?;
-            let _ = std::process::Command::new("hermes")
-                .args([
-                    "config",
-                    "set",
-                    "terminal.client_env_passthrough",
-                    r#"["CW_HERMES_OVERRIDE_FILE","CW_SESSION_ID","CW_CONTROL_TOKEN_FILE","CW_WORKSPACE"]"#,
-                ])
-                .status();
-            if std::process::Command::new("hermes")
+            if let Err(err) = merge_hermes_client_env_passthrough() {
+                eprintln!(
+                    "           Warning: could not merge Hermes client_env_passthrough: {err}"
+                );
+            }
+            let plugin_enabled = std::process::Command::new("hermes")
                 .args([
                     "plugins",
                     "enable",
@@ -2796,12 +2857,13 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
                     "--no-allow-tool-override",
                 ])
                 .status()
-                .is_ok_and(|status| status.success())
-            {
-                let _ = std::process::Command::new("systemctl")
-                    .args(["--user", "restart", "hermes-gateway"])
-                    .status();
-                println!("           Hermes contextWatcher middleware enabled for new sessions.");
+                .is_ok_and(|status| status.success());
+            if plugin_enabled {
+                println!("           Hermes contextWatcher plugin enabled for new sessions.");
+                println!(
+                    "           Note: To apply changes to an active gateway service, restart it when convenient:"
+                );
+                println!("                 systemctl --user restart hermes-gateway");
             } else {
                 println!(
                     "           Run `hermes plugins enable context-watcher` to activate proxy middleware."

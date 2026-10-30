@@ -143,7 +143,12 @@ impl Recorder {
 impl Drop for Recorder {
     fn drop(&mut self) {
         if self.turn.is_some() {
-            self.finish("cancelled");
+            let outcome = if self.usage.is_some() {
+                "completed"
+            } else {
+                "cancelled"
+            };
+            self.finish(outcome);
         }
     }
 }

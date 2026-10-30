@@ -3,7 +3,7 @@
 > **Legend:** `P0` = Critical Path | `P1` = Core Feature | `P2` = Enhancement
 > **Workflow:** Move items across `Ready` $\to$ `In Progress` $\to$ `Review` $\to$ `Done`. Always reference ticket IDs (`CW-XXX`) in commits and PRs.
 
-> **Current delivery priority after CW-116 maintainability gate:** Resume CW-112 (Codex CLI multi-turn qualification), followed by CW-114 and CW-115. Maintainability gate (CW-116A, CW-116B, CW-116C) complete.
+> **Current delivery priority after CW-112 qualification:** CW-114 (Long-session reliability campaign across harnesses), followed by CW-115. Maintainability gate (CW-116) and Codex qualification (CW-112) complete.
 
 ---
 
@@ -205,7 +205,7 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-110A** Qualification evidence hardening | Done | Completely separated qualification suite into Suite A (CI default contract tests), Suite B (harness binary integration requiring installed binaries and failing explicitly if absent), and Suite C (live provider continuation). Hardened AC4 (active mutation tool-pairing), AC5 (byte-for-byte & JSON-tree thinking signature fidelity), AC6 (tool env sandboxing), AC7 (BLAKE3 bit-for-bit transcript preservation), AC8 (Validation Gate fail-open), and AC10 (un-fabricated cache status reconciliation). |
 | **CW-111** OMP native runtime integration | Done | Replaced command-only extension with native runtime `context` and `before_provider_request` hooks and `/api/v1/sessions/:id/transform` endpoint; automated test (`test_harness_binary_omp_native_runtime_overlay_reapplication`) proved active overlay injection on Turn 2 wire payload while on-disk `.jsonl` transcript remained 100% immutable. |
 | **CW-111B** OMP native runtime hardening | Done | Eliminated control token from `models.json` and deleted unsafe helper; purged `CW_CONTROL_TOKEN` from `process.env` in memory on startup; enforced loopback-only URLs on `CW_DAEMON_URL`; prioritized native session ID to eliminate cross-session binding under switching; replaced time/length heuristics with reference-based WeakSet idempotency; hardened `PruneOrStub` safety to strictly forbid pointer-only user/system prompt modification; verified 3-turn native resume (`omp -r <uuid>`), wire pinning, on-disk transcript preservation, and offline fail-open recovery. |
-| **CW-112** Codex CLI multi-turn qualification | Blocked / In Progress (P0) | 3-turn native session resume (`codex exec resume <thread_id>`), tool execution, and overlay reapplication qualified with installed Codex CLI 0.165.0. 100% transcript immutability, header stripping, and fault recovery verified. Phase 2 live qualification blocked pending spend authorization. Documented in docs/CW-112-CODEX-QUALIFICATION.md. |
+| **CW-112** Codex CLI multi-turn qualification | Done | 3-turn native session resume (`codex exec resume <thread_id>`), tool execution, overlay reapplication, credential sandboxing, on-disk rollout immutability, and live provider continuation with prompt caching verified with installed Codex CLI 0.165.0 and `gpt-4o-mini`. Documented in docs/CW-112-CODEX-QUALIFICATION.md. |
 | **CW-113** Hermes Agent lifecycle hardening | Done | Replaced shared override file with UUID-scoped `hermes-override-<uuid>.json` (mode 0600, atomic `create_new`); middleware validates non-symlink, mode 0600, age <= 120s, and atomically unlinks on consumption; gateway daemon session isolation in `_SESSION_OVERRIDES`; passed 7-gate multi-process qualification and 20-session stress test. |
 | **CW-114** Long-session reliability campaign | Backlog | Unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families, 3 repetitions per harness. |
 | **CW-115** Performance and savings qualification | Backlog | Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims. |
@@ -247,11 +247,11 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🚧 In Progress
 
-* **CW-112** Codex CLI multi-turn qualification (`feat/cw-112-codex-multiturn`, P0) — Phase 1 mock qualification complete (PR #17); Phase 2 live provider qualification blocked pending explicit spend budget authorization.
+* **CW-114** Long-session reliability campaign across harnesses (P0) — Preparing unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families.
 
 ## 📋 Ready
 
-* **CW-114** Long-session reliability campaign across harnesses (P0) — Blocked on CW-112 live spend authorization / gate resolution.
+* **CW-115** Performance and savings qualification (P0)
 
 ---
 

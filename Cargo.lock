@@ -613,6 +613,7 @@ version = "0.2.4"
 dependencies = [
  "anyhow",
  "axum",
+ "blake3",
  "bytes",
  "chrono",
  "cw-core",

@@ -197,9 +197,10 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-100** Verified context optimization milestone | Done | Milestone addressing logic risk remediation, claims reconciliation, and focused end-to-end qualification foundation. |
 | **CW-101** Cache telemetry uncertainty & prefix safety | Done | Centralized `calculate_kv_break_tokens` across optimizer and mutation estimator; redefined `min` (`cache_safe_boost`) as strictly prefix-preserving (zero historical prefix modification to guarantee next-request cache reuse); added regression tests covering 0, partial, and unknown telemetry across consecutive requests. |
 | **CW-102** Claims reconciliation in EVIDENCE.md & README.md | Done | Separate static AST bloat opportunity (278 sessions, 14.33M tok) from active live proxy savings (153.8k tok, $2.10 saved). Differentiate theoretical prefill models, local GPU benchmarks, and cloud TTFT nuance. |
-| **CW-103** Focused qualification: Codex CLI & Hermes Agent | Done | Initial mock & proxy integration qualified in safety & qualification test suites. |
+| **CW-103** Focused qualification: Codex CLI & Hermes Agent | In Progress | Mock Responses & Chat Completions proxy verified. Codex CLI harness binary verified for multi-turn overlay reapplication. Hermes Agent verified for single-session middleware binding (concurrency collision tracked in CW-113). Live multi-turn cloud provider qualification tracked in CW-112. |
 | **CW-104** Hardware & local model qualification | Backlog | Differentiate PagedAttention memory footprint modeling from cloud provider KV caching, document slot bridge limitations, and benchmark local Ollama/llama.cpp engines. |
-| **CW-110** Shared harness qualification runner | Done | Automated qualification test suite in `crates/cw-proxy/tests/qualification.rs` covering all 10 acceptance criteria across mock Responses, Chat Completions, and Messages upstreams; live binary execution for installed `codex`, `omp`, and `hermes`; documented baseline support matrix and blockers in `docs/HARNESS_MATRIX.md`. |
+| **CW-110** Shared harness qualification runner | Done | Automated qualification test suite in `crates/cw-proxy/tests/qualification.rs` covering all 10 acceptance criteria across mock Responses, Chat Completions, and Messages upstreams; documented baseline support matrix and blockers in `docs/HARNESS_MATRIX.md`. |
+| **CW-110A** Qualification evidence hardening | Done | Completely separated qualification suite into Suite A (CI default contract tests), Suite B (harness binary integration requiring installed binaries and failing explicitly if absent), and Suite C (live provider continuation). Hardened AC4 (active mutation tool-pairing), AC5 (byte-for-byte & JSON-tree thinking signature fidelity), AC6 (tool env sandboxing), AC7 (BLAKE3 bit-for-bit transcript preservation), AC8 (Validation Gate fail-open), and AC10 (un-fabricated cache status reconciliation). |
 | **CW-111** OMP native runtime integration | Ready | Replace command-only `/cw` extension with native runtime `context` / `before_provider_request` hook so active overlays optimize the model context without altering the on-disk transcript. |
 | **CW-112** Codex CLI multi-turn qualification | Ready | Multi-turn coding sessions and session resume (`codex resume <id>`) verification with committed overlays against live Responses provider. |
 | **CW-113** Hermes Agent lifecycle hardening | Ready | Fix `hermes-session-override.json` single-file collision under concurrent invocations; harden session isolation and DeepSeek provider qualification. |
@@ -210,6 +211,7 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🚧 In Progress
 
+* **CW-103** Focused qualification: Codex CLI & Hermes Agent (multi-turn real provider qualification & concurrency hardening).
 * **CW-111** OMP native runtime integration: implement `context` / `before_provider_request` hook for live prompt optimization while keeping source transcript intact.
 
 ## 📋 Ready

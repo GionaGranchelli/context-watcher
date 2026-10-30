@@ -7,20 +7,7 @@ use cw_core::{
 };
 use cw_store::CwStore;
 
-use super::session::resolve_session;
-
-/// Extracts a clean project label from a workspace path, falling back to `"General Chat"`.
-pub fn project_label_from_workspace(ws: Option<&str>) -> String {
-    let Some(w) = ws.map(str::trim).filter(|s| !s.is_empty()) else {
-        return "General Chat".to_string();
-    };
-    w.trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(w)
-        .to_string()
-}
+use super::session::{project_label_from_workspace, resolve_session};
 
 /// Generates and prints the token, KV-cache, and cost ($) savings scoreboard across all sessions (`cw gain`).
 pub fn run_gain_report(store: &CwStore, show_history: bool) -> Result<()> {
@@ -456,24 +443,4 @@ pub fn run_hud_report(
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn project_label_from_workspace_contract() {
-        assert_eq!(project_label_from_workspace(None), "General Chat");
-        assert_eq!(project_label_from_workspace(Some("")), "General Chat");
-        assert_eq!(project_label_from_workspace(Some("   ")), "General Chat");
-        assert_eq!(
-            project_label_from_workspace(Some("/home/user/Development/my-project")),
-            "my-project"
-        );
-        assert_eq!(
-            project_label_from_workspace(Some("/home/user/Development/my-project/")),
-            "my-project"
-        );
-    }
 }

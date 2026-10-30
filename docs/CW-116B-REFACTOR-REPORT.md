@@ -30,11 +30,11 @@ Zero behavioral or API breaking changes were introduced. All 100 workspace unit/
 | File | Before Responsibilities | After Responsibilities |
 |---|---|---|
 | `src/main.rs` | Clap CLI definition, command dispatch, daemon process spawning/killing, static Web UI serving, session status, Radix tree printing, linter fix execution, optimization execution, transcript import, SQLite queries, HUD reporting, Swarm analysis, Slot bridge inspection, Init installer, Hook checks, header scrubbing, and process wrapping. | Pure entry point: Clap argument structs (`Cli`, `Commands`, `DaemonAction`), default DB path resolver, and thin async dispatch to dedicated `commands::*` modules. |
-| `src/commands/wrap.rs` | Mixed inside `main.rs`. | Subprocess proxy wrapping (`cw wrap`), session ID validation, CW header stripping, credential scrubbing (`CW_CONTROL_TOKEN`, `CW_CONTROL_TOKEN_FILE`), RAII temp override file cleanup. |
+| `src/commands/wrap.rs` | Mixed inside `main.rs`. | Subprocess proxy wrapping (`cw wrap`), session ID validation, CW header stripping, harness credential scoping (scrubbing `CW_CONTROL_TOKEN`/`CW_CONTROL_TOKEN_FILE` for general harnesses; passing `CW_CONTROL_TOKEN_FILE` for Hermes same-user middleware; passing `CW_CONTROL_TOKEN` for Codex filtered proxy headers), RAII temp override file cleanup. |
 | `src/commands/daemon.rs` | Mixed inside `main.rs`. | Daemon process health checking (`is_daemon_running`), detached child process spawning (`start_daemon_detached`), PID management, and process termination (`stop_daemon`, `restart_daemon`, `status_daemon`). |
 | `src/commands/init.rs` | Mixed inside `main.rs`. | Global CLI binary installation (`~/.local/bin/cw`), harness integration installation for Antigravity, Codex, Claude Code, Hermes, Pi, and OpenCode, systemd user service setup, and safe non-destructive config merges. |
-| `src/commands/session.rs` | Mixed inside `main.rs`. | Interactive session operations (`status`, `tree`, `lint`, `optimize`, `fold`, `prune`, `dedupe`, `gate`, `pin`, `import`, `sync-back`, `local`, `autopilot`, `pulse`, `hook`, `purge`, `preview`), session resolution (`resolve_session`), and mutation staging (`save_cli_mutation`). |
-| `src/commands/reports.rs` | Mixed inside `main.rs`. | Analytical reporting: Gain scoreboard (`run_gain_report`), Multi-Agent Swarm prefix sharing (`run_swarm_report`), Attention ECG / Context HUD (`run_hud_report`), and workspace project label derivation (`project_label_from_workspace`). |
+| `src/commands/session.rs` | Mixed inside `main.rs`. | Interactive session operations (`status`, `tree`, `lint`, `optimize`, `fold`, `prune`, `dedupe`, `gate`, `pin`, `import`, `sync-back`, `local`, `autopilot`, `pulse`, `hook`, `purge`, `preview`), session resolution (`resolve_session`), mutation staging (`save_cli_mutation`), and workspace project label derivation (`project_label_from_workspace`). |
+| `src/commands/reports.rs` | Mixed inside `main.rs`. | Analytical reporting: Gain scoreboard (`run_gain_report`), Multi-Agent Swarm prefix sharing (`run_swarm_report`), and Attention ECG / Context HUD (`run_hud_report`). |
 | `src/commands/slot.rs` | Mixed inside `main.rs`. | Engine-level PagedAttention inspection and KV cache slot splicing report (`run_slot_bridge_report`). |
 | `src/commands/web.rs` | Mixed inside `main.rs`. | Embedded static asset handler (`WebAssets`) and HTTP asset server fallback (`serve_embedded_web_ui`). |
 | `tests/init_characterization.rs` | Mixed inside `main.rs` test module. | Subprocess dry-run characterization asserting that `cw init --dry-run` leaves the host filesystem, directories, and systemd completely untouched. |
@@ -65,8 +65,8 @@ Zero behavioral or API breaking changes were introduced. All 100 workspace unit/
 | `cw-cli/src/commands/wrap.rs` | — | 362 | +362 | *New Module* |
 | `cw-cli/src/commands/daemon.rs` | — | 152 | +152 | *New Module* |
 | `cw-cli/src/commands/init.rs` | — | 598 | +598 | *New Module* |
-| `cw-cli/src/commands/reports.rs` | — | 479 | +479 | *New Module* |
-| `cw-cli/src/commands/session.rs` | — | 935 | +935 | *New Module* |
+| `cw-cli/src/commands/reports.rs` | — | 446 | +446 | *New Module* |
+| `cw-cli/src/commands/session.rs` | — | 966 | +966 | *New Module* |
 | `cw-cli/src/commands/slot.rs` | — | 282 | +282 | *New Module* |
 | `cw-cli/src/commands/web.rs` | — | 27 | +27 | *New Module* |
 | `cw-cli/src/commands/mod.rs` | — | 7 | +7 | *New Module* |
@@ -102,16 +102,20 @@ Zero behavioral or API breaking changes were introduced. All 100 workspace unit/
      ▼          ▼          ▼          ▼          ▼          ▼          ▼
  commands:: commands:: commands:: commands:: commands:: commands:: commands::
    daemon      wrap       init     session    reports      slot       web
-     │                     │          ▲          ▲          ▲
+     │                     │          ▲          │          │
      │                     │          │          │          │
-     │                     └──────────┼──────────┴──────────┘
-     │                                │ (project_label_from_workspace,
-     └────────────────────────────────┘  resolve_session)
-       (is_daemon_running, start_daemon_detached)
+     │                     │          └──────────┼──────────┘
+     │                     │            (imports: resolve_session,
+     │                     │             project_label_from_workspace)
+     │                     └─────────────────────┘
+     │
+     └───────────────────────────────────────────┐
+       (is_daemon_running, start_daemon_detached) │
+       used by init during setup                  │
 ```
 
 - **Top-Down Control Flow:** `main.rs` parses CLI arguments into `Cli` / `Commands` and routes execution into individual command modules.
-- **Acyclic Seams:** Reusable session resolution (`resolve_session`) and mutation persistence (`save_cli_mutation`) are co-located in `commands::session`. `commands::reports` exports `project_label_from_workspace`, cleanly consumed by both `session` (for batch project filtering) and `reports` (for analytics), eliminating circular dependencies.
+- **Strictly One-Directional Dependencies (No Cycles):** Reusable session resolution (`resolve_session`), mutation persistence (`save_cli_mutation`), and workspace project label parsing (`project_label_from_workspace`) are centralized in `commands::session`. Secondary consumers (`commands::reports`, `commands::slot`) import them from `commands::session`, while `commands::session` has zero reciprocal dependencies on any other command module.
 
 ### Harness Lifecycle Architecture
 
@@ -146,8 +150,11 @@ Zero behavioral or API breaking changes were introduced. All 100 workspace unit/
    - Interactive CLI commands (`fold`, `prune`, `dedupe`, `gate`, `pin`) create a typed `MutationRule` with unique UUID and persist it via `store.save_mutation`.
 3. **Hermes Configuration Seam (`merge_hermes_client_env_passthrough`):**
    - Safe merge contract established in CW-113 and characterized in CW-116A is maintained: existing environment variables are preserved, missing required variables are appended, and failure to read returns an error without clobbering existing configuration.
-4. **Credential Isolation Seam (`run_wrap`):**
-   - For all non-Codex wrappers, `CW_CONTROL_TOKEN` and `CW_CONTROL_TOKEN_FILE` are removed from the child process environment to enforce harness sandboxing.
+4. **Credential Isolation & Trust Boundaries (`run_wrap`):**
+   - **General Harnesses (Antigravity, Pi, OpenCode, Aider, Claude Code):** Both `CW_CONTROL_TOKEN` and `CW_CONTROL_TOKEN_FILE` are stripped from the child process environment, preventing untrusted tool calls from accessing privileged ContextWatcher daemon control endpoints.
+   - **Codex CLI:** `CW_CONTROL_TOKEN` is passed via process environment to allow Codex's Responses configuration (`x-cw-control-token=CW_CONTROL_TOKEN`) to authenticate upstream model requests, protected by Codex's shell environment exclusion filter (`shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"`).
+   - **Hermes Agent Exception:** `CW_CONTROL_TOKEN_FILE` is explicitly exported pointing to the user's private `control.token` path (`0600` permissions), required by the Hermes Python middleware to authenticate its background context optimization and status queries. This intentionally operates under Hermes's documented same-user filesystem trust boundary (and client environment passthrough merged in CW-113).
+   - **Temporary Override Cleanup:** The RAII `OverrideFileCleanup` guard ensures UUID-scoped override handoff files (`hermes-override-<uuid>.json`) are unlinked on all exit paths (normal exit or failure).
 
 ---
 

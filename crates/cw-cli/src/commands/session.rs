@@ -14,7 +14,18 @@ use cw_proxy::recompute_latest_turn_in_store;
 use cw_store::CwStore;
 use uuid::Uuid;
 
-use super::reports::project_label_from_workspace;
+/// Extracts a clean project label from a workspace path, falling back to `"General Chat"`.
+pub fn project_label_from_workspace(ws: Option<&str>) -> String {
+    let Some(w) = ws.map(str::trim).filter(|s| !s.is_empty()) else {
+        return "General Chat".to_string();
+    };
+    w.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(w)
+        .to_string()
+}
 
 /// Resolves a target session ID from explicit flag, environment variable, current workspace directory,
 /// or prefix match.
@@ -932,4 +943,24 @@ pub fn run_preview(store: &CwStore, session: &str) -> Result<()> {
         )?
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_label_from_workspace_contract() {
+        assert_eq!(project_label_from_workspace(None), "General Chat");
+        assert_eq!(project_label_from_workspace(Some("")), "General Chat");
+        assert_eq!(project_label_from_workspace(Some("   ")), "General Chat");
+        assert_eq!(
+            project_label_from_workspace(Some("/home/user/Development/my-project")),
+            "my-project"
+        );
+        assert_eq!(
+            project_label_from_workspace(Some("/home/user/Development/my-project/")),
+            "my-project"
+        );
+    }
 }

@@ -247,3 +247,41 @@ fn revision_tracks_new_snapshots_with_same_sequence() {
     store.save_turn(&second, Some(&b), None, None).unwrap();
     assert_ne!(revision, store.session_revision("s").unwrap());
 }
+
+#[test]
+fn wire_requests_are_immutable_and_blob_storage_is_content_addressed() {
+    let store = CwStore::open_in_memory().unwrap();
+    session(&store);
+
+    // 1. Content-addressed blob storage: identical payloads share exact hash
+    let payload = json!({"messages": [{"role": "user", "content": "hello world"}]});
+    let hash1 = store.put_blob(&payload).unwrap();
+    let hash2 = store.put_blob(&payload).unwrap();
+    assert_eq!(
+        hash1, hash2,
+        "Identical JSON payloads must yield identical BLAKE3 hashes"
+    );
+
+    let retrieved = store.get_blob(&hash1).unwrap();
+    assert_eq!(retrieved, Some(payload));
+
+    let missing = store.get_blob("nonexistent_hash_12345").unwrap();
+    assert_eq!(missing, None);
+
+    // 2. Wire requests: immutable byte storage per turn
+    let wire_bytes = b"{\"model\":\"mock\",\"stream\":false,\"custom_byte_sequence\":[1,2,3]}";
+    store.save_wire_request("turn_wire_1", wire_bytes).unwrap();
+
+    // Re-saving with INSERT OR IGNORE does not overwrite original
+    let wire_bytes_mutated = b"{\"model\":\"tampered\"}";
+    store
+        .save_wire_request("turn_wire_1", wire_bytes_mutated)
+        .unwrap();
+
+    let saved = store.get_wire_request("turn_wire_1").unwrap();
+    assert_eq!(
+        saved.as_deref(),
+        Some(&wire_bytes[..]),
+        "Wire requests must be immutable once written"
+    );
+}

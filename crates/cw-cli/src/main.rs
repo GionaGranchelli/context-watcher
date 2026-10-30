@@ -414,6 +414,31 @@ fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
     cw_harnesses::qualification::codex_proxy_config_args(proxy_port)
 }
 
+pub(crate) struct OverrideFileCleanup(pub(crate) Option<std::path::PathBuf>);
+
+impl OverrideFileCleanup {
+    pub(crate) fn new() -> Self {
+        Self(None)
+    }
+
+    pub(crate) fn track(&mut self, path: std::path::PathBuf) {
+        self.0 = Some(path);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn path(&self) -> Option<&std::path::Path> {
+        self.0.as_deref()
+    }
+}
+
+impl Drop for OverrideFileCleanup {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -628,7 +653,7 @@ async fn main() -> Result<()> {
             if let Some(token) = token {
                 process.env("CW_CONTROL_TOKEN", token);
             }
-            let mut hermes_override_file = None;
+            let mut cleanup_guard = OverrideFileCleanup::new();
             if is_hermes {
                 let _ = cw_core::control::control_token(true);
                 process.env_remove("CW_SESSION_ID").env(
@@ -638,43 +663,50 @@ async fn main() -> Result<()> {
                 process.env("CW_CONTROL_TOKEN_FILE", cw_core::control::token_path());
                 if let Some(session_id) = session_id.as_deref() {
                     process.env("CW_SESSION_ID", session_id);
-                    if let Some(parent) = cw_core::control::token_path().parent() {
-                        let _ = std::fs::create_dir_all(parent);
-                        let override_path = parent.join("hermes-session-override.json");
-                        let cwd_str = std::env::current_dir()
-                            .ok()
-                            .map(|p| p.to_string_lossy().into_owned())
-                            .unwrap_or_default();
-                        let payload = serde_json::json!({
-                            "session_id": session_id,
-                            "workspace": cwd_str,
-                            "ts": chrono::Utc::now().timestamp(),
-                        });
-                        if let Ok(bytes) = serde_json::to_vec(&payload) {
-                            let mut opts = std::fs::OpenOptions::new();
-                            opts.write(true).create(true).truncate(true);
-                            #[cfg(unix)]
-                            {
-                                use std::os::unix::fs::OpenOptionsExt;
-                                opts.mode(0o600);
-                            }
-                            if let Ok(mut f) = opts.open(&override_path) {
-                                use std::io::Write;
-                                let _ = f.write_all(&bytes);
-                                hermes_override_file = Some(override_path);
-                            }
-                        }
+                    let parent = cw_core::control::token_path()
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("Failed to resolve control token parent directory")
+                        })?;
+                    std::fs::create_dir_all(&parent)?;
+                    let override_uuid = uuid::Uuid::new_v4().to_string();
+                    let override_path =
+                        parent.join(format!("hermes-override-{override_uuid}.json"));
+                    let cwd_str = std::env::current_dir()
+                        .ok()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let payload = serde_json::json!({
+                        "session_id": session_id,
+                        "workspace": cwd_str,
+                        "ts": chrono::Utc::now().timestamp(),
+                    });
+                    let bytes = serde_json::to_vec(&payload)?;
+                    let mut opts = std::fs::OpenOptions::new();
+                    opts.write(true).create_new(true);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        opts.mode(0o600);
                     }
+                    let mut f = opts.open(&override_path)?;
+                    // Track file for cleanup IMMEDIATELY upon creation so subsequent errors/writes do not leave untracked files
+                    cleanup_guard.track(override_path.clone());
+                    use std::io::Write;
+                    f.write_all(&bytes)?;
+                    process.env("CW_HERMES_OVERRIDE_FILE", &override_path);
                 }
             } else if let Some(session_id) = session_id.as_deref() {
                 process.env("CW_SESSION_ID", session_id);
             } else {
                 process.env("CW_SESSION_ID", format!("wrap_{}", Uuid::new_v4().simple()));
             }
-            let status = process.status()?;
-            if let Some(path) = hermes_override_file {
-                let _ = std::fs::remove_file(path);
-            }
+
+            let status = process.status();
+            // Explicitly drop cleanup_guard before std::process::exit because process::exit does not run Rust destructors
+            drop(cleanup_guard);
+            let status = status?;
             std::process::exit(status.code().unwrap_or(1));
         }
         Commands::Tui { session } => {
@@ -2505,6 +2537,22 @@ fn register_claude_code_mcp(home_path: &std::path::Path, cw_cmd_str: &str) {
     }
 }
 
+fn parse_json_string_array(s: &str) -> Option<Vec<String>> {
+    let trimmed = s.trim();
+    if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
+        return Some(arr);
+    }
+    let start = s.find('[')?;
+    let end = s.rfind(']')?;
+    if start < end {
+        let slice = &s[start..=end];
+        if let Ok(arr) = serde_json::from_str::<Vec<String>>(slice) {
+            return Some(arr);
+        }
+    }
+    None
+}
+
 fn run_init_installer(dry_run: bool, auto_start: bool) -> Result<()> {
     let home_path = cw_core::home_dir();
     let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cw"));
@@ -2757,6 +2805,68 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
         );
     }
 
+    // Helper: merge contextWatcher variables into Hermes terminal.client_env_passthrough without clobbering existing configuration
+    fn merge_hermes_client_env_passthrough() -> anyhow::Result<()> {
+        const REQUIRED_VARS: &[&str] = &[
+            "CW_HERMES_OVERRIDE_FILE",
+            "CW_SESSION_ID",
+            "CW_CONTROL_TOKEN_FILE",
+            "CW_WORKSPACE",
+        ];
+
+        let output = std::process::Command::new("hermes")
+            .args(["config", "get", "--json", "terminal.client_env_passthrough"])
+            .output()?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // Distinguish explicitly absent setting from failed/unrecognized output.
+        // Preserve existing configuration on every error path; never overwrite settings when their prior value is unknown.
+        let existing_vars: Vec<String> = if !output.status.success() {
+            if stdout.contains("Config key not set") || stderr.contains("Config key not set") {
+                Vec::new()
+            } else {
+                anyhow::bail!(
+                    "Failed to query Hermes terminal.client_env_passthrough (status {:?}): {stderr} {stdout}",
+                    output.status.code()
+                );
+            }
+        } else {
+            parse_json_string_array(&stdout).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Unrecognized format returned by hermes config get --json: {stdout}"
+                )
+            })?
+        };
+
+        let mut updated = existing_vars.clone();
+        let mut changed = false;
+        for var in REQUIRED_VARS {
+            if !updated.iter().any(|v| v == *var) {
+                updated.push(var.to_string());
+                changed = true;
+            }
+        }
+
+        if changed {
+            let json_val = serde_json::to_string(&updated)?;
+            let status = std::process::Command::new("hermes")
+                .args([
+                    "config",
+                    "set",
+                    "terminal.client_env_passthrough",
+                    &json_val,
+                ])
+                .status()?;
+            if !status.success() {
+                anyhow::bail!("hermes config set returned non-zero exit code");
+            }
+        }
+
+        Ok(())
+    }
+
     // 5. Hermes Agent (~/.hermes/skills/context-watcher/ & skills/cw/)
     let hermes_dir = home_path.join(".hermes");
     if hermes_dir.exists() {
@@ -2777,7 +2887,12 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
                 hermes_plugin_dir.join("__init__.py"),
                 include_str!("../../../plugins/hermes/context-watcher/__init__.py"),
             )?;
-            if std::process::Command::new("hermes")
+            if let Err(err) = merge_hermes_client_env_passthrough() {
+                eprintln!(
+                    "           Warning: could not merge Hermes client_env_passthrough: {err}"
+                );
+            }
+            let plugin_enabled = std::process::Command::new("hermes")
                 .args([
                     "plugins",
                     "enable",
@@ -2785,19 +2900,13 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
                     "--no-allow-tool-override",
                 ])
                 .status()
-                .is_ok_and(|status| status.success())
-            {
-                let hermes_agent_dir = hermes_dir.join("hermes-agent");
-                if hermes_agent_dir.exists() {
-                    let _ = std::process::Command::new("python3")
-                        .env("PYTHONPATH", &hermes_agent_dir)
-                        .args([
-                            "-c",
-                            "from pathlib import Path; from gateway.control_socket import query_gateway_control; query_gateway_control(Path.home() / '.hermes', 'reload-plugins')",
-                        ])
-                        .output();
-                }
-                println!("           Hermes contextWatcher middleware enabled for new sessions.");
+                .is_ok_and(|status| status.success());
+            if plugin_enabled {
+                println!("           Hermes contextWatcher plugin enabled for new sessions.");
+                println!(
+                    "           Note: To apply changes to an active gateway service, restart it when convenient:"
+                );
+                println!("                 systemctl --user restart hermes-gateway");
             } else {
                 println!(
                     "           Run `hermes plugins enable context-watcher` to activate proxy middleware."
@@ -2961,5 +3070,77 @@ mod wrap_tests {
         assert!(settings.contains("env_key=\"OPENAI_API_KEY\""));
         assert!(settings.contains("shell_environment_policy.filters.CW_CONTROL_TOKEN"));
         assert!(!settings.contains("private-token"));
+    }
+
+    #[test]
+    fn regression_test_override_file_cleanup_on_normal_exit_without_consumption() {
+        let temp_dir = std::env::temp_dir().join(format!("cw_wrap_test_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let override_path = temp_dir.join("hermes-override-unconsumed.json");
+        std::fs::write(&override_path, b"{\"test\": true}").unwrap();
+        assert!(override_path.exists());
+
+        // Simulate wrapper process lifecycle where child exits without consuming the handoff
+        let mut cleanup_guard = super::OverrideFileCleanup::new();
+        cleanup_guard.track(override_path.clone());
+        assert_eq!(cleanup_guard.path(), Some(override_path.as_path()));
+        // Explicitly drop cleanup_guard before exit
+        drop(cleanup_guard);
+
+        assert!(
+            !override_path.exists(),
+            "Override file must be removed when cleanup guard is dropped on normal exit"
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn regression_test_override_file_cleanup_on_write_failure() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("cw_wrap_test_write_fail_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let override_path = temp_dir.join("hermes-override-write-fail.json");
+
+        let simulate_write_failure = || -> std::io::Result<()> {
+            let mut opts = std::fs::OpenOptions::new();
+            opts.write(true).create_new(true);
+            let mut _f = opts.open(&override_path)?;
+            let mut cleanup_guard = super::OverrideFileCleanup::new();
+            cleanup_guard.track(override_path.clone());
+
+            // Simulate write failure returning early via `?`
+            Err(std::io::Error::other("simulated write_all disk failure"))?;
+            Ok(())
+        };
+
+        let result = simulate_write_failure();
+        assert!(result.is_err());
+        assert!(
+            !override_path.exists(),
+            "Override file must be removed by cleanup guard if write failure occurs immediately after creation"
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn parse_json_string_array_handles_multiline_and_rejects_malformed() {
+        let direct = r#"["VAR1", "VAR2"]"#;
+        assert_eq!(
+            parse_json_string_array(direct),
+            Some(vec!["VAR1".to_string(), "VAR2".to_string()])
+        );
+
+        let multiline_with_prefix =
+            "  Bitwarden Secrets Manager: applied 9 secrets\n[\n  \"A\",\n  \"B\"\n]\n";
+        assert_eq!(
+            parse_json_string_array(multiline_with_prefix),
+            Some(vec!["A".to_string(), "B".to_string()])
+        );
+
+        let malformed = "  Bitwarden Secrets Manager: applied 9 secrets\nError: database locked\n";
+        assert_eq!(parse_json_string_array(malformed), None);
+
+        let not_array = "{\"error\": \"not an array\"}";
+        assert_eq!(parse_json_string_array(not_array), None);
     }
 }

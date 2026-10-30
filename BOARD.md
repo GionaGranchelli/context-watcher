@@ -204,7 +204,7 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-111** OMP native runtime integration | Done | Replaced command-only extension with native runtime `context` and `before_provider_request` hooks and `/api/v1/sessions/:id/transform` endpoint; automated test (`test_harness_binary_omp_native_runtime_overlay_reapplication`) proved active overlay injection on Turn 2 wire payload while on-disk `.jsonl` transcript remained 100% immutable. |
 | **CW-111B** OMP native runtime hardening | Done | Eliminated control token from `models.json` and deleted unsafe helper; purged `CW_CONTROL_TOKEN` from `process.env` in memory on startup; enforced loopback-only URLs on `CW_DAEMON_URL`; prioritized native session ID to eliminate cross-session binding under switching; replaced time/length heuristics with reference-based WeakSet idempotency; hardened `PruneOrStub` safety to strictly forbid pointer-only user/system prompt modification; verified 3-turn native resume (`omp -r <uuid>`), wire pinning, on-disk transcript preservation, and offline fail-open recovery. |
 | **CW-112** Codex CLI multi-turn qualification | Ready | Multi-turn coding sessions and session resume (`codex resume <id>`) verification with committed overlays against live Responses provider. |
-| **CW-113** Hermes Agent lifecycle hardening | Ready | Fix `hermes-session-override.json` single-file collision under concurrent invocations; harden session isolation and DeepSeek provider qualification. |
+| **CW-113** Hermes Agent lifecycle hardening | Done | Replaced shared override file with UUID-scoped `hermes-override-<uuid>.json` (mode 0600, atomic `create_new`); middleware validates non-symlink, mode 0600, age <= 120s, and atomically unlinks on consumption; gateway daemon session isolation in `_SESSION_OVERRIDES`; passed 7-gate multi-process qualification and 20-session stress test. |
 | **CW-114** Long-session reliability campaign | Backlog | Unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families, 3 repetitions per harness. |
 | **CW-115** Performance and savings qualification | Backlog | Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims. |
 
@@ -217,7 +217,6 @@ The checked tickets below are historical implementation milestones. They are not
 ## 📋 Ready
 
 * **CW-112** Codex CLI multi-turn qualification and session resume.
-* **CW-113** Hermes Agent lifecycle hardening (eliminate shared override file collision).
 
 ---
 

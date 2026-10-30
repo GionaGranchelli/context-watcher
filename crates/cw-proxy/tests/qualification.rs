@@ -230,6 +230,13 @@ async fn handle_mock_chat_completion(
     path: &str,
     captured: Arc<Mutex<Vec<CapturedRequest>>>,
 ) -> Response {
+    let body_str = String::from_utf8_lossy(&body);
+    // If this is Process A's request in the concurrent qualification test, hold the connection
+    // briefly so that Process B's concurrent request is guaranteed to overlap in-flight.
+    if body_str.contains("Prompt from Hermes Process A") {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+
     let json_val = serde_json::from_slice::<Value>(&body).ok();
     let is_stream = json_val
         .as_ref()
@@ -1348,6 +1355,22 @@ async fn test_harness_binary_codex_cli_multiturn_overlay_reapplication() {
     }
 }
 
+fn parse_json_string_array(s: &str) -> Option<Vec<String>> {
+    let trimmed = s.trim();
+    if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
+        return Some(arr);
+    }
+    let start = s.find('[')?;
+    let end = s.rfind(']')?;
+    if start < end {
+        let slice = &s[start..=end];
+        if let Ok(arr) = serde_json::from_str::<Vec<String>>(slice) {
+            return Some(arr);
+        }
+    }
+    None
+}
+
 #[tokio::test]
 #[ignore = "harness binary integration test; requires installed 'hermes'; run with cargo test --test qualification harness_binary -- --ignored"]
 async fn test_harness_binary_hermes_middleware_session_binding() {
@@ -1356,7 +1379,6 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
     let f = QualificationFixture::setup().await;
     let proxy_port = f.proxy_port;
     let control_token = f.control_token.clone();
-    let session_id = "hermes_bound_qual_sess";
 
     // Create temporary control token file with 0600 mode
     let temp_token_file = std::env::temp_dir().join(format!("cw_token_{}", uuid::Uuid::new_v4()));
@@ -1366,19 +1388,195 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&temp_token_file, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
-
     let token_path_str = temp_token_file.to_string_lossy().to_string();
 
-    // Turn 1: Hermes executes prompt and binds to configured CW_SESSION_ID
-    let hermes_bin_clone1 = hermes_bin.clone();
-    let token_path_clone1 = token_path_str.clone();
-    let output1 = tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::new(hermes_bin_clone1);
+    let temp_override_dir =
+        std::env::temp_dir().join(format!("cw_hermes_overrides_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_override_dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&temp_override_dir, std::fs::Permissions::from_mode(0o700))
+            .unwrap();
+    }
+
+    // Capture original Hermes client_env_passthrough to preserve existing entries and restore on completion
+    let output = Command::new(&hermes_bin)
+        .args(["config", "get", "--json", "terminal.client_env_passthrough"])
+        .output()
+        .expect("failed to execute hermes config get");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let (original_json, existing_vars): (Option<String>, Vec<String>) = if !output.status.success()
+    {
+        if stdout.contains("Config key not set") || stderr.contains("Config key not set") {
+            (None, Vec::new())
+        } else {
+            panic!("hermes config get failed unexpectedly: {stderr} {stdout}");
+        }
+    } else {
+        let vars = parse_json_string_array(&stdout)
+            .unwrap_or_else(|| panic!("failed to parse hermes config get output: {stdout}"));
+        let start = stdout.find('[').expect("JSON array start [");
+        let end = stdout.rfind(']').expect("JSON array end ]");
+        (Some(stdout[start..=end].to_string()), vars)
+    };
+
+    struct HermesConfigGuard {
+        hermes_bin: PathBuf,
+        original_config: Option<String>,
+        needed_restore: bool,
+    }
+
+    impl Drop for HermesConfigGuard {
+        fn drop(&mut self) {
+            if self.needed_restore {
+                if let Some(ref orig) = self.original_config {
+                    let _ = Command::new(&self.hermes_bin)
+                        .args(["config", "set", "terminal.client_env_passthrough", orig])
+                        .status();
+                } else {
+                    let _ = Command::new(&self.hermes_bin)
+                        .args(["config", "unset", "terminal.client_env_passthrough"])
+                        .status();
+                }
+            }
+        }
+    }
+
+    let mut _config_guard = HermesConfigGuard {
+        hermes_bin: hermes_bin.clone(),
+        original_config: original_json,
+        needed_restore: false,
+    };
+
+    let mut updated = existing_vars.clone();
+    let mut changed = false;
+    for var in &[
+        "CW_HERMES_OVERRIDE_FILE",
+        "CW_SESSION_ID",
+        "CW_CONTROL_TOKEN_FILE",
+        "CW_WORKSPACE",
+        "CW_HERMES_TRUSTED_DIR",
+    ] {
+        if !updated.iter().any(|v| v == *var) {
+            updated.push(var.to_string());
+            changed = true;
+        }
+    }
+
+    if changed {
+        // Arm restoration guard BEFORE executing config set so failures or panics trigger cleanup
+        _config_guard.needed_restore = true;
+        let merged_json = serde_json::to_string(&updated).unwrap();
+        let status = Command::new(&hermes_bin)
+            .args([
+                "config",
+                "set",
+                "terminal.client_env_passthrough",
+                &merged_json,
+            ])
+            .status()
+            .expect("hermes config set failed to execute");
+        assert!(status.success(), "hermes config set must succeed");
+    }
+
+    // -------------------------------------------------------------------------
+    // Gate 1 & 2 & 3: Concurrent Launches, Isolated Handoff Files & Overlay Isolation
+    // -------------------------------------------------------------------------
+    let sess_id_a = format!(
+        "hermes_concurrent_sess_A_{}",
+        &uuid::Uuid::new_v4().to_string()[..8]
+    );
+    let sess_id_b = format!(
+        "hermes_concurrent_sess_B_{}",
+        &uuid::Uuid::new_v4().to_string()[..8]
+    );
+
+    let now = chrono::Utc::now();
+    for (sid, policy_label, policy_content) in [
+        (
+            &sess_id_a,
+            "PolicyA",
+            "CRITICAL_POLICY_A_ONLY: STRICT_ISOLATION_A",
+        ),
+        (
+            &sess_id_b,
+            "PolicyB",
+            "CRITICAL_POLICY_B_ONLY: STRICT_ISOLATION_B",
+        ),
+    ] {
+        f.store
+            .upsert_session(&Session {
+                id: sid.to_string(),
+                parent_session_id: None,
+                harness: HarnessKind::Hermes,
+                workspace_root: None,
+                model: "mock-model".to_string(),
+                provider: ProviderKind::OpenAI,
+                title: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        f.store
+            .save_mutation(&MutationRule {
+                id: format!("mut_{policy_label}"),
+                session_id: sid.to_string(),
+                op: MutationOp::PinContext {
+                    label: policy_label.to_string(),
+                    content: policy_content.to_string(),
+                    source_node_id: None,
+                },
+                status: MutationStatus::Committed,
+                estimated_saved_tokens: 0,
+                estimated_kv_break_tokens: 0,
+                created_at: now,
+            })
+            .unwrap();
+    }
+
+    let override_uuid_a = uuid::Uuid::new_v4().to_string();
+    let override_path_a = temp_override_dir.join(format!("hermes-override-{override_uuid_a}.json"));
+    let override_uuid_b = uuid::Uuid::new_v4().to_string();
+    let override_path_b = temp_override_dir.join(format!("hermes-override-{override_uuid_b}.json"));
+
+    let create_override = |path: &std::path::Path, sid: &str| {
+        let payload = serde_json::json!({
+            "session_id": sid,
+            "workspace": "/tmp/hermes_workspace",
+            "ts": chrono::Utc::now().timestamp(),
+        });
+        let bytes = serde_json::to_vec(&payload).unwrap();
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(path).unwrap();
+        use std::io::Write;
+        f.write_all(&bytes).unwrap();
+    };
+
+    create_override(&override_path_a, &sess_id_a);
+    create_override(&override_path_b, &sess_id_b);
+
+    let hermes_bin_a = hermes_bin.clone();
+    let token_path_a = token_path_str.clone();
+    let override_file_a_str = override_path_a.to_string_lossy().to_string();
+    let trusted_dir_a = temp_override_dir.to_string_lossy().to_string();
+
+    let task_a = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(hermes_bin_a);
         cmd.args([
             "chat",
             "-Q",
             "-q",
-            "Say turn 1 prompt",
+            "Prompt from Hermes Process A",
             "--provider",
             "custom",
             "--base-url",
@@ -1390,82 +1588,157 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
             "--source",
             "tool",
         ]);
-        cmd.env("CW_CONTROL_TOKEN_FILE", token_path_clone1);
-        cmd.env("CW_SESSION_ID", session_id);
+        cmd.env("CW_CONTROL_TOKEN_FILE", token_path_a);
+        cmd.env("CW_HERMES_OVERRIDE_FILE", override_file_a_str);
+        cmd.env("CW_HERMES_TRUSTED_DIR", trusted_dir_a);
         cmd.output()
-    })
-    .await
-    .unwrap()
-    .expect("failed to run hermes binary on turn 1");
+    });
 
-    let stdout1 = String::from_utf8_lossy(&output1.stdout);
-    let stderr1 = String::from_utf8_lossy(&output1.stderr);
+    let hermes_bin_b = hermes_bin.clone();
+    let token_path_b = token_path_str.clone();
+    let override_file_b_str = override_path_b.to_string_lossy().to_string();
+    let trusted_dir_b = temp_override_dir.to_string_lossy().to_string();
+
+    let task_b = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(hermes_bin_b);
+        cmd.args([
+            "chat",
+            "-Q",
+            "-q",
+            "Prompt from Hermes Process B",
+            "--provider",
+            "custom",
+            "--base-url",
+            &format!("http://127.0.0.1:{proxy_port}/deepseek"),
+            "--api-key",
+            "mock-key",
+            "-m",
+            "mock-model",
+            "--source",
+            "tool",
+        ]);
+        cmd.env("CW_CONTROL_TOKEN_FILE", token_path_b);
+        cmd.env("CW_HERMES_OVERRIDE_FILE", override_file_b_str);
+        cmd.env("CW_HERMES_TRUSTED_DIR", trusted_dir_b);
+        cmd.output()
+    });
+
+    let (out_a, out_b) = tokio::join!(task_a, task_b);
+    let output_a = out_a.unwrap().expect("hermes A failed");
+    let output_b = out_b.unwrap().expect("hermes B failed");
+
+    let stdout_a = String::from_utf8_lossy(&output_a.stdout);
+    let stderr_a = String::from_utf8_lossy(&output_a.stderr);
+    let stdout_b = String::from_utf8_lossy(&output_b.stdout);
+    let stderr_b = String::from_utf8_lossy(&output_b.stderr);
+
+    eprintln!("Hermes A stdout: {stdout_a}");
+    eprintln!("Hermes A stderr: {stderr_a}");
+    eprintln!("Hermes B stdout: {stdout_b}");
+    eprintln!("Hermes B stderr: {stderr_b}");
+
+    let captured = f.mock.captured.lock().unwrap().clone();
+    for (i, c) in captured.iter().enumerate() {
+        eprintln!(
+            "Captured {i}: headers={:?} body={}",
+            c.headers,
+            String::from_utf8_lossy(&c.body)
+        );
+    }
 
     assert_eq!(
-        output1.status.code(),
+        output_a.status.code(),
         Some(0),
-        "Hermes turn 1 failed: stdout: {stdout1}\nstderr: {stderr1}"
+        "Hermes A failed: {stderr_a}"
     );
-    assert!(
-        stdout1.contains("Mock chat output"),
-        "Stdout did not contain mock response: {stdout1}"
+    assert_eq!(
+        output_b.status.code(),
+        Some(0),
+        "Hermes B failed: {stderr_b}"
     );
 
-    // Extract Hermes's authenticated native session ID
-    let sid = stderr1
+    // Gate 1: Assert override files were consumed and unlinked immediately on read
+    assert!(
+        !override_path_a.exists(),
+        "Override file A must be unlinked after consumption"
+    );
+    assert!(
+        !override_path_b.exists(),
+        "Override file B must be unlinked after consumption"
+    );
+
+    // Extract native Hermes session IDs
+    let native_sid_a = stderr_a
         .lines()
         .find_map(|l| l.strip_prefix("session_id: "))
         .map(str::trim)
-        .expect("Hermes must output its session_id in stderr");
+        .expect("Hermes A must output session_id");
+    let native_sid_b = stderr_b
+        .lines()
+        .find_map(|l| l.strip_prefix("session_id: "))
+        .map(str::trim)
+        .expect("Hermes B must output session_id");
+
+    assert_ne!(
+        native_sid_a, native_sid_b,
+        "Processes must have distinct native IDs"
+    );
+
+    // Gate 3: Upstream Overlay Isolation
+    let captured = f.mock.captured.lock().unwrap().clone();
+    assert!(captured.len() >= 2, "Expected at least 2 captured requests");
+
+    let req_a = captured
+        .iter()
+        .find(|c| String::from_utf8_lossy(&c.body).contains("Prompt from Hermes Process A"))
+        .expect("Request from Process A captured");
+    let req_b = captured
+        .iter()
+        .find(|c| String::from_utf8_lossy(&c.body).contains("Prompt from Hermes Process B"))
+        .expect("Request from Process B captured");
+
+    let body_a = String::from_utf8_lossy(&req_a.body);
+    let body_b = String::from_utf8_lossy(&req_b.body);
+
     assert!(
-        sid.starts_with("local-"),
-        "Unexpected session ID format: {sid}"
+        body_a.contains("CRITICAL_POLICY_A_ONLY"),
+        "Request A missing Policy A: {body_a}"
+    );
+    assert!(
+        !body_a.contains("CRITICAL_POLICY_B_ONLY"),
+        "CROSSOVER DETECTED: Request A contains Policy B: {body_a}"
     );
 
-    // Verify proxy bound and recorded Turn 1 under that exact authenticated session ID
-    let bound_session = f
-        .store
-        .get_session(sid)
-        .unwrap()
-        .expect("Expected Hermes session to be bound and recorded in CwStore");
-    assert_eq!(bound_session.id, sid);
-    let turns1 = f.store.list_turns(sid).unwrap();
-    assert_eq!(
-        turns1.len(),
-        1,
-        "Expected 1 turn recorded for bound session"
+    assert!(
+        body_b.contains("CRITICAL_POLICY_B_ONLY"),
+        "Request B missing Policy B: {body_b}"
+    );
+    assert!(
+        !body_b.contains("CRITICAL_POLICY_A_ONLY"),
+        "CROSSOVER DETECTED: Request B contains Policy A: {body_b}"
     );
 
-    // Commit active overlay mutation on the bound session
-    f.store
-        .save_mutation(&MutationRule {
-            id: "hermes_pin_overlay".into(),
-            session_id: sid.into(),
-            op: MutationOp::PinContext {
-                label: "SafetyDirective".into(),
-                content: "CRITICAL_HERMES_PINNED_POLICY".into(),
-                source_node_id: None,
-            },
-            status: MutationStatus::Committed,
-            estimated_saved_tokens: 0,
-            estimated_kv_break_tokens: 0,
-            created_at: Utc::now(),
-        })
-        .unwrap();
+    let turns_a = f.store.list_turns(&sess_id_a).unwrap();
+    let turns_b = f.store.list_turns(&sess_id_b).unwrap();
+    assert_eq!(turns_a.len(), 1, "Session A must have exactly 1 turn");
+    assert_eq!(turns_b.len(), 1, "Session B must have exactly 1 turn");
 
-    // Turn 2: Hermes resumes the session (--resume <sid>); middleware preserves session ID
-    let hermes_bin_clone2 = hermes_bin.clone();
-    let token_path_clone2 = token_path_str.clone();
-    let sid_string = sid.to_string();
-    let output2 = tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::new(hermes_bin_clone2);
+    // -------------------------------------------------------------------------
+    // Gate 4: Resume Gate (Native resume continues under original session identity)
+    // -------------------------------------------------------------------------
+    let hermes_bin_resume_a = hermes_bin.clone();
+    let token_path_resume_a = token_path_str.clone();
+    let native_sid_a_str = native_sid_a.to_string();
+
+    let output_resume_a = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(hermes_bin_resume_a);
         cmd.args([
             "chat",
             "-Q",
             "-r",
-            &sid_string,
+            &native_sid_a_str,
             "-q",
-            "Say turn 2 follow-up",
+            "Resume follow-up prompt from A",
             "--provider",
             "custom",
             "--base-url",
@@ -1477,45 +1750,119 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
             "--source",
             "tool",
         ]);
-        cmd.env("CW_CONTROL_TOKEN_FILE", token_path_clone2);
+        cmd.env("CW_CONTROL_TOKEN_FILE", token_path_resume_a);
         cmd.output()
     })
     .await
     .unwrap()
-    .expect("failed to run hermes binary on turn 2");
+    .expect("Hermes resume A failed");
 
-    let stdout2 = String::from_utf8_lossy(&output2.stdout);
-    let stderr2 = String::from_utf8_lossy(&output2.stderr);
-    let _ = std::fs::remove_file(&temp_token_file);
-
+    assert_eq!(output_resume_a.status.code(), Some(0));
+    let turns_a2 = f.store.list_turns(&sess_id_a).unwrap();
     assert_eq!(
-        output2.status.code(),
-        Some(0),
-        "Hermes turn 2 failed: stdout: {stdout2}\nstderr: {stderr2}"
-    );
-
-    // Verify Turn 2 outbound payload intercepted and received the committed overlay
-    let captured = f.mock.captured.lock().unwrap().clone();
-    let turn2_req = captured.last().expect("Turn 2 request captured");
-    let turn2_body = String::from_utf8_lossy(&turn2_req.body);
-    assert!(
-        turn2_body.contains("CRITICAL_HERMES_PINNED_POLICY"),
-        "Turn 2 request did not contain committed overlay in wire body: {turn2_body}"
-    );
-
-    // Verify session recorded both turns under the same bound session ID
-    let turns2 = f.store.list_turns(sid).unwrap();
-    assert_eq!(
-        turns2.len(),
+        turns_a2.len(),
         2,
-        "Expected 2 turns recorded for Hermes session"
+        "Session A must have 2 turns after resume"
     );
 
-    // Verify upstream received requests with contextWatcher headers stripped
-    for req in &captured {
-        assert!(!req.headers.contains_key("x-cw-control-token"));
-        assert!(!req.headers.contains_key("x-cw-session-id"));
+    let captured_resume = f.mock.captured.lock().unwrap().clone();
+    let req_resume_a = captured_resume
+        .iter()
+        .find(|c| String::from_utf8_lossy(&c.body).contains("Resume follow-up prompt from A"))
+        .expect("Resume request captured");
+    let body_resume_a = String::from_utf8_lossy(&req_resume_a.body);
+    assert!(
+        body_resume_a.contains("CRITICAL_POLICY_A_ONLY"),
+        "Resumed A missing Policy A"
+    );
+    assert!(
+        !body_resume_a.contains("CRITICAL_POLICY_B_ONLY"),
+        "CROSSOVER: Resumed A contains Policy B"
+    );
+
+    // -------------------------------------------------------------------------
+    // Gate 5: Invalid Handoff & Crash Recovery Gate (Fails safe without fallback)
+    // -------------------------------------------------------------------------
+    let hermes_bin_invalid = hermes_bin.clone();
+    let token_path_invalid = token_path_str.clone();
+    let missing_override_file = temp_override_dir.join("hermes-override-nonexistent.json");
+    let trusted_dir_invalid = temp_override_dir.to_string_lossy().to_string();
+
+    let output_invalid = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(hermes_bin_invalid);
+        cmd.args([
+            "chat",
+            "-Q",
+            "-q",
+            "Prompt with invalid override file",
+            "--provider",
+            "custom",
+            "--base-url",
+            &format!("http://127.0.0.1:{proxy_port}/deepseek"),
+            "--api-key",
+            "mock-key",
+            "-m",
+            "mock-model",
+            "--source",
+            "tool",
+        ]);
+        cmd.env("CW_CONTROL_TOKEN_FILE", token_path_invalid);
+        cmd.env(
+            "CW_HERMES_OVERRIDE_FILE",
+            missing_override_file.to_string_lossy().to_string(),
+        );
+        cmd.env("CW_HERMES_TRUSTED_DIR", trusted_dir_invalid);
+        cmd.output()
+    })
+    .await
+    .unwrap()
+    .expect("Hermes invalid handoff execution failed");
+
+    assert_eq!(output_invalid.status.code(), Some(0));
+    let captured_after_invalid = f.mock.captured.lock().unwrap().clone();
+    let last_req = captured_after_invalid
+        .last()
+        .expect("last request captured");
+    let last_body = String::from_utf8_lossy(&last_req.body);
+    assert!(
+        !last_body.contains("CRITICAL_POLICY_A_ONLY"),
+        "Must not bind to session A"
+    );
+    assert!(
+        !last_body.contains("CRITICAL_POLICY_B_ONLY"),
+        "Must not bind to session B"
+    );
+
+    // -------------------------------------------------------------------------
+    // Gate 6: Credential Stripping Gate
+    // -------------------------------------------------------------------------
+    for cap in &captured_after_invalid {
+        assert!(!cap.headers.contains_key("x-cw-control-token"));
+        assert!(!cap.headers.contains_key("x-cw-session-id"));
     }
+
+    // -------------------------------------------------------------------------
+    // Gate 7: 20-Session Stress Test
+    // -------------------------------------------------------------------------
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap();
+    let test_plugin_script = repo_root.join("plugins/hermes/context-watcher/test_plugin.py");
+    let py_test = Command::new("python3")
+        .arg(&test_plugin_script)
+        .current_dir(repo_root)
+        .env("CW_HERMES_TRUSTED_DIR", &temp_override_dir)
+        .output()
+        .expect("failed to run python test_plugin.py");
+    assert!(
+        py_test.status.success(),
+        "Python 20-session stress test failed: {}",
+        String::from_utf8_lossy(&py_test.stderr)
+    );
+
+    let _ = std::fs::remove_file(&temp_token_file);
+    let _ = std::fs::remove_dir_all(&temp_override_dir);
 }
 
 fn find_jsonl_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {

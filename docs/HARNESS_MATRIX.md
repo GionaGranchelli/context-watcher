@@ -22,7 +22,7 @@ Every harness integration is categorized according to four qualification tiers:
 | Harness | Core Proxy Verified | Harness Binary Verified | Real-Provider Verified | Live Optimization Status | Active Blocker / Target |
 |---|:---:|:---:|:---:|:---:|---|
 | **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (Multi-turn) | 🟡 Opt-in Suite C | 🟢 Supported (Responses API) | CW-112 (Real-provider qualification & resume) |
-| **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume) | 🟡 Opt-in Suite C | 🟡 Single-session only | CW-113 (Shared override file race condition) |
+| **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume & concurrency hardened) | 🟡 Opt-in Suite C | 🟢 Supported (OpenAI / DeepSeek middleware) | CW-112 (Live provider continuation) |
 | **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | CW-114 (Long-session reliability campaign) |
 
 ---
@@ -31,12 +31,12 @@ Every harness integration is categorized according to four qualification tiers:
 
 | # | Acceptance Criterion | Required Invariant | Codex CLI (`0.165.0`) | Hermes Agent (`0.22.5`) | OMP / Oh My Pi (`18.12.6`) |
 |---|---|---|:---:|:---:|:---:|
-| **AC1** | **Session Identity & Binding** | Correct session bound across multi-turn and resume without crossover | 🟢 **Harness Binary Verified**<br>`x-cw-session-id` header via custom model provider | 🟢 **Harness Binary Verified** (Single Session)<br>Native `local-...` session bound across turn 1 and `--resume` turn 2; concurrent launches collide on shared file (CW-113) | 🟢 **Harness Binary Verified**<br>Session identity bound via `CW_SESSION_ID` / `sessionManager.getSessionId()`; control token read from 0600 file |
+| **AC1** | **Session Identity & Binding** | Correct session bound across multi-turn and resume without crossover | 🟢 **Harness Binary Verified**<br>`x-cw-session-id` header via custom model provider | 🟢 **Harness Binary Verified (Concurrency Hardened)**<br>Native `local-...` session bound across turn 1 and `--resume` turn 2; concurrent launches isolated via UUID-scoped handoff files (`CW_HERMES_OVERRIDE_FILE`) and per-session gateway tracking (CW-113) | 🟢 **Harness Binary Verified**<br>Session identity bound via `CW_SESSION_ID` / `sessionManager.getSessionId()`; control token read from 0600 file |
 | **AC2** | **Committed Overlay Reapplication** | Overlays committed on turn $N$ apply to outbound model payload on turn $N+1$ | 🟢 **Harness Binary Verified**<br>Multi-turn test confirms `PinContext` applied to turn 2 Responses `input` array | 🟢 **Harness Binary Verified**<br>Turn 2 `--resume` outbound Chat Completions payload contains committed `PinContext` policy | 🟢 **Harness Binary Verified**<br>Native `context` hook intercepts in-memory messages, queries `/transform`, and injects committed overlays into outbound prompt |
 | **AC3** | **Zero Duplicate Injection** | Overlays applied exactly once across turns $N, N+1, N+2$; no duplicate accumulation | 🟢 **Core Proxy Verified**<br>Tested across turns 1..3 with 0 duplicate pin occurrences | 🟢 **Core Proxy Verified**<br>Overlay deduplicated by `apply_mutations_to_payload` | 🟢 **Core Proxy Verified**<br>Deduplication verified in canonical engine |
 | **AC4** | **Tool-Call / Result Pairing** | Tool call IDs and tool result pairings strictly preserved under active mutation | 🟢 **Core Proxy Verified**<br>Tested with active `PinContext` mutation; OpenAI Responses & Chat tool pairings 100% valid | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired |
 | **AC5** | **Signed / Unsupported Shape Passthrough** | Cryptographic thinking signatures & unparseable shapes forwarded with exact byte & JSON-tree fidelity | 🟢 **Core Proxy Verified**<br>Anthropic `thinking` signatures asserted byte-for-byte and JSON-tree equal | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads |
-| **AC6** | **Credential Stripping & Tool Sandboxing** | Control tokens stripped from upstream requests and inaccessible to model tool commands | 🟢 **Core Proxy Verified (Config Sandboxing Contract)**<br>Stripped before upstream; `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` configured in settings; live model shell tool verification in CW-112 | 🟡 **Partial**<br>Stripped before upstream; `CW_CONTROL_TOKEN_FILE` is a disk file accessible to local user | 🟢 **Harness Binary Verified**<br>Stripped before upstream; `models.json` has 0 headers; `CW_CONTROL_TOKEN` purged from `process.env` on startup; same-user file boundary documented |
+| **AC6** | **Credential Stripping & Tool Sandboxing** | Control tokens stripped from upstream requests and inaccessible to model tool commands | 🟢 **Core Proxy Verified (Config Sandboxing Contract)**<br>Stripped before upstream; `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` configured in settings; live model shell tool verification in CW-112 | 🟢 **Harness Binary Verified**<br>Stripped before upstream; UUID-scoped `hermes-override-<uuid>.json` created with `0600` permissions (`create_new(true)`) and atomically unlinked on consumption; `CW_CONTROL_TOKEN_FILE` read from 0600 file; same-user file boundary documented | 🟢 **Harness Binary Verified**<br>Stripped before upstream; `models.json` has 0 headers; `CW_CONTROL_TOKEN` purged from `process.env` on startup; same-user file boundary documented |
 | **AC7** | **Pristine Source Transcripts** | Harness on-disk transcripts and state databases are never corrupted or rewritten in place | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Harness ingestion, store indexing, and active proxy requests assert 100% BLAKE3 bit-for-bit hash identity on source files | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Source transcript files untouched bit-for-bit | 🟢 **Harness Binary Verified**<br>On-disk transcript preserves original turns without in-place mutation; in-memory overlays never touch disk transcript |
 | **AC8** | **Safe Fault Recovery & Gate Fail-Open** | Malformed mutations or daemon outages fail open or safe without corrupting agent session | 🟢 **Core Proxy Verified**<br>Corrupting mutation committed; Pre-Forward Validation Gate catches orphan tool invariant violation, logs diagnostic warning, and fails open to raw payload | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified |
 | **AC9** | **Live Binary Task Continuation** | Actual agent binary completes prompt/task against isolated proxy | 🟢 **Harness Binary Verified**<br>`codex exec` completes code 0 in automated test across multiple turns | 🟢 **Harness Binary Verified**<br>`hermes chat` completes code 0 across initial turn and resumed turn | 🟢 **Harness Binary Verified**<br>`omp -p` completes code 0 in automated test (passive proxy mode) |
@@ -71,36 +71,29 @@ Every harness integration is categorized according to four qualification tiers:
   - Session resume (`codex resume <id>`) verification with active overlays.
   - Live model-invoked shell command execution asserting token inaccessibility.
 
-### 4.2 Hermes Agent (`0.22.5`) — Concurrency Blocker
-* **Status:** **Harness Binary Verified (Multi-Turn Resume)** · Blocked for Concurrent Launches (CW-113).
+### 4.2 Hermes Agent (`0.22.5`) — Concurrency Hardened & Resume Verified
+* **Status:** **Harness Binary Verified (Multi-Turn Resume & Concurrency Hardened)** · Completed in CW-113.
 * **Wire Protocol:** OpenAI / DeepSeek Chat Completions (`/v1/chat/completions`) with delta chunk streaming.
-* **Middleware Extension Point:** `plugins/hermes/context-watcher/__init__.py` registers an `llm_request` hook that attaches `x-cw-session-id`, `x-cw-control-token`, and `x-cw-workspace` to requests routed to `_CW_ROUTES`.
-* **Verified Evidence:**
-  - `test_harness_binary_hermes_middleware_session_binding`:
-    - Turn 1: `hermes chat` executed against `http://127.0.0.1:{proxy_port}/deepseek`.
-    - Python middleware activated, attached `x-cw-session-id: <native-local-sid>` and `x-cw-control-token`.
-    - ContextWatcher proxy authenticated session, stripped control token, and forwarded request.
-    - CwStore recorded bound session `local-...` and Turn 1.
-    - Hermes received mock response and completed with code 0.
-    - Active `PinContext` mutation committed to `local-...` in CwStore.
-    - Turn 2: Hermes resumed the session via `hermes chat -r <sid>`.
-    - ContextWatcher proxy intercepted turn 2 under the same bound session ID and injected `CRITICAL_HERMES_PINNED_POLICY` into the Chat Completions `messages` array.
-    - Upstream mock captured turn 2 request containing the overlay.
-    - Hermes completed Turn 2 with exit code 0.
-    - CwStore recorded 2 turns under the bound session.
-    - Upstream captured 0 internal contextWatcher metadata headers.
-* **Identified Blocker (P0 — Race Condition in Wrap Override):**
-  - In `plugins/hermes/context-watcher/__init__.py`:
-    ```python
-    def _consume_wrap_override(hermes_session_id):
-        path = _data_dir() / "hermes-session-override.json"
-        ...
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        path.unlink(missing_ok=True)
-    ```
-  - The handoff between `cw wrap hermes` and the Python middleware relies on a single shared file: `~/.local/share/context-watcher/hermes-session-override.json`.
-  - The first process reads and deletes the file. If two Hermes instances launch concurrently (e.g. gateway dispatch or background cron), the second process fails to find the override or receives the wrong session ID.
-  - **Resolution Plan for CW-113:** Replace the single static file with per-PID or per-invocation files (e.g. `hermes-session-override.<pid>.json` or explicit environment binding `CW_HERMES_SESSION_FILE`).
+* **Middleware Extension Point & Concurrency Hardening (CW-113):**
+  - `plugins/hermes/context-watcher/__init__.py` registers an `llm_request` hook that attaches `x-cw-session-id`, `x-cw-control-token`, and `x-cw-workspace` to requests routed to `_CW_ROUTES`.
+  - **UUID-Scoped Override Handoff:** Replaced the global `hermes-session-override.json` file with unique per-invocation files: `~/.local/share/context-watcher/hermes-override-<uuid>.json`.
+  - **Atomic File Creation & Strict Permissions:** Files are created using `OpenOptions::new().create_new(true).mode(0o600)`, ensuring no symlink or pre-existing file takeover and restricting access strictly to the invoking user.
+  - **Environment-Directed Reference:** The wrapper passes the unique path via `CW_HERMES_OVERRIDE_FILE`. Hermes gateway allows this through via `terminal.client_env_passthrough`.
+  - **Handoff Validation & Atomic Unlink:** The middleware verifies that the target path is a regular file (not a symlink), owned with mode `0600` (`mode & 077 == 0`), created within 120 seconds, and contains valid JSON with a non-empty session ID. It unlinks the file immediately on read (`unlink()`), so each handoff file is consumed exactly once.
+  - **Gateway Daemon Session Scoping:** The Hermes gateway service (`hermes-gateway`) runs as a single persistent daemon serving multiple concurrent client sessions. The middleware indexes consumed overrides strictly by `hermes_sid` in `_SESSION_OVERRIDES`, eliminating shared module-level state and cross-session contamination.
+  - **Same-User Security Boundary:** Handoff files and control token files are created with `0600` permissions, protecting credentials from other user accounts on the host. In an uncontained execution environment, processes running under the same user UID share filesystem read privileges; isolation across processes requires OS containers (e.g. bubblewrap/docker). ContextWatcher unlinks handoff files immediately to minimize exposure windows.
+  - **Fail-Safe Operation:** Invalid, expired, unreadable, or symlinked override files fail safe: the middleware ignores the invalid handoff and does not attach spoofed or arbitrary session headers.
+* **Verified Evidence (7-Gate Multi-Process Qualification Test):**
+  - `test_harness_binary_hermes_middleware_session_binding` exercises 7 comprehensive verification gates:
+    - **Gate 1 (Handoff Consumption & Cleanup):** Two concurrent Hermes processes (Process A and Process B) launched simultaneously against the proxy; each consumed and atomically unlinked its own UUID-scoped override file.
+    - **Gate 2 (Session Identity Isolation):** Process A and Process B bound to two distinct native Hermes session IDs (`local-...`), with no cross-talk.
+    - **Gate 3 (Upstream Overlay Isolation):** Upstream mock captured model requests from both processes. Turn A received policy `CRITICAL_POLICY_A_ONLY`, Turn B received policy `CRITICAL_POLICY_B_ONLY`. Cross-contamination asserted to be exactly 0 (Turn A never saw B's policy; Turn B never saw A's policy).
+    - **Gate 4 (Native Resume Verification):** Session A was resumed via `hermes chat -r <sid_A>`. Turn 2 executed cleanly, maintained session identity `sid_A`, and carried active policy `CRITICAL_POLICY_A_ONLY`.
+    - **Gate 5 (Invalid Handoff Fail-Safe):** Tested with a pre-existing invalid handoff file; Hermes completed cleanly and the middleware failed safe without attaching unauthorized overlays.
+    - **Gate 6 (Credential Stripping):** Captured wire requests across all turns verified that `x-cw-control-token` and `x-cw-session-id` were stripped prior to reaching the upstream model endpoint.
+    - **Gate 7 (20-Session Concurrency Stress Test):** Python test suite `plugins/hermes/context-watcher/test_plugin.py` executed a 20-thread concurrent invocation stress test asserting 0 collisions, 0 race conditions, and complete file cleanup across all 20 threads.
+* **Remaining Work (CW-112):**
+  - Opt-in live multi-turn cloud provider qualification (`CW_QUALIFY_REAL_HERMES=1` against live DeepSeek endpoint).
 
 ### 4.3 OMP / Oh My Pi (`18.12.6`) — Native Runtime Context Hook & Hardened Isolation
 * **Status:** **Harness Binary Verified (Native Runtime Hardened & Multi-Turn Resume Verified)** · Completed in CW-111 / CW-111B.

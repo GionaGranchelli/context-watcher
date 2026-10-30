@@ -26,7 +26,6 @@ _SESSION_AUTHORITY_VARS = frozenset({
     "CW_HERMES_OVERRIDE_FILE",
     "CW_SESSION_ID",
     "CW_WORKSPACE",
-    "CW_CONTROL_TOKEN_FILE",
 })
 
 _OVERRIDE_FILENAME_RE = re.compile(r"^hermes-override-[0-9a-zA-Z_-]+\.json$")

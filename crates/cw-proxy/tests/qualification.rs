@@ -1558,19 +1558,19 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
         let _ = std::fs::set_permissions(&token_file, std::fs::Permissions::from_mode(0o600));
     }
 
-    let session_id = format!("omp_qual_{}", &uuid::Uuid::new_v4().to_string()[..8]);
-
-    let models_cfg = cw_harnesses::qualification::omp_proxy_models_config_with_headers(
-        f.proxy_port,
-        "mock-model",
-        &session_id,
-        &f.control_token,
+    // AC1 / Security: models.json MUST NOT contain privileged CW control tokens
+    let models_cfg =
+        cw_harnesses::qualification::omp_proxy_models_config(f.proxy_port, "mock-model");
+    let models_json_str = serde_json::to_string_pretty(&models_cfg).unwrap();
+    assert!(
+        !models_json_str.contains("control-token"),
+        "models.json must never contain CW control credentials"
     );
-    std::fs::write(
-        temp_agent_dir.join("models.json"),
-        serde_json::to_string_pretty(&models_cfg).unwrap(),
-    )
-    .unwrap();
+    assert!(
+        !models_json_str.contains(&f.control_token),
+        "models.json must never contain CW control token"
+    );
+    std::fs::write(temp_agent_dir.join("models.json"), &models_json_str).unwrap();
 
     let ext_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -1584,29 +1584,26 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
         ext_path.display()
     );
 
-    // Turn 1: Initial prompt executes with native extension loaded
+    // Turn 1: Initial prompt executes with native extension loaded; OMP creates native persisted session
     let omp_bin_clone = omp_bin.clone();
     let temp_agent_dir_clone = temp_agent_dir.clone();
     let token_file_clone = token_file.clone();
     let ext_path_clone = ext_path.clone();
-    let sid_clone = session_id.clone();
     let proxy_port = f.proxy_port;
 
     let output1 = tokio::task::spawn_blocking(move || {
         let mut cmd = Command::new(omp_bin_clone);
         cmd.args([
             "-p",
-            "Turn 1 pristine prompt",
+            "Turn 1 pristine prompt text",
             "--model",
             "cw-proxy/mock-model",
-            "--no-tools",
             "-e",
             &ext_path_clone.to_string_lossy(),
         ]);
         cmd.env("PI_CODING_AGENT_DIR", &temp_agent_dir_clone);
         cmd.env("CW_CONTROL_TOKEN_FILE", &token_file_clone);
         cmd.env("CW_DAEMON_URL", format!("http://127.0.0.1:{proxy_port}"));
-        cmd.env("CW_SESSION_ID", &sid_clone);
         cmd.output()
     })
     .await
@@ -1630,10 +1627,56 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
     assert_eq!(captured1.len(), 1);
     assert_eq!(captured1[0].path, "/v1/chat/completions");
 
-    // Commit an active mutation overlay for this session: PinContext
+    // AC5 / Transcript Evidence: Assert that a real persisted session transcript file was created
+    let session_dir = temp_agent_dir.join("sessions");
+    assert!(
+        session_dir.exists(),
+        "OMP must create a sessions directory on disk"
+    );
+    let session_files = find_jsonl_files(&session_dir);
+    assert!(
+        !session_files.is_empty(),
+        "OMP must generate at least one persisted session .jsonl file"
+    );
+    let session_file = &session_files[0];
+    let initial_disk_content = std::fs::read_to_string(session_file).unwrap();
+    assert!(
+        !initial_disk_content.trim().is_empty(),
+        "Persisted session transcript cannot be empty"
+    );
+    assert!(
+        initial_disk_content.contains("Turn 1 pristine prompt text"),
+        "Persisted session transcript must contain initial user prompt"
+    );
+
+    // Extract native session UUID from session filename: <timestamp>_<session_uuid>.jsonl
+    let filename = session_file.file_stem().unwrap().to_str().unwrap();
+    let session_uuid = filename
+        .split('_')
+        .nth(1)
+        .expect("expected uuid component in session filename")
+        .to_string();
+    let canonical_sid = format!("omp_{session_uuid}");
+
+    // Register session in CwStore
+    let sess = Session {
+        id: canonical_sid.clone(),
+        parent_session_id: None,
+        harness: HarnessKind::Omp,
+        workspace_root: None,
+        model: "mock-model".to_string(),
+        provider: ProviderKind::OpenAI,
+        title: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    f.store.upsert_session(&sess).unwrap();
+
+    // Commit active tail directive (PinContext).
+    // Note: User and system prompts must NEVER be pruned or stubbed (enforced by CW safety contract).
     let pin = MutationRule {
         id: "mut_omp_pin_qual".to_string(),
-        session_id: session_id.clone(),
+        session_id: canonical_sid.clone(),
         op: MutationOp::PinContext {
             label: "CRITICAL_OMP_PINNED_POLICY".to_string(),
             content: "Zero-hallucination verified native context hook".to_string(),
@@ -1645,50 +1688,52 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
         created_at: Utc::now(),
     };
     f.store
-        .save_mutations_at_revision(&session_id, None, &[pin])
+        .save_mutations_at_revision(&canonical_sid, None, &[pin])
         .unwrap();
 
-    // Turn 2: Follow-up prompt. Native extension's `context` hook intercepts
-    // and injects the pinned policy into the model prompt.
+    // Turn 2: Native OMP Resume (`omp -r <session_uuid>`).
+    // Native extension's `context` hook intercepts resumed messages, queries /transform using canonical_sid,
+    // and applies active overlays before model dispatch.
+    let omp_bin_clone2 = omp_bin.clone();
     let temp_agent_dir_clone2 = temp_agent_dir.clone();
     let token_file_clone2 = token_file.clone();
     let ext_path_clone2 = ext_path.clone();
-    let sid_clone2 = session_id.clone();
+    let resume_uuid = session_uuid.clone();
 
     let output2 = tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::new(omp_bin);
+        let mut cmd = Command::new(omp_bin_clone2);
         cmd.args([
+            "-r",
+            &resume_uuid,
             "-p",
-            "Turn 2 follow-up prompt",
+            "Turn 2 follow-up prompt text",
             "--model",
             "cw-proxy/mock-model",
-            "--no-tools",
             "-e",
             &ext_path_clone2.to_string_lossy(),
         ]);
         cmd.env("PI_CODING_AGENT_DIR", &temp_agent_dir_clone2);
         cmd.env("CW_CONTROL_TOKEN_FILE", &token_file_clone2);
         cmd.env("CW_DAEMON_URL", format!("http://127.0.0.1:{proxy_port}"));
-        cmd.env("CW_SESSION_ID", &sid_clone2);
         cmd.output()
     })
     .await
     .unwrap()
-    .expect("failed to run omp binary Turn 2");
+    .expect("failed to run omp binary Turn 2 (resumed)");
 
     let stdout2 = String::from_utf8_lossy(&output2.stdout);
     let stderr2 = String::from_utf8_lossy(&output2.stderr);
     assert_eq!(
         output2.status.code(),
         Some(0),
-        "OMP Turn 2 CLI failed: stderr: {stderr2}"
+        "OMP Turn 2 resumed CLI failed: stderr: {stderr2}"
     );
     assert!(
         stdout2.contains("Mock chat output"),
         "Stdout did not contain mock response: {stdout2}"
     );
 
-    // Verify upstream captured Turn 2 containing the active mutation overlay
+    // Verify upstream captured Turn 2 containing injected tail pin
     let captured2 = f.mock.captured.lock().unwrap().clone();
     assert!(
         captured2.len() >= 2,
@@ -1698,30 +1743,73 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
     let turn2_body = String::from_utf8_lossy(&captured2[captured2.len() - 1].body);
     assert!(
         turn2_body.contains("CRITICAL_OMP_PINNED_POLICY"),
-        "Turn 2 upstream payload did not contain injected pinned context: {turn2_body}"
+        "Turn 2 payload did not contain injected pinned directive: {turn2_body}"
     );
     assert!(
-        turn2_body.contains("Zero-hallucination verified native context hook"),
-        "Turn 2 upstream payload did not contain injected policy content: {turn2_body}"
+        turn2_body.contains("Turn 2 follow-up prompt text"),
+        "Turn 2 payload missing follow-up prompt: {turn2_body}"
     );
 
-    // Core Invariant Check: Verify on-disk transcript immutability
-    // Any session .jsonl files written by OMP must NOT contain the pinned policy
-    let session_dir = temp_agent_dir.join("sessions");
-    if session_dir.exists() {
-        let files = find_jsonl_files(&session_dir);
-        for file in files {
-            let disk_content = std::fs::read_to_string(&file).unwrap();
-            assert!(
-                !disk_content.contains("CRITICAL_OMP_PINNED_POLICY"),
-                "On-disk OMP session transcript was corrupted with injected overlay: {}",
-                file.display()
-            );
-        }
-    }
+    // AC7 Invariant: On-disk transcript legitimately grows by appending Turn 2,
+    // but the original Turn 1 prompt is preserved and in-memory overlays NEVER touch the disk file.
+    let disk_content_after_turn2 = std::fs::read_to_string(session_file).unwrap();
+    assert!(
+        disk_content_after_turn2.contains("Turn 1 pristine prompt text"),
+        "Original Turn 1 prompt must be preserved on disk"
+    );
+    assert!(
+        disk_content_after_turn2.contains("Turn 2 follow-up prompt text"),
+        "Turn 2 follow-up prompt must be appended to disk transcript"
+    );
+    assert!(
+        !disk_content_after_turn2.contains("CRITICAL_OMP_PINNED_POLICY"),
+        "On-disk transcript must NEVER contain injected pinned policy"
+    );
+
+    // Turn 3: Fail-Open Verification under Daemon Unavailability
+    // When daemon URL points to an offline endpoint, OMP must still complete Turn 3 successfully with raw prompt
+    let ext_path_clone3 = ext_path.clone();
+    let temp_agent_dir_clone3 = temp_agent_dir.clone();
+    let token_file_clone3 = token_file.clone();
+    let resume_uuid3 = session_uuid.clone();
+
+    let output3 = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(omp_bin);
+        cmd.args([
+            "-r",
+            &resume_uuid3,
+            "-p",
+            "Turn 3 offline fail-open prompt text",
+            "--model",
+            "cw-proxy/mock-model",
+            "-e",
+            &ext_path_clone3.to_string_lossy(),
+        ]);
+        cmd.env("PI_CODING_AGENT_DIR", &temp_agent_dir_clone3);
+        cmd.env("CW_CONTROL_TOKEN_FILE", &token_file_clone3);
+        // Point daemon URL to an unreachable port to test fail-open resiliency
+        cmd.env("CW_DAEMON_URL", "http://127.0.0.1:19999");
+        cmd.output()
+    })
+    .await
+    .unwrap()
+    .expect("failed to run omp binary Turn 3 (fail-open)");
+
+    assert_eq!(
+        output3.status.code(),
+        Some(0),
+        "OMP Turn 3 fail-open failed with error"
+    );
+
+    let captured3 = f.mock.captured.lock().unwrap().clone();
+    let turn3_body = String::from_utf8_lossy(&captured3[captured3.len() - 1].body);
+    assert!(
+        turn3_body.contains("Turn 3 offline fail-open prompt text"),
+        "Turn 3 prompt was not forwarded during offline fail-open"
+    );
 
     // Header Stripping Check: Upstream received 0 internal contextWatcher metadata headers
-    for cap in &captured2 {
+    for cap in &captured3 {
         assert!(
             !cap.headers.contains_key("x-cw-control-token"),
             "Upstream captured x-cw-control-token"
@@ -1731,6 +1819,73 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
             "Upstream captured x-cw-session-id"
         );
     }
+
+    // AC1 / Session Precedence & Idempotency: Assert native session takes precedence over
+    // process.env.CW_SESSION_ID and single-pass idempotency holds without time heuristics.
+    let ext_js = ext_path.to_string_lossy().to_string();
+    let node_script = format!(
+        r#"
+let capturedUrls = [];
+let transformCalls = 0;
+globalThis.fetch = async (url) => {{
+  capturedUrls.push(String(url));
+  transformCalls++;
+  return {{
+    ok: true,
+    json: async () => ({{ messages: [{{ role: "user", content: "transformed" }}] }})
+  }};
+}};
+
+process.env.CW_SESSION_ID = "omp_legacy_env_wrapper_id";
+
+import("{ext_js}").then(async (mod) => {{
+  let contextHook = null;
+  let beforeHook = null;
+  const mockPi = {{
+    on: (evt, fn) => {{
+      if (evt === "context") contextHook = fn;
+      if (evt === "before_provider_request") beforeHook = fn;
+    }},
+    registerCommand: () => {{}}
+  }};
+  mod.default(mockPi);
+
+  // 1. Session Isolation: Native session 1 takes precedence over process.env.CW_SESSION_ID
+  const ctx1 = {{ sessionManager: {{ getSessionId: () => "native-uuid-1" }} }};
+  const resContext1 = await contextHook({{ messages: [{{ role: "user", content: "t1" }}] }}, ctx1);
+
+  // 2. Session Switching: Switching native sessions within process binds to new native session
+  const ctx2 = {{ sessionManager: {{ getSessionId: () => "native-uuid-2" }} }};
+  const resContext2 = await contextHook({{ messages: [{{ role: "user", content: "t2" }}] }}, ctx2);
+
+  // 3. Fallback: Absent native session uses env
+  await contextHook({{ messages: [{{ role: "user", content: "t3" }}] }}, {{}});
+
+  if (!capturedUrls[0].includes("omp_native-uuid-1")) throw new Error("Expected omp_native-uuid-1, got " + capturedUrls[0]);
+  if (!capturedUrls[1].includes("omp_native-uuid-2")) throw new Error("Expected omp_native-uuid-2, got " + capturedUrls[1]);
+  if (!capturedUrls[2].includes("omp_legacy_env_wrapper_id")) throw new Error("Expected omp_legacy_env_wrapper_id, got " + capturedUrls[2]);
+
+  // 4. Idempotency: before_provider_request receiving transformed messages skips second call
+  const callCountBefore = transformCalls;
+  await beforeHook({{ payload: {{ messages: resContext1.messages }} }}, ctx1);
+  if (transformCalls !== callCountBefore) throw new Error("Duplicate transformation detected!");
+
+  // 5. Bypass: Turn bypassing context hook still executes
+  await beforeHook({{ payload: {{ messages: [{{ role: "user", content: "bypassed" }}] }} }}, ctx1);
+  if (transformCalls !== callCountBefore + 1) throw new Error("Bypass turn failed to transform");
+}});
+"#
+    );
+
+    let node_out = Command::new("node")
+        .args(["-e", &node_script])
+        .output()
+        .expect("failed to run node session precedence check");
+    assert!(
+        node_out.status.success(),
+        "Node session isolation/idempotency check failed: {}",
+        String::from_utf8_lossy(&node_out.stderr)
+    );
 
     let _ = std::fs::remove_dir_all(&temp_agent_dir);
     let _ = std::fs::remove_dir_all(&token_dir);

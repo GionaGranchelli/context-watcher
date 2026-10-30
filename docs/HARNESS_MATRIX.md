@@ -23,7 +23,7 @@ Every harness integration is categorized according to four qualification tiers:
 |---|:---:|:---:|:---:|:---:|---|
 | **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (Multi-turn) | 🟡 Opt-in Suite C | 🟢 Supported (Responses API) | CW-112 (Real-provider qualification & resume) |
 | **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume) | 🟡 Opt-in Suite C | 🟡 Single-session only | CW-113 (Shared override file race condition) |
-| **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | CW-114 (Long-session reliability campaign) |
+| **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | CW-114 (Long-session reliability campaign) |
 
 ---
 
@@ -36,8 +36,8 @@ Every harness integration is categorized according to four qualification tiers:
 | **AC3** | **Zero Duplicate Injection** | Overlays applied exactly once across turns $N, N+1, N+2$; no duplicate accumulation | 🟢 **Core Proxy Verified**<br>Tested across turns 1..3 with 0 duplicate pin occurrences | 🟢 **Core Proxy Verified**<br>Overlay deduplicated by `apply_mutations_to_payload` | 🟢 **Core Proxy Verified**<br>Deduplication verified in canonical engine |
 | **AC4** | **Tool-Call / Result Pairing** | Tool call IDs and tool result pairings strictly preserved under active mutation | 🟢 **Core Proxy Verified**<br>Tested with active `PinContext` mutation; OpenAI Responses & Chat tool pairings 100% valid | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired |
 | **AC5** | **Signed / Unsupported Shape Passthrough** | Cryptographic thinking signatures & unparseable shapes forwarded with exact byte & JSON-tree fidelity | 🟢 **Core Proxy Verified**<br>Anthropic `thinking` signatures asserted byte-for-byte and JSON-tree equal | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads |
-| **AC6** | **Credential Stripping & Tool Sandboxing** | Control tokens stripped from upstream requests and inaccessible to model tool commands | 🟢 **Core Proxy Verified (Config Sandboxing Contract)**<br>Stripped before upstream; `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` configured in settings; live model shell tool verification in CW-112 | 🟡 **Partial**<br>Stripped before upstream; `CW_CONTROL_TOKEN_FILE` is a disk file accessible to local user | 🟢 **Core Proxy Verified**<br>Stripped before upstream; `cw wrap` removes env tokens |
-| **AC7** | **Pristine Source Transcripts** | Harness on-disk transcripts and state databases are never corrupted or rewritten in place | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Harness ingestion, store indexing, and active proxy requests assert 100% BLAKE3 bit-for-bit hash identity on source files | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Source transcript files untouched bit-for-bit | 🟢 **Core Proxy Verified (Transcript Immutability Contract)`**<br>Source transcript files untouched bit-for-bit |
+| **AC6** | **Credential Stripping & Tool Sandboxing** | Control tokens stripped from upstream requests and inaccessible to model tool commands | 🟢 **Core Proxy Verified (Config Sandboxing Contract)**<br>Stripped before upstream; `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` configured in settings; live model shell tool verification in CW-112 | 🟡 **Partial**<br>Stripped before upstream; `CW_CONTROL_TOKEN_FILE` is a disk file accessible to local user | 🟢 **Harness Binary Verified**<br>Stripped before upstream; `models.json` has 0 headers; `CW_CONTROL_TOKEN` purged from `process.env` on startup; same-user file boundary documented |
+| **AC7** | **Pristine Source Transcripts** | Harness on-disk transcripts and state databases are never corrupted or rewritten in place | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Harness ingestion, store indexing, and active proxy requests assert 100% BLAKE3 bit-for-bit hash identity on source files | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Source transcript files untouched bit-for-bit | 🟢 **Harness Binary Verified**<br>On-disk transcript preserves original turns without in-place mutation; in-memory overlays never touch disk transcript |
 | **AC8** | **Safe Fault Recovery & Gate Fail-Open** | Malformed mutations or daemon outages fail open or safe without corrupting agent session | 🟢 **Core Proxy Verified**<br>Corrupting mutation committed; Pre-Forward Validation Gate catches orphan tool invariant violation, logs diagnostic warning, and fails open to raw payload | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified |
 | **AC9** | **Live Binary Task Continuation** | Actual agent binary completes prompt/task against isolated proxy | 🟢 **Harness Binary Verified**<br>`codex exec` completes code 0 in automated test across multiple turns | 🟢 **Harness Binary Verified**<br>`hermes chat` completes code 0 across initial turn and resumed turn | 🟢 **Harness Binary Verified**<br>`omp -p` completes code 0 in automated test (passive proxy mode) |
 | **AC10** | **Telemetry Provenance & Cache Accounting** | Token usage verified against telemetry provenance; un-telemetred cache strictly un-fabricated | 🟢 **Core Proxy Verified**<br>Observed provider usage (`prompt_tokens`, `completion_tokens`) reconciled against AST token spans; absent cache telemetry strictly reported as 0 tokens (`telemetry_available: false`) | 🟢 **Core Proxy Verified**<br>Usage provenance reconciled against wire telemetry | 🟢 **Core Proxy Verified**<br>Usage provenance reconciled against wire telemetry |
@@ -102,27 +102,31 @@ Every harness integration is categorized according to four qualification tiers:
   - The first process reads and deletes the file. If two Hermes instances launch concurrently (e.g. gateway dispatch or background cron), the second process fails to find the override or receives the wrong session ID.
   - **Resolution Plan for CW-113:** Replace the single static file with per-PID or per-invocation files (e.g. `hermes-session-override.<pid>.json` or explicit environment binding `CW_HERMES_SESSION_FILE`).
 
-### 4.3 OMP / Oh My Pi (`18.12.6`) — Native Runtime Context Hook
-* **Status:** **Harness Binary Verified (Native Runtime Context Hook Verified)** · Completed in CW-111.
-* **Wire Protocol:** OpenAI Chat Completions (`/v1/chat/completions`).
-* **Architecture:**
+### 4.3 OMP / Oh My Pi (`18.12.6`) — Native Runtime Context Hook & Hardened Isolation
+* **Status:** **Harness Binary Verified (Native Runtime Hardened & Multi-Turn Resume Verified)** · Completed in CW-111 / CW-111B.
+* **Wire Protocol:** OpenAI Chat Completions (`/v1/chat/completions`) & Anthropic Messages (`/v1/messages`).
+* **Architecture & Security Boundary (CW-111B Hardening):**
   - `plugins/pi-opencode/index.js` registers native OMP runtime event hooks `pi.on("context", ...)` and `pi.on("before_provider_request", ...)`.
-  - When OMP prepares messages for prompt formatting, the `context` hook extracts current in-memory conversation messages and session identity (`ctx.sessionManager.getSessionId()`).
-  - Reads the local control token securely from `~/.local/share/context-watcher/control-token` (0600 permissions, zero exposure to child tool environments).
-  - Posts messages to `POST /api/v1/sessions/:id/transform` on the local CW daemon/proxy.
-  - Active overlays (e.g. `PinContext`, `PruneOrStub`, `ShadowDedupe`) are applied in-memory, validated by the Pre-Forward Validation Gate, and returned to OMP without touching the on-disk session `.jsonl` transcript.
-  - Fail-Open Guarantee: Network timeouts, offline daemon, or invalid payloads immediately return `{ messages: event.messages }` unmodified, ensuring OMP never crashes or stalls.
-* **Verified Evidence:**
+  - **Zero Credential Exposure in Config:** `models.json` contains zero custom headers or privileged CW control tokens. The unsafe helper `omp_proxy_models_config_with_headers()` has been completely removed from `cw-harnesses`.
+  - **Process Environment Sanitization & Same-User Boundary:** Private control tokens are read securely from `~/.local/share/context-watcher/control-token` (`0600` permissions). The extension immediately purges `CW_CONTROL_TOKEN` and `CW_CONTROL_TOKEN_FILE` from `process.env` in memory on startup so child processes spawned by OMP tools (bash, scripts) cannot inherit them.
+    > [!NOTE] Same-User Security Boundary: Files with `0600` permissions protect credentials against unauthorized user accounts on the host. However, any uncontained tool running under the *same* OS user account can access user-readable files unless enclosed in an OS sandbox/container (e.g. bubblewrap/docker). ContextWatcher purges the token from the process environment so standard tool executions do not inherit it.
+  - **Loopback Enforcement:** `CW_DAEMON_URL` strictly validates hostname against loopback addresses (`127.0.0.1`, `localhost`, `::1`, `[::1]`). Any non-loopback destination fails closed back to local default `http://127.0.0.1:4400`.
+  - **Canonical Session Identity & Isolation:** Prioritizes native session identity (`ctx.sessionManager.getSessionId()`) over ambient environment variables (`CW_SESSION_ID`), guaranteeing that switching native sessions within one process does not cross-bind to an initial wrapper session.
+  - **Single-Pass Transformation & Reference Idempotency:** Employs reference-based `WeakSet` tracking on both transformed message arrays and constituent message objects. Eliminates heuristic time/length windows, guaranteeing that subsequent requests bypassing the context hook are safely transformed while turns already transformed by the context hook are never double-mutated.
+  - **Dynamic Provider Resolution:** Automatically resolves provider (`anthropic`, `gemini`, `deepseek`, `ollama`, `openai`) from `ctx.model.provider` or payload shape.
+  - **Fail-Open Guarantee:** If the CW daemon is offline, unauthenticated, or returns an error, the extension fails open instantly, returning pristine messages so agent workflows are never interrupted.
+* **Verified Evidence (3-Turn Native Resume & Fail-Open Test):**
   - `test_harness_binary_omp_native_runtime_overlay_reapplication`:
-    - Turn 1: `omp -p "Turn 1 pristine prompt"` executed against isolated proxy endpoint with native extension loaded.
-    - Upstream mock captured Turn 1 request; OMP exited with status code 0.
-    - Active `PinContext` mutation committed to CwStore (`CRITICAL_OMP_PINNED_POLICY`).
-    - Turn 2: `omp -p "Turn 2 follow-up prompt"` executed under the same session.
-    - Native `context` hook intercepted prompt, queried `/transform`, and injected pinned policy into outbound message array.
-    - Upstream mock captured Turn 2 wire payload containing `CRITICAL_OMP_PINNED_POLICY` and policy content.
-    - OMP completed Turn 2 with exit code 0.
-    - Invariant: Verified all on-disk session transcripts in `$PI_CODING_AGENT_DIR/sessions/` do NOT contain the injected policy, maintaining 100% bit-for-bit transcript immutability.
+    - Turn 1: `omp -p "Turn 1 pristine prompt"` executed with tools enabled against isolated proxy endpoint without `--no-session`. Native OMP writes session transcript to `$PI_CODING_AGENT_DIR/sessions/<slug>/<timestamp>_<uuid>.jsonl`.
+    - Turn 1 completed with exit code 0.
+    - Active `PinContext` mutation committed to CwStore (`CRITICAL_OMP_PINNED_POLICY`). (Safety contract enforces that user and system prompts are never pruned or stubbed).
+    - Turn 2: Native OMP resume executed via `omp -r <uuid> -p "Turn 2 resume prompt"` with tools enabled.
+    - Native `context` hook intercepted in-memory messages, queried `/transform`, and injected the pinned policy into outbound wire messages.
+    - Upstream mock captured Turn 2 wire payload containing `CRITICAL_OMP_PINNED_POLICY`.
+    - On-Disk Transcript Evidence: The `.jsonl` transcript file legitimately grew by appending Turn 2; asserted on-disk transcript preserves original Turn 1 prompt, records Turn 2, and does NOT contain the injected pinned policy (in-memory overlay only).
+    - Turn 3: Fail-Open verification under offline daemon (`CW_DAEMON_URL="http://127.0.0.1:19999"`). OMP completed cleanly with exit code 0 and pristine prompt forwarded.
     - Upstream captured 0 internal contextWatcher metadata headers (`x-cw-*` stripped).
+    - Node.js contract test verified session precedence (native session taking priority over `CW_SESSION_ID`), session switching between native sessions, and reference-based single-pass idempotency.
 
 ---
 

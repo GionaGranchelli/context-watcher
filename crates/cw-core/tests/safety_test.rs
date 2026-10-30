@@ -421,3 +421,75 @@ fn native_tool_text_arrays_can_be_targeted_without_dropping_metadata() {
         "keep the requirement"
     );
 }
+
+#[test]
+fn user_and_system_prompts_are_never_pruned_or_stubbed_by_pointer() {
+    let mut payload = json!({
+        "system": "System instructions here",
+        "messages": [
+            {"role": "user", "content": "Pristine user prompt 1"},
+            {"role": "assistant", "content": "Assistant turn 1"},
+            {"role": "user", "content": "Pristine user prompt 2"}
+        ]
+    });
+    let original = payload.clone();
+
+    // 1. Attempt to prune user prompt 1 by pointer without fingerprint/call_id
+    let prune_user = rule(MutationOp::PruneOrStub {
+        target_fingerprint: None,
+        target_call_id: None,
+        target_json_pointer: Some("/messages/0/content".into()),
+        stub_text: "[cw:pruned_user_prompt]".into(),
+    });
+    let rep1 = apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[prune_user], 1);
+    assert!(
+        rep1.applied_rule_ids.is_empty(),
+        "Pruning user prompt must be rejected"
+    );
+    assert_eq!(
+        payload, original,
+        "Payload must remain completely unmodified when user prompt is targeted"
+    );
+
+    // 2. Attempt to prune system prompt by pointer
+    let prune_system = rule(MutationOp::PruneOrStub {
+        target_fingerprint: None,
+        target_call_id: None,
+        target_json_pointer: Some("/system".into()),
+        stub_text: "[cw:pruned_system]".into(),
+    });
+    let rep2 = apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[prune_system], 1);
+    assert!(
+        rep2.applied_rule_ids.is_empty(),
+        "Pruning system prompt must be rejected"
+    );
+    assert_eq!(payload, original);
+
+    // 3. Pointer targeting a completed ToolResult succeeds
+    let mut tool_payload = json!({
+        "messages": [
+            {"role": "user", "content": "Run tool"},
+            {"role": "assistant", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "bash", "arguments": "{\"command\":\"test\"}"}}]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "Very long tool output 12345"},
+            {"role": "assistant", "content": "Done tool"},
+            {"role": "user", "content": "Follow up"}
+        ]
+    });
+    let prune_tool = rule(MutationOp::PruneOrStub {
+        target_fingerprint: None,
+        target_call_id: None,
+        target_json_pointer: Some("/messages/2/content".into()),
+        stub_text: "[cw:pruned_tool_result]".into(),
+    });
+    let rep3 =
+        apply_mutations_to_payload(&mut tool_payload, ProviderKind::OpenAI, &[prune_tool], 1);
+    assert_eq!(rep3.applied_rule_ids, vec!["safety"]);
+    assert_eq!(
+        tool_payload["messages"][2]["content"],
+        "[cw:pruned_tool_result]"
+    );
+    assert_eq!(
+        tool_payload["messages"][0]["content"], "Run tool",
+        "User prompt preserved"
+    );
+}

@@ -2382,32 +2382,4 @@ pub mod qualification {
             }
         })
     }
-
-    /// Generates isolated models.json content with authenticated session headers for OMP/Pi.
-    pub fn omp_proxy_models_config_with_headers(
-        proxy_port: u16,
-        model_id: &str,
-        session_id: &str,
-        control_token: &str,
-    ) -> serde_json::Value {
-        serde_json::json!({
-            "providers": {
-                "cw-proxy": {
-                    "baseUrl": format!("http://127.0.0.1:{proxy_port}/openai/v1"),
-                    "api": "openai-completions",
-                    "apiKey": "cw-authenticated",
-                    "headers": {
-                        "x-cw-session-id": session_id,
-                        "x-cw-control-token": control_token
-                    },
-                    "models": [{
-                        "id": model_id,
-                        "name": format!("contextWatcher ({model_id})"),
-                        "contextWindow": 131072,
-                        "maxTokens": 4096
-                    }]
-                }
-            }
-        })
-    }
 }

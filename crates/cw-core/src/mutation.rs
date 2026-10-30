@@ -70,54 +70,67 @@ pub fn apply_mutations_to_payload(
                 target_json_pointer,
                 stub_text,
             } => {
-                if target_fingerprint.is_none() && target_call_id.is_none() {
-                    if let Some(target_ptr) = target_json_pointer.as_ref()
-                        && let Some(target_val) = payload.pointer_mut(target_ptr)
-                    {
-                        *target_val = Value::String(stub_text.clone());
-                        applied = true;
+                // Strict Safety Invariant: PruneOrStub must ONLY target prunable kinds
+                // (ToolResult or AssistantThinking). UserPrompt, SystemPrompt, AssistantText,
+                // and ToolCall must NEVER be modified or pruned under any circumstances,
+                // even if targeted directly by JSON pointer.
+                for (node_idx, node) in before_nodes.iter().enumerate() {
+                    let is_prunable_kind = matches!(
+                        node.kind,
+                        NodeKind::ToolResult { .. } | NodeKind::AssistantThinking { .. }
+                    );
+                    if !is_prunable_kind {
+                        continue;
                     }
-                } else {
-                    // Match node by fingerprint, call_id, or direct pointer
-                    for (node_idx, node) in before_nodes.iter().enumerate() {
-                        if is_protected_tool_result(
-                            node,
-                            node_idx,
-                            before_nodes.len(),
-                            last_assistant_idx,
-                        ) {
-                            continue;
+                    if is_protected_tool_result(
+                        node,
+                        node_idx,
+                        before_nodes.len(),
+                        last_assistant_idx,
+                    ) {
+                        continue;
+                    }
+
+                    let fp_match = target_fingerprint
+                        .as_ref()
+                        .map(|fp| fp == &node.fingerprint.0);
+                    let call_match = match (&node.kind, target_call_id.as_ref()) {
+                        (NodeKind::ToolResult { call_id, .. }, Some(tc)) if !call_id.is_empty() => {
+                            Some(call_id == tc)
                         }
-                        let fp_match = target_fingerprint
-                            .as_ref()
-                            .map(|fp| fp == &node.fingerprint.0)
-                            .unwrap_or(false);
-                        let call_match = match (&node.kind, target_call_id.as_ref()) {
-                            (NodeKind::ToolResult { call_id, .. }, Some(tc))
-                                if !call_id.is_empty() =>
-                            {
-                                call_id == tc
-                            }
-                            _ => false,
-                        };
-                        let identity_matches = if target_fingerprint.is_some() {
-                            fp_match && (target_call_id.is_none() || call_match)
-                        } else {
-                            call_match
-                        };
-                        let location_matches = target_json_pointer
-                            .as_ref()
-                            .is_none_or(|p| p == &node.raw_json_pointer);
-                        if identity_matches
-                            && location_matches
-                            && replace_node_text_at_pointer(
-                                payload,
-                                &node.raw_json_pointer,
-                                stub_text,
-                            )
-                        {
-                            applied = true;
-                        }
+                        _ => None,
+                    };
+                    let ptr_match = target_json_pointer.as_ref().map(|p| {
+                        p == &node.raw_json_pointer
+                            || p.strip_prefix(&node.raw_json_pointer).is_some_and(|rem| {
+                                rem == "/content" || rem == "/text" || rem == "/0/text"
+                            })
+                            || node.raw_json_pointer.strip_prefix(p).is_some_and(|rem| {
+                                rem == "/content" || rem == "/text" || rem == "/0/text"
+                            })
+                    });
+
+                    let mut matches_all = true;
+                    let mut has_selector = false;
+
+                    if let Some(m) = fp_match {
+                        has_selector = true;
+                        matches_all &= m;
+                    }
+                    if let Some(m) = call_match {
+                        has_selector = true;
+                        matches_all &= m;
+                    }
+                    if let Some(m) = ptr_match {
+                        has_selector = true;
+                        matches_all &= m;
+                    }
+
+                    if has_selector
+                        && matches_all
+                        && replace_node_text_at_pointer(payload, &node.raw_json_pointer, stub_text)
+                    {
+                        applied = true;
                     }
                 }
             }

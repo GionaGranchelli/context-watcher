@@ -6,54 +6,144 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-function getControlToken() {
-  const tokenFile =
-    process.env.CW_CONTROL_TOKEN_FILE ||
-    path.join(os.homedir(), ".local/share/context-watcher/control-token");
-  try {
-    const stat = fs.lstatSync(tokenFile);
-    if (!stat.isFile()) return null;
-    if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) {
-      return null;
+let cachedControlToken = null;
+const transformedMessageSets = new WeakSet();
+const transformedMessageObjects = new WeakSet();
+
+function markTransformed(messages) {
+  if (!Array.isArray(messages)) return;
+  transformedMessageSets.add(messages);
+  for (const msg of messages) {
+    if (msg && typeof msg === "object") {
+      transformedMessageObjects.add(msg);
     }
-    const token = fs.readFileSync(tokenFile, "utf8").trim();
-    if (token.length >= 32 && token.length <= 128 && /^[a-zA-Z0-9_-]+$/.test(token)) {
-      return token;
-    }
-  } catch {
-    return null;
   }
-  return null;
 }
 
-function resolveSessionId(ctx, pi) {
-  if (process.env.CW_SESSION_ID) {
-    return process.env.CW_SESSION_ID;
+/**
+ * Retrieves the local ContextWatcher control token securely.
+ * Purges CW_CONTROL_TOKEN and CW_CONTROL_TOKEN_FILE from process.env immediately
+ * so model-invoked child processes (e.g. bash tools) cannot inherit them.
+ */
+function getControlToken() {
+  if (cachedControlToken) return cachedControlToken;
+
+  const envFile = process.env.CW_CONTROL_TOKEN_FILE;
+  const tokenFile =
+    envFile ||
+    path.join(os.homedir(), ".local/share/context-watcher/control-token");
+
+  try {
+    const stat = fs.lstatSync(tokenFile);
+    if (stat.isFile() && (process.platform === "win32" || (stat.mode & 0o077) === 0)) {
+      const token = fs.readFileSync(tokenFile, "utf8").trim();
+      if (token.length >= 32 && token.length <= 128 && /^[a-zA-Z0-9_-]+$/.test(token)) {
+        cachedControlToken = token;
+      }
+    }
+  } catch {
+    // File missing or inaccessible
   }
+
+  // Security: Purge sensitive credentials from process.env immediately after reading
+  if (process.env.CW_CONTROL_TOKEN) {
+    if (!cachedControlToken && /^[a-zA-Z0-9_-]{32,128}$/.test(process.env.CW_CONTROL_TOKEN)) {
+      cachedControlToken = process.env.CW_CONTROL_TOKEN;
+    }
+    delete process.env.CW_CONTROL_TOKEN;
+  }
+  if (process.env.CW_CONTROL_TOKEN_FILE) {
+    delete process.env.CW_CONTROL_TOKEN_FILE;
+  }
+
+  return cachedControlToken;
+}
+
+/**
+ * Resolves the canonical ContextWatcher session ID.
+ * Uses uniform 'omp_<sid>' prefixing across all hooks and slash commands without truncation.
+ */
+function getCanonicalSessionId(ctx, pi) {
   const rawId =
     ctx?.sessionManager?.getSessionId?.() ||
     ctx?.session?.id ||
     ctx?.sessionId ||
-    pi?.sessionId;
+    pi?.sessionId ||
+    process.env.CW_SESSION_ID;
+
   if (!rawId) return null;
   const strId = String(rawId).trim();
   return strId.startsWith("omp_") ? strId : `omp_${strId}`;
 }
 
+/**
+ * Resolves and validates the ContextWatcher daemon URL.
+ * Strictly enforces local loopback addresses (127.0.0.1, localhost, [::1]) to prevent token leakage.
+ */
 function getDaemonUrl() {
-  if (process.env.CW_DAEMON_URL) {
-    return process.env.CW_DAEMON_URL.replace(/\/+$/, "");
+  const rawUrl =
+    process.env.CW_DAEMON_URL ||
+    `http://127.0.0.1:${process.env.CW_PORT || process.env.CW_DAEMON_PORT || 4400}`;
+
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    const isLoopback =
+      host === "127.0.0.1" ||
+      host === "localhost" ||
+      host === "::1" ||
+      host === "[::1]";
+
+    if (!isLoopback || parsed.protocol !== "http:") {
+      return "http://127.0.0.1:4400";
+    }
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return "http://127.0.0.1:4400";
   }
-  const port = process.env.CW_PORT || process.env.CW_DAEMON_PORT || 4400;
-  return `http://127.0.0.1:${port}`;
 }
 
-async function transformMessages(messages, sid) {
+/**
+ * Identifies the model provider for protocol validation and transformation.
+ */
+function resolveProvider(ctx, event) {
+  const modelProvider = (
+    ctx?.model?.provider ||
+    ctx?.agent?.state?.model?.provider ||
+    ""
+  ).toLowerCase();
+
+  if (modelProvider.includes("anthropic") || modelProvider.includes("claude")) {
+    return "anthropic";
+  }
+  if (modelProvider.includes("gemini") || modelProvider.includes("google")) {
+    return "gemini";
+  }
+  if (modelProvider.includes("deepseek")) {
+    return "deepseek";
+  }
+  if (modelProvider.includes("ollama")) {
+    return "ollama";
+  }
+  const payload = event?.payload;
+  if (payload) {
+    if (Array.isArray(payload.contents)) return "gemini";
+    if (payload.system && Array.isArray(payload.messages)) return "anthropic";
+  }
+  return "openai";
+}
+
+/**
+ * Submits in-memory messages to the local contextWatcher daemon for active mutation overlays.
+ * Ensures fail-open safety on network errors, timeouts, or unparseable responses.
+ */
+async function transformMessages(messages, sid, provider) {
   if (!sid || !Array.isArray(messages) || messages.length === 0) {
     return messages;
   }
   const token = getControlToken();
   const daemonUrl = getDaemonUrl();
+
   try {
     const res = await fetch(
       `${daemonUrl}/api/v1/sessions/${encodeURIComponent(sid)}/transform`,
@@ -63,10 +153,11 @@ async function transformMessages(messages, sid) {
           "Content-Type": "application/json",
           ...(token ? { "x-cw-control-token": token } : {}),
         },
-        body: JSON.stringify({ messages, provider: "openai" }),
-        signal: AbortSignal.timeout(2000),
+        body: JSON.stringify({ messages, provider: provider || "openai" }),
+        signal: AbortSignal.timeout(1500),
       }
     );
+
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data?.messages)) {
@@ -74,7 +165,7 @@ async function transformMessages(messages, sid) {
       }
     }
   } catch {
-    // Fail-open: network failure, daemon offline, timeout
+    // Fail-open: network offline, timeout, or daemon unready
   }
   return messages;
 }
@@ -84,7 +175,6 @@ function runCwCli(args, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     execFile("cw", args, { timeout: 15000, env }, (error, stdout, stderr) => {
       if (error) {
-        // Fallback to absolute ~/.local/bin/cw if cw not in ambient PATH
         const fallbackPath = `${process.env.HOME || "/tmp"}/.local/bin/cw`;
         execFile(fallbackPath, args, { timeout: 15000, env }, (err2, out2, errStr2) => {
           if (err2) return reject(new Error(errStr2 || err2.message));
@@ -101,10 +191,9 @@ const cwHandler = async (rawArgs, ctx, pi) => {
   const parts = String(rawArgs || "").trim().split(/\s+/).filter(Boolean);
   let action = parts[0] || "status";
   let param = parts[1] || "mid";
-  const sessId = ctx?.session?.id || ctx?.sessionId || pi?.sessionId;
-  const extraEnv = sessId ? { CW_SESSION_ID: `omp_${String(sessId).slice(0, 12)}` } : {};
+  const sid = getCanonicalSessionId(ctx, pi);
+  const extraEnv = sid ? { CW_SESSION_ID: sid } : {};
 
-  // Support direct `/context-watcher mid` or `/cw min` without requiring `optimize` keyword
   if (["min", "mid", "max", "clean_code_state", "surgical_log_diet", "max_token_diet"].includes(action)) {
     param = action;
     action = "optimize";
@@ -150,37 +239,65 @@ const cwHandler = async (rawArgs, ctx, pi) => {
 };
 
 export default function contextWatcherExtension(pi) {
-  // 1. Native Runtime Context Hook (CW-111)
+  // Pre-load and cleanse control token from process.env immediately on extension initialization
+  getControlToken();
+
+  // 1. Native Runtime Context Hook (CW-111 / CW-111B)
   // Intercepts in-memory messages before prompt formatting, applies active CW overlays,
   // leaving the on-disk session transcript 100% immutable and intact.
   pi.on?.("context", async (event, ctx) => {
     try {
       if (!Array.isArray(event?.messages)) return;
-      const sid = resolveSessionId(ctx, pi);
-      const transformed = await transformMessages(event.messages, sid);
+      const sid = getCanonicalSessionId(ctx, pi);
+      const provider = resolveProvider(ctx, event);
+      const transformed = await transformMessages(event.messages, sid, provider);
+
+      if (transformed && transformed !== event.messages) {
+        markTransformed(transformed);
+      }
       return { messages: transformed };
     } catch {
       return { messages: event?.messages };
     }
   });
 
-  // 2. Native Runtime Before Provider Request Hook (CW-111)
-  // Ensures provider payload level prompt optimization if context was bypassed.
+  // 2. Native Runtime Before Provider Request Hook (CW-111 / CW-111B)
+  // Fallback handler for requests bypassing the context hook (e.g. direct payload dispatches).
+  // Strictly skips transformation if context hook already processed the turn to prevent double-mutation.
   pi.on?.("before_provider_request", async (event, ctx) => {
     try {
-      if (!Array.isArray(event?.payload?.messages)) return event?.payload;
-      const sid = resolveSessionId(ctx, pi);
-      const transformed = await transformMessages(event.payload.messages, sid);
-      return {
-        ...event.payload,
-        messages: transformed,
-      };
+      const messages = event?.payload?.messages;
+      if (!Array.isArray(messages)) return event?.payload;
+
+      const sid = getCanonicalSessionId(ctx, pi);
+
+      // Single-pass idempotency check: If context hook already transformed this turn, pass through cleanly.
+      const isAlreadyTransformed =
+        transformedMessageSets.has(messages) ||
+        (messages.length > 0 &&
+          messages.some((m) => m && typeof m === "object" && transformedMessageObjects.has(m)));
+
+      if (isAlreadyTransformed) {
+        return event.payload;
+      }
+
+      const provider = resolveProvider(ctx, event);
+      const transformed = await transformMessages(messages, sid, provider);
+
+      if (transformed && transformed !== messages) {
+        markTransformed(transformed);
+        return {
+          ...event.payload,
+          messages: transformed,
+        };
+      }
     } catch {
       return event?.payload;
     }
+    return event?.payload;
   });
 
-  // 3. Register slash commands
+  // 3. Register canonical slash commands
   pi.registerCommand?.("cw", {
     description: "contextWatcher: /cw optimize [min|mid|max], /cw gain, /cw status",
     handler: (args, ctx) => cwHandler(args, ctx, pi),

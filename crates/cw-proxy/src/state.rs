@@ -84,6 +84,7 @@ pub struct DaemonState {
     pub llamacpp_upstream: String,
     pub llamacpp_api_key: Option<String>,
     pub vllm_upstream: String,
+    pub capture_wire_egress: bool,
     pub(crate) intercepts: Arc<Mutex<HashMap<String, ActiveIntercept>>>,
 }
 
@@ -116,6 +117,8 @@ impl DaemonState {
                 .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string()),
             vllm_upstream: std::env::var("CW_VLLM_UPSTREAM")
                 .unwrap_or_else(|_| "http://127.0.0.1:8000".to_string()),
+            capture_wire_egress: std::env::var("CW_CAPTURE_WIRE_EGRESS").ok().as_deref()
+                == Some("1"),
             intercepts: Arc::new(Mutex::new(HashMap::new())),
         }
     }

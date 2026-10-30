@@ -205,6 +205,7 @@ impl CwStore {
         )?;
 
         conn.execute_batch("CREATE TABLE IF NOT EXISTS wire_requests(turn_id TEXT PRIMARY KEY,body BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS wire_egress(turn_id TEXT PRIMARY KEY,body BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS request_sequences(session_id TEXT PRIMARY KEY,seq INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS exports(session_id TEXT NOT NULL,path TEXT PRIMARY KEY,content_hash TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS mutation_effectiveness_v2 (
@@ -406,6 +407,7 @@ impl CwStore {
         };
         for id in &ids {
             tx.execute("DELETE FROM wire_requests WHERE turn_id=?1", params![id])?;
+            tx.execute("DELETE FROM wire_egress WHERE turn_id=?1", params![id])?;
             tx.execute(
                 "DELETE FROM mutation_effectiveness_v2 WHERE turn_id=?1",
                 params![id],
@@ -480,6 +482,33 @@ impl CwStore {
         let raw: Option<Vec<u8>> = conn
             .query_row(
                 "SELECT body FROM wire_requests WHERE turn_id = ?1",
+                params![turn_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(raw)
+    }
+
+    pub fn save_wire_egress(&self, turn_id: &str, body: &[u8]) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS wire_egress (turn_id TEXT PRIMARY KEY, body BLOB NOT NULL)",
+        )?;
+        conn.execute(
+            "INSERT OR REPLACE INTO wire_egress(turn_id,body) VALUES (?1,?2)",
+            params![turn_id, body],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_wire_egress(&self, turn_id: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS wire_egress (turn_id TEXT PRIMARY KEY, body BLOB NOT NULL)",
+        )?;
+        let raw: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT body FROM wire_egress WHERE turn_id = ?1",
                 params![turn_id],
                 |row| row.get(0),
             )
@@ -639,6 +668,23 @@ impl CwStore {
             let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
             conn.query_row(
                 "SELECT raw_request_hash FROM turns WHERE id = ?1",
+                params![turn_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten()
+        };
+        match hash_opt {
+            Some(h) => self.get_blob(&h),
+            None => Ok(None),
+        }
+    }
+
+    pub fn get_turn_mutated_payload(&self, turn_id: &str) -> Result<Option<Value>, StoreError> {
+        let hash_opt: Option<String> = {
+            let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+            conn.query_row(
+                "SELECT mutated_request_hash FROM turns WHERE id = ?1",
                 params![turn_id],
                 |row| row.get(0),
             )

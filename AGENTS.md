@@ -4,12 +4,12 @@ Welcome to `contextWatcher` (`cw`). Every human or AI agent working in this repo
 
 ---
 
-## 0. Active milestone: CW-112 Codex CLI qualification
+## 0. Active milestone: CW-112 Codex CLI qualification (Live Gate Blocked)
 
 **Before coding**, read [BOARD.md](BOARD.md), [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), and [docs/HARNESS_MATRIX.md](docs/HARNESS_MATRIX.md). Checked historical board tasks are not current product qualification. Ground claims in code, fixtures, CI and reproducible evidence.
 
-- **Completed:** CW-116 Maintainability Gate (CW-116A characterization/contracts in PR #13, CW-116B CLI/harness modularization in PR #14, and CW-116C proxy/transformation boundaries on branch `feat/cw-116c-proxy-boundaries`).
-- **Next: CW-112**, Codex CLI multi-turn qualification and native resume against a live Responses provider, on branch **feat/cw-112-codex-multiturn**. Move it to In Progress only when implementation begins.
+- **Completed:** CW-116 Maintainability Gate (CW-116A characterization/contracts in PR #13, CW-116B CLI/harness modularization in PR #14, and CW-116C proxy/transformation boundaries in PR #16); CW-112 Phase 1 mock qualification on branch `feat/cw-112-codex-multiturn` in PR #17 (documented in `docs/CW-112-CODEX-QUALIFICATION.md`).
+- **Active / Blocked: CW-112**, Phase 2 real-provider qualification is blocked pending explicit live spend budget authorization. Do not mark CW-112 complete based only on mocks.
 - **Then CW-114**, long-session reliability campaign across harnesses, **then CW-115**, empirical performance and savings qualification.
 - Preserve public CLI/API, session identity, authenticated vs observation-only behavior, raw provider wire bytes/streaming, signed and unknown content, transcript originals, mutation eligibility and fail-open behavior. Do not claim observed cache savings where only estimates exist.
 - Use temporary isolated HOME/config and data directories, mock ports and test stores. Do not edit actual user Hermes config, live session transcripts, installed agent settings or running services.

@@ -94,56 +94,7 @@ impl MockProvider {
                     let captured = captured_clone.clone();
                     move |headers: HeaderMap, body: axum::body::Bytes| {
                         let captured = captured.clone();
-                        async move {
-                            let json_val = serde_json::from_slice::<Value>(&body).ok();
-                            let is_stream = json_val
-                                .as_ref()
-                                .and_then(|v| v.get("stream"))
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false);
-
-                            captured.lock().unwrap().push(CapturedRequest {
-                                path: "/v1/responses".to_string(),
-                                headers: headers.clone(),
-                                body: body.to_vec(),
-                                json_body: json_val,
-                            });
-
-                            if is_stream {
-                                let events = [
-                                    json!({"type": "response.created", "response": {"id": "resp_test", "status": "in_progress"}}),
-                                    json!({"type": "response.output_item.added", "output_index": 0, "item": {"id": "msg_out_1", "type": "message", "role": "assistant", "content": []}}),
-                                    json!({"type": "response.content_part.added", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": ""}}),
-                                    json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "Mock responses output"}),
-                                    json!({"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": "Mock responses output"}),
-                                    json!({"type": "response.content_part.done", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "Mock responses output"}}),
-                                    json!({"type": "response.output_item.done", "output_index": 0, "item": {"id": "msg_out_1", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Mock responses output"}]}}),
-                                    json!({"type": "response.completed", "response": {"id": "resp_test", "status": "completed", "output": [{"id": "msg_out_1", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Mock responses output"}]}], "usage": {"input_tokens": 12, "output_tokens": 4, "total_tokens": 16}}}),
-                                ];
-                                let mut sse_body = String::new();
-                                for ev in events {
-                                    sse_body.push_str(&format!("data: {}\n\n", serde_json::to_string(&ev).unwrap()));
-                                }
-                                sse_body.push_str("data: [DONE]\n\n");
-                                Response::builder()
-                                    .status(StatusCode::OK)
-                                    .header("content-type", "text/event-stream")
-                                    .header("cache-control", "no-cache")
-                                    .body(Body::from(sse_body))
-                                    .unwrap()
-                            } else {
-                                Json(json!({
-                                    "id": "resp_mock_json",
-                                    "output": [{
-                                        "id": "msg_out_1",
-                                        "type": "message",
-                                        "role": "assistant",
-                                        "content": [{"type": "output_text", "text": "Mock responses output"}]
-                                    }],
-                                    "usage": {"input_tokens": 12, "output_tokens": 4, "total_tokens": 16}
-                                })).into_response()
-                            }
-                        }
+                        async move { handle_mock_responses(headers, body, captured).await }
                     }
                 }),
             )
@@ -154,7 +105,13 @@ impl MockProvider {
                     move |headers: HeaderMap, body: axum::body::Bytes| {
                         let captured = captured.clone();
                         async move {
-                            handle_mock_chat_completion(headers, body, "/v1/chat/completions", captured).await
+                            handle_mock_chat_completion(
+                                headers,
+                                body,
+                                "/v1/chat/completions",
+                                captured,
+                            )
+                            .await
                         }
                     }
                 }),
@@ -166,7 +123,13 @@ impl MockProvider {
                     move |headers: HeaderMap, body: axum::body::Bytes| {
                         let captured = captured.clone();
                         async move {
-                            handle_mock_chat_completion(headers, body, "/chat/completions", captured).await
+                            handle_mock_chat_completion(
+                                headers,
+                                body,
+                                "/chat/completions",
+                                captured,
+                            )
+                            .await
                         }
                     }
                 }),
@@ -178,7 +141,13 @@ impl MockProvider {
                     move |headers: HeaderMap, body: axum::body::Bytes| {
                         let captured = captured.clone();
                         async move {
-                            handle_mock_chat_completion(headers, body, "/deepseek/chat/completions", captured).await
+                            handle_mock_chat_completion(
+                                headers,
+                                body,
+                                "/deepseek/chat/completions",
+                                captured,
+                            )
+                            .await
                         }
                     }
                 }),
@@ -203,7 +172,8 @@ impl MockProvider {
                                 "role": "assistant",
                                 "content": [{"type": "text", "text": "Mock anthropic output"}],
                                 "usage": {"input_tokens": 10, "output_tokens": 4}
-                            })).into_response()
+                            }))
+                            .into_response()
                         }
                     }
                 }),
@@ -288,6 +258,189 @@ async fn handle_mock_chat_completion(
 impl Drop for MockProvider {
     fn drop(&mut self) {
         self.server_task.abort();
+    }
+}
+
+async fn handle_mock_responses(
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
+) -> Response {
+    let json_val = serde_json::from_slice::<Value>(&body).ok();
+    let is_stream = json_val
+        .as_ref()
+        .and_then(|v| v.get("stream"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    captured.lock().unwrap().push(CapturedRequest {
+        path: "/v1/responses".to_string(),
+        headers: headers.clone(),
+        body: body.to_vec(),
+        json_body: json_val.clone(),
+    });
+
+    let body_str = String::from_utf8_lossy(&body);
+
+    if body_str.contains("CW_FORCE_UPSTREAM_502") {
+        return (StatusCode::BAD_GATEWAY, "Upstream mock gateway failure").into_response();
+    }
+
+    if body_str.contains("CW112_TASK_TURN_1")
+        || body_str.contains("CW112_TASK_TURN_2")
+        || body_str.contains("CW112_TASK_TURN_3")
+    {
+        let (turn, call_id, cmd, text) = if body_str.contains("CW112_TASK_TURN_3") {
+            (
+                3,
+                "call_turn_3",
+                "python3 -c \"with open('test_calculator.py', 'w') as f: f.write('import unittest\\nfrom calculator import add, multiply\\n\\nclass TestCalc(unittest.TestCase):\\n    def test_add(self):\\n        self.assertEqual(add(2, 3), 5)\\n    def test_mul(self):\\n        self.assertEqual(multiply(2, 3), 6)\\n\\nif __name__ == \\\"__main__\\\":\\n    unittest.main()\\n')\" && python3 test_calculator.py",
+                "Created test_calculator.py and verified tests pass.",
+            )
+        } else if body_str.contains("CW112_TASK_TURN_2") {
+            (
+                2,
+                "call_turn_2",
+                "python3 -c \"with open('calculator.py', 'a') as f: f.write('def multiply(a, b):\\n    return a * b\\n')\"",
+                "Added multiply function to calculator.py.",
+            )
+        } else {
+            (
+                1,
+                "call_turn_1",
+                "python3 -c \"import os; open('env_check.txt', 'w').write(os.environ.get('CW_CONTROL_TOKEN', 'ABSENT')); open('calculator.py', 'w').write('def add(a, b):\\n    return a + b\\n')\"",
+                "Created calculator.py with add function.",
+            )
+        };
+
+        let has_output = json_val.as_ref().is_some_and(|payload| {
+            payload
+                .get("input")
+                .and_then(Value::as_array)
+                .is_some_and(|items| {
+                    items.iter().any(|item| {
+                        item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                            && item.get("call_id").and_then(Value::as_str) == Some(call_id)
+                    })
+                })
+        });
+
+        if !has_output {
+            let args = serde_json::to_string(&json!({"cmd": cmd})).unwrap();
+            if is_stream {
+                let events = [
+                    json!({"type": "response.created", "response": {"id": format!("resp_{turn}_call"), "status": "in_progress"}}),
+                    json!({"type": "response.output_item.added", "output_index": 0, "item": {"id": format!("fc_{turn}"), "type": "function_call", "call_id": call_id, "name": "exec_command", "arguments": ""}}),
+                    json!({"type": "response.function_call_arguments.delta", "output_index": 0, "call_id": call_id, "delta": args}),
+                    json!({"type": "response.function_call_arguments.done", "output_index": 0, "call_id": call_id, "arguments": args}),
+                    json!({"type": "response.output_item.done", "output_index": 0, "item": {"id": format!("fc_{turn}"), "type": "function_call", "call_id": call_id, "name": "exec_command", "arguments": args}}),
+                    json!({"type": "response.completed", "response": {"id": format!("resp_{turn}_call"), "status": "completed", "output": [{"id": format!("fc_{turn}"), "type": "function_call", "call_id": call_id, "name": "exec_command", "arguments": args}], "usage": {"input_tokens": 10, "output_tokens": 10, "total_tokens": 20}}}),
+                ];
+                let mut sse_body = String::new();
+                for ev in events {
+                    sse_body.push_str(&format!(
+                        "data: {}\n\n",
+                        serde_json::to_string(&ev).unwrap()
+                    ));
+                }
+                sse_body.push_str("data: [DONE]\n\n");
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "text/event-stream")
+                    .header("cache-control", "no-cache")
+                    .body(Body::from(sse_body))
+                    .unwrap();
+            } else {
+                return Json(json!({
+                    "id": format!("resp_{turn}_call"),
+                    "output": [{
+                        "id": format!("fc_{turn}"),
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": "exec_command",
+                        "arguments": args
+                    }],
+                    "usage": {"input_tokens": 10, "output_tokens": 10, "total_tokens": 20}
+                }))
+                .into_response();
+            }
+        } else if is_stream {
+            let events = [
+                json!({"type": "response.created", "response": {"id": format!("resp_{turn}_done"), "status": "in_progress"}}),
+                json!({"type": "response.output_item.added", "output_index": 0, "item": {"id": format!("msg_{turn}"), "type": "message", "role": "assistant", "content": []}}),
+                json!({"type": "response.content_part.added", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": ""}}),
+                json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": text}),
+                json!({"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": text}),
+                json!({"type": "response.content_part.done", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": text}}),
+                json!({"type": "response.output_item.done", "output_index": 0, "item": {"id": format!("msg_{turn}"), "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}}),
+                json!({"type": "response.completed", "response": {"id": format!("resp_{turn}_done"), "status": "completed", "output": [{"id": format!("msg_{turn}"), "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}], "usage": {"input_tokens": 10, "output_tokens": 10, "total_tokens": 20}}}),
+            ];
+            let mut sse_body = String::new();
+            for ev in events {
+                sse_body.push_str(&format!(
+                    "data: {}\n\n",
+                    serde_json::to_string(&ev).unwrap()
+                ));
+            }
+            sse_body.push_str("data: [DONE]\n\n");
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .header("cache-control", "no-cache")
+                .body(Body::from(sse_body))
+                .unwrap();
+        } else {
+            return Json(json!({
+                "id": format!("resp_{turn}_done"),
+                "output": [{
+                    "id": format!("msg_{turn}"),
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text}]
+                }],
+                "usage": {"input_tokens": 10, "output_tokens": 10, "total_tokens": 20}
+            }))
+            .into_response();
+        }
+    }
+
+    if is_stream {
+        let events = [
+            json!({"type": "response.created", "response": {"id": "resp_test", "status": "in_progress"}}),
+            json!({"type": "response.output_item.added", "output_index": 0, "item": {"id": "msg_out_1", "type": "message", "role": "assistant", "content": []}}),
+            json!({"type": "response.content_part.added", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": ""}}),
+            json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "Mock responses output"}),
+            json!({"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": "Mock responses output"}),
+            json!({"type": "response.content_part.done", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": "Mock responses output"}}),
+            json!({"type": "response.output_item.done", "output_index": 0, "item": {"id": "msg_out_1", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Mock responses output"}]}}),
+            json!({"type": "response.completed", "response": {"id": "resp_test", "status": "completed", "output": [{"id": "msg_out_1", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Mock responses output"}]}], "usage": {"input_tokens": 12, "output_tokens": 4, "total_tokens": 16}}}),
+        ];
+        let mut sse_body = String::new();
+        for ev in events {
+            sse_body.push_str(&format!(
+                "data: {}\n\n",
+                serde_json::to_string(&ev).unwrap()
+            ));
+        }
+        sse_body.push_str("data: [DONE]\n\n");
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .header("cache-control", "no-cache")
+            .body(Body::from(sse_body))
+            .unwrap()
+    } else {
+        Json(json!({
+            "id": "resp_mock_json",
+            "output": [{
+                "id": "msg_out_1",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Mock responses output"}]
+            }],
+            "usage": {"input_tokens": 12, "output_tokens": 4, "total_tokens": 16}
+        }))
+        .into_response()
     }
 }
 
@@ -1355,6 +1508,718 @@ async fn test_harness_binary_codex_cli_multiturn_overlay_reapplication() {
     }
 }
 
+fn extract_thread_id_from_stdout(stdout: &str) -> Option<String> {
+    for line in stdout.lines() {
+        if let Ok(v) = serde_json::from_str::<Value>(line)
+            && v.get("type").and_then(Value::as_str) == Some("thread.started")
+            && let Some(tid) = v.get("thread_id").and_then(Value::as_str)
+        {
+            return Some(tid.to_string());
+        }
+    }
+    None
+}
+
+fn find_rollout_files(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(find_rollout_files(&path));
+            } else if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("rollout-") && n.ends_with(".jsonl"))
+            {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+#[tokio::test]
+#[ignore = "harness binary integration test; requires installed 'codex'; run with cargo test --test qualification harness_binary -- --ignored"]
+async fn test_harness_binary_codex_cli_native_resume_three_turn_qualification() {
+    let codex_bin = require_installed_binary("codex");
+
+    let f = QualificationFixture::setup().await;
+    let cw_session_id = format!("cw_codex_qual_{}", uuid::Uuid::new_v4());
+    let temp_home = std::env::temp_dir().join(format!("codex_home_{}", uuid::Uuid::new_v4()));
+    let temp_workspace = std::env::temp_dir().join(format!("codex_ws_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_home).unwrap();
+    std::fs::create_dir_all(&temp_workspace).unwrap();
+
+    let proxy_port = f.proxy_port;
+    let token = f.control_token.clone();
+
+    // Turn 1 Execution: Codex starts a new native session and creates calculator.py
+    let output1 = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let sid = cw_session_id.clone();
+        let token = token.clone();
+        let temp_home = temp_home.clone();
+        let temp_workspace = temp_workspace.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_workspace);
+            cmd.args([
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args([
+                "-m",
+                "mock-model",
+                "CW112_TASK_TURN_1: create calculator.py with add function",
+            ]);
+            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env("CODEX_HOME", &temp_home);
+            cmd.env("CW_SESSION_ID", &sid);
+            cmd.env("CW_CONTROL_TOKEN", &token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex binary on turn 1");
+
+    let stdout1 = String::from_utf8_lossy(&output1.stdout);
+    let stderr1 = String::from_utf8_lossy(&output1.stderr);
+    assert!(
+        output1.status.success(),
+        "Codex Turn 1 failed: {stderr1}\nstdout: {stdout1}"
+    );
+
+    let thread_id = extract_thread_id_from_stdout(&stdout1)
+        .expect("Codex must emit thread.started with thread_id on Turn 1");
+    assert!(!thread_id.is_empty());
+
+    let calc_file = temp_workspace.join("calculator.py");
+    assert!(
+        calc_file.exists(),
+        "calculator.py should exist after Turn 1"
+    );
+    let calc_content_1 = std::fs::read_to_string(&calc_file).expect("read calculator.py");
+    assert!(
+        calc_content_1.contains("def add(a, b):"),
+        "calculator.py must contain add function after Turn 1"
+    );
+
+    // Verify credential sandboxing: tool command executed by Codex must NOT inherit CW_CONTROL_TOKEN
+    let env_check = std::fs::read_to_string(temp_workspace.join("env_check.txt"))
+        .expect("read env_check.txt written by model tool execution");
+    assert_eq!(
+        env_check.trim(),
+        "ABSENT",
+        "Model-invoked tool command inside Codex must NOT inherit CW_CONTROL_TOKEN"
+    );
+
+    // Commit overlay mutation on the session after Turn 1
+    f.store
+        .save_mutation(&MutationRule {
+            id: "cw112_pin_rule".into(),
+            session_id: cw_session_id.clone(),
+            op: MutationOp::PinContext {
+                label: "Policy".into(),
+                content: "CW112_POLICY_ACTIVE".into(),
+                source_node_id: None,
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: Utc::now(),
+        })
+        .unwrap();
+
+    // Turn 2 Execution: Codex resumes the existing native session using `codex exec resume <thread_id>`
+    let output2 = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let sid = cw_session_id.clone();
+        let token = token.clone();
+        let temp_home = temp_home.clone();
+        let temp_workspace = temp_workspace.clone();
+        let thread_id = thread_id.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_workspace);
+            cmd.args([
+                "exec",
+                "resume",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args([
+                "-m",
+                "mock-model",
+                &thread_id,
+                "CW112_TASK_TURN_2: add multiply function to calculator.py",
+            ]);
+            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env("CODEX_HOME", &temp_home);
+            cmd.env("CW_SESSION_ID", &sid);
+            cmd.env("CW_CONTROL_TOKEN", &token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex binary on turn 2");
+
+    let stdout2 = String::from_utf8_lossy(&output2.stdout);
+    let stderr2 = String::from_utf8_lossy(&output2.stderr);
+    assert!(
+        output2.status.success(),
+        "Codex Turn 2 resume failed: {stderr2}\nstdout: {stdout2}"
+    );
+
+    let thread_id_2 = extract_thread_id_from_stdout(&stdout2)
+        .expect("Codex must emit thread.started with thread_id on Turn 2");
+    assert_eq!(
+        thread_id_2, thread_id,
+        "Native thread ID must be preserved across resume on Turn 2"
+    );
+
+    let calc_content_2 = std::fs::read_to_string(&calc_file).expect("read calculator.py");
+    assert!(
+        calc_content_2.contains("def add(a, b):") && calc_content_2.contains("def multiply(a, b):"),
+        "calculator.py must contain both add and multiply functions after Turn 2"
+    );
+
+    // Turn 3 Execution: Second native resume to create test_calculator.py and run tests
+    let output3 = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let sid = cw_session_id.clone();
+        let token = token.clone();
+        let temp_home = temp_home.clone();
+        let temp_workspace = temp_workspace.clone();
+        let thread_id = thread_id.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_workspace);
+            cmd.args([
+                "exec",
+                "resume",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args([
+                "-m",
+                "mock-model",
+                &thread_id,
+                "CW112_TASK_TURN_3: create test_calculator.py and run unit tests",
+            ]);
+            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env("CODEX_HOME", &temp_home);
+            cmd.env("CW_SESSION_ID", &sid);
+            cmd.env("CW_CONTROL_TOKEN", &token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex binary on turn 3");
+
+    let stdout3 = String::from_utf8_lossy(&output3.stdout);
+    let stderr3 = String::from_utf8_lossy(&output3.stderr);
+    assert!(
+        output3.status.success(),
+        "Codex Turn 3 resume failed: {stderr3}\nstdout: {stdout3}"
+    );
+
+    let thread_id_3 = extract_thread_id_from_stdout(&stdout3)
+        .expect("Codex must emit thread.started with thread_id on Turn 3");
+    assert_eq!(
+        thread_id_3, thread_id,
+        "Native thread ID must be preserved across resume on Turn 3"
+    );
+
+    let test_file = temp_workspace.join("test_calculator.py");
+    assert!(
+        test_file.exists(),
+        "test_calculator.py should exist after Turn 3"
+    );
+
+    // Verify unit test execution directly
+    let test_run = Command::new("python3")
+        .arg("test_calculator.py")
+        .current_dir(&temp_workspace)
+        .output()
+        .expect("failed to run python3 test_calculator.py");
+    assert!(
+        test_run.status.success(),
+        "Generated unit test failed: {}",
+        String::from_utf8_lossy(&test_run.stderr)
+    );
+
+    // Verify rollout files in CODEX_HOME/sessions:
+    // They must parse as valid JSONL and NOT contain CW112_POLICY_ACTIVE
+    let rollouts = find_rollout_files(&temp_home.join("sessions"));
+    assert!(
+        !rollouts.is_empty(),
+        "CODEX_HOME/sessions must contain at least one rollout file"
+    );
+    for rf in &rollouts {
+        let content = std::fs::read_to_string(rf).expect("read rollout file");
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                let parsed = serde_json::from_str::<Value>(trimmed);
+                assert!(
+                    parsed.is_ok(),
+                    "Rollout line in {} must parse as valid JSON: {trimmed}",
+                    rf.display()
+                );
+            }
+        }
+        assert!(
+            !content.contains("CW112_POLICY_ACTIVE"),
+            "Rollout file on disk must not be modified with pinned overlay: {}",
+            rf.display()
+        );
+    }
+
+    // Inspect captured requests forwarded upstream to mock provider
+    let captured = f.mock.captured.lock().unwrap().clone();
+    assert!(
+        captured.len() >= 3,
+        "Expected at least 3 requests forwarded upstream, got {}",
+        captured.len()
+    );
+
+    // 1. Upstream requests must NEVER leak contextWatcher internal headers
+    for req in &captured {
+        assert!(
+            !req.headers.contains_key("x-cw-control-token"),
+            "Upstream request leaked x-cw-control-token"
+        );
+        assert!(
+            !req.headers.contains_key("x-cw-session-id"),
+            "Upstream request leaked x-cw-session-id"
+        );
+        for key in req.headers.keys() {
+            assert!(
+                !key.as_str().starts_with("x-cw-"),
+                "Upstream request leaked internal header {key}"
+            );
+        }
+        assert!(
+            req.headers.contains_key("authorization"),
+            "Upstream request must contain Authorization header"
+        );
+    }
+
+    // 2. Turn 1 initial request must NOT contain CW112_POLICY_ACTIVE
+    let turn1_req = captured
+        .iter()
+        .find(|r| String::from_utf8_lossy(&r.body).contains("CW112_TASK_TURN_1"))
+        .expect("Turn 1 request found");
+    assert!(
+        !String::from_utf8_lossy(&turn1_req.body).contains("CW112_POLICY_ACTIVE"),
+        "Turn 1 request should not contain CW112_POLICY_ACTIVE"
+    );
+
+    // 3. Turn 2 and Turn 3 initial requests MUST contain CW112_POLICY_ACTIVE
+    let turn2_req = captured
+        .iter()
+        .find(|r| String::from_utf8_lossy(&r.body).contains("CW112_TASK_TURN_2"))
+        .expect("Turn 2 request found");
+    assert!(
+        String::from_utf8_lossy(&turn2_req.body).contains("CW112_POLICY_ACTIVE"),
+        "Turn 2 request must have CW112_POLICY_ACTIVE overlay injected"
+    );
+
+    let turn3_req = captured
+        .iter()
+        .find(|r| String::from_utf8_lossy(&r.body).contains("CW112_TASK_TURN_3"))
+        .expect("Turn 3 request found");
+    assert!(
+        String::from_utf8_lossy(&turn3_req.body).contains("CW112_POLICY_ACTIVE"),
+        "Turn 3 request must have CW112_POLICY_ACTIVE overlay injected across second resume"
+    );
+
+    // Verify ContextWatcher store integrity
+    let sess = f
+        .store
+        .get_session(&cw_session_id)
+        .unwrap()
+        .expect("ContextWatcher session recorded");
+    assert_eq!(sess.id, cw_session_id);
+
+    let turns = f.store.list_turns(&cw_session_id).unwrap();
+    assert!(
+        turns.len() >= 3,
+        "Expected at least 3 turns recorded in CW store, got {}",
+        turns.len()
+    );
+    for t in &turns {
+        assert_eq!(t.session_id, cw_session_id);
+    }
+    for req in &captured {
+        if let Some(json) = &req.json_body {
+            assert!(
+                validate_protocol_invariants(json, ProviderKind::OpenAI).is_ok(),
+                "Captured request payload violates OpenAI protocol invariants"
+            );
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&temp_home);
+    let _ = std::fs::remove_dir_all(&temp_workspace);
+}
+
+#[tokio::test]
+#[ignore = "harness binary integration test; requires installed 'codex'; run with cargo test --test qualification harness_binary -- --ignored"]
+async fn test_harness_binary_codex_cli_unknown_native_session_id_resume() {
+    let codex_bin = require_installed_binary("codex");
+    let f = QualificationFixture::setup().await;
+    let temp_home =
+        std::env::temp_dir().join(format!("codex_home_unknown_{}", uuid::Uuid::new_v4()));
+    let temp_workspace =
+        std::env::temp_dir().join(format!("codex_ws_unknown_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_home).unwrap();
+    std::fs::create_dir_all(&temp_workspace).unwrap();
+
+    let output = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let proxy_port = f.proxy_port;
+        let token = f.control_token.clone();
+        let temp_home = temp_home.clone();
+        let temp_workspace = temp_workspace.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_workspace);
+            cmd.args([
+                "exec",
+                "resume",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args([
+                "-m",
+                "mock-model",
+                "00000000-0000-0000-0000-000000000000",
+                "resume non-existent session",
+            ]);
+            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env("CODEX_HOME", &temp_home);
+            cmd.env("CW_SESSION_ID", "cw_unknown_session_test");
+            cmd.env("CW_CONTROL_TOKEN", &token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex resume");
+
+    let _ = std::fs::remove_dir_all(&temp_home);
+    let _ = std::fs::remove_dir_all(&temp_workspace);
+
+    assert!(
+        !output.status.success(),
+        "Codex should fail when resuming non-existent session ID"
+    );
+}
+
+#[tokio::test]
+#[ignore = "harness binary integration test; requires installed 'codex'; run with cargo test --test qualification harness_binary -- --ignored"]
+async fn test_harness_binary_codex_cli_unauthorized_token_rejection() {
+    let codex_bin = require_installed_binary("codex");
+    let f = QualificationFixture::setup().await;
+    let temp_home = std::env::temp_dir().join(format!("codex_home_auth_{}", uuid::Uuid::new_v4()));
+    let temp_workspace =
+        std::env::temp_dir().join(format!("codex_ws_auth_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_home).unwrap();
+    std::fs::create_dir_all(&temp_workspace).unwrap();
+
+    let output = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let proxy_port = f.proxy_port;
+        let bad_token = "invalid_cw_control_token_12345";
+        let temp_home = temp_home.clone();
+        let temp_workspace = temp_workspace.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_workspace);
+            cmd.args([
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args(["-m", "mock-model", "Test invalid token"]);
+            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env("CODEX_HOME", &temp_home);
+            cmd.env("CW_SESSION_ID", "cw_unauthorized_test");
+            cmd.env("CW_CONTROL_TOKEN", bad_token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex with invalid token");
+
+    let _ = std::fs::remove_dir_all(&temp_home);
+    let _ = std::fs::remove_dir_all(&temp_workspace);
+
+    assert!(
+        !output.status.success(),
+        "Codex should fail when proxy rejects unauthorized token"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stderr.contains("403")
+            || stdout.contains("403")
+            || stderr.contains("Forbidden")
+            || stdout.contains("Forbidden"),
+        "Expected HTTP 403 Forbidden on invalid control token, got stdout: '{stdout}', stderr: '{stderr}'"
+    );
+}
+
+#[tokio::test]
+#[ignore = "harness binary integration test; requires installed 'codex'; run with cargo test --test qualification harness_binary -- --ignored"]
+async fn test_harness_binary_codex_cli_upstream_failure_handling() {
+    let codex_bin = require_installed_binary("codex");
+    let f = QualificationFixture::setup().await;
+    let temp_home = std::env::temp_dir().join(format!("codex_home_fail_{}", uuid::Uuid::new_v4()));
+    let temp_workspace =
+        std::env::temp_dir().join(format!("codex_ws_fail_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_home).unwrap();
+    std::fs::create_dir_all(&temp_workspace).unwrap();
+
+    let output = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let proxy_port = f.proxy_port;
+        let token = f.control_token.clone();
+        let temp_home = temp_home.clone();
+        let temp_workspace = temp_workspace.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_workspace);
+            cmd.args([
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args(["-m", "mock-model", "CW_FORCE_UPSTREAM_502"]);
+            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env("CODEX_HOME", &temp_home);
+            cmd.env("CW_SESSION_ID", "cw_upstream_fail_test");
+            cmd.env("CW_CONTROL_TOKEN", &token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex with upstream failure");
+
+    let _ = std::fs::remove_dir_all(&temp_home);
+    let _ = std::fs::remove_dir_all(&temp_workspace);
+
+    assert!(
+        !output.status.success(),
+        "Codex should fail when upstream fails with 502 Bad Gateway"
+    );
+
+    // Verify proxy store remains uncorrupted
+    assert!(
+        f.store.list_turns("cw_upstream_fail_test").is_ok(),
+        "CW store must remain consistent and accessible after upstream error"
+    );
+}
+
+#[tokio::test]
+#[ignore = "harness binary integration test; requires installed 'codex'; run with cargo test --test qualification harness_binary -- --ignored"]
+async fn test_harness_binary_codex_cli_session_isolation() {
+    let codex_bin = require_installed_binary("codex");
+    let f = QualificationFixture::setup().await;
+    let proxy_port = f.proxy_port;
+    let token = f.control_token.clone();
+
+    let sid_a = format!("cw_codex_sess_a_{}", uuid::Uuid::new_v4());
+    let sid_b = format!("cw_codex_sess_b_{}", uuid::Uuid::new_v4());
+
+    // 1. Run Session A Turn 1 to establish the session in ContextWatcher store
+    let temp_home_a = std::env::temp_dir().join(format!("codex_home_a_{}", uuid::Uuid::new_v4()));
+    let temp_ws_a = std::env::temp_dir().join(format!("codex_ws_a_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_home_a).unwrap();
+    std::fs::create_dir_all(&temp_ws_a).unwrap();
+
+    let output_a1 = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let sid_a = sid_a.clone();
+        let token = token.clone();
+        let temp_home_a = temp_home_a.clone();
+        let temp_ws_a = temp_ws_a.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_ws_a);
+            cmd.args([
+                "exec",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args(["-m", "mock-model", "Session A turn 1"]);
+            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env("CODEX_HOME", &temp_home_a);
+            cmd.env("CW_SESSION_ID", &sid_a);
+            cmd.env("CW_CONTROL_TOKEN", &token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex binary for session A turn 1");
+
+    assert!(output_a1.status.success());
+
+    // 2. Commit pin ONLY to Session A
+    f.store
+        .save_mutation(&MutationRule {
+            id: "session_a_isolated_pin".into(),
+            session_id: sid_a.clone(),
+            op: MutationOp::PinContext {
+                label: "Secret".into(),
+                content: "CW112_SESSION_A_SECRET_OVERLAY".into(),
+                source_node_id: None,
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: Utc::now(),
+        })
+        .unwrap();
+
+    // 3. Run Session B Turn 1 with independent session ID and CODEX_HOME
+    let temp_home_b = std::env::temp_dir().join(format!("codex_home_b_{}", uuid::Uuid::new_v4()));
+    let temp_ws_b = std::env::temp_dir().join(format!("codex_ws_b_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_home_b).unwrap();
+    std::fs::create_dir_all(&temp_ws_b).unwrap();
+
+    let output_b = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let sid_b = sid_b.clone();
+        let token = token.clone();
+        let temp_home_b = temp_home_b.clone();
+        let temp_ws_b = temp_ws_b.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_ws_b);
+            cmd.args([
+                "exec",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args(["-m", "mock-model", "Session B turn 1"]);
+            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env("CODEX_HOME", &temp_home_b);
+            cmd.env("CW_SESSION_ID", &sid_b);
+            cmd.env("CW_CONTROL_TOKEN", &token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex binary for session B");
+
+    let _ = std::fs::remove_dir_all(&temp_home_b);
+    let _ = std::fs::remove_dir_all(&temp_ws_b);
+    assert!(output_b.status.success());
+
+    // 4. Run Session A Turn 2
+    let output_a2 = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let sid_a = sid_a.clone();
+        let token = token.clone();
+        let temp_home_a = temp_home_a.clone();
+        let temp_ws_a = temp_ws_a.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_ws_a);
+            cmd.args([
+                "exec",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args(["-m", "mock-model", "Session A turn 2"]);
+            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env("CODEX_HOME", &temp_home_a);
+            cmd.env("CW_SESSION_ID", &sid_a);
+            cmd.env("CW_CONTROL_TOKEN", &token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex binary for session A turn 2");
+
+    let _ = std::fs::remove_dir_all(&temp_home_a);
+    let _ = std::fs::remove_dir_all(&temp_ws_a);
+    assert!(output_a2.status.success());
+
+    let captured = f.mock.captured.lock().unwrap().clone();
+    let req_b = captured
+        .iter()
+        .find(|r| String::from_utf8_lossy(&r.body).contains("Session B turn 1"))
+        .expect("Session B request found");
+    assert!(
+        !String::from_utf8_lossy(&req_b.body).contains("CW112_SESSION_A_SECRET_OVERLAY"),
+        "Session B must NOT receive Session A's overlay mutation!"
+    );
+
+    let req_a2 = captured
+        .iter()
+        .find(|r| String::from_utf8_lossy(&r.body).contains("Session A turn 2"))
+        .expect("Session A turn 2 request found");
+    assert!(
+        String::from_utf8_lossy(&req_a2.body).contains("CW112_SESSION_A_SECRET_OVERLAY"),
+        "Session A MUST receive its committed overlay mutation!"
+    );
+}
+
 fn parse_json_string_array(s: &str) -> Option<Vec<String>> {
     let trimmed = s.trim();
     if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
@@ -2243,11 +3108,13 @@ import("{ext_js}").then(async (mod) => {{
 // =============================================================================
 
 #[tokio::test]
-#[ignore = "opt-in real Codex qualification; requires CW_QUALIFY_REAL_CODEX and OPENAI_API_KEY"]
+#[ignore = "opt-in real Codex qualification; requires CW_QUALIFY_REAL_CODEX=1 and OPENAI_API_KEY with authorized budget"]
 async fn test_live_continuation_real_codex_multiturn() {
-    if std::env::var("CW_QUALIFY_REAL_CODEX").is_err() {
-        eprintln!("SKIPPED: CW_QUALIFY_REAL_CODEX not set");
-        return;
+    let opt_in = std::env::var("CW_QUALIFY_REAL_CODEX").unwrap_or_default();
+    if opt_in != "1" {
+        panic!(
+            "SKIPPED: Live Codex qualification requires explicit opt-in with CW_QUALIFY_REAL_CODEX=1 and authorized live spend budget"
+        );
     }
     let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY required for live test");
     let codex_bin = require_installed_binary("codex");
@@ -2255,6 +3122,7 @@ async fn test_live_continuation_real_codex_multiturn() {
     let store = CwStore::open_in_memory().unwrap();
     let mut state = DaemonState::new(store.clone());
     state.openai_upstream = "https://api.openai.com".to_string();
+    state.capture_wire_egress = true;
     let control_token = state.control_token.clone();
 
     let app = build_proxy_router(state);
@@ -2266,31 +3134,46 @@ async fn test_live_continuation_real_codex_multiturn() {
 
     let session_id = "codex_real_live_qual";
     let temp_home = std::env::temp_dir().join(format!("codex_real_home_{}", uuid::Uuid::new_v4()));
+    let temp_workspace =
+        std::env::temp_dir().join(format!("codex_real_ws_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&temp_home).unwrap();
+    std::fs::create_dir_all(&temp_workspace).unwrap();
 
     let temp_home_clone = temp_home.clone();
+    let temp_ws_clone = temp_workspace.clone();
     let sid = session_id.to_string();
     let token = control_token.clone();
 
-    // Turn 1
+    // Turn 1: Create calculator.py
     let output1 = tokio::task::spawn_blocking({
         let codex_bin = codex_bin.clone();
         let api_key = api_key.clone();
         let temp_home_clone = temp_home_clone.clone();
+        let temp_ws_clone = temp_ws_clone.clone();
         let sid = sid.clone();
         let token = token.clone();
         move || {
             let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_ws_clone);
             cmd.args([
                 "exec",
-                "--ephemeral",
+                "--json",
                 "--skip-git-repo-check",
                 "--ignore-user-config",
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
             ]);
             cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
                 proxy_port,
             ));
-            cmd.args(["-m", "gpt-4o-mini", "Say live-codex-turn-1"]);
+            cmd.args([
+                "-m",
+                "gpt-4o-mini",
+                "Create a python file calculator.py with a function add(a, b) that returns a + b.",
+            ]);
+            cmd.stdin(std::process::Stdio::null());
             cmd.env("OPENAI_API_KEY", api_key);
             cmd.env("CODEX_HOME", &temp_home_clone);
             cmd.env("CW_SESSION_ID", sid);
@@ -2302,7 +3185,54 @@ async fn test_live_continuation_real_codex_multiturn() {
     .unwrap()
     .expect("failed to run codex binary on live turn 1");
 
-    assert_eq!(output1.status.code(), Some(0));
+    let stdout1 = String::from_utf8_lossy(&output1.stdout);
+    assert_eq!(
+        output1.status.code(),
+        Some(0),
+        "Turn 1 failed: {}",
+        String::from_utf8_lossy(&output1.stderr)
+    );
+
+    let thread_id = extract_thread_id_from_stdout(&stdout1)
+        .expect("Codex must emit thread.started with thread_id on live turn 1");
+
+    // Correlate and verify all model requests generated during Turn 1 invocation
+    let all_turns_after_turn1 = store.list_turns(session_id).unwrap();
+    assert!(
+        !all_turns_after_turn1.is_empty(),
+        "Expected at least one model turn recorded for live Codex Turn 1"
+    );
+    for t in &all_turns_after_turn1 {
+        assert_eq!(
+            t.outcome.as_deref(),
+            Some("completed"),
+            "Turn 1 provider request must complete successfully at egress"
+        );
+        assert!(
+            t.observed_usage.is_some(),
+            "Turn 1 must record provider-returned token usage"
+        );
+        // Egress byte assertion: captured at forwarding boundary
+        if let Some(egress) = store.get_wire_egress(&t.id).unwrap() {
+            let egress_str = String::from_utf8_lossy(&egress);
+            assert!(
+                !egress_str.contains("CW112_POLICY_ACTIVE"),
+                "Turn 1 egress request must not contain overlay before commitment"
+            );
+        }
+        // Prepared outbound payload assertion
+        let payload = store
+            .get_turn_mutated_payload(&t.id)
+            .unwrap()
+            .or_else(|| store.get_turn_raw_payload(&t.id).unwrap())
+            .expect("Turn 1 payload recorded in store");
+        assert!(
+            !serde_json::to_string(&payload)
+                .unwrap()
+                .contains("CW112_POLICY_ACTIVE"),
+            "Turn 1 prepared outbound request must not contain overlay before commitment"
+        );
+    }
 
     // Commit overlay mutation on live session
     store
@@ -2311,7 +3241,7 @@ async fn test_live_continuation_real_codex_multiturn() {
             session_id: sid.clone(),
             op: MutationOp::PinContext {
                 label: "Directive".into(),
-                content: "LIVE_INJECTED_OVERLAY_ACTIVE".into(),
+                content: "CW112_POLICY_ACTIVE".into(),
                 source_node_id: None,
             },
             status: MutationStatus::Committed,
@@ -2321,25 +3251,39 @@ async fn test_live_continuation_real_codex_multiturn() {
         })
         .unwrap();
 
-    // Turn 2
+    // Turn 2: Native Resume to add multiply function
     let output2 = tokio::task::spawn_blocking({
         let codex_bin = codex_bin.clone();
         let api_key = api_key.clone();
         let temp_home_clone = temp_home_clone.clone();
+        let temp_ws_clone = temp_ws_clone.clone();
         let sid = sid.clone();
         let token = token.clone();
+        let thread_id = thread_id.clone();
         move || {
             let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_ws_clone);
             cmd.args([
                 "exec",
-                "--ephemeral",
+                "resume",
+                "--json",
                 "--skip-git-repo-check",
                 "--ignore-user-config",
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
             ]);
             cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
                 proxy_port,
             ));
-            cmd.args(["-m", "gpt-4o-mini", "Say live-codex-turn-2"]);
+            cmd.args([
+                "-m",
+                "gpt-4o-mini",
+                &thread_id,
+                "Add a function multiply(a, b) that returns a * b to calculator.py.",
+            ]);
+            cmd.stdin(std::process::Stdio::null());
             cmd.env("OPENAI_API_KEY", api_key);
             cmd.env("CODEX_HOME", &temp_home_clone);
             cmd.env("CW_SESSION_ID", sid);
@@ -2353,15 +3297,190 @@ async fn test_live_continuation_real_codex_multiturn() {
 
     let stdout2 = String::from_utf8_lossy(&output2.stdout);
     let stderr2 = String::from_utf8_lossy(&output2.stderr);
-    let _ = std::fs::remove_dir_all(&temp_home);
-    proxy_task.abort();
 
     assert_eq!(
         output2.status.code(),
         Some(0),
         "Live Codex turn 2 failed: {stderr2}"
     );
-    assert!(stdout2.contains("live-codex-turn-2") || stderr2.contains("live-codex-turn-2"));
+
+    let thread_id_2 = extract_thread_id_from_stdout(&stdout2)
+        .expect("Codex must emit thread.started with thread_id on live turn 2");
+    assert_eq!(
+        thread_id_2, thread_id,
+        "Native thread ID must match across live resume"
+    );
+
+    // Correlate and verify all model requests generated during Turn 2 invocation
+    let count_before_turn2 = all_turns_after_turn1.len();
+    let all_turns_after_turn2 = store.list_turns(session_id).unwrap();
+    let turn2_turns = all_turns_after_turn2[count_before_turn2..].to_vec();
+    assert!(
+        !turn2_turns.is_empty(),
+        "Expected at least one model turn recorded for live Codex Turn 2"
+    );
+    for t in &turn2_turns {
+        assert_eq!(
+            t.outcome.as_deref(),
+            Some("completed"),
+            "Turn 2 provider request must complete successfully at egress"
+        );
+        assert!(
+            t.observed_usage.is_some(),
+            "Turn 2 must record provider-returned token usage"
+        );
+        // Egress wire byte assertion: proves the bytes were actually transmitted to upstream
+        let egress = store
+            .get_wire_egress(&t.id)
+            .unwrap()
+            .expect("Turn 2 wire egress must be captured at forwarding boundary");
+        let egress_str = String::from_utf8_lossy(&egress);
+        assert!(
+            egress_str.contains("CW112_POLICY_ACTIVE"),
+            "Turn 2 egress request sent to provider must contain committed overlay"
+        );
+        // Prepared outbound payload assertion
+        let payload = store
+            .get_turn_mutated_payload(&t.id)
+            .unwrap()
+            .expect("Turn 2 mutated outbound payload recorded in store");
+        assert!(
+            serde_json::to_string(&payload)
+                .unwrap()
+                .contains("CW112_POLICY_ACTIVE"),
+            "Turn 2 prepared outbound request must contain committed overlay"
+        );
+    }
+
+    // Turn 3: Second Native Resume to create and run tests
+    let output3 = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let api_key = api_key.clone();
+        let temp_home_clone = temp_home_clone.clone();
+        let temp_ws_clone = temp_ws_clone.clone();
+        let sid = sid.clone();
+        let token = token.clone();
+        let thread_id = thread_id.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_ws_clone);
+            cmd.args([
+                "exec",
+                "resume",
+                "--json",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args([
+                "-m",
+                "gpt-4o-mini",
+                &thread_id,
+                "Create a test file test_calculator.py with unit tests for add and multiply, and run python3 test_calculator.py.",
+            ]);
+            cmd.stdin(std::process::Stdio::null());
+            cmd.env("OPENAI_API_KEY", api_key);
+            cmd.env("CODEX_HOME", &temp_home_clone);
+            cmd.env("CW_SESSION_ID", sid);
+            cmd.env("CW_CONTROL_TOKEN", token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex binary on live turn 3");
+
+    let stdout3 = String::from_utf8_lossy(&output3.stdout);
+    let stderr3 = String::from_utf8_lossy(&output3.stderr);
+
+    assert_eq!(
+        output3.status.code(),
+        Some(0),
+        "Live Codex turn 3 failed: {stderr3}"
+    );
+
+    let thread_id_3 = extract_thread_id_from_stdout(&stdout3)
+        .expect("Codex must emit thread.started with thread_id on live turn 3");
+    assert_eq!(
+        thread_id_3, thread_id,
+        "Native thread ID must match across second live resume"
+    );
+
+    // Correlate and verify all model requests generated during Turn 3 invocation
+    let count_before_turn3 = all_turns_after_turn2.len();
+    let all_turns_after_turn3 = store.list_turns(session_id).unwrap();
+    let turn3_turns = all_turns_after_turn3[count_before_turn3..].to_vec();
+    assert!(
+        !turn3_turns.is_empty(),
+        "Expected at least one model turn recorded for live Codex Turn 3"
+    );
+    for t in &turn3_turns {
+        assert_eq!(
+            t.outcome.as_deref(),
+            Some("completed"),
+            "Turn 3 provider request must complete successfully at egress"
+        );
+        assert!(
+            t.observed_usage.is_some(),
+            "Turn 3 must record provider-returned token usage"
+        );
+        // Egress wire byte assertion: proves the bytes were actually transmitted to upstream
+        let egress = store
+            .get_wire_egress(&t.id)
+            .unwrap()
+            .expect("Turn 3 wire egress must be captured at forwarding boundary");
+        let egress_str = String::from_utf8_lossy(&egress);
+        assert!(
+            egress_str.contains("CW112_POLICY_ACTIVE"),
+            "Turn 3 egress request sent to provider must retain committed overlay across resume"
+        );
+        // Prepared outbound payload assertion
+        let payload = store
+            .get_turn_mutated_payload(&t.id)
+            .unwrap()
+            .expect("Turn 3 mutated outbound payload recorded in store");
+        assert!(
+            serde_json::to_string(&payload)
+                .unwrap()
+                .contains("CW112_POLICY_ACTIVE"),
+            "Turn 3 prepared outbound request must retain committed overlay across resume"
+        );
+    }
+
+    // Verify on-disk rollout files are valid JSONL and do not contain injected overlay
+    let rollouts = find_rollout_files(&temp_home.join("sessions"));
+    assert!(
+        !rollouts.is_empty(),
+        "CODEX_HOME/sessions must contain rollout files"
+    );
+    for rf in &rollouts {
+        let content = std::fs::read_to_string(rf).expect("read rollout file");
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                assert!(
+                    serde_json::from_str::<Value>(trimmed).is_ok(),
+                    "Rollout line in {} must be valid JSON",
+                    rf.display()
+                );
+            }
+        }
+        assert!(
+            !content.contains("CW112_POLICY_ACTIVE"),
+            "Rollout file on disk must not contain injected overlay: {}",
+            rf.display()
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&temp_home);
+    let _ = std::fs::remove_dir_all(&temp_workspace);
+    proxy_task.abort();
 
     let sess = store
         .get_session(session_id)
@@ -2369,10 +3488,10 @@ async fn test_live_continuation_real_codex_multiturn() {
         .expect("session recorded");
     assert_eq!(sess.id, session_id);
     let turns = store.list_turns(session_id).unwrap();
-    assert_eq!(
-        turns.len(),
-        2,
-        "Expected 2 turns recorded for live codex session"
+    assert!(
+        turns.len() >= 3,
+        "Expected at least 3 turns recorded for live codex session, got {}",
+        turns.len()
     );
 }
 

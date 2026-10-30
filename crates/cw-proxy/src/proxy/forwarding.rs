@@ -18,6 +18,13 @@ pub async fn forward_to_upstream(
     outbound_body: Vec<u8>,
     mut recorder: Option<Recorder>,
 ) -> Response {
+    if state.capture_wire_egress
+        && let Some(ref rec) = recorder
+        && let Some(ref turn) = rec.turn
+    {
+        let _ = state.store.save_wire_egress(&turn.id, &outbound_body);
+    }
+
     let mut request = state.http_client.request(method, target);
     for (key, value) in headers {
         if !matches!(

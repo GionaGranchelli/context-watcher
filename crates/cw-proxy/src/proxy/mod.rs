@@ -1,7 +1,61 @@
-use super::*;
-use cw_core::mutation::has_signed_content;
+pub mod forwarding;
+pub mod preview;
+pub mod recorder;
+pub mod routing;
 
-pub(super) async fn handle_proxy_request(
+use axum::{
+    Json, Router,
+    body::Bytes,
+    extract::State,
+    http::{HeaderMap, StatusCode, Uri},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
+use chrono::Utc;
+use cw_core::{
+    analyze_turn_from_payload,
+    autopilot::evaluate_autopilot_policies,
+    ir::{HarnessKind, Session},
+    local_llm::strip_internal_cw_fields,
+    mutation::{apply_mutations_to_payload, evaluate_firewall, has_signed_content},
+    normalizer::detect_provider,
+    validator::validate_protocol_invariants,
+};
+use serde_json::{Value, json};
+use std::time::{Duration, Instant};
+use tokio::sync::oneshot;
+use uuid::Uuid;
+
+use crate::{
+    api::transform::api_transform_context,
+    proxy::{
+        forwarding::forward_to_upstream,
+        preview::{render_dry_run_response, validate_dry_run_payload},
+        recorder::{InterceptCleanup, Recorder},
+        routing::resolve_upstream_target,
+    },
+    security::{local_cors_layer, local_only_guard},
+    state::{
+        ActiveIntercept, ApprovalAction, DaemonState, InterceptResolution, PendingInterceptInfo,
+        WsEvent,
+    },
+};
+
+/// Builds the Intercepting Proxy Router (`127.0.0.1:4401`).
+pub fn build_proxy_router(state: DaemonState) -> Router {
+    Router::new()
+        .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
+        .route(
+            "/api/v1/sessions/:id/transform",
+            post(api_transform_context),
+        )
+        .fallback(handle_proxy_request)
+        .layer(local_cors_layer())
+        .layer(axum::middleware::from_fn(local_only_guard))
+        .with_state(state)
+}
+
+pub async fn handle_proxy_request(
     State(state): State<DaemonState>,
     method: axum::http::Method,
     uri: Uri,
@@ -10,42 +64,15 @@ pub(super) async fn handle_proxy_request(
 ) -> Response {
     let started = Instant::now();
     if headers.contains_key("x-cw-dry-run")
-        && !serde_json::from_slice::<Value>(&body).is_ok_and(|value| value.is_object())
+        && let Err(err) = validate_dry_run_payload(&body)
     {
-        return (
-            StatusCode::BAD_REQUEST,
-            "Preview requires a supported JSON object",
-        )
-            .into_response();
+        return err.into_response();
     }
-    let path = uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
-    let routes = [
-        ("/anthropic", &state.anthropic_upstream),
-        ("/openai", &state.openai_upstream),
-        ("/deepseek", &state.deepseek_upstream),
-        ("/gemini", &state.gemini_upstream),
-        ("/ollama", &state.ollama_upstream),
-        ("/llamacpp", &state.llamacpp_upstream),
-        ("/vllm", &state.vllm_upstream),
-    ];
-    let fallback = if uri.path().ends_with("/v1/messages") {
-        &state.anthropic_upstream
-    } else if path.contains("generateContent") {
-        &state.gemini_upstream
-    } else {
-        &state.openai_upstream
-    };
-    let (base, suffix) = routes
-        .iter()
-        .find_map(|(prefix, base)| {
-            path.strip_prefix(prefix)
-                .filter(|rest| rest.is_empty() || rest.starts_with('/') || rest.starts_with('?'))
-                .map(|rest| (*base, if rest.is_empty() { "/" } else { rest }))
-        })
-        .unwrap_or((fallback, path));
-    let target = format!("{}{suffix}", base.trim_end_matches('/'));
+
+    let target = resolve_upstream_target(&state, &uri);
     let mut outbound_body = body.to_vec();
     let mut recorder = None;
+
     'capture: {
         if let Ok(raw) = serde_json::from_slice::<Value>(&body)
             && raw.is_object()
@@ -344,24 +371,19 @@ pub(super) async fn handle_proxy_request(
                     break 'capture;
                 }
                 if headers.contains_key("x-cw-dry-run") {
-                    turn.outcome = Some("preview".into());
-                    let _ = state.store.save_turn(&turn, None, Some(&outbound), None);
-                    return Json(json!({"cw_dry_run":true,"turn":turn,"mutated_payload":outbound}))
-                        .into_response();
+                    return render_dry_run_response(&state, turn, outbound);
                 }
-                recorder = Some(Recorder {
-                    state: state.clone(),
-                    turn: Some(turn),
+                recorder = Some(Recorder::new(
+                    state.clone(),
+                    Some(turn),
                     provider,
-                    previous: previous_nodes,
+                    previous_nodes,
                     started,
-                    usage: None,
-                    sse: false,
-                    buffer: Vec::new(),
-                });
+                ));
             }
         }
     }
+
     if recorder.is_none() {
         match state.store.list_firewall_rules(None) {
             Ok(rules)
@@ -385,201 +407,6 @@ pub(super) async fn handle_proxy_request(
             _ => {}
         }
     }
-    let mut request = state.http_client.request(method, target);
-    for (key, value) in &headers {
-        if !matches!(
-            key.as_str(),
-            "host" | "content-length" | "connection" | "transfer-encoding" | "accept-encoding"
-        ) && !key.as_str().starts_with("x-cw-")
-        {
-            request = request.header(key, value);
-        }
-    }
-    let upstream = match request.body(outbound_body).send().await {
-        Ok(response) => response,
-        Err(error) => {
-            if let Some(mut rec) = recorder {
-                rec.finish("upstream_error");
-            }
-            return (StatusCode::BAD_GATEWAY, error.without_url().to_string()).into_response();
-        }
-    };
-    let status = upstream.status();
-    let mut response_headers = upstream.headers().clone();
-    response_headers.remove(header::CONNECTION);
-    response_headers.remove(header::TRANSFER_ENCODING);
-    if let Some(rec) = recorder.as_mut() {
-        rec.sse = response_headers
-            .get(header::CONTENT_TYPE)
-            .is_some_and(|v| v.as_bytes().starts_with(b"text/event-stream"));
-    }
-    let stream = futures::stream::unfold(
-        (upstream.bytes_stream(), recorder),
-        move |(mut source, mut recorder)| async move {
-            match source.next().await {
-                Some(Ok(bytes)) => {
-                    if let Some(rec) = recorder.as_mut() {
-                        rec.tap(&bytes);
-                    }
-                    Some((Ok::<_, reqwest::Error>(bytes), (source, recorder)))
-                }
-                Some(Err(error)) => {
-                    if let Some(rec) = recorder.as_mut()
-                        && let Some(task) = rec.finish("stream_error")
-                    {
-                        let _ = task.await;
-                    }
-                    Some((Err(error), (source, recorder)))
-                }
-                None => {
-                    if let Some(rec) = recorder.as_mut()
-                        && let Some(task) = rec.finish(if status.is_success() {
-                            "completed"
-                        } else {
-                            "upstream_error"
-                        })
-                    {
-                        let _ = task.await;
-                    }
-                    None
-                }
-            }
-        },
-    );
-    let mut response = Response::new(Body::from_stream(stream));
-    *response.status_mut() = status;
-    *response.headers_mut() = response_headers;
-    response
-}
 
-struct Recorder {
-    state: DaemonState,
-    turn: Option<ContextTurn>,
-    provider: ProviderKind,
-    previous: Option<Vec<cw_core::ir::ContextNode>>,
-    started: Instant,
-    usage: Option<Value>,
-    sse: bool,
-    buffer: Vec<u8>,
-}
-impl Recorder {
-    fn tap(&mut self, bytes: &[u8]) {
-        if let Some(turn) = self.turn.as_mut()
-            && turn.first_body_byte_ms.is_none()
-            && !bytes.is_empty()
-        {
-            turn.first_body_byte_ms = Some(self.started.elapsed().as_millis() as u64);
-        }
-        if self.buffer.len().saturating_add(bytes.len()) > 1_048_576 {
-            self.buffer.clear();
-            return;
-        }
-        self.buffer.extend_from_slice(bytes);
-        if self.sse {
-            while let Some(end) = self.buffer.iter().position(|b| *b == b'\n') {
-                let line: Vec<u8> = self.buffer.drain(..=end).collect();
-                if let Some(data) = line.strip_prefix(b"data:")
-                    && let Ok(value) = serde_json::from_slice::<Value>(data)
-                {
-                    self.read_usage(&value);
-                }
-            }
-        }
-    }
-    fn read_usage(&mut self, value: &Value) {
-        let usage = value
-            .get("usage")
-            .or_else(|| value.get("usageMetadata"))
-            .or_else(|| value.pointer("/message/usage"))
-            .or_else(|| value.pointer("/response/usage"));
-        if let Some(usage) = usage.filter(|u| u.is_object()) {
-            let merged = self.usage.get_or_insert_with(|| json!({}));
-            if let (Some(target), Some(source)) = (merged.as_object_mut(), usage.as_object()) {
-                for (k, v) in source {
-                    target.insert(k.clone(), v.clone());
-                }
-            }
-        }
-    }
-    fn finish(&mut self, outcome: &str) -> Option<tokio::task::JoinHandle<()>> {
-        if !self.sse
-            && let Ok(value) = serde_json::from_slice::<Value>(&self.buffer)
-        {
-            self.read_usage(&value);
-        }
-        let mut turn = self.turn.take()?;
-        turn.outcome = Some(outcome.into());
-        turn.latency_ms = Some(self.started.elapsed().as_millis() as u64);
-        turn.observed_usage = self.usage.take();
-        let cached = turn
-            .observed_usage
-            .as_ref()
-            .and_then(|u| extract_cached_tokens_from_json(&json!({"usage":u})));
-        turn.kv_cache_report = cw_core::radix::analyze_kv_cache(
-            self.previous.as_deref(),
-            &mut turn.nodes,
-            self.provider,
-            cached,
-        );
-        turn.token_usage.cached_tokens = cached.unwrap_or(0);
-        turn.token_usage.output_tokens = turn
-            .observed_usage
-            .as_ref()
-            .and_then(|u| {
-                u.get("output_tokens")
-                    .or_else(|| u.get("completion_tokens"))
-                    .or_else(|| u.get("candidatesTokenCount"))
-            })
-            .and_then(Value::as_u64)
-            .unwrap_or(0)
-            .min(u32::MAX as u64) as u32;
-        let state = self.state.clone();
-        Some(tokio::task::spawn_blocking(move || {
-            if let Err(error) = state.store.save_turn(&turn, None, None, None) {
-                tracing::error!(%error,"Unable to finalize provider attempt");
-                return;
-            }
-            for id in &turn.applied_mutation_ids {
-                let record = MutationEffectivenessRecord {
-                    mutation_id: id.clone(),
-                    session_id: turn.session_id.clone(),
-                    turn_id: turn.id.clone(),
-                    tokens_saved: 0,
-                    kv_cache_hit_rate: turn.kv_cache_report.hit_ratio as f64,
-                    ttft_ms: None,
-                    created_at: Utc::now(),
-                };
-                if let Err(error) = state.store.record_mutation_effectiveness(&record) {
-                    tracing::error!(%error,"Unable to record mutation evidence");
-                }
-            }
-            state.broadcast(WsEvent::TurnCompleted {
-                session_id: turn.session_id.clone(),
-                turn: Box::new(turn),
-            });
-        }))
-    }
-}
-impl Drop for Recorder {
-    fn drop(&mut self) {
-        if self.turn.is_some() {
-            self.finish("cancelled");
-        }
-    }
-}
-
-struct InterceptCleanup {
-    state: DaemonState,
-    id: String,
-}
-impl Drop for InterceptCleanup {
-    fn drop(&mut self) {
-        let state = self.state.clone();
-        let id = self.id.clone();
-        tokio::spawn(async move {
-            if state.intercepts.lock().await.remove(&id).is_some() {
-                state.broadcast(WsEvent::FirewallResolved { intercept_id: id });
-            }
-        });
-    }
+    forward_to_upstream(&state, method, target, &headers, outbound_body, recorder).await
 }

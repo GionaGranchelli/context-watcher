@@ -3,7 +3,7 @@
 > **Legend:** `P0` = Critical Path | `P1` = Core Feature | `P2` = Enhancement
 > **Workflow:** Move items across `Ready` $\to$ `In Progress` $\to$ `Review` $\to$ `Done`. Always reference ticket IDs (`CW-XXX`) in commits and PRs.
 
-> **Current delivery priority after CW-113:** CW-116A characterization and contracts, then CW-116B CLI/harness decomposition, then CW-116C proxy/transformation boundaries. Resume CW-112, followed by CW-114 and CW-115, after this maintainability gate. One scoped PR per subtask.
+> **Current delivery priority after CW-116 maintainability gate:** Resume CW-112 (Codex CLI multi-turn qualification), followed by CW-114 and CW-115. Maintainability gate (CW-116A, CW-116B, CW-116C) complete.
 
 ---
 
@@ -205,14 +205,14 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-110A** Qualification evidence hardening | Done | Completely separated qualification suite into Suite A (CI default contract tests), Suite B (harness binary integration requiring installed binaries and failing explicitly if absent), and Suite C (live provider continuation). Hardened AC4 (active mutation tool-pairing), AC5 (byte-for-byte & JSON-tree thinking signature fidelity), AC6 (tool env sandboxing), AC7 (BLAKE3 bit-for-bit transcript preservation), AC8 (Validation Gate fail-open), and AC10 (un-fabricated cache status reconciliation). |
 | **CW-111** OMP native runtime integration | Done | Replaced command-only extension with native runtime `context` and `before_provider_request` hooks and `/api/v1/sessions/:id/transform` endpoint; automated test (`test_harness_binary_omp_native_runtime_overlay_reapplication`) proved active overlay injection on Turn 2 wire payload while on-disk `.jsonl` transcript remained 100% immutable. |
 | **CW-111B** OMP native runtime hardening | Done | Eliminated control token from `models.json` and deleted unsafe helper; purged `CW_CONTROL_TOKEN` from `process.env` in memory on startup; enforced loopback-only URLs on `CW_DAEMON_URL`; prioritized native session ID to eliminate cross-session binding under switching; replaced time/length heuristics with reference-based WeakSet idempotency; hardened `PruneOrStub` safety to strictly forbid pointer-only user/system prompt modification; verified 3-turn native resume (`omp -r <uuid>`), wire pinning, on-disk transcript preservation, and offline fail-open recovery. |
-| **CW-112** Codex CLI multi-turn qualification | Deferred until CW-116C | Multi-turn coding sessions and native resume against a live Responses provider, after the maintainability campaign. |
+| **CW-112** Codex CLI multi-turn qualification | Ready | Multi-turn coding sessions and native resume against a live Responses provider, following the completion of the CW-116 maintainability campaign. |
 | **CW-113** Hermes Agent lifecycle hardening | Done | Replaced shared override file with UUID-scoped `hermes-override-<uuid>.json` (mode 0600, atomic `create_new`); middleware validates non-symlink, mode 0600, age <= 120s, and atomically unlinks on consumption; gateway daemon session isolation in `_SESSION_OVERRIDES`; passed 7-gate multi-process qualification and 20-session stress test. |
 | **CW-114** Long-session reliability campaign | Backlog | Unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families, 3 repetitions per harness. |
 | **CW-115** Performance and savings qualification | Backlog | Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims. |
-| **CW-116** Architecture consolidation & maintainability | In Progress (P0) | Three bounded, behavior-preserving PRs: CW-116A characterization/contracts, CW-116B CLI/harness modularization, CW-116C proxy/transformation boundaries. No feature expansion. |
+| **CW-116** Architecture consolidation & maintainability | Done | Three bounded, behavior-preserving PRs: CW-116A characterization/contracts, CW-116B CLI/harness modularization, CW-116C proxy/transformation boundaries. Maintainability gate complete. |
 | **CW-116A** Characterization tests & architecture contracts | Done | Characterization baseline documented in docs/CW-116A-BASELINE.md; architecture decomposition plan in docs/CW-116-ARCHITECTURE.md; 12 net new characterization tests added covering CLI lifecycle, transform API, proxy routing, internal header stripping, dry-run preview, and store immutability; 100/100 workspace tests passing (+12 net increase over 88 baseline) with 0 warnings; PR #13 merged into main. |
-| **CW-116B** CLI & harness architecture | Done (PR ready) | Decomposed monolithic `main.rs` (3,210 -> 618 lines, -80.7%) and `lib.rs` (2,385 -> 277 lines, -88.4%) into cohesive command handlers (`wrap.rs`, `daemon.rs`, `init.rs`, `reports.rs`, `session.rs`, `slot.rs`, `web.rs`) and harness lifecycle modules (`error.rs`, `qualification.rs`, `sync.rs`, `auto_heal.rs`, `watcher.rs`, `adapters/`). 100/100 workspace tests passing, 12/12 Hermes Python tests passing, 3/3 ignored harness binary qualification tests passing with zero warnings. Report delivered in `docs/CW-116B-REFACTOR-REPORT.md`. |
-| **CW-116C** Proxy & transformation boundaries | Backlog, after CW-116B (P0) | Separate routing, auth, provider forwarding, mutation orchestration and telemetry while preserving raw passthrough, signed content and safety decisions. |
+| **CW-116B** CLI & harness architecture | Done | Decomposed monolithic `main.rs` (3,210 -> 618 lines, -80.7%) and `lib.rs` (2,385 -> 277 lines, -88.4%) into cohesive command handlers (`wrap.rs`, `daemon.rs`, `init.rs`, `reports.rs`, `session.rs`, `slot.rs`, `web.rs`) and harness lifecycle modules (`error.rs`, `qualification.rs`, `sync.rs`, `auto_heal.rs`, `watcher.rs`, `adapters/`). 100/100 workspace tests passing, 12/12 Hermes Python tests passing, 3/3 ignored harness binary qualification tests passing with zero warnings; PR #14 merged into main. |
+| **CW-116C** Proxy & transformation boundaries | Done (PR ready) | Decomposed monolithic `lib.rs` (1,974 -> 249 lines, -87.4%) and `forwarding.rs` (585 lines dismantled) into modular `state.rs`, `security.rs`, `sse.rs`, `proxy/` and `api/` subsystems. Preserved dual `/api/v1/sessions/:id/transform` routes, raw wire byte streaming, thinking block signatures, and fail-open validation. 100/100 workspace tests passing, 12/12 Hermes Python tests passing, 3/3 ignored qualification tests passing with zero warnings; report delivered in `docs/CW-116C-REFACTOR-REPORT.md`. |
 
 ---
 
@@ -227,14 +227,17 @@ The checked tickets below are historical implementation milestones. They are not
 - Test with isolated HOME/config directories, ports, stores and subprocesses. Do not modify real Hermes configuration, user transcripts, installed harness settings or running services. Keep ignored harness-binary and live-provider tests explicitly opt-in; a skip is not a pass.
 - Record reproducible commands and exact baseline revision, CI/default vs optional test results, and limits. Reuse production code instead of copying cleanup guards, parsers or auth checks into tests.
 - **Exit:** no intentional runtime behavior changes; existing tests continue passing, new characterization tests pass, evidence and limitations are documented, and CW-116B/C can proceed in small independent PRs. Do not mark Done based on documentation alone.
+- Complete: PR #13 merged into main at `e0c7b5b`.
 
-**CW-116B — CLI and harness modularization (second PR)**
+**CW-116B — CLI and harness modularization (second PR; branch: feat/cw-116b-cli-harness-modularization)**
 - Extract command, harness launch, configuration/install and cleanup responsibilities from the large CLI and harness modules into cohesive units. Define only contracts proven necessary for existing Codex, Hermes and OMP flows.
 - Preserve public CLI, environment/auth, session identity, installer behavior and all CW-116A contracts. Avoid speculative universal plugin infrastructure.
+- Complete: PR #14 merged into main at `b60c7d1`.
 
-**CW-116C — Proxy and transformation boundaries (third PR)**
+**CW-116C — Proxy and transformation boundaries (third PR; branch: feat/cw-116c-proxy-boundaries)**
 - Isolate API routing, authentication/session selection, provider forwarding/streaming, mutation orchestration/validation and telemetry responsibilities. Keep mutation policy in cw-core.
 - Preserve provider wire bytes, SSE ordering, signed/unknown payloads, mutation decisions and existing API contracts. Require specific safety/regression evidence for each moved boundary.
+- Complete: refactoring finished on branch `feat/cw-116c-proxy-boundaries`, report delivered in `docs/CW-116C-REFACTOR-REPORT.md`.
 
 **Non-goals:** new providers or harnesses, new optimizer strategies, performance tuning, cross-crate rewrites, arbitrary line-count targets, schema migrations or broad store/normalizer rework without an evidenced blocker.
 
@@ -244,19 +247,16 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🚧 In Progress
 
-* None (CW-116B implementation complete; PR opened for review).
+* None (CW-116C implementation complete; PR opened for review).
 
 ## 📋 Ready
 
-* **CW-116C** Proxy and transformation boundaries (ready after CW-116B PR merge).
+* **CW-112** Codex CLI multi-turn and native resume qualification (P0).
 
 ---
 
 ## 🗂️ Backlog (ordered)
 
-* **CW-116B** CLI and harness lifecycle modularization (after CW-116A).
-* **CW-116C** Proxy and transformation boundaries (after CW-116B).
-* **CW-112** Codex CLI real-provider multi-turn and native resume qualification (after CW-116C).
 * **CW-103** Resume broader Codex/Hermes qualification through CW-112; Hermes concurrency is completed.
 * **CW-114** Long-session reliability (same acceptance suite for three harnesses).
 * **CW-115** Performance and savings qualification (measured baseline vs optimized execution).

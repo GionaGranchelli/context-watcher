@@ -210,7 +210,7 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-114** Long-session reliability campaign | Backlog | Unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families, 3 repetitions per harness. |
 | **CW-115** Performance and savings qualification | Backlog | Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims. |
 | **CW-116** Architecture consolidation & maintainability | In Progress (P0) | Three bounded, behavior-preserving PRs: CW-116A characterization/contracts, CW-116B CLI/harness modularization, CW-116C proxy/transformation boundaries. No feature expansion. |
-| **CW-116A** Characterization tests & architecture contracts | Done | Characterization baseline documented in docs/CW-116A-BASELINE.md; architecture decomposition plan in docs/CW-116-ARCHITECTURE.md; 12 new characterization tests added covering CLI lifecycle, transform API, proxy routing, internal header stripping, dry-run preview, and store immutability; 94/94 workspace tests passing with 0 warnings. |
+| **CW-116A** Characterization tests & architecture contracts | Done | Characterization baseline documented in docs/CW-116A-BASELINE.md; architecture decomposition plan in docs/CW-116-ARCHITECTURE.md; 12 net new characterization tests added covering CLI lifecycle, transform API, proxy routing, internal header stripping, dry-run preview, and store immutability; 100/100 workspace tests passing (+12 net increase over 88 baseline) with 0 warnings; PR #13 merged into main. |
 | **CW-116B** CLI & harness architecture | Ready (P0) | Incrementally split CLI and harness lifecycle responsibilities into cohesive modules with minimal contracts. Preserve CLI, environment, auth, session behavior and installation side effects. |
 | **CW-116C** Proxy & transformation boundaries | Backlog, after CW-116B (P0) | Separate routing, auth, provider forwarding, mutation orchestration and telemetry while preserving raw passthrough, signed content and safety decisions. |
 
@@ -244,7 +244,7 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🚧 In Progress
 
-* No active implementation milestone. **CW-116A** is completed on branch `feat/cw-116a-characterization-contracts`; PR open for review.
+* No active implementation milestone. **CW-116A** is merged into `main` (PR #13); **CW-116B** is Ready to begin.
 
 ## 📋 Ready
 

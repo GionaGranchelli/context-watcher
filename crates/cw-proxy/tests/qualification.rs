@@ -512,6 +512,94 @@ async fn test_core_contract_ac2_committed_overlay_on_next_model_request() {
 }
 
 #[tokio::test]
+async fn test_core_contract_ac2_context_transform_api() {
+    let f = QualificationFixture::setup().await;
+    let client = reqwest::Client::new();
+    let session_id = "test_ac2_transform_session";
+
+    let sess = Session {
+        id: session_id.to_string(),
+        parent_session_id: None,
+        harness: HarnessKind::Omp,
+        workspace_root: None,
+        model: "mock-model".to_string(),
+        provider: ProviderKind::OpenAI,
+        title: None,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    };
+    f.store.upsert_session(&sess).unwrap();
+
+    let pin = MutationRule {
+        id: "mut_omp_pin_01".to_string(),
+        session_id: session_id.to_string(),
+        op: MutationOp::PinContext {
+            label: "CRITICAL_OMP_PINNED_POLICY".to_string(),
+            content: "Zero hallucination context hook active".to_string(),
+            source_node_id: None,
+        },
+        status: MutationStatus::Committed,
+        estimated_saved_tokens: 0,
+        estimated_kv_break_tokens: 0,
+        created_at: Utc::now(),
+    };
+    f.store
+        .save_mutations_at_revision(session_id, None, &[pin])
+        .unwrap();
+
+    let transform_url = format!(
+        "http://127.0.0.1:{}/api/v1/sessions/{session_id}/transform",
+        f.proxy_port
+    );
+
+    // 1. Authorized transform request succeeds
+    let req_body = json!({
+        "messages": [
+            {"role": "user", "content": "Hello prompt"}
+        ],
+        "provider": "openai"
+    });
+    let res = client
+        .post(&transform_url)
+        .header("x-cw-control-token", &f.control_token)
+        .header("content-type", "application/json")
+        .json(&req_body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: Value = res.json().await.unwrap();
+    assert_eq!(body["status"], "ok");
+    let msgs = body["messages"].as_array().expect("messages must be array");
+    let msgs_str = serde_json::to_string(msgs).unwrap();
+    assert!(msgs_str.contains("CRITICAL_OMP_PINNED_POLICY"));
+    assert!(msgs_str.contains("Zero hallucination context hook active"));
+
+    // 2. Unauthorized request is rejected
+    let res_unauth = client
+        .post(&transform_url)
+        .header("x-cw-control-token", "invalid_token_12345678901234567890")
+        .header("content-type", "application/json")
+        .json(&req_body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res_unauth.status(), StatusCode::FORBIDDEN);
+
+    // 3. Bad request (messages is not an array)
+    let res_bad = client
+        .post(&transform_url)
+        .header("x-cw-control-token", &f.control_token)
+        .header("content-type", "application/json")
+        .json(&json!({"messages": "not an array"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res_bad.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn test_core_contract_ac3_zero_duplicate_mutation_injection() {
     let f = QualificationFixture::setup().await;
     let client = reqwest::Client::new();
@@ -1430,67 +1518,222 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
     }
 }
 
+fn find_jsonl_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                files.extend(find_jsonl_files(&path));
+            } else if path.extension().and_then(|s| s.to_str()) == Some("jsonl") {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
 #[tokio::test]
 #[ignore = "harness binary integration test; requires installed 'omp'; run with cargo test --test qualification harness_binary -- --ignored"]
-async fn test_harness_binary_omp_proxy_passthrough_and_baseline_gaps() {
+async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
     let omp_bin = require_installed_binary("omp");
 
     let f = QualificationFixture::setup().await;
     let temp_agent_dir = std::env::temp_dir().join(format!("omp_agent_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&temp_agent_dir).unwrap();
 
-    let models_cfg =
-        cw_harnesses::qualification::omp_proxy_models_config(f.proxy_port, "mock-model");
+    // Create private control token file for the extension
+    let token_dir = std::env::temp_dir().join(format!("omp_token_{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&token_dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&token_dir, std::fs::Permissions::from_mode(0o700));
+    }
+    let token_file = token_dir.join("control-token");
+    std::fs::write(&token_file, format!("{}\n", f.control_token)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&token_file, std::fs::Permissions::from_mode(0o600));
+    }
+
+    let session_id = format!("omp_qual_{}", &uuid::Uuid::new_v4().to_string()[..8]);
+
+    let models_cfg = cw_harnesses::qualification::omp_proxy_models_config_with_headers(
+        f.proxy_port,
+        "mock-model",
+        &session_id,
+        &f.control_token,
+    );
     std::fs::write(
         temp_agent_dir.join("models.json"),
         serde_json::to_string_pretty(&models_cfg).unwrap(),
     )
     .unwrap();
 
+    let ext_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("plugins/pi-opencode/index.js");
+    assert!(
+        ext_path.exists(),
+        "plugins/pi-opencode/index.js must exist at {}",
+        ext_path.display()
+    );
+
+    // Turn 1: Initial prompt executes with native extension loaded
+    let omp_bin_clone = omp_bin.clone();
     let temp_agent_dir_clone = temp_agent_dir.clone();
-    let output = tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::new(omp_bin);
+    let token_file_clone = token_file.clone();
+    let ext_path_clone = ext_path.clone();
+    let sid_clone = session_id.clone();
+    let proxy_port = f.proxy_port;
+
+    let output1 = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(omp_bin_clone);
         cmd.args([
             "-p",
-            "Say hello",
+            "Turn 1 pristine prompt",
             "--model",
             "cw-proxy/mock-model",
             "--no-tools",
-            "--no-session",
-            "--no-extensions",
-            "--no-skills",
-            "--no-rules",
+            "-e",
+            &ext_path_clone.to_string_lossy(),
         ]);
         cmd.env("PI_CODING_AGENT_DIR", &temp_agent_dir_clone);
+        cmd.env("CW_CONTROL_TOKEN_FILE", &token_file_clone);
+        cmd.env("CW_DAEMON_URL", format!("http://127.0.0.1:{proxy_port}"));
+        cmd.env("CW_SESSION_ID", &sid_clone);
         cmd.output()
     })
     .await
     .unwrap()
-    .expect("failed to run omp binary");
+    .expect("failed to run omp binary Turn 1");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    let _ = std::fs::remove_dir_all(&temp_agent_dir);
-
+    let stdout1 = String::from_utf8_lossy(&output1.stdout);
+    let stderr1 = String::from_utf8_lossy(&output1.stderr);
     assert_eq!(
-        output.status.code(),
+        output1.status.code(),
         Some(0),
-        "OMP CLI failed: stderr: {stderr}"
+        "OMP Turn 1 CLI failed: stderr: {stderr1}"
     );
     assert!(
-        stdout.contains("Mock chat output"),
-        "Stdout did not contain mock response: {stdout}"
+        stdout1.contains("Mock chat output"),
+        "Stdout did not contain mock response: {stdout1}"
     );
 
-    // Upstream captured the turn
-    let captured = f.mock.captured.lock().unwrap().clone();
-    assert_eq!(captured.len(), 1);
-    assert_eq!(captured[0].path, "/v1/chat/completions");
+    // Verify Turn 1 request reached upstream
+    let captured1 = f.mock.captured.lock().unwrap().clone();
+    assert_eq!(captured1.len(), 1);
+    assert_eq!(captured1[0].path, "/v1/chat/completions");
 
-    // NOTE: This test establishes passive proxy routing for OMP.
-    // Live context mutation (AC2) remains BLOCKED in baseline until CW-111
-    // introduces the native runtime context hook.
+    // Commit an active mutation overlay for this session: PinContext
+    let pin = MutationRule {
+        id: "mut_omp_pin_qual".to_string(),
+        session_id: session_id.clone(),
+        op: MutationOp::PinContext {
+            label: "CRITICAL_OMP_PINNED_POLICY".to_string(),
+            content: "Zero-hallucination verified native context hook".to_string(),
+            source_node_id: None,
+        },
+        status: MutationStatus::Committed,
+        estimated_saved_tokens: 0,
+        estimated_kv_break_tokens: 0,
+        created_at: Utc::now(),
+    };
+    f.store
+        .save_mutations_at_revision(&session_id, None, &[pin])
+        .unwrap();
+
+    // Turn 2: Follow-up prompt. Native extension's `context` hook intercepts
+    // and injects the pinned policy into the model prompt.
+    let temp_agent_dir_clone2 = temp_agent_dir.clone();
+    let token_file_clone2 = token_file.clone();
+    let ext_path_clone2 = ext_path.clone();
+    let sid_clone2 = session_id.clone();
+
+    let output2 = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(omp_bin);
+        cmd.args([
+            "-p",
+            "Turn 2 follow-up prompt",
+            "--model",
+            "cw-proxy/mock-model",
+            "--no-tools",
+            "-e",
+            &ext_path_clone2.to_string_lossy(),
+        ]);
+        cmd.env("PI_CODING_AGENT_DIR", &temp_agent_dir_clone2);
+        cmd.env("CW_CONTROL_TOKEN_FILE", &token_file_clone2);
+        cmd.env("CW_DAEMON_URL", format!("http://127.0.0.1:{proxy_port}"));
+        cmd.env("CW_SESSION_ID", &sid_clone2);
+        cmd.output()
+    })
+    .await
+    .unwrap()
+    .expect("failed to run omp binary Turn 2");
+
+    let stdout2 = String::from_utf8_lossy(&output2.stdout);
+    let stderr2 = String::from_utf8_lossy(&output2.stderr);
+    assert_eq!(
+        output2.status.code(),
+        Some(0),
+        "OMP Turn 2 CLI failed: stderr: {stderr2}"
+    );
+    assert!(
+        stdout2.contains("Mock chat output"),
+        "Stdout did not contain mock response: {stdout2}"
+    );
+
+    // Verify upstream captured Turn 2 containing the active mutation overlay
+    let captured2 = f.mock.captured.lock().unwrap().clone();
+    assert!(
+        captured2.len() >= 2,
+        "Expected at least 2 captured upstream requests, got {}",
+        captured2.len()
+    );
+    let turn2_body = String::from_utf8_lossy(&captured2[captured2.len() - 1].body);
+    assert!(
+        turn2_body.contains("CRITICAL_OMP_PINNED_POLICY"),
+        "Turn 2 upstream payload did not contain injected pinned context: {turn2_body}"
+    );
+    assert!(
+        turn2_body.contains("Zero-hallucination verified native context hook"),
+        "Turn 2 upstream payload did not contain injected policy content: {turn2_body}"
+    );
+
+    // Core Invariant Check: Verify on-disk transcript immutability
+    // Any session .jsonl files written by OMP must NOT contain the pinned policy
+    let session_dir = temp_agent_dir.join("sessions");
+    if session_dir.exists() {
+        let files = find_jsonl_files(&session_dir);
+        for file in files {
+            let disk_content = std::fs::read_to_string(&file).unwrap();
+            assert!(
+                !disk_content.contains("CRITICAL_OMP_PINNED_POLICY"),
+                "On-disk OMP session transcript was corrupted with injected overlay: {}",
+                file.display()
+            );
+        }
+    }
+
+    // Header Stripping Check: Upstream received 0 internal contextWatcher metadata headers
+    for cap in &captured2 {
+        assert!(
+            !cap.headers.contains_key("x-cw-control-token"),
+            "Upstream captured x-cw-control-token"
+        );
+        assert!(
+            !cap.headers.contains_key("x-cw-session-id"),
+            "Upstream captured x-cw-session-id"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&temp_agent_dir);
+    let _ = std::fs::remove_dir_all(&token_dir);
 }
 
 // =============================================================================

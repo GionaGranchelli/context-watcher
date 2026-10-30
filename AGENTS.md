@@ -4,6 +4,20 @@ Welcome to `contextWatcher` (`cw`). Every human or AI agent working in this repo
 
 ---
 
+## 0. Active milestone: CW-116 maintainability gate
+
+**Before coding**, read [BOARD.md](BOARD.md), [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), and [docs/HARNESS_MATRIX.md](docs/HARNESS_MATRIX.md). Checked historical board tasks are not current product qualification. Ground claims in code, fixtures, CI and reproducible evidence.
+
+- **Next: CW-116A**, characterization tests and architecture contracts, on branch **feat/cw-116a-characterization-contracts**. Move it to In Progress only when implementation begins.
+- **Then CW-116B**, CLI and harness lifecycle modularization, **then CW-116C**, proxy and transformation boundary consolidation. Only then resume CW-112 and follow with CW-114/CW-115.
+- CW-116A is a **behavior freeze**: deliver dependency/call maps, current test and CI baseline, characterized security/protocol/session behavior, isolated regression fixtures and a risk-ranked plan. No code cleanup, refactor, new harness or optimizer within CW-116A unless a minimal extraction is strictly required to characterize behavior.
+- Preserve public CLI/API, session identity, authenticated vs observation-only behavior, raw provider wire bytes/streaming, signed and unknown content, transcript originals, mutation eligibility and fail-open behavior. Do not claim observed cache savings where only estimates exist.
+- One scoped PR per CW-116 subtask. Use temporary isolated HOME/config and data directories, mock ports and test stores. Do not edit actual user Hermes config, live session transcripts, installed agent settings or running services.
+- Explicitly distinguish default CI tests, separately invoked ignored harness-binary tests and opt-in live-provider tests. Never report a skipped or unavailable test as passed. Avoid duplicating production algorithms or guards inside tests.
+- See Epic 16 in BOARD.md for acceptance criteria and non-goals. Track bugs or cleanup ideas as separate findings rather than silently changing runtime behavior during characterization.
+
+---
+
 ## 1. Mission & Core Philosophy
 
 `contextWatcher` is a **local-first, ultra-low-latency intercepting proxy, analyzer, and active manipulation engine** for LLM agent harnesses (Antigravity/AGY, Codex CLI, Pi, OpenCode, Aider, Claude Code).
@@ -44,17 +58,18 @@ contextWatcher/
 
 ## 3. Specification-Driven Workflow
 
-Before implementing any feature or ticket from [`BOARD.md`](file:///home/gionag/Development/contextWatcher/BOARD.md):
+Before implementing any feature or ticket from [`BOARD.md`](BOARD.md):
 
 1. **Read the Relevant Spec:**
-   * Architecture & APIs $\rightarrow$ [`specs/00-architecture.md`](file:///home/gionag/Development/contextWatcher/specs/00-architecture.md)
-   * Graph, Radix Tree, KV Cache & Linter $\rightarrow$ [`specs/01-context-graph-and-kv-cache.md`](file:///home/gionag/Development/contextWatcher/specs/01-context-graph-and-kv-cache.md)
-   * Mutation Engine & Overlays $\rightarrow$ [`specs/02-mutation-engine.md`](file:///home/gionag/Development/contextWatcher/specs/02-mutation-engine.md)
-   * Web UI (Svelte 5) & TUI/CLI $\rightarrow$ [`specs/03-web-ui-and-tui.md`](file:///home/gionag/Development/contextWatcher/specs/03-web-ui-and-tui.md)
-   * Harness Adapters & IntelliJ Plugin $\rightarrow$ [`specs/04-harness-and-ide-plugins.md`](file:///home/gionag/Development/contextWatcher/specs/04-harness-and-ide-plugins.md)
+   * Architecture & APIs $\rightarrow$ [`specs/00-architecture.md`](specs/00-architecture.md)
+   * Graph, Radix Tree, KV Cache & Linter $\rightarrow$ [`specs/01-context-graph-and-kv-cache.md`](specs/01-context-graph-and-kv-cache.md)
+   * Mutation Engine & Overlays $\rightarrow$ [`specs/02-mutation-engine.md`](specs/02-mutation-engine.md)
+   * Web UI (Svelte 5) & TUI/CLI $\rightarrow$ [`specs/03-web-ui-and-tui.md`](specs/03-web-ui-and-tui.md)
+   * Harness Adapters & IntelliJ Plugin $\rightarrow$ [`specs/04-harness-and-ide-plugins.md`](specs/04-harness-and-ide-plugins.md)
 2. **Update `BOARD.md`:**
-   * Move the ticket to **In Progress** when starting work.
-   * Move the ticket to **Done** only after unit/integration tests pass and docs/specs are updated if any interface changed.
+   * Move the current ticket to **In Progress** when starting; don't activate later CW-116 subtasks prematurely.
+   * Move it to **Done** only after applicable tests pass, optional tests are accounted for, and evidence/docs are updated.
+   * Record unsupported or unverified scenarios explicitly rather than treating them as passed.
 
 ---
 
@@ -83,7 +98,9 @@ Before implementing any feature or ticket from [`BOARD.md`](file:///home/gionag/
 # Rust workspace checks & tests
 cargo check --workspace
 cargo test --workspace
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+python3 plugins/hermes/context-watcher/test_plugin.py
 
 # Web UI development
 cd web && npm install && npm run dev

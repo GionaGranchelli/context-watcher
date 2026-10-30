@@ -411,21 +411,7 @@ fn is_cw_header(header: &str) -> bool {
 }
 
 fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
-    [
-        "model_provider=\"context_watcher\"".to_owned(),
-        "model_providers.context_watcher.name=\"contextWatcher\"".to_owned(),
-        format!(
-            "model_providers.context_watcher.base_url=\"http://127.0.0.1:{proxy_port}/openai/v1\""
-        ),
-        "model_providers.context_watcher.wire_api=\"responses\"".to_owned(),
-        "model_providers.context_watcher.requires_openai_auth=true".to_owned(),
-        "model_providers.context_watcher.env_key=\"OPENAI_API_KEY\"".to_owned(),
-        "model_providers.context_watcher.env_http_headers={\"x-cw-session-id\"=\"CW_SESSION_ID\",\"x-cw-control-token\"=\"CW_CONTROL_TOKEN\"}".to_owned(),
-        "shell_environment_policy.filters.CW_CONTROL_TOKEN=\"exclude\"".to_owned(),
-    ]
-    .into_iter()
-    .flat_map(|setting| ["--config".to_owned(), setting])
-    .collect()
+    cw_harnesses::qualification::codex_proxy_config_args(proxy_port)
 }
 
 #[tokio::main]

@@ -70,39 +70,54 @@ pub fn apply_mutations_to_payload(
                 target_json_pointer,
                 stub_text,
             } => {
-                // Match node by fingerprint, call_id, or direct pointer
-                for (node_idx, node) in before_nodes.iter().enumerate() {
-                    if is_protected_tool_result(
-                        node,
-                        node_idx,
-                        before_nodes.len(),
-                        last_assistant_idx,
-                    ) {
-                        continue;
-                    }
-                    let fp_match = target_fingerprint
-                        .as_ref()
-                        .map(|fp| fp == &node.fingerprint.0)
-                        .unwrap_or(false);
-                    let call_match = match (&node.kind, target_call_id.as_ref()) {
-                        (NodeKind::ToolResult { call_id, .. }, Some(tc)) if !call_id.is_empty() => {
-                            call_id == tc
-                        }
-                        _ => false,
-                    };
-                    let identity_matches = if target_fingerprint.is_some() {
-                        fp_match && (target_call_id.is_none() || call_match)
-                    } else {
-                        call_match
-                    };
-                    let location_matches = target_json_pointer
-                        .as_ref()
-                        .is_none_or(|p| p == &node.raw_json_pointer);
-                    if identity_matches
-                        && location_matches
-                        && replace_node_text_at_pointer(payload, &node.raw_json_pointer, stub_text)
+                if target_fingerprint.is_none() && target_call_id.is_none() {
+                    if let Some(target_ptr) = target_json_pointer.as_ref()
+                        && let Some(target_val) = payload.pointer_mut(target_ptr)
                     {
+                        *target_val = Value::String(stub_text.clone());
                         applied = true;
+                    }
+                } else {
+                    // Match node by fingerprint, call_id, or direct pointer
+                    for (node_idx, node) in before_nodes.iter().enumerate() {
+                        if is_protected_tool_result(
+                            node,
+                            node_idx,
+                            before_nodes.len(),
+                            last_assistant_idx,
+                        ) {
+                            continue;
+                        }
+                        let fp_match = target_fingerprint
+                            .as_ref()
+                            .map(|fp| fp == &node.fingerprint.0)
+                            .unwrap_or(false);
+                        let call_match = match (&node.kind, target_call_id.as_ref()) {
+                            (NodeKind::ToolResult { call_id, .. }, Some(tc))
+                                if !call_id.is_empty() =>
+                            {
+                                call_id == tc
+                            }
+                            _ => false,
+                        };
+                        let identity_matches = if target_fingerprint.is_some() {
+                            fp_match && (target_call_id.is_none() || call_match)
+                        } else {
+                            call_match
+                        };
+                        let location_matches = target_json_pointer
+                            .as_ref()
+                            .is_none_or(|p| p == &node.raw_json_pointer);
+                        if identity_matches
+                            && location_matches
+                            && replace_node_text_at_pointer(
+                                payload,
+                                &node.raw_json_pointer,
+                                stub_text,
+                            )
+                        {
+                            applied = true;
+                        }
                     }
                 }
             }

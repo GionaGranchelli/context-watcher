@@ -487,6 +487,33 @@ impl CwStore {
         Ok(raw)
     }
 
+    pub fn save_wire_egress(&self, turn_id: &str, body: &[u8]) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS wire_egress (turn_id TEXT PRIMARY KEY, body BLOB NOT NULL)",
+        )?;
+        conn.execute(
+            "INSERT OR REPLACE INTO wire_egress(turn_id,body) VALUES (?1,?2)",
+            params![turn_id, body],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_wire_egress(&self, turn_id: &str) -> Result<Option<Vec<u8>>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS wire_egress (turn_id TEXT PRIMARY KEY, body BLOB NOT NULL)",
+        )?;
+        let raw: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT body FROM wire_egress WHERE turn_id = ?1",
+                params![turn_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(raw)
+    }
+
     pub fn reserve_turn_sequence(&self, session_id: &str) -> Result<u32, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         conn.execute_batch("CREATE TABLE IF NOT EXISTS request_sequences (session_id TEXT PRIMARY KEY, seq INTEGER NOT NULL)")?;

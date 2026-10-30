@@ -3157,11 +3157,12 @@ async fn test_live_continuation_real_codex_multiturn() {
             cmd.args([
                 "exec",
                 "--json",
-                "-s",
-                "workspace-write",
-                "--approve-for-me",
                 "--skip-git-repo-check",
                 "--ignore-user-config",
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
             ]);
             cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
                 proxy_port,
@@ -3171,6 +3172,7 @@ async fn test_live_continuation_real_codex_multiturn() {
                 "gpt-4o-mini",
                 "Create a python file calculator.py with a function add(a, b) that returns a + b.",
             ]);
+            cmd.stdin(std::process::Stdio::null());
             cmd.env("OPENAI_API_KEY", api_key);
             cmd.env("CODEX_HOME", &temp_home_clone);
             cmd.env("CW_SESSION_ID", sid);
@@ -3192,6 +3194,44 @@ async fn test_live_continuation_real_codex_multiturn() {
 
     let thread_id = extract_thread_id_from_stdout(&stdout1)
         .expect("Codex must emit thread.started with thread_id on live turn 1");
+
+    // Correlate and verify all model requests generated during Turn 1 invocation
+    let all_turns_after_turn1 = store.list_turns(session_id).unwrap();
+    assert!(
+        !all_turns_after_turn1.is_empty(),
+        "Expected at least one model turn recorded for live Codex Turn 1"
+    );
+    for t in &all_turns_after_turn1 {
+        assert_eq!(
+            t.outcome.as_deref(),
+            Some("completed"),
+            "Turn 1 provider request must complete successfully at egress"
+        );
+        assert!(
+            t.observed_usage.is_some(),
+            "Turn 1 must record provider-returned token usage"
+        );
+        // Egress byte assertion: captured at forwarding boundary
+        if let Some(egress) = store.get_wire_egress(&t.id).unwrap() {
+            let egress_str = String::from_utf8_lossy(&egress);
+            assert!(
+                !egress_str.contains("CW112_POLICY_ACTIVE"),
+                "Turn 1 egress request must not contain overlay before commitment"
+            );
+        }
+        // Prepared outbound payload assertion
+        let payload = store
+            .get_turn_mutated_payload(&t.id)
+            .unwrap()
+            .or_else(|| store.get_turn_raw_payload(&t.id).unwrap())
+            .expect("Turn 1 payload recorded in store");
+        assert!(
+            !serde_json::to_string(&payload)
+                .unwrap()
+                .contains("CW112_POLICY_ACTIVE"),
+            "Turn 1 prepared outbound request must not contain overlay before commitment"
+        );
+    }
 
     // Commit overlay mutation on live session
     store
@@ -3226,10 +3266,12 @@ async fn test_live_continuation_real_codex_multiturn() {
                 "exec",
                 "resume",
                 "--json",
-                "-c",
-                "ask_for_approval=\"never\"",
                 "--skip-git-repo-check",
                 "--ignore-user-config",
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
             ]);
             cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
                 proxy_port,
@@ -3240,6 +3282,7 @@ async fn test_live_continuation_real_codex_multiturn() {
                 &thread_id,
                 "Add a function multiply(a, b) that returns a * b to calculator.py.",
             ]);
+            cmd.stdin(std::process::Stdio::null());
             cmd.env("OPENAI_API_KEY", api_key);
             cmd.env("CODEX_HOME", &temp_home_clone);
             cmd.env("CW_SESSION_ID", sid);
@@ -3267,6 +3310,47 @@ async fn test_live_continuation_real_codex_multiturn() {
         "Native thread ID must match across live resume"
     );
 
+    // Correlate and verify all model requests generated during Turn 2 invocation
+    let count_before_turn2 = all_turns_after_turn1.len();
+    let all_turns_after_turn2 = store.list_turns(session_id).unwrap();
+    let turn2_turns = all_turns_after_turn2[count_before_turn2..].to_vec();
+    assert!(
+        !turn2_turns.is_empty(),
+        "Expected at least one model turn recorded for live Codex Turn 2"
+    );
+    for t in &turn2_turns {
+        assert_eq!(
+            t.outcome.as_deref(),
+            Some("completed"),
+            "Turn 2 provider request must complete successfully at egress"
+        );
+        assert!(
+            t.observed_usage.is_some(),
+            "Turn 2 must record provider-returned token usage"
+        );
+        // Egress wire byte assertion: proves the bytes were actually transmitted to upstream
+        let egress = store
+            .get_wire_egress(&t.id)
+            .unwrap()
+            .expect("Turn 2 wire egress must be captured at forwarding boundary");
+        let egress_str = String::from_utf8_lossy(&egress);
+        assert!(
+            egress_str.contains("CW112_POLICY_ACTIVE"),
+            "Turn 2 egress request sent to provider must contain committed overlay"
+        );
+        // Prepared outbound payload assertion
+        let payload = store
+            .get_turn_mutated_payload(&t.id)
+            .unwrap()
+            .expect("Turn 2 mutated outbound payload recorded in store");
+        assert!(
+            serde_json::to_string(&payload)
+                .unwrap()
+                .contains("CW112_POLICY_ACTIVE"),
+            "Turn 2 prepared outbound request must contain committed overlay"
+        );
+    }
+
     // Turn 3: Second Native Resume to create and run tests
     let output3 = tokio::task::spawn_blocking({
         let codex_bin = codex_bin.clone();
@@ -3283,10 +3367,12 @@ async fn test_live_continuation_real_codex_multiturn() {
                 "exec",
                 "resume",
                 "--json",
-                "-c",
-                "ask_for_approval=\"never\"",
                 "--skip-git-repo-check",
                 "--ignore-user-config",
+                "-c",
+                "approval_policy=\"never\"",
+                "-c",
+                "sandbox_mode=\"workspace-write\"",
             ]);
             cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
                 proxy_port,
@@ -3297,6 +3383,7 @@ async fn test_live_continuation_real_codex_multiturn() {
                 &thread_id,
                 "Create a test file test_calculator.py with unit tests for add and multiply, and run python3 test_calculator.py.",
             ]);
+            cmd.stdin(std::process::Stdio::null());
             cmd.env("OPENAI_API_KEY", api_key);
             cmd.env("CODEX_HOME", &temp_home_clone);
             cmd.env("CW_SESSION_ID", sid);
@@ -3323,6 +3410,47 @@ async fn test_live_continuation_real_codex_multiturn() {
         thread_id_3, thread_id,
         "Native thread ID must match across second live resume"
     );
+
+    // Correlate and verify all model requests generated during Turn 3 invocation
+    let count_before_turn3 = all_turns_after_turn2.len();
+    let all_turns_after_turn3 = store.list_turns(session_id).unwrap();
+    let turn3_turns = all_turns_after_turn3[count_before_turn3..].to_vec();
+    assert!(
+        !turn3_turns.is_empty(),
+        "Expected at least one model turn recorded for live Codex Turn 3"
+    );
+    for t in &turn3_turns {
+        assert_eq!(
+            t.outcome.as_deref(),
+            Some("completed"),
+            "Turn 3 provider request must complete successfully at egress"
+        );
+        assert!(
+            t.observed_usage.is_some(),
+            "Turn 3 must record provider-returned token usage"
+        );
+        // Egress wire byte assertion: proves the bytes were actually transmitted to upstream
+        let egress = store
+            .get_wire_egress(&t.id)
+            .unwrap()
+            .expect("Turn 3 wire egress must be captured at forwarding boundary");
+        let egress_str = String::from_utf8_lossy(&egress);
+        assert!(
+            egress_str.contains("CW112_POLICY_ACTIVE"),
+            "Turn 3 egress request sent to provider must retain committed overlay across resume"
+        );
+        // Prepared outbound payload assertion
+        let payload = store
+            .get_turn_mutated_payload(&t.id)
+            .unwrap()
+            .expect("Turn 3 mutated outbound payload recorded in store");
+        assert!(
+            serde_json::to_string(&payload)
+                .unwrap()
+                .contains("CW112_POLICY_ACTIVE"),
+            "Turn 3 prepared outbound request must retain committed overlay across resume"
+        );
+    }
 
     // Verify on-disk rollout files are valid JSONL and do not contain injected overlay
     let rollouts = find_rollout_files(&temp_home.join("sessions"));
@@ -3363,41 +3491,6 @@ async fn test_live_continuation_real_codex_multiturn() {
         turns.len() >= 3,
         "Expected at least 3 turns recorded for live codex session, got {}",
         turns.len()
-    );
-
-    // Explicitly assert that the committed overlay reached the actual provider-bound outbound request
-    let turn1_payload = store
-        .get_turn_mutated_payload(&turns[0].id)
-        .unwrap()
-        .or_else(|| store.get_turn_raw_payload(&turns[0].id).unwrap())
-        .expect("Turn 1 payload recorded in store");
-    assert!(
-        !serde_json::to_string(&turn1_payload)
-            .unwrap()
-            .contains("CW112_POLICY_ACTIVE"),
-        "Turn 1 outbound request should not contain overlay before commitment"
-    );
-
-    let turn2_payload = store
-        .get_turn_mutated_payload(&turns[1].id)
-        .unwrap()
-        .expect("Turn 2 mutated outbound payload recorded in store");
-    assert!(
-        serde_json::to_string(&turn2_payload)
-            .unwrap()
-            .contains("CW112_POLICY_ACTIVE"),
-        "Turn 2 outbound request to live provider must contain committed overlay"
-    );
-
-    let turn3_payload = store
-        .get_turn_mutated_payload(&turns[2].id)
-        .unwrap()
-        .expect("Turn 3 mutated outbound payload recorded in store");
-    assert!(
-        serde_json::to_string(&turn3_payload)
-            .unwrap()
-            .contains("CW112_POLICY_ACTIVE"),
-        "Turn 3 outbound request to live provider must retain committed overlay across resume"
     );
 }
 

@@ -169,8 +169,13 @@ Once spend authorization and budget are confirmed:
 CW_QUALIFY_REAL_CODEX=1 OPENAI_API_KEY="sk-..." cargo test -p cw-proxy --test qualification test_live_continuation_real_codex_multiturn -- --ignored --nocapture
 ```
 This test runs a real 3-turn native session resume (`codex exec` followed by two `codex exec resume <thread_id>` invocations) with `gpt-4o-mini` through the live ContextWatcher proxy:
-- Runs in an isolated workspace with `-s workspace-write --approve-for-me` and `-c ask_for_approval="never"`.
-- Uses `store.get_turn_mutated_payload` to verify that the committed overlay reaches the actual outbound provider request on Turns 2 and 3.
+- Configures consistent, verified sandbox/approval flags across all 3 turns without argument conflicts:
+  `-c approval_policy="never" -c sandbox_mode="workspace-write"`
+- Slices and correlates all model turns generated during each invocation snapshot rather than assuming naive 1-to-1 positional turn indices (`turns[0]`, `turns[1]`, `turns[2]`).
+- Evaluates three distinct levels of verification evidence:
+  1. **Configured:** Codex is instructed to route through ContextWatcher with explicit workspace isolation and non-interactive execution.
+  2. **Locally Observed (Prepared):** `store.get_turn_mutated_payload(&turn.id)` verifies that ContextWatcher's mutation overlay engine successfully generated and persisted the transformed payload containing the committed overlay.
+  3. **Observed at Egress & Provider Acceptance:** `store.get_wire_egress(&turn.id)` captures the actual outbound wire bytes at the HTTP forwarding boundary right before network transmission. Provider acceptance and execution are confirmed by `turn.outcome == "completed"`, `turn.latency_ms > 0`, and provider-returned token usage metrics recorded in `turn.observed_usage`.
 
 ---
 

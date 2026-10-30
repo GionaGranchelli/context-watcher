@@ -284,4 +284,14 @@ fn wire_requests_are_immutable_and_blob_storage_is_content_addressed() {
         Some(&wire_bytes[..]),
         "Wire requests must be immutable once written"
     );
+
+    // 3. Wire egress: actual outbound bytes recorded at forwarding boundary
+    let egress_bytes = b"{\"model\":\"mock\",\"stream\":false,\"overlay_active\":true}";
+    store.save_wire_egress("turn_wire_1", egress_bytes).unwrap();
+    let saved_egress = store.get_wire_egress("turn_wire_1").unwrap();
+    assert_eq!(
+        saved_egress.as_deref(),
+        Some(&egress_bytes[..]),
+        "Wire egress bytes must be captured at forwarding boundary"
+    );
 }

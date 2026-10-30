@@ -61,25 +61,26 @@ flowchart TD
 During any refactoring in CW-116B and CW-116C, the following six invariants must be preserved:
 
 ### Invariant 1: Zero-Drop Wire Transparency & Provider-Specific Field Preservation
-In passthrough mode or when no mutations apply, the proxy must never alter or drop provider-specific fields (e.g., `model`, `temperature`, `response_format`), reasoning blocks, Anthropic `signature` in thinking events, or Gemini `thoughtSignature`. Raw byte fidelity is verified by [`test_core_contract_ac5_signed_request_byte_for_byte_fidelity`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L700-L755) and [`contract_proxy_routing_and_fallback_provider_selection`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/characterization_contracts.rs#L250-L325).
+In passthrough mode or when no mutations apply, the proxy must never alter or drop provider-specific fields (e.g., `model`, `temperature`, `response_format`), reasoning blocks, Anthropic `signature` in thinking events, or Gemini `thoughtSignature`. Raw byte fidelity is verified by [`test_core_contract_ac5_signed_request_byte_for_byte_fidelity`](../crates/cw-proxy/tests/qualification.rs) and [`contract_proxy_routing_and_fallback_provider_selection`](../crates/cw-proxy/tests/characterization_contracts.rs).
 
 ### Invariant 2: Strict Credential Stripping & Tool Sandboxing
 - Internal headers (`x-cw-session-id`, `x-cw-control-token`, `x-cw-workspace`, `x-cw-dry-run`) are stripped before any request reaches upstream model endpoints.
-- Non-Codex harnesses wrapped via `cw wrap` have `CW_CONTROL_TOKEN` and `CW_CONTROL_TOKEN_FILE` removed from their environment, preventing untrusted model-invoked shell commands from accessing the local control daemon.
+- Non-Codex, non-Hermes harnesses wrapped via `cw wrap` have `CW_CONTROL_TOKEN` and `CW_CONTROL_TOKEN_FILE` removed from their environment, preventing untrusted model-invoked shell commands from accessing the local control daemon.
 - Codex CLI excludes `CW_CONTROL_TOKEN` from subshells via native configuration (`shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"`).
+- **Hermes Exception & Same-User Trust Limitation:** `cw wrap hermes` explicitly sets `CW_CONTROL_TOKEN_FILE` pointing to `~/.local/share/context-watcher/control-token` so the Hermes gateway middleware can authenticate loopback proxy requests against `/api/v1/sessions/:id/transform`. Under Linux/POSIX architecture, any shell command or tool process executed by Hermes under the same user UID also has local filesystem read access to `~/.local/share/context-watcher/control-token` (file mode `0600`). Strong credential isolation against model-invoked tool executions cannot be achieved solely via environment variable filtering; it requires OS-level process isolation (e.g., Bubblewrap, Docker/Podman containers, or Hermes native sandbox modes).
 - Hermes uses temporary UUID-scoped handoff files (`hermes-override-<uuid>.json`) created with mode `0600` and unlinked atomically upon first consumption.
 
 ### Invariant 3: Pristine Source Transcripts & Immutability
-On-disk session transcripts (`.jsonl`) and state databases (`hermes.db`, `opencode.db`) are treated as immutable source-of-truth records. In-memory proxy overlays and Context Transform responses never overwrite the harness's disk transcript in-place. Verified by [`test_core_contract_ac7_original_transcripts_untouched_bit_for_bit`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L850-L910).
+On-disk session transcripts (`.jsonl`) and state databases (`hermes.db`, `opencode.db`) are treated as immutable source-of-truth records. In-memory proxy overlays and Context Transform responses never overwrite the harness's disk transcript in-place. Verified by [`test_core_contract_ac7_original_transcripts_untouched_bit_for_bit`](../crates/cw-proxy/tests/qualification.rs).
 
 ### Invariant 4: Pre-Forward Validation Gate & Fail-Open Recovery
-If an active mutation (pruning, folding, or deduplication) invalidates protocol invariants (e.g., produces an orphan tool call ID or orphan tool result ID), the Pre-Forward Validation Gate catches the violation, emits a diagnostic warning, and automatically fails open by forwarding the unmutated original raw payload. Verified by [`test_core_contract_ac8_safe_recovery_and_validation_gate_fail_open`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L920-L990) and [`contract_transform_context_api_auth_validation_and_fail_open`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/characterization_contracts.rs#L60-L245).
+If an active mutation (pruning, folding, or deduplication) invalidates protocol invariants (e.g., produces an orphan tool call ID or orphan tool result ID), the Pre-Forward Validation Gate catches the violation, emits a diagnostic warning, and automatically fails open by forwarding the unmutated original raw payload. Verified by [`test_core_contract_ac8_safe_recovery_and_validation_gate_fail_open`](../crates/cw-proxy/tests/qualification.rs) and [`contract_transform_context_api_auth_validation_and_fail_open`](../crates/cw-proxy/tests/characterization_contracts.rs).
 
 ### Invariant 5: Protected User and System Prompts
-User prompts and system prompts are strictly immune from pointer-based or automated pruning and stubbing. Only completed, eligible tool outputs and thinking blocks can be compacted. Verified by [`user_and_system_prompts_are_never_pruned_or_stubbed_by_pointer`](file:///home/gionag/Development/contextWatcher/crates/cw-core/tests/safety_test.rs#L425-L485).
+User prompts and system prompts are strictly immune from pointer-based or automated pruning and stubbing. Only completed, eligible tool outputs and thinking blocks can be compacted. Verified by [`user_and_system_prompts_are_never_pruned_or_stubbed_by_pointer`](../crates/cw-core/tests/safety_test.rs).
 
 ### Invariant 6: Content-Addressed Blob Storage & Revision Integrity
-Raw payloads are deduplicated using BLAKE3 hashes in SQLite blob storage. Mutation state updates are revision-checked to prevent race conditions or overwriting concurrent turn updates. Verified by [`wire_requests_are_immutable_and_blob_storage_is_content_addressed`](file:///home/gionag/Development/contextWatcher/crates/cw-store/tests/safety.rs#L250-L285).
+Raw payloads are deduplicated using BLAKE3 hashes in SQLite blob storage. Mutation state updates are revision-checked to prevent race conditions or overwriting concurrent turn updates. Verified by [`wire_requests_are_immutable_and_blob_storage_is_content_addressed`](../crates/cw-store/tests/safety.rs).
 
 ---
 
@@ -168,16 +169,16 @@ crates/cw-harnesses/src/
 ```
 
 #### Protective Contracts for CW-116B
-- [`wrap_tests::codex_wrapper_uses_proxy_provider_and_environment_backed_headers`](file:///home/gionag/Development/contextWatcher/crates/cw-cli/src/main.rs#L3064-L3073)
-- [`wrap_tests::wrapper_removes_cw_credentials_from_harness_environment`](file:///home/gionag/Development/contextWatcher/crates/cw-cli/src/main.rs#L3046-L3060)
-- [`wrap_tests::regression_test_override_file_cleanup_on_normal_exit_without_consumption`](file:///home/gionag/Development/contextWatcher/crates/cw-cli/src/main.rs#L3076-L3095)
-- [`wrap_tests::regression_test_override_file_cleanup_on_write_failure`](file:///home/gionag/Development/contextWatcher/crates/cw-cli/src/main.rs#L3098-L3123)
-- [`wrap_tests::init_dry_run_leaves_filesystem_and_systemd_untouched`](file:///home/gionag/Development/contextWatcher/crates/cw-cli/src/main.rs#L3148-L3153)
-- [`wrap_tests::session_id_validation_contract`](file:///home/gionag/Development/contextWatcher/crates/cw-cli/src/main.rs#L3184-L3199)
-- [`wrap_tests::header_stripping_preserves_complex_non_cw_headers`](file:///home/gionag/Development/contextWatcher/crates/cw-cli/src/main.rs#L3155-L3171)
-- [`test_harness_binary_codex_cli_multiturn_overlay_reapplication`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L1200-L1300)
-- [`test_harness_binary_omp_native_runtime_overlay_reapplication`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L1310-L1400)
-- [`test_harness_binary_hermes_middleware_session_binding`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L1410-L1580)
+- [`wrap_tests::codex_wrapper_uses_proxy_provider_and_environment_backed_headers`](../crates/cw-cli/src/main.rs)
+- [`wrap_tests::wrapper_removes_cw_credentials_from_harness_environment`](../crates/cw-cli/src/main.rs)
+- [`wrap_tests::regression_test_override_file_cleanup_on_normal_exit_without_consumption`](../crates/cw-cli/src/main.rs)
+- [`wrap_tests::regression_test_override_file_cleanup_on_write_failure`](../crates/cw-cli/src/main.rs)
+- [`init_dry_run_leaves_filesystem_and_systemd_untouched`](../crates/cw-cli/tests/init_characterization.rs)
+- [`wrap_tests::session_id_validation_contract`](../crates/cw-cli/src/main.rs)
+- [`wrap_tests::header_stripping_preserves_complex_non_cw_headers`](../crates/cw-cli/src/main.rs)
+- [`test_harness_binary_codex_cli_multiturn_overlay_reapplication`](../crates/cw-proxy/tests/qualification.rs)
+- [`test_harness_binary_omp_native_runtime_overlay_reapplication`](../crates/cw-proxy/tests/qualification.rs)
+- [`test_harness_binary_hermes_middleware_session_binding`](../crates/cw-proxy/tests/qualification.rs)
 - `python3 plugins/hermes/context-watcher/test_plugin.py`
 
 ---
@@ -209,16 +210,16 @@ crates/cw-proxy/src/
 ```
 
 #### Protective Contracts for CW-116C
-- [`contract_transform_context_api_auth_validation_and_fail_open`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/characterization_contracts.rs#L40-L245)
-- [`contract_proxy_routing_and_fallback_provider_selection`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/characterization_contracts.rs#L250-L325)
-- [`contract_proxy_strips_internal_cw_headers_before_forwarding`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/characterization_contracts.rs#L330-L390)
-- [`contract_proxy_dry_run_preview_never_calls_upstream`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/characterization_contracts.rs#L395-L440)
-- [`contract_unauthenticated_request_generates_synthetic_session`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/characterization_contracts.rs#L445-L485)
-- [`contract_sse_streaming_chunk_accumulator_and_cached_tokens`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/characterization_contracts.rs#L490-L525)
-- [`test_core_contract_ac1_session_identity_and_binding`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L368-L442)
-- [`test_core_contract_ac2_committed_overlay_on_next_model_request`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L445-L520)
-- [`test_core_contract_ac4_tool_call_result_pairing_preserved_under_active_mutation`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L600-L690)
-- [`test_core_contract_ac8_safe_recovery_and_validation_gate_fail_open`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs#L920-L990)
+- [`contract_transform_context_api_auth_validation_and_fail_open`](../crates/cw-proxy/tests/characterization_contracts.rs)
+- [`contract_proxy_routing_and_fallback_provider_selection`](../crates/cw-proxy/tests/characterization_contracts.rs)
+- [`contract_proxy_strips_internal_cw_headers_before_forwarding`](../crates/cw-proxy/tests/characterization_contracts.rs)
+- [`contract_proxy_dry_run_preview_never_calls_upstream`](../crates/cw-proxy/tests/characterization_contracts.rs)
+- [`contract_unauthenticated_request_generates_synthetic_session`](../crates/cw-proxy/tests/characterization_contracts.rs)
+- [`contract_sse_streaming_chunk_accumulator_and_cached_tokens`](../crates/cw-proxy/tests/characterization_contracts.rs)
+- [`test_core_contract_ac1_session_identity_and_binding`](../crates/cw-proxy/tests/qualification.rs)
+- [`test_core_contract_ac2_committed_overlay_on_next_model_request`](../crates/cw-proxy/tests/qualification.rs)
+- [`test_core_contract_ac4_tool_call_result_pairing_preserved_under_active_mutation`](../crates/cw-proxy/tests/qualification.rs)
+- [`test_core_contract_ac8_safe_recovery_and_validation_gate_fail_open`](../crates/cw-proxy/tests/qualification.rs)
 
 ---
 

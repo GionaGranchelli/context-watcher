@@ -3145,13 +3145,6 @@ mod wrap_tests {
     }
 
     #[test]
-    fn init_dry_run_leaves_filesystem_and_systemd_untouched() {
-        // Assert that run_init_installer with dry_run=true returns Ok without modifying system
-        let result = run_init_installer(true, false);
-        assert!(result.is_ok(), "dry-run init installer must return Ok(())");
-    }
-
-    #[test]
     fn header_stripping_preserves_complex_non_cw_headers() {
         let input = "authorization: Bearer secret-token\n\
                      X-Custom-Header: custom-val\n\

@@ -354,6 +354,7 @@ async fn contract_proxy_strips_internal_cw_headers_before_forwarding() {
         .header("x-cw-session-id", session_id)
         .header("x-cw-control-token", &token)
         .header("x-cw-workspace", "/home/user/project")
+        .header("x-cw-test-private", "arbitrary-private-header")
         .body(Body::from(
             json!({
                 "model": "gpt-4o",
@@ -394,6 +395,10 @@ async fn contract_proxy_strips_internal_cw_headers_before_forwarding() {
     assert!(
         upstream_headers.get("x-cw-workspace").is_none(),
         "x-cw-workspace leaked to upstream"
+    );
+    assert!(
+        upstream_headers.get("x-cw-test-private").is_none(),
+        "generic x-cw-* header leaked to upstream"
     );
 }
 
@@ -464,16 +469,25 @@ async fn contract_unauthenticated_request_generates_synthetic_session() {
         "model": "gpt-4o",
         "messages": [{"role": "user", "content": "unauthenticated observation prompt"}]
     });
+    let raw_payload_bytes = payload.to_string().into_bytes();
     let req = Request::builder()
         .method("POST")
         .uri("/openai/v1/chat/completions")
         .header("host", "127.0.0.1")
         .header("content-type", "application/json")
-        .body(Body::from(payload.to_string()))
+        .body(Body::from(raw_payload_bytes.clone()))
         .unwrap();
 
     let resp = proxy_app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+
+    // Verify observation transparency: upstream received byte-for-byte exact unmutated request payload
+    let captured = mock.captured.lock().unwrap();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(
+        captured[0].body, raw_payload_bytes,
+        "Upstream must receive byte-for-byte exact unmutated request payload"
+    );
 
     // Verify synthetic session was created in CwStore starting with 'sess_'
     let sessions = store.list_sessions().unwrap();
@@ -507,10 +521,22 @@ async fn contract_sse_streaming_chunk_accumulator_and_cached_tokens() {
     let cached1 = accumulator.push_chunk(chunk1);
     assert_eq!(cached1, None);
 
-    // Chunk 2: Fragmented chunk containing prompt_tokens_details.cached_tokens
-    let chunk2 = b"data: {\"id\":\"gen_1\",\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":25,\"prompt_tokens_details\":{\"cached_tokens\":80}}}\n\n";
-    let cached2 = accumulator.push_chunk(chunk2);
-    assert_eq!(cached2, Some(80));
+    // Chunk 2a: Partial packet split across TCP boundary (incomplete line without \n)
+    let chunk2a = b"data: {\"id\":\"gen_1\",\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":25,\"prompt_tokens_details\":{\"cached_";
+    let cached2a = accumulator.push_chunk(chunk2a);
+    assert_eq!(
+        cached2a, None,
+        "Accumulator must not report tokens until line boundary is received"
+    );
+
+    // Chunk 2b: Remainder of packet completing the SSE event
+    let chunk2b = b"tokens\":80}}}\n\n";
+    let cached2b = accumulator.push_chunk(chunk2b);
+    assert_eq!(
+        cached2b,
+        Some(80),
+        "Accumulator must parse cached tokens once complete line boundary is assembled"
+    );
 
     // Chunk 3: DONE sentinel
     let chunk3 = b"data: [DONE]\n\n";

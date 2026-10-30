@@ -477,9 +477,6 @@ impl CwStore {
 
     pub fn get_wire_request(&self, turn_id: &str) -> Result<Option<Vec<u8>>, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS wire_requests (turn_id TEXT PRIMARY KEY, body BLOB NOT NULL)",
-        )?;
         let raw: Option<Vec<u8>> = conn
             .query_row(
                 "SELECT body FROM wire_requests WHERE turn_id = ?1",

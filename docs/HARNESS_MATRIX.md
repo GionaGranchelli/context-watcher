@@ -203,7 +203,7 @@ Captured from `test_harness_binary_omp_native_runtime_overlay_reapplication`:
 
 ## 6. Reproducible Qualification Suite Runner
 
-The qualification suite is implemented in [`crates/cw-proxy/tests/qualification.rs`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/tests/qualification.rs) and organized into three test suites:
+The qualification suite is implemented in [`crates/cw-proxy/tests/qualification.rs`](../crates/cw-proxy/tests/qualification.rs) and organized into three test suites:
 
 ### Suite A: Core Proxy & IR Invariant Tests (CI Default)
 Runs in standard CI environments without requiring harness binaries or cloud API keys:

@@ -3,6 +3,8 @@
 > **Legend:** `P0` = Critical Path | `P1` = Core Feature | `P2` = Enhancement
 > **Workflow:** Move items across `Ready` $\to$ `In Progress` $\to$ `Review` $\to$ `Done`. Always reference ticket IDs (`CW-XXX`) in commits and PRs.
 
+> **Current delivery priority after CW-113:** CW-116A characterization and contracts, then CW-116B CLI/harness decomposition, then CW-116C proxy/transformation boundaries. Resume CW-112, followed by CW-114 and CW-115, after this maintainability gate. One scoped PR per subtask.
+
 ---
 
 ## Historical implementation milestones
@@ -197,33 +199,67 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-100** Verified context optimization milestone | Done | Milestone addressing logic risk remediation, claims reconciliation, and focused end-to-end qualification foundation. |
 | **CW-101** Cache telemetry uncertainty & prefix safety | Done | Centralized `calculate_kv_break_tokens` across optimizer and mutation estimator; redefined `min` (`cache_safe_boost`) as strictly prefix-preserving (zero historical prefix modification to guarantee next-request cache reuse); added regression tests covering 0, partial, and unknown telemetry across consecutive requests. |
 | **CW-102** Claims reconciliation in EVIDENCE.md & README.md | Done | Separate static AST bloat opportunity (278 sessions, 14.33M tok) from active live proxy savings (153.8k tok, $2.10 saved). Differentiate theoretical prefill models, local GPU benchmarks, and cloud TTFT nuance. |
-| **CW-103** Focused qualification: Codex CLI & Hermes Agent | In Progress | Mock Responses & Chat Completions proxy verified. Codex CLI harness binary verified for multi-turn overlay reapplication. Hermes Agent verified for single-session middleware binding (concurrency collision tracked in CW-113). Live multi-turn cloud provider qualification tracked in CW-112. |
+| **CW-103** Focused qualification: Codex CLI & Hermes Agent | Paused for CW-116 | Mock-provider and harness-binary qualification exist. Hermes concurrency is completed in CW-113; resume real-provider work through CW-112 after the maintainability gate. |
 | **CW-104** Hardware & local model qualification | Backlog | Differentiate PagedAttention memory footprint modeling from cloud provider KV caching, document slot bridge limitations, and benchmark local Ollama/llama.cpp engines. |
 | **CW-110** Shared harness qualification runner | Done | Automated qualification test suite in `crates/cw-proxy/tests/qualification.rs` covering all 10 acceptance criteria across mock Responses, Chat Completions, and Messages upstreams; documented baseline support matrix and blockers in `docs/HARNESS_MATRIX.md`. |
 | **CW-110A** Qualification evidence hardening | Done | Completely separated qualification suite into Suite A (CI default contract tests), Suite B (harness binary integration requiring installed binaries and failing explicitly if absent), and Suite C (live provider continuation). Hardened AC4 (active mutation tool-pairing), AC5 (byte-for-byte & JSON-tree thinking signature fidelity), AC6 (tool env sandboxing), AC7 (BLAKE3 bit-for-bit transcript preservation), AC8 (Validation Gate fail-open), and AC10 (un-fabricated cache status reconciliation). |
 | **CW-111** OMP native runtime integration | Done | Replaced command-only extension with native runtime `context` and `before_provider_request` hooks and `/api/v1/sessions/:id/transform` endpoint; automated test (`test_harness_binary_omp_native_runtime_overlay_reapplication`) proved active overlay injection on Turn 2 wire payload while on-disk `.jsonl` transcript remained 100% immutable. |
 | **CW-111B** OMP native runtime hardening | Done | Eliminated control token from `models.json` and deleted unsafe helper; purged `CW_CONTROL_TOKEN` from `process.env` in memory on startup; enforced loopback-only URLs on `CW_DAEMON_URL`; prioritized native session ID to eliminate cross-session binding under switching; replaced time/length heuristics with reference-based WeakSet idempotency; hardened `PruneOrStub` safety to strictly forbid pointer-only user/system prompt modification; verified 3-turn native resume (`omp -r <uuid>`), wire pinning, on-disk transcript preservation, and offline fail-open recovery. |
-| **CW-112** Codex CLI multi-turn qualification | Ready | Multi-turn coding sessions and session resume (`codex resume <id>`) verification with committed overlays against live Responses provider. |
+| **CW-112** Codex CLI multi-turn qualification | Deferred until CW-116C | Multi-turn coding sessions and native resume against a live Responses provider, after the maintainability campaign. |
 | **CW-113** Hermes Agent lifecycle hardening | Done | Replaced shared override file with UUID-scoped `hermes-override-<uuid>.json` (mode 0600, atomic `create_new`); middleware validates non-symlink, mode 0600, age <= 120s, and atomically unlinks on consumption; gateway daemon session isolation in `_SESSION_OVERRIDES`; passed 7-gate multi-process qualification and 20-session stress test. |
 | **CW-114** Long-session reliability campaign | Backlog | Unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families, 3 repetitions per harness. |
 | **CW-115** Performance and savings qualification | Backlog | Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims. |
+| **CW-116** Architecture consolidation & maintainability | Planned (P0) | Three bounded, behavior-preserving PRs: CW-116A characterization/contracts, CW-116B CLI/harness modularization, CW-116C proxy/transformation boundaries. No feature expansion. |
+| **CW-116A** Characterization tests & architecture contracts | Ready (next, P0) | Freeze behavior and document dependency/call graphs, safety boundaries, module hotspots, test isolation and evidence. Deliver regression contracts and a reproducible baseline; no production refactoring. |
+| **CW-116B** CLI & harness architecture | Backlog, after CW-116A (P0) | Incrementally split CLI and harness lifecycle responsibilities into cohesive modules with minimal contracts. Preserve CLI, environment, auth, session behavior and installation side effects. |
+| **CW-116C** Proxy & transformation boundaries | Backlog, after CW-116B (P0) | Separate routing, auth, provider forwarding, mutation orchestration and telemetry while preserving raw passthrough, signed content and safety decisions. |
+
+---
+
+### Epic 16: Architecture consolidation and maintainability (CW-116)
+
+**Why now:** CW-111B and CW-113 strengthened runtime behavior and isolation, but large CLI, harness, proxy, store and normalizer modules increase the effort and risk of later changes. Stabilize responsibilities before CW-112/CW-114/CW-115.
+
+**CW-116A — Characterization and contracts (first PR; branch: feat/cw-116a-characterization-contracts)**
+- Inventory actual crate dependencies, call flows, configuration side effects, high-risk modules, responsibility ownership and unwanted dependency directions. Use current code and the verified compatibility/support matrix rather than historical claims.
+- Deliver docs/CW-116A-BASELINE.md (or equivalent) with module/change-hotspot inventory, architecture map, test/CI coverage, unverified areas, and proposed seams for CW-116B/C.
+- Add focused characterization/regression tests for *existing* CLI behavior; authenticated vs observation-only session binding; provider-transparent and signed/unknown passthrough; mutation eligibility and validation; original transcript safety; and error/fail-open behavior.
+- Test with isolated HOME/config directories, ports, stores and subprocesses. Do not modify real Hermes configuration, user transcripts, installed harness settings or running services. Keep ignored harness-binary and live-provider tests explicitly opt-in; a skip is not a pass.
+- Record reproducible commands and exact baseline revision, CI/default vs optional test results, and limits. Reuse production code instead of copying cleanup guards, parsers or auth checks into tests.
+- **Exit:** no intentional runtime behavior changes; existing tests continue passing, new characterization tests pass, evidence and limitations are documented, and CW-116B/C can proceed in small independent PRs. Do not mark Done based on documentation alone.
+
+**CW-116B — CLI and harness modularization (second PR)**
+- Extract command, harness launch, configuration/install and cleanup responsibilities from the large CLI and harness modules into cohesive units. Define only contracts proven necessary for existing Codex, Hermes and OMP flows.
+- Preserve public CLI, environment/auth, session identity, installer behavior and all CW-116A contracts. Avoid speculative universal plugin infrastructure.
+
+**CW-116C — Proxy and transformation boundaries (third PR)**
+- Isolate API routing, authentication/session selection, provider forwarding/streaming, mutation orchestration/validation and telemetry responsibilities. Keep mutation policy in cw-core.
+- Preserve provider wire bytes, SSE ordering, signed/unknown payloads, mutation decisions and existing API contracts. Require specific safety/regression evidence for each moved boundary.
+
+**Non-goals:** new providers or harnesses, new optimizer strategies, performance tuning, cross-crate rewrites, arbitrary line-count targets, schema migrations or broad store/normalizer rework without an evidenced blocker.
+
+**Sequence:** CW-116A -> CW-116B -> CW-116C -> CW-112 -> CW-114 -> CW-115. Each subtask gets its own PR, test evidence and board transition.
 
 ---
 
 ## 🚧 In Progress
 
-* **CW-103** Focused qualification: Codex CLI & Hermes Agent (multi-turn real provider qualification & concurrency hardening).
+* No active implementation milestone. CW-113 is merged; begin **CW-116A** next.
 
 ## 📋 Ready
 
-* **CW-112** Codex CLI multi-turn qualification and session resume.
+* **CW-116A** Characterization tests and architectural contracts — **next task**. Start feat/cw-116a-characterization-contracts after this board update lands.
 
 ---
 
-## 🗂️ Backlog
+## 🗂️ Backlog (ordered)
 
-* **CW-114** Long-session reliability campaign (three harnesses passing the same acceptance suite).
+* **CW-116B** CLI and harness lifecycle modularization (after CW-116A).
+* **CW-116C** Proxy and transformation boundaries (after CW-116B).
+* **CW-112** Codex CLI real-provider multi-turn and native resume qualification (after CW-116C).
+* **CW-103** Resume broader Codex/Hermes qualification through CW-112; Hermes concurrency is completed.
+* **CW-114** Long-session reliability (same acceptance suite for three harnesses).
 * **CW-115** Performance and savings qualification (measured baseline vs optimized execution).
-* **CW-104** Hardware and local model qualification (PagedAttention memory modeling vs. cloud provider caching).
-* **CW-R11** Qualify bounded IO and session pagination against a large history fixture.
-* **CW-R12** Extend task-family and provider qualification before making broader quality or performance claims.
+* **CW-104** Hardware and local model qualification.
+* **CW-R11** Large-history IO and pagination qualification.
+* **CW-R12** Broader task-family and provider qualification.

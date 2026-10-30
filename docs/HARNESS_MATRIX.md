@@ -21,7 +21,7 @@ Every harness integration is categorized according to four qualification tiers:
 
 | Harness | Core Proxy Verified | Harness Binary Verified | Real-Provider Verified | Live Optimization Status | Active Blocker / Target |
 |---|:---:|:---:|:---:|:---:|---|
-| **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (Multi-turn) | 🟡 Opt-in Suite C | 🟢 Supported (Responses API) | CW-112 (Real-provider qualification & resume) |
+| **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (3-Turn Native Resume & Overlays) | 🟡 Opt-in Suite C (Blocked without spend ceiling) | 🟢 Supported (Responses API) | Qualified in CW-112 |
 | **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume & concurrency hardened) | 🟡 Opt-in Suite C | 🟢 Supported (OpenAI / DeepSeek middleware) | CW-112 (Live provider continuation) |
 | **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | CW-114 (Long-session reliability campaign) |
 
@@ -47,7 +47,7 @@ Every harness integration is categorized according to four qualification tiers:
 ## 4. Per-Harness Architecture & Verified Baselines
 
 ### 4.1 Codex CLI (`0.165.0`) — Reference Implementation
-* **Status:** **Harness Binary Verified** · Ready for CW-112 (Real-Provider Qualification).
+* **Status:** **Harness Binary Verified (3-Turn Native Resume & Overlays Qualified)** · Completed in CW-112 (see [docs/CW-112-CODEX-QUALIFICATION.md](docs/CW-112-CODEX-QUALIFICATION.md)).
 * **Wire Protocol:** OpenAI Responses API (`/openai/v1/responses`) with streaming Server-Sent Events (`text/event-stream`).
 * **Session Transport:** Native provider config arguments:
   ```toml
@@ -58,18 +58,20 @@ Every harness integration is categorized according to four qualification tiers:
   shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"
   ```
 * **Verified Evidence:**
-  - `test_harness_binary_codex_cli_multiturn_overlay_reapplication`:
-    - Turn 1 executed via `codex exec` with session ID `codex_multiturn_qual_sess`.
-    - Active `PinContext` mutation committed to CwStore.
-    - Turn 2 executed with same session ID. ContextWatcher proxy intercepted turn 2, injected pinned context into the Responses `input` array.
-    - Upstream mock captured request and returned streaming response.
-    - Codex exited with status code 0.
-  - Inbound `x-cw-control-token` stripped prior to upstream forwarding.
+  - `test_harness_binary_codex_cli_native_resume_three_turn_qualification`:
+    - Turn 1: `codex exec` starts persistent native thread (`thread.started`), writes `calculator.py` with `add` function via `exec_command`.
+    - Turn 2: `codex exec resume <thread_id>` resumes same thread UUID, ContextWatcher injects committed `CW112_POLICY_ACTIVE` overlay, tool appends `multiply`.
+    - Turn 3: Second native resume re-applies overlay across resume boundary, tool creates `test_calculator.py` and runs unit tests; verified exit code 0.
+    - Rollouts in `CODEX_HOME/sessions` verified as valid JSONL with 0 injected overlays (100% transcript immutability).
+  - `test_harness_binary_codex_cli_unknown_native_session_id_resume`: Resuming unknown UUID exits non-zero; daemon remains healthy.
+  - `test_harness_binary_codex_cli_unauthorized_token_rejection`: Invalid control token rejected with HTTP 401.
+  - `test_harness_binary_codex_cli_upstream_failure_handling`: Upstream 502 Bad Gateway handled with retry backoff; store uncorrupted.
+  - `test_harness_binary_codex_cli_session_isolation`: Session B isolated from Session A's active mutation overlay.
+  - Inbound `x-cw-control-token` and `x-cw-session-id` stripped prior to upstream forwarding.
   - Tool sandboxing: `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` guarantees that model-invoked shell commands inside Codex cannot read the control token.
-* **Remaining Work (CW-112):**
-  - Multi-turn real-provider continuation tests (`CW_QUALIFY_REAL_CODEX=1`).
-  - Session resume (`codex resume <id>`) verification with active overlays.
-  - Live model-invoked shell command execution asserting token inaccessibility.
+* **Live Qualification Status:**
+  - `test_live_continuation_real_codex_multiturn` implemented in Suite C.
+  - Gated on opt-in `CW_QUALIFY_REAL_CODEX=1` and spend budget authorization. Currently recorded as **LIVE QUALIFICATION BLOCKED** pending spend approval.
 
 ### 4.2 Hermes Agent (`0.22.5`) — Concurrency Hardened & Resume Verified
 * **Status:** **Harness Binary Verified (Multi-Turn Resume & Concurrency Hardened)** · Completed in CW-113.

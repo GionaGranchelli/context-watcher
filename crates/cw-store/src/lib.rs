@@ -651,6 +651,23 @@ impl CwStore {
         }
     }
 
+    pub fn get_turn_mutated_payload(&self, turn_id: &str) -> Result<Option<Value>, StoreError> {
+        let hash_opt: Option<String> = {
+            let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+            conn.query_row(
+                "SELECT mutated_request_hash FROM turns WHERE id = ?1",
+                params![turn_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten()
+        };
+        match hash_opt {
+            Some(h) => self.get_blob(&h),
+            None => Ok(None),
+        }
+    }
+
     pub fn get_turn(&self, turn_id: &str) -> Result<Option<ContextTurn>, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         let raw: Option<String> = conn

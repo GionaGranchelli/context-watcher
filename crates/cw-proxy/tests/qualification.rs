@@ -308,7 +308,7 @@ async fn handle_mock_responses(
             (
                 1,
                 "call_turn_1",
-                "python3 -c \"with open('calculator.py', 'w') as f: f.write('def add(a, b):\\n    return a + b\\n')\"",
+                "python3 -c \"import os; open('env_check.txt', 'w').write(os.environ.get('CW_CONTROL_TOKEN', 'ABSENT')); open('calculator.py', 'w').write('def add(a, b):\\n    return a + b\\n')\"",
                 "Created calculator.py with add function.",
             )
         };
@@ -1612,6 +1612,15 @@ async fn test_harness_binary_codex_cli_native_resume_three_turn_qualification() 
         "calculator.py must contain add function after Turn 1"
     );
 
+    // Verify credential sandboxing: tool command executed by Codex must NOT inherit CW_CONTROL_TOKEN
+    let env_check = std::fs::read_to_string(temp_workspace.join("env_check.txt"))
+        .expect("read env_check.txt written by model tool execution");
+    assert_eq!(
+        env_check.trim(),
+        "ABSENT",
+        "Model-invoked tool command inside Codex must NOT inherit CW_CONTROL_TOKEN"
+    );
+
     // Commit overlay mutation on the session after Turn 1
     f.store
         .save_mutation(&MutationRule {
@@ -1981,6 +1990,15 @@ async fn test_harness_binary_codex_cli_unauthorized_token_rejection() {
     assert!(
         !output.status.success(),
         "Codex should fail when proxy rejects unauthorized token"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stderr.contains("403")
+            || stdout.contains("403")
+            || stderr.contains("Forbidden")
+            || stdout.contains("Forbidden"),
+        "Expected HTTP 403 Forbidden on invalid control token, got stdout: '{stdout}', stderr: '{stderr}'"
     );
 }
 
@@ -3090,11 +3108,13 @@ import("{ext_js}").then(async (mod) => {{
 // =============================================================================
 
 #[tokio::test]
-#[ignore = "opt-in real Codex qualification; requires CW_QUALIFY_REAL_CODEX and OPENAI_API_KEY"]
+#[ignore = "opt-in real Codex qualification; requires CW_QUALIFY_REAL_CODEX=1 and OPENAI_API_KEY with authorized budget"]
 async fn test_live_continuation_real_codex_multiturn() {
-    if std::env::var("CW_QUALIFY_REAL_CODEX").is_err() {
-        eprintln!("SKIPPED: CW_QUALIFY_REAL_CODEX not set");
-        return;
+    let opt_in = std::env::var("CW_QUALIFY_REAL_CODEX").unwrap_or_default();
+    if opt_in != "1" {
+        panic!(
+            "SKIPPED: Live Codex qualification requires explicit opt-in with CW_QUALIFY_REAL_CODEX=1 and authorized live spend budget"
+        );
     }
     let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY required for live test");
     let codex_bin = require_installed_binary("codex");
@@ -3137,7 +3157,9 @@ async fn test_live_continuation_real_codex_multiturn() {
             cmd.args([
                 "exec",
                 "--json",
-                "--dangerously-bypass-approvals-and-sandbox",
+                "-s",
+                "workspace-write",
+                "--approve-for-me",
                 "--skip-git-repo-check",
                 "--ignore-user-config",
             ]);
@@ -3204,7 +3226,8 @@ async fn test_live_continuation_real_codex_multiturn() {
                 "exec",
                 "resume",
                 "--json",
-                "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                "ask_for_approval=\"never\"",
                 "--skip-git-repo-check",
                 "--ignore-user-config",
             ]);
@@ -3260,7 +3283,8 @@ async fn test_live_continuation_real_codex_multiturn() {
                 "exec",
                 "resume",
                 "--json",
-                "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                "ask_for_approval=\"never\"",
                 "--skip-git-repo-check",
                 "--ignore-user-config",
             ]);
@@ -3339,6 +3363,41 @@ async fn test_live_continuation_real_codex_multiturn() {
         turns.len() >= 3,
         "Expected at least 3 turns recorded for live codex session, got {}",
         turns.len()
+    );
+
+    // Explicitly assert that the committed overlay reached the actual provider-bound outbound request
+    let turn1_payload = store
+        .get_turn_mutated_payload(&turns[0].id)
+        .unwrap()
+        .or_else(|| store.get_turn_raw_payload(&turns[0].id).unwrap())
+        .expect("Turn 1 payload recorded in store");
+    assert!(
+        !serde_json::to_string(&turn1_payload)
+            .unwrap()
+            .contains("CW112_POLICY_ACTIVE"),
+        "Turn 1 outbound request should not contain overlay before commitment"
+    );
+
+    let turn2_payload = store
+        .get_turn_mutated_payload(&turns[1].id)
+        .unwrap()
+        .expect("Turn 2 mutated outbound payload recorded in store");
+    assert!(
+        serde_json::to_string(&turn2_payload)
+            .unwrap()
+            .contains("CW112_POLICY_ACTIVE"),
+        "Turn 2 outbound request to live provider must contain committed overlay"
+    );
+
+    let turn3_payload = store
+        .get_turn_mutated_payload(&turns[2].id)
+        .unwrap()
+        .expect("Turn 3 mutated outbound payload recorded in store");
+    assert!(
+        serde_json::to_string(&turn3_payload)
+            .unwrap()
+            .contains("CW112_POLICY_ACTIVE"),
+        "Turn 3 outbound request to live provider must retain committed overlay across resume"
     );
 }
 

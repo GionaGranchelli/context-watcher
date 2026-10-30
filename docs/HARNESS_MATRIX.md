@@ -47,7 +47,7 @@ Every harness integration is categorized according to four qualification tiers:
 ## 4. Per-Harness Architecture & Verified Baselines
 
 ### 4.1 Codex CLI (`0.165.0`) — Reference Implementation
-* **Status:** **Harness Binary Verified (3-Turn Native Resume & Overlays Qualified)** · Completed in CW-112 (see [docs/CW-112-CODEX-QUALIFICATION.md](docs/CW-112-CODEX-QUALIFICATION.md)).
+* **Status:** **Harness Binary Verified (3-Turn Native Resume & Overlays Qualified)** · Completed in CW-112 (see [CW-112-CODEX-QUALIFICATION.md](CW-112-CODEX-QUALIFICATION.md)).
 * **Wire Protocol:** OpenAI Responses API (`/openai/v1/responses`) with streaming Server-Sent Events (`text/event-stream`).
 * **Session Transport:** Native provider config arguments:
   ```toml
@@ -62,13 +62,13 @@ Every harness integration is categorized according to four qualification tiers:
     - Turn 1: `codex exec` starts persistent native thread (`thread.started`), writes `calculator.py` with `add` function via `exec_command`.
     - Turn 2: `codex exec resume <thread_id>` resumes same thread UUID, ContextWatcher injects committed `CW112_POLICY_ACTIVE` overlay, tool appends `multiply`.
     - Turn 3: Second native resume re-applies overlay across resume boundary, tool creates `test_calculator.py` and runs unit tests; verified exit code 0.
-    - Rollouts in `CODEX_HOME/sessions` verified as valid JSONL with 0 injected overlays (100% transcript immutability).
+    - Rollouts in `CODEX_HOME/sessions` confirmed free of injected overlay content (proxy operates strictly in-flight without modifying persisted transcripts).
   - `test_harness_binary_codex_cli_unknown_native_session_id_resume`: Resuming unknown UUID exits non-zero; daemon remains healthy.
-  - `test_harness_binary_codex_cli_unauthorized_token_rejection`: Invalid control token rejected with HTTP 401.
+  - `test_harness_binary_codex_cli_unauthorized_token_rejection`: Invalid control token rejected with HTTP 403 Forbidden.
   - `test_harness_binary_codex_cli_upstream_failure_handling`: Upstream 502 Bad Gateway handled with retry backoff; store uncorrupted.
   - `test_harness_binary_codex_cli_session_isolation`: Session B isolated from Session A's active mutation overlay.
   - Inbound `x-cw-control-token` and `x-cw-session-id` stripped prior to upstream forwarding.
-  - Tool sandboxing: `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` guarantees that model-invoked shell commands inside Codex cannot read the control token.
+  - Tool sandboxing directly tested: model-invoked tool commands inside Codex confirmed to execute without `CW_CONTROL_TOKEN` in environment (`shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"`).
 * **Live Qualification Status:**
   - `test_live_continuation_real_codex_multiturn` implemented in Suite C.
   - Gated on opt-in `CW_QUALIFY_REAL_CODEX=1` and spend budget authorization. Currently recorded as **LIVE QUALIFICATION BLOCKED** pending spend approval.

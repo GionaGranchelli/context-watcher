@@ -11,10 +11,10 @@ This document records the empirical verification evidence for **CW-112: Codex CL
 | **Binary Installation** | Codex CLI `0.165.0` | 🟢 **Verified** | Installed at `/home/gionag/.npm-global/bin/codex` (`codex-cli 0.165.0`) |
 | **Native Resume Multi-Turn** | 3-Turn Coding Task + Resume | 🟢 **Verified** | `test_harness_binary_codex_cli_native_resume_three_turn_qualification` |
 | **Overlay Reapplication** | `PinContext` across Resume | 🟢 **Verified** | Verified overlay injection on Turns 2 and 3; unmutated on Turn 1 |
-| **Rollout Immutability** | On-disk `.jsonl` Bit Integrity | 🟢 **Verified** | `CODEX_HOME/sessions` rollouts validated as valid JSONL with 0 injected overlays |
-| **Credential Sandboxing** | Upstream Header Stripping | 🟢 **Verified** | `x-cw-control-token` and `x-cw-session-id` stripped from 100% of upstream wire requests |
+| **Rollout Integrity** | No Injected Overlays on Disk | 🟢 **Verified** | `CODEX_HOME/sessions` rollouts validated as valid JSONL with 0 injected overlays (in-flight proxying) |
+| **Credential Sandboxing** | Upstream Stripping & Tool Isolation | 🟢 **Verified** | Upstream wire requests stripped of `x-cw-*`; tool execution directly verified free of `CW_CONTROL_TOKEN` |
 | **Unknown Session Fault** | Non-existent UUID Resume | 🟢 **Verified** | `test_harness_binary_codex_cli_unknown_native_session_id_resume` |
-| **Unauthorized Rejection** | Missing / Invalid Token | 🟢 **Verified** | `test_harness_binary_codex_cli_unauthorized_token_rejection` (401 Unauthorized) |
+| **Unauthorized Rejection** | Missing / Invalid Token | 🟢 **Verified** | `test_harness_binary_codex_cli_unauthorized_token_rejection` (403 Forbidden) |
 | **Upstream 502 Handling** | Gateway Error Recovery | 🟢 **Verified** | `test_harness_binary_codex_cli_upstream_failure_handling` (store uncorrupted) |
 | **Session Isolation** | Distinct Sessions Separation | 🟢 **Verified** | `test_harness_binary_codex_cli_session_isolation` (Session B isolated from A) |
 | **Live Provider Continuation** | Real OpenAI Responses API | 🟡 **LIVE QUALIFICATION BLOCKED** | Gated on `CW_QUALIFY_REAL_CODEX=1` and spend ceiling authorization |
@@ -45,13 +45,16 @@ Qualification was executed in an isolated temporary directory environment (`CODE
    {"type": "thread.started", "thread_id": "019a6b..."}
    ```
    The native `thread_id` was parsed and captured.
-3. **Responses API Tool Interaction:**
+3. **Responses API Tool Interaction & Credential Sandboxing Check:**
    The mock provider returned an SSE streaming function call for `exec_command` with payload:
    ```python
-   python3 -c "with open('calculator.py', 'w') as f: f.write('def add(a, b):\n    return a + b\n')"
+   python3 -c "import os; open('env_check.txt', 'w').write(os.environ.get('CW_CONTROL_TOKEN', 'ABSENT')); open('calculator.py', 'w').write('def add(a, b):\n    return a + b\n')"
    ```
    Codex executed the command in its dedicated workspace and returned `function_call_output`.
-4. **Completion:** Codex concluded Turn 1 with exit code 0. `calculator.py` was verified on disk containing `def add(a, b):`.
+4. **Completion & Sandboxing Verification:**
+   - Codex concluded Turn 1 with exit code 0.
+   - `calculator.py` was verified on disk containing `def add(a, b):`.
+   - `env_check.txt` was verified containing `"ABSENT"`, directly proving that the model-invoked tool subprocess did not inherit `CW_CONTROL_TOKEN`.
 
 ### Mutation Overlay Commitment
 Between Turn 1 and Turn 2, an active overlay rule was saved to the ContextWatcher store:
@@ -113,19 +116,19 @@ f.store.save_mutation(&MutationRule {
 ### Credential Sandboxing & Header Stripping
 - **Authentication Separation:** ContextWatcher daemon uses `CW_CONTROL_TOKEN` for proxy authentication, passed via `x-cw-control-token` header. The upstream LLM provider uses `OPENAI_API_KEY`, passed via `Authorization: Bearer <key>`.
 - **Wire Stripping:** 100% of requests captured by the upstream provider were inspected. No request contained `x-cw-control-token`, `x-cw-session-id`, or any header beginning with `x-cw-`.
-- **Subprocess Isolation:** Codex configuration flag `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` ensures that shell commands spawned by Codex cannot access the daemon control token.
+- **Subprocess Isolation Directly Tested:** Codex configuration flag `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` was validated in-test: the tool command executed by Codex inspected `os.environ` and wrote `env_check.txt` containing `"ABSENT"`, proving the daemon token is never leaked to model-invoked shell commands.
 
 ### Responses API Wire Protocol
 - ContextWatcher correctly normalizes and reconstructs the OpenAI Responses wire schema (`input` array containing `message`, `function_call`, and `function_call_output`).
 - Inbound SSE chunks (`response.output_item.added`, `response.function_call_arguments.delta`, `response.completed`, `[DONE]`) are streamed with zero drop or corruption.
 - All outbound requests satisfy protocol invariants under `validate_protocol_invariants(&json, ProviderKind::OpenAI)`.
 
-### On-Disk Rollout Transcript Immutability
+### On-Disk Rollout Transcript Integrity
 - Codex records session history to `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl`.
 - ContextWatcher acts purely as an in-flight wire proxy: it applies overlays in memory to outbound model payloads without altering on-disk files.
 - In-depth verification parsed every rollout file generated across turns:
   1. Every non-empty line parsed as valid JSON.
-  2. The string `"CW112_POLICY_ACTIVE"` was **completely absent** from all rollout files on disk, proving 100% transcript preservation.
+  2. The string `"CW112_POLICY_ACTIVE"` was **completely absent** from all rollout files on disk, proving on-disk transcripts are free of injected proxy overlays.
 
 ### Session Identity Disambiguation
 - **ContextWatcher Session ID (`CW_SESSION_ID`):** Manages ContextWatcher database records, token accounting, and active mutation overlays.
@@ -141,7 +144,7 @@ The test suite in `crates/cw-proxy/tests/qualification.rs` includes dedicated fa
 1. **Unknown Native Session Resume (`test_harness_binary_codex_cli_unknown_native_session_id_resume`):**
    Resuming with an invalid UUID (`00000000-0000-0000-0000-000000000000`) causes Codex to exit with a non-zero code. ContextWatcher proxy logs cleanly, records no corrupt turns, and remains fully operational.
 2. **Unauthorized Token Rejection (`test_harness_binary_codex_cli_unauthorized_token_rejection`):**
-   Requests carrying an invalid `CW_CONTROL_TOKEN` are rejected by the proxy with `401 Unauthorized`. Codex fails immediately without contacting upstream.
+   Requests carrying an invalid `CW_CONTROL_TOKEN` on session-bound proxy routes are rejected by the proxy with `403 Forbidden` (`Session-bound requests require the local control credential`). Codex fails immediately without contacting upstream.
 3. **Upstream 502 Bad Gateway Handling (`test_harness_binary_codex_cli_upstream_failure_handling`):**
    When the upstream provider returns `502 Bad Gateway`, Codex retries with exponential backoff and exits non-zero. The ContextWatcher database remains uncorrupted and accessible.
 4. **Session Isolation (`test_harness_binary_codex_cli_session_isolation`):**
@@ -157,10 +160,29 @@ The test suite in `crates/cw-proxy/tests/qualification.rs` includes dedicated fa
 > In accordance with repository safety guidelines, **no live LLM provider charges may be incurred without explicit opt-in and authorized test budget**.
 >
 > Although `OPENAI_API_KEY` is present in the local environment, `CW_QUALIFY_REAL_CODEX` is currently unset and no live spend ceiling has been authorized for this task.
+>
+> Invoking `test_live_continuation_real_codex_multiturn` without `CW_QUALIFY_REAL_CODEX=1` explicitly panics with an actionable error rather than silently returning a passing result.
 
 ### How to Run Opt-in Live Qualification
 Once spend authorization and budget are confirmed:
 ```bash
 CW_QUALIFY_REAL_CODEX=1 OPENAI_API_KEY="sk-..." cargo test -p cw-proxy --test qualification test_live_continuation_real_codex_multiturn -- --ignored --nocapture
 ```
-This test runs a real 2-turn native session resume with `gpt-4o-mini` through the live ContextWatcher proxy, verifying real upstream responses and overlay reapplication.
+This test runs a real 3-turn native session resume (`codex exec` followed by two `codex exec resume <thread_id>` invocations) with `gpt-4o-mini` through the live ContextWatcher proxy:
+- Runs in an isolated workspace with `-s workspace-write --approve-for-me` and `-c ask_for_approval="never"`.
+- Uses `store.get_turn_mutated_payload` to verify that the committed overlay reaches the actual outbound provider request on Turns 2 and 3.
+
+---
+
+## 6. Test Suite & CI Reconciliation
+
+Reconciliation against CI run 41105119741 and local test runs:
+
+| Test Target | Passed | Failed | Ignored | Notes |
+|---|:---:|:---:|:---:|---|
+| **Workspace Default Suite** (`cargo test --workspace`) | **100** | **0** | **15** | CI baseline (10 ignored in qualification + 4 in live_provider + 1 other) |
+| **Hermes Python Suite** (`test_plugin.py`) | **12** | **0** | **0** | 100% pass |
+| **Harness Binary Suite** (`cargo test ... harness_binary -- --ignored`) | **8** | **0** | **13** | 6 Codex tests + 1 Hermes test + 1 OMP test |
+| **Opt-in Live Test** (`test_live_continuation_real_codex_multiturn`) | — | — | — | Fails explicitly if invoked without `CW_QUALIFY_REAL_CODEX=1` |
+
+**Milestone Status:** Phase 1 mock qualification complete. CW-112 remains **Blocked / In Progress** pending Phase 2 live spend authorization.

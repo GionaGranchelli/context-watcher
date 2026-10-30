@@ -267,6 +267,10 @@ async fn control_guard(
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "));
+    let control_header = req
+        .headers()
+        .get("x-cw-control-token")
+        .and_then(|v| v.to_str().ok());
     let ws_token = req
         .headers()
         .get(header::SEC_WEBSOCKET_PROTOCOL)
@@ -276,7 +280,7 @@ async fn control_guard(
                 .map(str::trim)
                 .find_map(|v| v.strip_prefix("cw-token."))
         });
-    if bearer.or(ws_token) != Some(state.control_token.as_str()) {
+    if bearer.or(control_header).or(ws_token) != Some(state.control_token.as_str()) {
         return (
             StatusCode::UNAUTHORIZED,
             "Use cw auth-token to connect a local client",
@@ -290,6 +294,10 @@ async fn control_guard(
 pub fn build_proxy_router(state: DaemonState) -> Router {
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
+        .route(
+            "/api/v1/sessions/:id/transform",
+            post(api_transform_context),
+        )
         .fallback(handle_proxy_request)
         .layer(local_cors_layer())
         .layer(middleware::from_fn(local_only_guard))
@@ -325,6 +333,10 @@ pub fn build_api_router(state: DaemonState) -> Router {
         .route(
             "/api/v1/sessions/:id/mutations/:mutation_id",
             delete(api_delete_mutation),
+        )
+        .route(
+            "/api/v1/sessions/:id/transform",
+            post(api_transform_context),
         )
         .route("/api/v1/sessions/:id/optimize", post(api_auto_optimize))
         .route(
@@ -840,6 +852,112 @@ async fn api_clear_mutations(
             .store
             .change_mutations_at_revision(&id, expected, &ids, false),
     )
+}
+
+#[derive(Deserialize)]
+pub struct TransformContextRequest {
+    pub messages: Value,
+    pub provider: Option<String>,
+}
+
+async fn api_transform_context(
+    State(state): State<DaemonState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<TransformContextRequest>,
+) -> impl IntoResponse {
+    let authorized = headers
+        .get("x-cw-control-token")
+        .and_then(|v| v.to_str().ok())
+        == Some(state.control_token.as_str());
+    if !authorized {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "status": "forbidden",
+                "messages": req.messages,
+                "applied_rules": [],
+                "saved_tokens": 0,
+            })),
+        )
+            .into_response();
+    }
+
+    if !req.messages.is_array() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "status": "bad_request",
+                "error": "messages must be a JSON array",
+                "messages": req.messages,
+                "applied_rules": [],
+                "saved_tokens": 0,
+            })),
+        )
+            .into_response();
+    }
+
+    let provider = req
+        .provider
+        .as_deref()
+        .map(ProviderKind::from_str_lossy)
+        .unwrap_or(ProviderKind::OpenAI);
+
+    let rules = state.store.list_mutations(&id).unwrap_or_default();
+    if rules.is_empty() {
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "status": "ok",
+                "messages": req.messages,
+                "applied_rules": [],
+                "saved_tokens": 0,
+            })),
+        )
+            .into_response();
+    }
+
+    let mut payload = json!({
+        "messages": req.messages,
+    });
+
+    let seq = state
+        .store
+        .get_latest_turn(&id)
+        .ok()
+        .flatten()
+        .map(|t| t.sequence_number + 1)
+        .unwrap_or(1);
+
+    let report = cw_core::mutation::apply_mutations_to_payload(&mut payload, provider, &rules, seq);
+
+    // Run Pre-Forward Validation Gate
+    if let Err(gate_err) = cw_core::validator::validate_protocol_invariants(&payload, provider) {
+        tracing::warn!(%gate_err, "Pre-forward validation failed during context transformation; failing open");
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "status": "fallback_raw",
+                "messages": req.messages,
+                "applied_rules": [],
+                "saved_tokens": 0,
+            })),
+        )
+            .into_response();
+    }
+
+    let final_messages = payload.get("messages").cloned().unwrap_or(req.messages);
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "ok",
+            "messages": final_messages,
+            "applied_rules": report.applied_rule_ids,
+            "saved_tokens": report.saved_tokens,
+        })),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize, Default)]

@@ -23,7 +23,7 @@ Every harness integration is categorized according to four qualification tiers:
 |---|:---:|:---:|:---:|:---:|---|
 | **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (Multi-turn) | 🟡 Opt-in Suite C | 🟢 Supported (Responses API) | CW-112 (Real-provider qualification & resume) |
 | **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume) | 🟡 Opt-in Suite C | 🟡 Single-session only | CW-113 (Shared override file race condition) |
-| **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Passive) | 🟡 Opt-in Suite C | 🔴 Blocked in baseline | CW-111 (Native runtime context hook) |
+| **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | CW-114 (Long-session reliability campaign) |
 
 ---
 
@@ -31,8 +31,8 @@ Every harness integration is categorized according to four qualification tiers:
 
 | # | Acceptance Criterion | Required Invariant | Codex CLI (`0.165.0`) | Hermes Agent (`0.22.5`) | OMP / Oh My Pi (`18.12.6`) |
 |---|---|---|:---:|:---:|:---:|
-| **AC1** | **Session Identity & Binding** | Correct session bound across multi-turn and resume without crossover | 🟢 **Harness Binary Verified**<br>`x-cw-session-id` header via custom model provider | 🟢 **Harness Binary Verified** (Single Session)<br>Native `local-...` session bound across turn 1 and `--resume` turn 2; concurrent launches collide on shared file (CW-113) | 🟡 **Partial**<br>Passive observation works; no live authenticated binding in baseline |
-| **AC2** | **Committed Overlay Reapplication** | Overlays committed on turn $N$ apply to outbound model payload on turn $N+1$ | 🟢 **Harness Binary Verified**<br>Multi-turn test confirms `PinContext` applied to turn 2 Responses `input` array | 🟢 **Harness Binary Verified**<br>Turn 2 `--resume` outbound Chat Completions payload contains committed `PinContext` policy | 🔴 **Blocked in Baseline**<br>No live proxy mutation in baseline; `cw wrap` strips auth credentials (CW-111) |
+| **AC1** | **Session Identity & Binding** | Correct session bound across multi-turn and resume without crossover | 🟢 **Harness Binary Verified**<br>`x-cw-session-id` header via custom model provider | 🟢 **Harness Binary Verified** (Single Session)<br>Native `local-...` session bound across turn 1 and `--resume` turn 2; concurrent launches collide on shared file (CW-113) | 🟢 **Harness Binary Verified**<br>Session identity bound via `CW_SESSION_ID` / `sessionManager.getSessionId()`; control token read from 0600 file |
+| **AC2** | **Committed Overlay Reapplication** | Overlays committed on turn $N$ apply to outbound model payload on turn $N+1$ | 🟢 **Harness Binary Verified**<br>Multi-turn test confirms `PinContext` applied to turn 2 Responses `input` array | 🟢 **Harness Binary Verified**<br>Turn 2 `--resume` outbound Chat Completions payload contains committed `PinContext` policy | 🟢 **Harness Binary Verified**<br>Native `context` hook intercepts in-memory messages, queries `/transform`, and injects committed overlays into outbound prompt |
 | **AC3** | **Zero Duplicate Injection** | Overlays applied exactly once across turns $N, N+1, N+2$; no duplicate accumulation | 🟢 **Core Proxy Verified**<br>Tested across turns 1..3 with 0 duplicate pin occurrences | 🟢 **Core Proxy Verified**<br>Overlay deduplicated by `apply_mutations_to_payload` | 🟢 **Core Proxy Verified**<br>Deduplication verified in canonical engine |
 | **AC4** | **Tool-Call / Result Pairing** | Tool call IDs and tool result pairings strictly preserved under active mutation | 🟢 **Core Proxy Verified**<br>Tested with active `PinContext` mutation; OpenAI Responses & Chat tool pairings 100% valid | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired |
 | **AC5** | **Signed / Unsupported Shape Passthrough** | Cryptographic thinking signatures & unparseable shapes forwarded with exact byte & JSON-tree fidelity | 🟢 **Core Proxy Verified**<br>Anthropic `thinking` signatures asserted byte-for-byte and JSON-tree equal | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads |
@@ -102,23 +102,27 @@ Every harness integration is categorized according to four qualification tiers:
   - The first process reads and deletes the file. If two Hermes instances launch concurrently (e.g. gateway dispatch or background cron), the second process fails to find the override or receives the wrong session ID.
   - **Resolution Plan for CW-113:** Replace the single static file with per-PID or per-invocation files (e.g. `hermes-session-override.<pid>.json` or explicit environment binding `CW_HERMES_SESSION_FILE`).
 
-### 4.3 OMP / Oh My Pi (`18.12.6`) — Native Hook Blocker
-* **Status:** **Harness Binary Verified (Passive Proxy)** · Blocked for Live Context Optimization (CW-111).
+### 4.3 OMP / Oh My Pi (`18.12.6`) — Native Runtime Context Hook
+* **Status:** **Harness Binary Verified (Native Runtime Context Hook Verified)** · Completed in CW-111.
 * **Wire Protocol:** OpenAI Chat Completions (`/v1/chat/completions`).
-* **Current Baseline State:**
-  - `plugins/pi-opencode/index.js` only provides terminal slash commands (`/cw status`, `/cw gain`, `/cw optimize`).
-  - When `/cw optimize` is invoked, it spawns `cw optimize -s <level> --sync-back` as a subshell command.
-  - `cw wrap pi` intentionally strips `CW_*` auth environment variables so child tools cannot access credentials.
-  - Consequently, OMP runs in **passive observation mode only**. Outgoing model prompts are not intercepted or optimized in-flight.
+* **Architecture:**
+  - `plugins/pi-opencode/index.js` registers native OMP runtime event hooks `pi.on("context", ...)` and `pi.on("before_provider_request", ...)`.
+  - When OMP prepares messages for prompt formatting, the `context` hook extracts current in-memory conversation messages and session identity (`ctx.sessionManager.getSessionId()`).
+  - Reads the local control token securely from `~/.local/share/context-watcher/control-token` (0600 permissions, zero exposure to child tool environments).
+  - Posts messages to `POST /api/v1/sessions/:id/transform` on the local CW daemon/proxy.
+  - Active overlays (e.g. `PinContext`, `PruneOrStub`, `ShadowDedupe`) are applied in-memory, validated by the Pre-Forward Validation Gate, and returned to OMP without touching the on-disk session `.jsonl` transcript.
+  - Fail-Open Guarantee: Network timeouts, offline daemon, or invalid payloads immediately return `{ messages: event.messages }` unmodified, ensuring OMP never crashes or stalls.
 * **Verified Evidence:**
-  - `test_harness_binary_omp_proxy_passthrough_and_baseline_gaps`:
-    - `omp -p "Say hello"` executed against isolated proxy endpoint.
-    - Proxy observed request, forwarded to mock provider, returned response.
-    - OMP exited with status code 0.
-    - Verified that no live mutation overlay was injected into the prompt.
-* **Resolution Plan for CW-111:**
-  - Implement native OMP runtime integration using OMP's `context` or `before_provider_request` extension hooks.
-  - Pass the active context through contextWatcher's transformation engine before prompt transmission, leaving the on-disk conversation history untouched.
+  - `test_harness_binary_omp_native_runtime_overlay_reapplication`:
+    - Turn 1: `omp -p "Turn 1 pristine prompt"` executed against isolated proxy endpoint with native extension loaded.
+    - Upstream mock captured Turn 1 request; OMP exited with status code 0.
+    - Active `PinContext` mutation committed to CwStore (`CRITICAL_OMP_PINNED_POLICY`).
+    - Turn 2: `omp -p "Turn 2 follow-up prompt"` executed under the same session.
+    - Native `context` hook intercepted prompt, queried `/transform`, and injected pinned policy into outbound message array.
+    - Upstream mock captured Turn 2 wire payload containing `CRITICAL_OMP_PINNED_POLICY` and policy content.
+    - OMP completed Turn 2 with exit code 0.
+    - Invariant: Verified all on-disk session transcripts in `$PI_CODING_AGENT_DIR/sessions/` do NOT contain the injected policy, maintaining 100% bit-for-bit transcript immutability.
+    - Upstream captured 0 internal contextWatcher metadata headers (`x-cw-*` stripped).
 
 ---
 
@@ -182,6 +186,21 @@ Captured from `test_harness_binary_hermes_middleware_session_binding`:
   }
   ```
 * **Result:** Active `llm_request` middleware attached same session ID on resume; proxy intercepted and applied overlay into chat completion messages.
+
+### 5.4 Overlay Injection via Native Runtime Context Hook (OMP / Oh My Pi)
+Captured from `test_harness_binary_omp_native_runtime_overlay_reapplication`:
+* **Turn 1 Outbound:** `omp -p "Turn 1 pristine prompt"` forwarded cleanly under session `omp_qual_...`.
+* **Mutation Committed:** `PinContext { label: "CRITICAL_OMP_PINNED_POLICY", content: "Zero-hallucination verified native context hook" }`.
+* **Turn 2 Outbound Forwarded to Upstream (`POST /v1/chat/completions`):**
+  ```json
+  {
+    "model": "mock-model",
+    "messages": [
+      {"role": "user", "content": [{"type": "text", "text": "Turn 2 follow-up prompt\n<cw_pinned_context>\n- [CRITICAL_OMP_PINNED_POLICY]: Zero-hallucination verified native context hook\n</cw_pinned_context>"}]}
+    ]
+  }
+  ```
+* **Result:** Native OMP `context` hook intercepted in-memory messages before prompt serialization, applied the active overlay via local CW daemon, and sent optimized prompt to provider; on-disk `.jsonl` session files remained 100% immutable and uncorrupted.
 
 ---
 

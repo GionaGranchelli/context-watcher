@@ -19,6 +19,7 @@ pub struct Recorder {
     pub sse: bool,
     pub buffer: Vec<u8>,
     pub terminal_outcome: Option<String>,
+    pub current_event: Option<String>,
 }
 
 fn trim_ascii(bytes: &[u8]) -> &[u8] {
@@ -55,6 +56,7 @@ impl Recorder {
             sse: false,
             buffer: Vec::new(),
             terminal_outcome: None,
+            current_event: None,
         }
     }
 
@@ -81,12 +83,15 @@ impl Recorder {
     pub fn process_sse_line(&mut self, line: &[u8]) {
         let trimmed = trim_ascii(line);
         if trimmed.is_empty() {
+            // An empty line marks the dispatch/end of an SSE event block in RFC 8895.
+            // Reset the pending event type for the next block.
+            self.current_event = None;
             return;
         }
 
         if let Some(rest) = trimmed.strip_prefix(b"event:") {
             let event_name = trim_ascii(rest);
-            self.handle_sse_event_name(event_name);
+            self.current_event = Some(String::from_utf8_lossy(event_name).to_string());
             return;
         }
 
@@ -103,39 +108,27 @@ impl Recorder {
         }
     }
 
-    pub fn handle_sse_event_name(&mut self, event_name: &[u8]) {
-        match event_name {
-            b"message_stop" | b"response.completed" | b"response.done" | b"done" => {
+    pub fn handle_sse_data_json(&mut self, value: &Value) {
+        // 1. Check event name from SSE frame header or top-level "type" field
+        let event_type = self
+            .current_event
+            .as_deref()
+            .or_else(|| value.get("type").and_then(Value::as_str));
+
+        match event_type {
+            Some("message_stop" | "response.completed" | "response.done") => {
                 self.record_terminal("completed");
+                return;
             }
-            b"error" | b"response.failed" => {
+            Some("error" | "response.failed") => {
                 self.record_terminal("stream_error");
+                return;
             }
-            b"response.cancelled" | b"response.incomplete" => {
+            Some("response.cancelled" | "response.incomplete") => {
                 self.record_terminal("cancelled");
+                return;
             }
             _ => {}
-        }
-    }
-
-    pub fn handle_sse_data_json(&mut self, value: &Value) {
-        // 1. Check top-level "type" field (e.g. Anthropic, OpenAI Responses)
-        if let Some(typ) = value.get("type").and_then(Value::as_str) {
-            match typ {
-                "message_stop" | "response.completed" | "response.done" => {
-                    self.record_terminal("completed");
-                    return;
-                }
-                "error" | "response.failed" => {
-                    self.record_terminal("stream_error");
-                    return;
-                }
-                "response.cancelled" | "response.incomplete" => {
-                    self.record_terminal("cancelled");
-                    return;
-                }
-                _ => {}
-            }
         }
 
         // 2. Check for explicit error payload (e.g. {"error": {...}})
@@ -167,18 +160,7 @@ impl Recorder {
             }
         }
 
-        // 5. Check Anthropic message_delta stop_reason
-        if let Some(delta) = value.get("delta").and_then(Value::as_object)
-            && let Some(stop_reason) = delta.get("stop_reason").and_then(Value::as_str)
-            && matches!(
-                stop_reason,
-                "end_turn" | "stop_sequence" | "max_tokens" | "tool_use"
-            )
-        {
-            self.record_terminal("completed");
-        }
-
-        // 6. Check Gemini candidates finishReason
+        // 5. Check Gemini candidates finishReason
         if let Some(candidates) = value.get("candidates").and_then(Value::as_array) {
             for candidate in candidates {
                 if let Some(reason) = candidate.get("finishReason").and_then(Value::as_str) {
@@ -231,10 +213,10 @@ impl Recorder {
             self.read_usage(&value);
         }
         let mut turn = self.turn.take()?;
-        let effective_outcome = if outcome == "completed"
-            && let Some(ref term) = self.terminal_outcome
-        {
+        let effective_outcome = if let Some(ref term) = self.terminal_outcome {
             term.as_str()
+        } else if outcome == "completed" && self.sse {
+            "stream_error"
         } else {
             outcome
         };
@@ -551,5 +533,101 @@ mod tests {
             Some("stream_error"),
             "finish(completed) must not mask an observed stream_error"
         );
+    }
+
+    #[tokio::test]
+    async fn test_anthropic_stop_reason_does_not_mark_completed_before_message_stop() {
+        let (mut recorder, store, turn_id) = create_test_recorder(ProviderKind::Anthropic);
+
+        let stream_data = concat!(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"usage\":{\"input_tokens\":15}}}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n",
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n"
+        );
+        recorder.tap(stream_data.as_bytes());
+
+        // stop_reason was delivered, but message_stop has NOT yet arrived!
+        assert_eq!(
+            recorder.terminal_outcome, None,
+            "Anthropic stop_reason must NOT mark stream completed before message_stop"
+        );
+
+        // Client disconnects before message_stop
+        drop(recorder);
+
+        let turn = wait_for_saved_turn(&store, &turn_id).await;
+        assert_eq!(
+            turn.outcome.as_deref(),
+            Some("cancelled"),
+            "Disconnect between message_delta and message_stop must remain cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_incomplete_terminal_sse_frame_does_not_establish_completion() {
+        let (mut recorder, store, turn_id) = create_test_recorder(ProviderKind::Anthropic);
+
+        // Truncated frame: only event header arrived, connection broke before data payload
+        let truncated_frame = b"event: message_stop\n";
+        recorder.tap(truncated_frame);
+
+        assert_eq!(
+            recorder.terminal_outcome, None,
+            "Incomplete terminal frame must not establish completion"
+        );
+
+        drop(recorder);
+
+        let turn = wait_for_saved_turn(&store, &turn_id).await;
+        assert_eq!(
+            turn.outcome.as_deref(),
+            Some("cancelled"),
+            "Client disconnect on truncated terminal frame must remain cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sse_eof_without_terminal_event_records_stream_error() {
+        let (mut recorder, store, turn_id) = create_test_recorder(ProviderKind::OpenAI);
+
+        // Stream sent partial delta chunks but was closed prematurely at EOF without [DONE]
+        let partial_chunks = "data: {\"choices\":[{\"delta\":{\"content\":\"unfinished\"}}]}\n\n";
+        recorder.tap(partial_chunks.as_bytes());
+
+        assert_eq!(recorder.terminal_outcome, None);
+
+        // Simulating upstream HTTP 200 EOF calling finish("completed")
+        recorder.finish("completed");
+
+        let turn = wait_for_saved_turn(&store, &turn_id).await;
+        assert_eq!(
+            turn.outcome.as_deref(),
+            Some("stream_error"),
+            "HTTP 200 SSE stream ending without a terminal event must be recorded as stream_error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_non_sse_response_preserves_completed_behavior() {
+        let (mut recorder, store, turn_id) = create_test_recorder(ProviderKind::OpenAI);
+        recorder.sse = false; // standard non-streaming JSON response
+
+        let json_body = json!({
+            "id": "chatcmpl-test",
+            "choices": [{"message": {"role": "assistant", "content": "Done"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+        });
+        recorder.tap(serde_json::to_vec(&json_body).unwrap().as_slice());
+
+        // Full JSON response body received, EOF reached on HTTP 200
+        recorder.finish("completed");
+
+        let turn = wait_for_saved_turn(&store, &turn_id).await;
+        assert_eq!(
+            turn.outcome.as_deref(),
+            Some("completed"),
+            "Non-SSE response reaching EOF on HTTP 200 must be recorded as completed"
+        );
+        assert_eq!(turn.token_usage.output_tokens, 5);
     }
 }

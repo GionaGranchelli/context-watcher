@@ -82,6 +82,8 @@ pub async fn forward_to_upstream(
                             "upstream_error"
                         } else if let Some(ref term) = terminal {
                             term.as_str()
+                        } else if rec.sse {
+                            "stream_error"
                         } else {
                             "completed"
                         };

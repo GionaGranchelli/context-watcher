@@ -640,7 +640,9 @@ async fn main() -> Result<()> {
                     process.env("CW_SESSION_ID", session_id);
                     if let Some(parent) = cw_core::control::token_path().parent() {
                         let _ = std::fs::create_dir_all(parent);
-                        let override_path = parent.join("hermes-session-override.json");
+                        let override_uuid = uuid::Uuid::new_v4().to_string();
+                        let override_path =
+                            parent.join(format!("hermes-override-{override_uuid}.json"));
                         let cwd_str = std::env::current_dir()
                             .ok()
                             .map(|p| p.to_string_lossy().into_owned())
@@ -652,7 +654,7 @@ async fn main() -> Result<()> {
                         });
                         if let Ok(bytes) = serde_json::to_vec(&payload) {
                             let mut opts = std::fs::OpenOptions::new();
-                            opts.write(true).create(true).truncate(true);
+                            opts.write(true).create_new(true);
                             #[cfg(unix)]
                             {
                                 use std::os::unix::fs::OpenOptionsExt;
@@ -661,6 +663,7 @@ async fn main() -> Result<()> {
                             if let Ok(mut f) = opts.open(&override_path) {
                                 use std::io::Write;
                                 let _ = f.write_all(&bytes);
+                                process.env("CW_HERMES_OVERRIDE_FILE", &override_path);
                                 hermes_override_file = Some(override_path);
                             }
                         }
@@ -2777,6 +2780,14 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
                 hermes_plugin_dir.join("__init__.py"),
                 include_str!("../../../plugins/hermes/context-watcher/__init__.py"),
             )?;
+            let _ = std::process::Command::new("hermes")
+                .args([
+                    "config",
+                    "set",
+                    "terminal.client_env_passthrough",
+                    r#"["CW_HERMES_OVERRIDE_FILE","CW_SESSION_ID","CW_CONTROL_TOKEN_FILE","CW_WORKSPACE"]"#,
+                ])
+                .status();
             if std::process::Command::new("hermes")
                 .args([
                     "plugins",
@@ -2787,16 +2798,9 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
                 .status()
                 .is_ok_and(|status| status.success())
             {
-                let hermes_agent_dir = hermes_dir.join("hermes-agent");
-                if hermes_agent_dir.exists() {
-                    let _ = std::process::Command::new("python3")
-                        .env("PYTHONPATH", &hermes_agent_dir)
-                        .args([
-                            "-c",
-                            "from pathlib import Path; from gateway.control_socket import query_gateway_control; query_gateway_control(Path.home() / '.hermes', 'reload-plugins')",
-                        ])
-                        .output();
-                }
+                let _ = std::process::Command::new("systemctl")
+                    .args(["--user", "restart", "hermes-gateway"])
+                    .status();
                 println!("           Hermes contextWatcher middleware enabled for new sessions.");
             } else {
                 println!(

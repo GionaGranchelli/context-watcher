@@ -8,7 +8,17 @@ const execFileAsync = promisify(execFile);
 
 let cachedControlToken = null;
 const transformedMessageSets = new WeakSet();
-let lastTransformRecord = { sid: null, length: 0, timestamp: 0 };
+const transformedMessageObjects = new WeakSet();
+
+function markTransformed(messages) {
+  if (!Array.isArray(messages)) return;
+  transformedMessageSets.add(messages);
+  for (const msg of messages) {
+    if (msg && typeof msg === "object") {
+      transformedMessageObjects.add(msg);
+    }
+  }
+}
 
 /**
  * Retrieves the local ContextWatcher control token securely.
@@ -54,14 +64,12 @@ function getControlToken() {
  * Uses uniform 'omp_<sid>' prefixing across all hooks and slash commands without truncation.
  */
 function getCanonicalSessionId(ctx, pi) {
-  if (process.env.CW_SESSION_ID) {
-    return process.env.CW_SESSION_ID.trim();
-  }
   const rawId =
     ctx?.sessionManager?.getSessionId?.() ||
     ctx?.session?.id ||
     ctx?.sessionId ||
-    pi?.sessionId;
+    pi?.sessionId ||
+    process.env.CW_SESSION_ID;
 
   if (!rawId) return null;
   const strId = String(rawId).trim();
@@ -245,12 +253,7 @@ export default function contextWatcherExtension(pi) {
       const transformed = await transformMessages(event.messages, sid, provider);
 
       if (transformed && transformed !== event.messages) {
-        transformedMessageSets.add(transformed);
-        lastTransformRecord = {
-          sid,
-          length: transformed.length,
-          timestamp: Date.now(),
-        };
+        markTransformed(transformed);
       }
       return { messages: transformed };
     } catch {
@@ -269,12 +272,10 @@ export default function contextWatcherExtension(pi) {
       const sid = getCanonicalSessionId(ctx, pi);
 
       // Single-pass idempotency check: If context hook already transformed this turn, pass through cleanly.
-      const now = Date.now();
       const isAlreadyTransformed =
         transformedMessageSets.has(messages) ||
-        (lastTransformRecord.sid === sid &&
-          lastTransformRecord.length === messages.length &&
-          now - lastTransformRecord.timestamp < 3000);
+        (messages.length > 0 &&
+          messages.some((m) => m && typeof m === "object" && transformedMessageObjects.has(m)));
 
       if (isAlreadyTransformed) {
         return event.payload;
@@ -284,12 +285,7 @@ export default function contextWatcherExtension(pi) {
       const transformed = await transformMessages(messages, sid, provider);
 
       if (transformed && transformed !== messages) {
-        transformedMessageSets.add(transformed);
-        lastTransformRecord = {
-          sid,
-          length: transformed.length,
-          timestamp: Date.now(),
-        };
+        markTransformed(transformed);
         return {
           ...event.payload,
           messages: transformed,

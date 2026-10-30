@@ -1598,7 +1598,6 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
             "Turn 1 pristine prompt text",
             "--model",
             "cw-proxy/mock-model",
-            "--no-tools",
             "-e",
             &ext_path_clone.to_string_lossy(),
         ]);
@@ -1673,21 +1672,8 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
     };
     f.store.upsert_session(&sess).unwrap();
 
-    // Commit both a context-reducing mutation (PruneOrStub) AND a tail directive (PinContext)
-    let prune = MutationRule {
-        id: "mut_omp_prune_qual".to_string(),
-        session_id: canonical_sid.clone(),
-        op: MutationOp::PruneOrStub {
-            target_fingerprint: None,
-            stub_text: "[cw:pruned_turn1_context]".to_string(),
-            target_call_id: None,
-            target_json_pointer: Some("/messages/0/content/0/text".to_string()),
-        },
-        status: MutationStatus::Committed,
-        estimated_saved_tokens: 15,
-        estimated_kv_break_tokens: 0,
-        created_at: Utc::now(),
-    };
+    // Commit active tail directive (PinContext).
+    // Note: User and system prompts must NEVER be pruned or stubbed (enforced by CW safety contract).
     let pin = MutationRule {
         id: "mut_omp_pin_qual".to_string(),
         session_id: canonical_sid.clone(),
@@ -1702,7 +1688,7 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
         created_at: Utc::now(),
     };
     f.store
-        .save_mutations_at_revision(&canonical_sid, None, &[prune, pin])
+        .save_mutations_at_revision(&canonical_sid, None, &[pin])
         .unwrap();
 
     // Turn 2: Native OMP Resume (`omp -r <session_uuid>`).
@@ -1723,7 +1709,6 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
             "Turn 2 follow-up prompt text",
             "--model",
             "cw-proxy/mock-model",
-            "--no-tools",
             "-e",
             &ext_path_clone2.to_string_lossy(),
         ]);
@@ -1748,7 +1733,7 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
         "Stdout did not contain mock response: {stdout2}"
     );
 
-    // Verify upstream captured Turn 2 containing both the context reduction and tail pin
+    // Verify upstream captured Turn 2 containing injected tail pin
     let captured2 = f.mock.captured.lock().unwrap().clone();
     assert!(
         captured2.len() >= 2,
@@ -1756,10 +1741,6 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
         captured2.len()
     );
     let turn2_body = String::from_utf8_lossy(&captured2[captured2.len() - 1].body);
-    assert!(
-        turn2_body.contains("[cw:pruned_turn1_context]"),
-        "Turn 2 payload did not contain context-reduced stub: {turn2_body}"
-    );
     assert!(
         turn2_body.contains("CRITICAL_OMP_PINNED_POLICY"),
         "Turn 2 payload did not contain injected pinned directive: {turn2_body}"
@@ -1769,24 +1750,20 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
         "Turn 2 payload missing follow-up prompt: {turn2_body}"
     );
 
-    // Core Invariant Check: Verify on-disk transcript immutability
-    // On-disk session transcript must retain original unpruned text and never contain injected overlays
+    // AC7 Invariant: On-disk transcript legitimately grows by appending Turn 2,
+    // but the original Turn 1 prompt is preserved and in-memory overlays NEVER touch the disk file.
     let disk_content_after_turn2 = std::fs::read_to_string(session_file).unwrap();
     assert!(
         disk_content_after_turn2.contains("Turn 1 pristine prompt text"),
-        "On-disk transcript was corrupted: missing original Turn 1 text"
-    );
-    assert!(
-        !disk_content_after_turn2.contains("[cw:pruned_turn1_context]"),
-        "On-disk transcript was corrupted: contains in-memory stub text"
-    );
-    assert!(
-        !disk_content_after_turn2.contains("CRITICAL_OMP_PINNED_POLICY"),
-        "On-disk transcript was corrupted: contains injected pinned overlay"
+        "Original Turn 1 prompt must be preserved on disk"
     );
     assert!(
         disk_content_after_turn2.contains("Turn 2 follow-up prompt text"),
-        "On-disk transcript missing Turn 2 entry"
+        "Turn 2 follow-up prompt must be appended to disk transcript"
+    );
+    assert!(
+        !disk_content_after_turn2.contains("CRITICAL_OMP_PINNED_POLICY"),
+        "On-disk transcript must NEVER contain injected pinned policy"
     );
 
     // Turn 3: Fail-Open Verification under Daemon Unavailability
@@ -1805,7 +1782,6 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
             "Turn 3 offline fail-open prompt text",
             "--model",
             "cw-proxy/mock-model",
-            "--no-tools",
             "-e",
             &ext_path_clone3.to_string_lossy(),
         ]);
@@ -1843,6 +1819,73 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
             "Upstream captured x-cw-session-id"
         );
     }
+
+    // AC1 / Session Precedence & Idempotency: Assert native session takes precedence over
+    // process.env.CW_SESSION_ID and single-pass idempotency holds without time heuristics.
+    let ext_js = ext_path.to_string_lossy().to_string();
+    let node_script = format!(
+        r#"
+let capturedUrls = [];
+let transformCalls = 0;
+globalThis.fetch = async (url) => {{
+  capturedUrls.push(String(url));
+  transformCalls++;
+  return {{
+    ok: true,
+    json: async () => ({{ messages: [{{ role: "user", content: "transformed" }}] }})
+  }};
+}};
+
+process.env.CW_SESSION_ID = "omp_legacy_env_wrapper_id";
+
+import("{ext_js}").then(async (mod) => {{
+  let contextHook = null;
+  let beforeHook = null;
+  const mockPi = {{
+    on: (evt, fn) => {{
+      if (evt === "context") contextHook = fn;
+      if (evt === "before_provider_request") beforeHook = fn;
+    }},
+    registerCommand: () => {{}}
+  }};
+  mod.default(mockPi);
+
+  // 1. Session Isolation: Native session 1 takes precedence over process.env.CW_SESSION_ID
+  const ctx1 = {{ sessionManager: {{ getSessionId: () => "native-uuid-1" }} }};
+  const resContext1 = await contextHook({{ messages: [{{ role: "user", content: "t1" }}] }}, ctx1);
+
+  // 2. Session Switching: Switching native sessions within process binds to new native session
+  const ctx2 = {{ sessionManager: {{ getSessionId: () => "native-uuid-2" }} }};
+  const resContext2 = await contextHook({{ messages: [{{ role: "user", content: "t2" }}] }}, ctx2);
+
+  // 3. Fallback: Absent native session uses env
+  await contextHook({{ messages: [{{ role: "user", content: "t3" }}] }}, {{}});
+
+  if (!capturedUrls[0].includes("omp_native-uuid-1")) throw new Error("Expected omp_native-uuid-1, got " + capturedUrls[0]);
+  if (!capturedUrls[1].includes("omp_native-uuid-2")) throw new Error("Expected omp_native-uuid-2, got " + capturedUrls[1]);
+  if (!capturedUrls[2].includes("omp_legacy_env_wrapper_id")) throw new Error("Expected omp_legacy_env_wrapper_id, got " + capturedUrls[2]);
+
+  // 4. Idempotency: before_provider_request receiving transformed messages skips second call
+  const callCountBefore = transformCalls;
+  await beforeHook({{ payload: {{ messages: resContext1.messages }} }}, ctx1);
+  if (transformCalls !== callCountBefore) throw new Error("Duplicate transformation detected!");
+
+  // 5. Bypass: Turn bypassing context hook still executes
+  await beforeHook({{ payload: {{ messages: [{{ role: "user", content: "bypassed" }}] }} }}, ctx1);
+  if (transformCalls !== callCountBefore + 1) throw new Error("Bypass turn failed to transform");
+}});
+"#
+    );
+
+    let node_out = Command::new("node")
+        .args(["-e", &node_script])
+        .output()
+        .expect("failed to run node session precedence check");
+    assert!(
+        node_out.status.success(),
+        "Node session isolation/idempotency check failed: {}",
+        String::from_utf8_lossy(&node_out.stderr)
+    );
 
     let _ = std::fs::remove_dir_all(&temp_agent_dir);
     let _ = std::fs::remove_dir_all(&token_dir);

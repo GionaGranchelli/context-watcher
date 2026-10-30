@@ -666,10 +666,11 @@ async fn main() -> Result<()> {
                         opts.mode(0o600);
                     }
                     let mut f = opts.open(&override_path)?;
+                    // Track file for cleanup IMMEDIATELY upon creation so subsequent errors/writes do not leave untracked files
+                    hermes_override_file = Some(override_path.clone());
                     use std::io::Write;
                     f.write_all(&bytes)?;
                     process.env("CW_HERMES_OVERRIDE_FILE", &override_path);
-                    hermes_override_file = Some(override_path);
                 }
             } else if let Some(session_id) = session_id.as_deref() {
                 process.env("CW_SESSION_ID", session_id);
@@ -685,8 +686,11 @@ async fn main() -> Result<()> {
                     }
                 }
             }
-            let _cleanup_guard = OverrideFileCleanup(hermes_override_file);
-            let status = process.status()?;
+            let cleanup_guard = OverrideFileCleanup(hermes_override_file);
+            let status = process.status();
+            // Explicitly drop cleanup_guard before std::process::exit because process::exit does not run Rust destructors
+            drop(cleanup_guard);
+            let status = status?;
             std::process::exit(status.code().unwrap_or(1));
         }
         Commands::Tui { session } => {
@@ -2517,6 +2521,22 @@ fn register_claude_code_mcp(home_path: &std::path::Path, cw_cmd_str: &str) {
     }
 }
 
+fn parse_json_string_array(s: &str) -> Option<Vec<String>> {
+    let trimmed = s.trim();
+    if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
+        return Some(arr);
+    }
+    let start = s.find('[')?;
+    let end = s.rfind(']')?;
+    if start < end {
+        let slice = &s[start..=end];
+        if let Ok(arr) = serde_json::from_str::<Vec<String>>(slice) {
+            return Some(arr);
+        }
+    }
+    None
+}
+
 fn run_init_installer(dry_run: bool, auto_start: bool) -> Result<()> {
     let home_path = cw_core::home_dir();
     let current_exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cw"));
@@ -2780,22 +2800,29 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
 
         let output = std::process::Command::new("hermes")
             .args(["config", "get", "--json", "terminal.client_env_passthrough"])
-            .output();
+            .output()?;
 
-        let mut existing_vars: Vec<String> = Vec::new();
-        if let Ok(out) = output {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            for line in stdout.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with('[')
-                    && trimmed.ends_with(']')
-                    && let Ok(parsed) = serde_json::from_str::<Vec<String>>(trimmed)
-                {
-                    existing_vars = parsed;
-                    break;
-                }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        // Distinguish explicitly absent setting from failed/unrecognized output.
+        // Preserve existing configuration on every error path; never overwrite settings when their prior value is unknown.
+        let existing_vars: Vec<String> = if !output.status.success() {
+            if stdout.contains("Config key not set") || stderr.contains("Config key not set") {
+                Vec::new()
+            } else {
+                anyhow::bail!(
+                    "Failed to query Hermes terminal.client_env_passthrough (status {:?}): {stderr} {stdout}",
+                    output.status.code()
+                );
             }
-        }
+        } else {
+            parse_json_string_array(&stdout).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Unrecognized format returned by hermes config get --json: {stdout}"
+                )
+            })?
+        };
 
         let mut updated = existing_vars.clone();
         let mut changed = false;
@@ -3027,5 +3054,56 @@ mod wrap_tests {
         assert!(settings.contains("env_key=\"OPENAI_API_KEY\""));
         assert!(settings.contains("shell_environment_policy.filters.CW_CONTROL_TOKEN"));
         assert!(!settings.contains("private-token"));
+    }
+
+    #[test]
+    fn regression_test_override_file_cleanup_on_normal_exit_without_consumption() {
+        let temp_dir = std::env::temp_dir().join(format!("cw_wrap_test_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let override_path = temp_dir.join("hermes-override-unconsumed.json");
+        std::fs::write(&override_path, b"{\"test\": true}").unwrap();
+        assert!(override_path.exists());
+
+        struct OverrideFileCleanup(Option<std::path::PathBuf>);
+        impl Drop for OverrideFileCleanup {
+            fn drop(&mut self) {
+                if let Some(path) = self.0.take() {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+
+        // Simulate wrapper process lifecycle where child exits without consuming the handoff
+        let cleanup_guard = OverrideFileCleanup(Some(override_path.clone()));
+        // Explicitly drop cleanup_guard before exit
+        drop(cleanup_guard);
+
+        assert!(
+            !override_path.exists(),
+            "Override file must be removed when cleanup guard is dropped on normal exit"
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn parse_json_string_array_handles_multiline_and_rejects_malformed() {
+        let direct = r#"["VAR1", "VAR2"]"#;
+        assert_eq!(
+            parse_json_string_array(direct),
+            Some(vec!["VAR1".to_string(), "VAR2".to_string()])
+        );
+
+        let multiline_with_prefix =
+            "  Bitwarden Secrets Manager: applied 9 secrets\n[\n  \"A\",\n  \"B\"\n]\n";
+        assert_eq!(
+            parse_json_string_array(multiline_with_prefix),
+            Some(vec!["A".to_string(), "B".to_string()])
+        );
+
+        let malformed = "  Bitwarden Secrets Manager: applied 9 secrets\nError: database locked\n";
+        assert_eq!(parse_json_string_array(malformed), None);
+
+        let not_array = "{\"error\": \"not an array\"}";
+        assert_eq!(parse_json_string_array(not_array), None);
     }
 }

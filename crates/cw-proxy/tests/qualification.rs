@@ -1355,6 +1355,22 @@ async fn test_harness_binary_codex_cli_multiturn_overlay_reapplication() {
     }
 }
 
+fn parse_json_string_array(s: &str) -> Option<Vec<String>> {
+    let trimmed = s.trim();
+    if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
+        return Some(arr);
+    }
+    let start = s.find('[')?;
+    let end = s.rfind(']')?;
+    if start < end {
+        let slice = &s[start..=end];
+        if let Ok(arr) = serde_json::from_str::<Vec<String>>(slice) {
+            return Some(arr);
+        }
+    }
+    None
+}
+
 #[tokio::test]
 #[ignore = "harness binary integration test; requires installed 'hermes'; run with cargo test --test qualification harness_binary -- --ignored"]
 async fn test_harness_binary_hermes_middleware_session_binding() {
@@ -1387,24 +1403,26 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
     // Capture original Hermes client_env_passthrough to preserve existing entries and restore on completion
     let output = Command::new(&hermes_bin)
         .args(["config", "get", "--json", "terminal.client_env_passthrough"])
-        .output();
+        .output()
+        .expect("failed to execute hermes config get");
 
-    let mut original_json = None;
-    let mut existing_vars: Vec<String> = Vec::new();
-    if let Ok(ref out) = output {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        for line in stdout.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[')
-                && trimmed.ends_with(']')
-                && let Ok(parsed) = serde_json::from_str::<Vec<String>>(trimmed)
-            {
-                original_json = Some(trimmed.to_string());
-                existing_vars = parsed;
-                break;
-            }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let (original_json, existing_vars): (Option<String>, Vec<String>) = if !output.status.success()
+    {
+        if stdout.contains("Config key not set") || stderr.contains("Config key not set") {
+            (None, Vec::new())
+        } else {
+            panic!("hermes config get failed unexpectedly: {stderr} {stdout}");
         }
-    }
+    } else {
+        let vars = parse_json_string_array(&stdout)
+            .unwrap_or_else(|| panic!("failed to parse hermes config get output: {stdout}"));
+        let start = stdout.find('[').expect("JSON array start [");
+        let end = stdout.rfind(']').expect("JSON array end ]");
+        (Some(stdout[start..=end].to_string()), vars)
+    };
 
     struct HermesConfigGuard {
         hermes_bin: PathBuf,
@@ -1435,6 +1453,7 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
         "CW_SESSION_ID",
         "CW_CONTROL_TOKEN_FILE",
         "CW_WORKSPACE",
+        "CW_HERMES_TRUSTED_DIR",
     ] {
         if !updated.iter().any(|v| v == *var) {
             updated.push(var.to_string());
@@ -1547,6 +1566,7 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
     let hermes_bin_a = hermes_bin.clone();
     let token_path_a = token_path_str.clone();
     let override_file_a_str = override_path_a.to_string_lossy().to_string();
+    let trusted_dir_a = temp_override_dir.to_string_lossy().to_string();
 
     let task_a = tokio::task::spawn_blocking(move || {
         let mut cmd = Command::new(hermes_bin_a);
@@ -1568,12 +1588,14 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
         ]);
         cmd.env("CW_CONTROL_TOKEN_FILE", token_path_a);
         cmd.env("CW_HERMES_OVERRIDE_FILE", override_file_a_str);
+        cmd.env("CW_HERMES_TRUSTED_DIR", trusted_dir_a);
         cmd.output()
     });
 
     let hermes_bin_b = hermes_bin.clone();
     let token_path_b = token_path_str.clone();
     let override_file_b_str = override_path_b.to_string_lossy().to_string();
+    let trusted_dir_b = temp_override_dir.to_string_lossy().to_string();
 
     let task_b = tokio::task::spawn_blocking(move || {
         let mut cmd = Command::new(hermes_bin_b);
@@ -1595,6 +1617,7 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
         ]);
         cmd.env("CW_CONTROL_TOKEN_FILE", token_path_b);
         cmd.env("CW_HERMES_OVERRIDE_FILE", override_file_b_str);
+        cmd.env("CW_HERMES_TRUSTED_DIR", trusted_dir_b);
         cmd.output()
     });
 
@@ -1760,7 +1783,8 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
     // -------------------------------------------------------------------------
     let hermes_bin_invalid = hermes_bin.clone();
     let token_path_invalid = token_path_str.clone();
-    let missing_override_file = temp_override_dir.join("nonexistent_override.json");
+    let missing_override_file = temp_override_dir.join("hermes-override-nonexistent.json");
+    let trusted_dir_invalid = temp_override_dir.to_string_lossy().to_string();
 
     let output_invalid = tokio::task::spawn_blocking(move || {
         let mut cmd = Command::new(hermes_bin_invalid);
@@ -1785,6 +1809,7 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
             "CW_HERMES_OVERRIDE_FILE",
             missing_override_file.to_string_lossy().to_string(),
         );
+        cmd.env("CW_HERMES_TRUSTED_DIR", trusted_dir_invalid);
         cmd.output()
     })
     .await
@@ -1825,6 +1850,7 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
     let py_test = Command::new("python3")
         .arg(&test_plugin_script)
         .current_dir(repo_root)
+        .env("CW_HERMES_TRUSTED_DIR", &temp_override_dir)
         .output()
         .expect("failed to run python test_plugin.py");
     assert!(

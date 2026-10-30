@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import stat
 import time
 import uuid
@@ -21,9 +22,67 @@ _CW_ROUTES = frozenset({
     "/vllm",
 })
 
+_SESSION_AUTHORITY_VARS = frozenset({
+    "CW_HERMES_OVERRIDE_FILE",
+    "CW_SESSION_ID",
+    "CW_WORKSPACE",
+    "CW_CONTROL_TOKEN_FILE",
+})
+
+_OVERRIDE_FILENAME_RE = re.compile(r"^hermes-override-[0-9a-zA-Z_-]+\.json$")
+
 
 def _data_dir():
     return Path.home() / ".local/share/context-watcher"
+
+
+def _trusted_override_dirs():
+    dirs = []
+    try:
+        dirs.append(_data_dir().resolve())
+    except Exception:
+        dirs.append(_data_dir())
+
+    # Allow explicitly configured trusted test directories for isolated qualification
+    test_dirs = os.environ.get("CW_HERMES_TRUSTED_DIR") or os.environ.get("CW_TEST_OVERRIDE_DIR")
+    if test_dirs:
+        for p in test_dirs.split(os.pathsep):
+            if p.strip():
+                try:
+                    dirs.append(Path(p.strip()).resolve())
+                except Exception:
+                    pass
+    return dirs
+
+
+def _is_candidate_override_file(override_file):
+    """Restrict candidate handoff files to expected private directory and UUID-based filename pattern.
+
+    Ensures that an accidentally or maliciously supplied path to an unrelated file
+    (e.g., ~/.bashrc or /etc/passwd) is rejected immediately and never moved or touched.
+    """
+    if not override_file or not isinstance(override_file, str):
+        return False
+    path_obj = Path(override_file).expanduser()
+    name = path_obj.name
+    if not _OVERRIDE_FILENAME_RE.match(name):
+        return False
+
+    # Check that the parent directory matches one of the trusted directories
+    try:
+        resolved_parent = path_obj.parent.resolve(strict=True)
+    except OSError:
+        return False
+
+    trusted = _trusted_override_dirs()
+    if not any(resolved_parent == td for td in trusted):
+        return False
+
+    # Must not be a symlink
+    if os.path.islink(str(path_obj)):
+        return False
+
+    return True
 
 
 def _bound_client_env():
@@ -39,16 +98,31 @@ def _bound_client_env():
 
 
 def _get_env_var(var_name, client_env=None):
-    """Retrieve an environment variable, prioritizing client-scoped env over process-global env.
+    """Retrieve an environment variable.
 
-    Inside a long-lived Hermes gateway daemon, client_env or bound_client_env()
-    isolates variables per client/request. We NEVER mutate os.environ.
+    When an explicit client environment is active (either passed directly via client_env
+    or via bound_client_env() in a long-lived gateway daemon), that client environment
+    is strictly authoritative for session variables. Missing keys in an active client
+    environment do NOT fall back to process-global os.environ.
+
+    Process-global os.environ is only used when no client environment is active (standalone execution).
     """
-    if isinstance(client_env, dict) and var_name in client_env:
-        return client_env[var_name]
-    bound = _bound_client_env()
-    if isinstance(bound, dict) and var_name in bound:
-        return bound[var_name]
+    active_env = None
+    if isinstance(client_env, dict):
+        active_env = client_env
+    else:
+        bound = _bound_client_env()
+        if isinstance(bound, dict):
+            active_env = bound
+
+    if active_env is not None:
+        val = active_env.get(var_name)
+        if val is not None:
+            return val
+        if var_name in _SESSION_AUTHORITY_VARS:
+            return None
+        return os.environ.get(var_name)
+
     return os.environ.get(var_name)
 
 
@@ -98,11 +172,12 @@ def _consume_handoff_file(override_file):
     """Safely and atomically consume a handoff file using atomic claim and descriptor reads.
 
     Prevents symlink traversal, TOCTOU races, and arbitrary file reads.
+    Restricts candidates to trusted directory and filename patterns before renaming.
     Uses atomic os.rename claim to ensure strictly single consumption even under
     concurrent race conditions. Verifies ownership, permissions (0600), bounds size,
     and returns parsed (session_id, workspace) tuple.
     """
-    if not override_file or not isinstance(override_file, str):
+    if not _is_candidate_override_file(override_file):
         return None
 
     path_obj = Path(override_file).expanduser()

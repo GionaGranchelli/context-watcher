@@ -20,6 +20,10 @@ class HermesMiddlewareTest(unittest.TestCase):
 
     def tearDown(self):
         plugin._SESSION_OVERRIDES.clear()
+        os.environ.pop("CW_HERMES_TRUSTED_DIR", None)
+        os.environ.pop("CW_CONTROL_TOKEN_FILE", None)
+        os.environ.pop("CW_HERMES_OVERRIDE_FILE", None)
+        os.environ.pop("CW_SESSION_ID", None)
 
     def test_adds_authenticated_session_headers_only_to_request_kwargs(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -84,6 +88,7 @@ class HermesMiddlewareTest(unittest.TestCase):
 
     def test_override_file_consumption_and_deterministic_binding(self):
         with tempfile.TemporaryDirectory() as directory:
+            os.environ["CW_HERMES_TRUSTED_DIR"] = directory
             token_file = Path(directory) / "control-token"
             token_file.write_text("b" * 64, encoding="utf-8")
             token_file.chmod(0o600)
@@ -132,6 +137,7 @@ class HermesMiddlewareTest(unittest.TestCase):
 
     def test_client_env_takes_precedence_over_global_env(self):
         with tempfile.TemporaryDirectory() as directory:
+            os.environ["CW_HERMES_TRUSTED_DIR"] = directory
             token_file = Path(directory) / "control-token"
             token_file.write_text("e" * 64, encoding="utf-8")
             token_file.chmod(0o600)
@@ -182,8 +188,92 @@ class HermesMiddlewareTest(unittest.TestCase):
                 if file1.exists():
                     file1.unlink()
 
+    def test_client_without_override_cannot_inherit_global_override(self):
+        """P1 (Finding D): Client B with active client_env omitting CW_HERMES_OVERRIDE_FILE must
+        NOT inherit Client A's global os.environ override."""
+        with tempfile.TemporaryDirectory() as directory:
+            os.environ["CW_HERMES_TRUSTED_DIR"] = directory
+            token_file = Path(directory) / "control-token"
+            token_file.write_text("d" * 64, encoding="utf-8")
+            token_file.chmod(0o600)
+
+            # Process-global environment has Client A's override file
+            file_a = Path(directory) / "hermes-override-client-a.json"
+            file_a.write_text(json.dumps({
+                "session_id": "client_A_override_sid",
+                "workspace": "/tmp/ws_A",
+                "ts": time.time(),
+            }), encoding="utf-8")
+            file_a.chmod(0o600)
+            os.environ["CW_HERMES_OVERRIDE_FILE"] = str(file_a)
+
+            try:
+                # Client B executes within the persistent gateway with its own client_env
+                # (which does NOT include CW_HERMES_OVERRIDE_FILE)
+                client_b_env = {
+                    "CW_CONTROL_TOKEN_FILE": str(token_file),
+                    "SOME_OTHER_VAR": "val_b",
+                }
+                res_b = plugin._request_headers(
+                    request={},
+                    session_id="local-hermes-client-b",
+                    base_url="http://127.0.0.1:4401/deepseek",
+                    client_env=client_b_env,
+                )
+                self.assertIsNotNone(res_b)
+                # Client B must NOT inherit Client A's override file!
+                self.assertEqual(
+                    res_b["request"]["extra_headers"]["x-cw-session-id"],
+                    "local-hermes-client-b",
+                )
+                # Client A's override file must remain on disk, completely unconsumed
+                self.assertTrue(file_a.exists(), "Client A's override file must not be consumed by Client B")
+            finally:
+                os.environ.pop("CW_HERMES_OVERRIDE_FILE", None)
+                if file_a.exists():
+                    file_a.unlink()
+
+    def test_unrelated_file_outside_trusted_pattern_remains_untouched(self):
+        """P1 (Finding C): Unrelated files or paths outside trusted directories/patterns must
+        be rejected BEFORE atomic rename claim and remain completely untouched."""
+        with tempfile.TemporaryDirectory() as trusted_dir, tempfile.TemporaryDirectory() as untrusted_dir:
+            os.environ["CW_HERMES_TRUSTED_DIR"] = trusted_dir
+            token_file = Path(trusted_dir) / "control-token"
+            token_file.write_text("u" * 64, encoding="utf-8")
+            token_file.chmod(0o600)
+            os.environ["CW_CONTROL_TOKEN_FILE"] = str(token_file)
+
+            # Scenario 1: An unrelated filename inside trusted directory
+            unrelated_in_trusted = Path(trusted_dir) / "sensitive-config.txt"
+            unrelated_in_trusted.write_text("CRITICAL_USER_DATA", encoding="utf-8")
+            unrelated_in_trusted.chmod(0o600)
+
+            os.environ["CW_HERMES_OVERRIDE_FILE"] = str(unrelated_in_trusted)
+            res1 = plugin._request_headers(
+                request={}, session_id="local-unrelated-1", base_url="http://127.0.0.1:4401/deepseek"
+            )
+            self.assertIsNone(res1, "Must reject file not matching hermes-override-*.json pattern")
+            self.assertTrue(unrelated_in_trusted.exists(), "Unrelated file must not be renamed or deleted")
+            self.assertEqual(unrelated_in_trusted.read_text(encoding="utf-8"), "CRITICAL_USER_DATA")
+
+            # Scenario 2: Correct filename pattern, BUT in an untrusted directory
+            valid_pattern_in_untrusted = Path(untrusted_dir) / "hermes-override-attacker.json"
+            valid_pattern_in_untrusted.write_text(json.dumps({
+                "session_id": "forged_session",
+                "ts": time.time(),
+            }), encoding="utf-8")
+            valid_pattern_in_untrusted.chmod(0o600)
+
+            os.environ["CW_HERMES_OVERRIDE_FILE"] = str(valid_pattern_in_untrusted)
+            res2 = plugin._request_headers(
+                request={}, session_id="local-unrelated-2", base_url="http://127.0.0.1:4401/deepseek"
+            )
+            self.assertIsNone(res2, "Must reject file located in untrusted directory")
+            self.assertTrue(valid_pattern_in_untrusted.exists(), "File in untrusted directory must not be touched")
+
     def test_override_fails_safe_without_cross_binding(self):
         with tempfile.TemporaryDirectory() as directory:
+            os.environ["CW_HERMES_TRUSTED_DIR"] = directory
             token_file = Path(directory) / "control-token"
             token_file.write_text("c" * 64, encoding="utf-8")
             token_file.chmod(0o600)
@@ -191,7 +281,7 @@ class HermesMiddlewareTest(unittest.TestCase):
 
             try:
                 # Scenario A: Nonexistent override file
-                os.environ["CW_HERMES_OVERRIDE_FILE"] = str(Path(directory) / "nonexistent.json")
+                os.environ["CW_HERMES_OVERRIDE_FILE"] = str(Path(directory) / "hermes-override-missing.json")
                 res_missing = plugin._request_headers(
                     request={}, session_id="local-fail1", base_url="http://127.0.0.1:4401/deepseek"
                 )
@@ -232,16 +322,18 @@ class HermesMiddlewareTest(unittest.TestCase):
                 self.assertIsNone(res_token, "Must reject override file containing control token")
 
                 # Scenario E: Symlink attack rejection
-                real_file = Path(directory) / "real-target.json"
+                real_file = Path(directory) / "hermes-override-real.json"
                 real_file.write_text(json.dumps({"session_id": "s_sym", "ts": time.time()}), encoding="utf-8")
                 real_file.chmod(0o600)
-                sym_file = Path(directory) / "symlink-override.json"
+                sym_file = Path(directory) / "hermes-override-symlink.json"
                 os.symlink(str(real_file), str(sym_file))
                 os.environ["CW_HERMES_OVERRIDE_FILE"] = str(sym_file)
                 res_sym = plugin._request_headers(
                     request={}, session_id="local-fail5", base_url="http://127.0.0.1:4401/deepseek"
                 )
-                self.assertIsNone(res_sym, "Must reject symlinked override files via O_NOFOLLOW")
+                self.assertIsNone(res_sym, "Must reject symlinked override files via candidate check and O_NOFOLLOW")
+                # Assert real_file was not consumed
+                self.assertTrue(real_file.exists())
             finally:
                 os.environ.pop("CW_CONTROL_TOKEN_FILE", None)
                 os.environ.pop("CW_HERMES_OVERRIDE_FILE", None)
@@ -254,6 +346,7 @@ class HermesMiddlewareTest(unittest.TestCase):
 
     def test_stress_20_distinct_sequential_sessions_no_crossover(self):
         with tempfile.TemporaryDirectory() as directory:
+            os.environ["CW_HERMES_TRUSTED_DIR"] = directory
             token_file = Path(directory) / "control-token"
             token_file.write_text("d" * 64, encoding="utf-8")
             token_file.chmod(0o600)
@@ -316,6 +409,7 @@ class HermesMiddlewareTest(unittest.TestCase):
         errors = []
 
         with tempfile.TemporaryDirectory() as directory:
+            os.environ["CW_HERMES_TRUSTED_DIR"] = directory
             token_file = Path(directory) / "control-token"
             token_file.write_text("f" * 64, encoding="utf-8")
             token_file.chmod(0o600)
@@ -417,6 +511,7 @@ class HermesMiddlewareTest(unittest.TestCase):
         errors = []
 
         with tempfile.TemporaryDirectory() as directory:
+            os.environ["CW_HERMES_TRUSTED_DIR"] = directory
             token_file = Path(directory) / "control-token"
             token_file.write_text("g" * 64, encoding="utf-8")
             token_file.chmod(0o600)

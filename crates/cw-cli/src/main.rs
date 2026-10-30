@@ -414,6 +414,31 @@ fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
     cw_harnesses::qualification::codex_proxy_config_args(proxy_port)
 }
 
+pub(crate) struct OverrideFileCleanup(pub(crate) Option<std::path::PathBuf>);
+
+impl OverrideFileCleanup {
+    pub(crate) fn new() -> Self {
+        Self(None)
+    }
+
+    pub(crate) fn track(&mut self, path: std::path::PathBuf) {
+        self.0 = Some(path);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn path(&self) -> Option<&std::path::Path> {
+        self.0.as_deref()
+    }
+}
+
+impl Drop for OverrideFileCleanup {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -628,7 +653,7 @@ async fn main() -> Result<()> {
             if let Some(token) = token {
                 process.env("CW_CONTROL_TOKEN", token);
             }
-            let mut hermes_override_file = None;
+            let mut cleanup_guard = OverrideFileCleanup::new();
             if is_hermes {
                 let _ = cw_core::control::control_token(true);
                 process.env_remove("CW_SESSION_ID").env(
@@ -667,7 +692,7 @@ async fn main() -> Result<()> {
                     }
                     let mut f = opts.open(&override_path)?;
                     // Track file for cleanup IMMEDIATELY upon creation so subsequent errors/writes do not leave untracked files
-                    hermes_override_file = Some(override_path.clone());
+                    cleanup_guard.track(override_path.clone());
                     use std::io::Write;
                     f.write_all(&bytes)?;
                     process.env("CW_HERMES_OVERRIDE_FILE", &override_path);
@@ -678,15 +703,6 @@ async fn main() -> Result<()> {
                 process.env("CW_SESSION_ID", format!("wrap_{}", Uuid::new_v4().simple()));
             }
 
-            struct OverrideFileCleanup(Option<std::path::PathBuf>);
-            impl Drop for OverrideFileCleanup {
-                fn drop(&mut self) {
-                    if let Some(path) = self.0.take() {
-                        let _ = std::fs::remove_file(path);
-                    }
-                }
-            }
-            let cleanup_guard = OverrideFileCleanup(hermes_override_file);
             let status = process.status();
             // Explicitly drop cleanup_guard before std::process::exit because process::exit does not run Rust destructors
             drop(cleanup_guard);
@@ -3064,23 +3080,44 @@ mod wrap_tests {
         std::fs::write(&override_path, b"{\"test\": true}").unwrap();
         assert!(override_path.exists());
 
-        struct OverrideFileCleanup(Option<std::path::PathBuf>);
-        impl Drop for OverrideFileCleanup {
-            fn drop(&mut self) {
-                if let Some(path) = self.0.take() {
-                    let _ = std::fs::remove_file(path);
-                }
-            }
-        }
-
         // Simulate wrapper process lifecycle where child exits without consuming the handoff
-        let cleanup_guard = OverrideFileCleanup(Some(override_path.clone()));
+        let mut cleanup_guard = super::OverrideFileCleanup::new();
+        cleanup_guard.track(override_path.clone());
+        assert_eq!(cleanup_guard.path(), Some(override_path.as_path()));
         // Explicitly drop cleanup_guard before exit
         drop(cleanup_guard);
 
         assert!(
             !override_path.exists(),
             "Override file must be removed when cleanup guard is dropped on normal exit"
+        );
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn regression_test_override_file_cleanup_on_write_failure() {
+        let temp_dir =
+            std::env::temp_dir().join(format!("cw_wrap_test_write_fail_{}", uuid::Uuid::new_v4()));
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let override_path = temp_dir.join("hermes-override-write-fail.json");
+
+        let simulate_write_failure = || -> std::io::Result<()> {
+            let mut opts = std::fs::OpenOptions::new();
+            opts.write(true).create_new(true);
+            let mut _f = opts.open(&override_path)?;
+            let mut cleanup_guard = super::OverrideFileCleanup::new();
+            cleanup_guard.track(override_path.clone());
+
+            // Simulate write failure returning early via `?`
+            Err(std::io::Error::other("simulated write_all disk failure"))?;
+            Ok(())
+        };
+
+        let result = simulate_write_failure();
+        assert!(result.is_err());
+        assert!(
+            !override_path.exists(),
+            "Override file must be removed by cleanup guard if write failure occurs immediately after creation"
         );
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

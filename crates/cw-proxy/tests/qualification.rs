@@ -1446,6 +1446,12 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
         }
     }
 
+    let mut _config_guard = HermesConfigGuard {
+        hermes_bin: hermes_bin.clone(),
+        original_config: original_json,
+        needed_restore: false,
+    };
+
     let mut updated = existing_vars.clone();
     let mut changed = false;
     for var in &[
@@ -1462,6 +1468,8 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
     }
 
     if changed {
+        // Arm restoration guard BEFORE executing config set so failures or panics trigger cleanup
+        _config_guard.needed_restore = true;
         let merged_json = serde_json::to_string(&updated).unwrap();
         let status = Command::new(&hermes_bin)
             .args([
@@ -1474,12 +1482,6 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
             .expect("hermes config set failed to execute");
         assert!(status.success(), "hermes config set must succeed");
     }
-
-    let _config_guard = HermesConfigGuard {
-        hermes_bin: hermes_bin.clone(),
-        original_config: original_json,
-        needed_restore: changed,
-    };
 
     // -------------------------------------------------------------------------
     // Gate 1 & 2 & 3: Concurrent Launches, Isolated Handoff Files & Overlay Isolation

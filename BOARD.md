@@ -244,11 +244,11 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🚧 In Progress
 
-* No active implementation milestone. CW-113 is merged; begin **CW-116A** next.
+* **CW-116A** Characterization tests and architectural contracts (`feat/cw-116a-characterization-contracts`).
 
 ## 📋 Ready
 
-* **CW-116A** Characterization tests and architectural contracts — **next task**. Start feat/cw-116a-characterization-contracts after this board update lands.
+* None (CW-116B ready after CW-116A completion).
 
 ---
 

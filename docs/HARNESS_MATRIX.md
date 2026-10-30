@@ -22,7 +22,7 @@ Every harness integration is categorized according to four qualification tiers:
 | Harness | Core Proxy Verified | Harness Binary Verified | Real-Provider Verified | Live Optimization Status | Active Blocker / Target |
 |---|:---:|:---:|:---:|:---:|---|
 | **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (Multi-turn) | 🟡 Opt-in Suite C | 🟢 Supported (Responses API) | CW-112 (Real-provider qualification & resume) |
-| **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Middleware) | 🟡 Opt-in Suite C | 🟡 Single-session only | CW-113 (Shared override file race condition) |
+| **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume) | 🟡 Opt-in Suite C | 🟡 Single-session only | CW-113 (Shared override file race condition) |
 | **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Passive) | 🟡 Opt-in Suite C | 🔴 Blocked in baseline | CW-111 (Native runtime context hook) |
 
 ---
@@ -31,16 +31,16 @@ Every harness integration is categorized according to four qualification tiers:
 
 | # | Acceptance Criterion | Required Invariant | Codex CLI (`0.165.0`) | Hermes Agent (`0.22.5`) | OMP / Oh My Pi (`18.12.6`) |
 |---|---|---|:---:|:---:|:---:|
-| **AC1** | **Session Identity & Binding** | Correct session bound across multi-turn and resume without crossover | 🟢 **Harness Binary Verified**<br>`x-cw-session-id` header via custom model provider | 🔴 **Blocked for Concurrency**<br>Single-session works via `llm_request`; concurrent launches collide on `hermes-session-override.json` (CW-113) | 🟡 **Partial**<br>Passive observation works; no live authenticated binding in baseline |
-| **AC2** | **Committed Overlay Reapplication** | Overlays committed on turn $N$ apply to outbound model payload on turn $N+1$ | 🟢 **Harness Binary Verified**<br>Multi-turn test confirms `PinContext` applied to turn 2 Responses `input` array | 🟡 **Core Proxy Verified**<br>Applied via `llm_request` when bound, but unstable under concurrent processes | 🔴 **Blocked in Baseline**<br>No live proxy mutation in baseline; `cw wrap` strips auth credentials (CW-111) |
+| **AC1** | **Session Identity & Binding** | Correct session bound across multi-turn and resume without crossover | 🟢 **Harness Binary Verified**<br>`x-cw-session-id` header via custom model provider | 🟢 **Harness Binary Verified** (Single Session)<br>Native `local-...` session bound across turn 1 and `--resume` turn 2; concurrent launches collide on shared file (CW-113) | 🟡 **Partial**<br>Passive observation works; no live authenticated binding in baseline |
+| **AC2** | **Committed Overlay Reapplication** | Overlays committed on turn $N$ apply to outbound model payload on turn $N+1$ | 🟢 **Harness Binary Verified**<br>Multi-turn test confirms `PinContext` applied to turn 2 Responses `input` array | 🟢 **Harness Binary Verified**<br>Turn 2 `--resume` outbound Chat Completions payload contains committed `PinContext` policy | 🔴 **Blocked in Baseline**<br>No live proxy mutation in baseline; `cw wrap` strips auth credentials (CW-111) |
 | **AC3** | **Zero Duplicate Injection** | Overlays applied exactly once across turns $N, N+1, N+2$; no duplicate accumulation | 🟢 **Core Proxy Verified**<br>Tested across turns 1..3 with 0 duplicate pin occurrences | 🟢 **Core Proxy Verified**<br>Overlay deduplicated by `apply_mutations_to_payload` | 🟢 **Core Proxy Verified**<br>Deduplication verified in canonical engine |
 | **AC4** | **Tool-Call / Result Pairing** | Tool call IDs and tool result pairings strictly preserved under active mutation | 🟢 **Core Proxy Verified**<br>Tested with active `PinContext` mutation; OpenAI Responses & Chat tool pairings 100% valid | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired |
 | **AC5** | **Signed / Unsupported Shape Passthrough** | Cryptographic thinking signatures & unparseable shapes forwarded with exact byte & JSON-tree fidelity | 🟢 **Core Proxy Verified**<br>Anthropic `thinking` signatures asserted byte-for-byte and JSON-tree equal | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads |
-| **AC6** | **Credential Stripping** | Control tokens stripped from upstream requests and inaccessible to model tool commands | 🟢 **Harness Binary Verified**<br>Stripped before upstream; excluded from tools via `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` | 🟡 **Partial**<br>Stripped before upstream; `CW_CONTROL_TOKEN_FILE` is a disk file accessible to local user | 🟢 **Core Proxy Verified**<br>Stripped before upstream; `cw wrap` removes env tokens |
-| **AC7** | **Pristine Source Transcripts** | Harness on-disk transcripts and state databases are never corrupted or rewritten in place | 🟢 **Core Proxy Verified**<br>BLAKE3 transcript hashes verified bit-for-bit identical before and after proxy turns | 🟢 **Core Proxy Verified**<br>BLAKE3 transcript hashes verified bit-for-bit identical before and after proxy turns | 🟢 **Core Proxy Verified**<br>BLAKE3 transcript hashes verified bit-for-bit identical before and after proxy turns |
-| **AC8** | **Safe Fault Recovery** | Malformed mutations or daemon outages fail open or safe without corrupting agent session | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate catches structural errors, logs warning, and fails open to raw payload | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified |
-| **AC9** | **Live Binary Task Continuation** | Actual agent binary completes prompt/task against isolated proxy | 🟢 **Harness Binary Verified**<br>`codex exec` completes code 0 in automated test across multiple turns | 🟢 **Harness Binary Verified**<br>`hermes chat` completes code 0 with active `llm_request` middleware | 🟢 **Harness Binary Verified**<br>`omp -p` completes code 0 in automated test (passive proxy mode) |
-| **AC10** | **Deterministic Savings Accounting** | Token and latency savings measured from real usage telemetry; no fabricated cache hits | 🟢 **Core Proxy Verified**<br>Observed usage reconciled against parsed AST; un-telemetred cache strictly reported as 0 / unavailable | 🟢 **Core Proxy Verified**<br>Observed usage reconciled against parsed AST; un-telemetred cache strictly reported as 0 / unavailable | 🟢 **Core Proxy Verified**<br>Observed usage reconciled against parsed AST; un-telemetred cache strictly reported as 0 / unavailable |
+| **AC6** | **Credential Stripping & Tool Sandboxing** | Control tokens stripped from upstream requests and inaccessible to model tool commands | 🟢 **Core Proxy Verified (Config Sandboxing Contract)**<br>Stripped before upstream; `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` configured in settings; live model shell tool verification in CW-112 | 🟡 **Partial**<br>Stripped before upstream; `CW_CONTROL_TOKEN_FILE` is a disk file accessible to local user | 🟢 **Core Proxy Verified**<br>Stripped before upstream; `cw wrap` removes env tokens |
+| **AC7** | **Pristine Source Transcripts** | Harness on-disk transcripts and state databases are never corrupted or rewritten in place | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Harness ingestion, store indexing, and active proxy requests assert 100% BLAKE3 bit-for-bit hash identity on source files | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Source transcript files untouched bit-for-bit | 🟢 **Core Proxy Verified (Transcript Immutability Contract)`**<br>Source transcript files untouched bit-for-bit |
+| **AC8** | **Safe Fault Recovery & Gate Fail-Open** | Malformed mutations or daemon outages fail open or safe without corrupting agent session | 🟢 **Core Proxy Verified**<br>Corrupting mutation committed; Pre-Forward Validation Gate catches orphan tool invariant violation, logs diagnostic warning, and fails open to raw payload | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified |
+| **AC9** | **Live Binary Task Continuation** | Actual agent binary completes prompt/task against isolated proxy | 🟢 **Harness Binary Verified**<br>`codex exec` completes code 0 in automated test across multiple turns | 🟢 **Harness Binary Verified**<br>`hermes chat` completes code 0 across initial turn and resumed turn | 🟢 **Harness Binary Verified**<br>`omp -p` completes code 0 in automated test (passive proxy mode) |
+| **AC10** | **Telemetry Provenance & Cache Accounting** | Token usage verified against telemetry provenance; un-telemetred cache strictly un-fabricated | 🟢 **Core Proxy Verified**<br>Observed provider usage (`prompt_tokens`, `completion_tokens`) reconciled against AST token spans; absent cache telemetry strictly reported as 0 tokens (`telemetry_available: false`) | 🟢 **Core Proxy Verified**<br>Usage provenance reconciled against wire telemetry | 🟢 **Core Proxy Verified**<br>Usage provenance reconciled against wire telemetry |
 
 ---
 
@@ -69,18 +69,26 @@ Every harness integration is categorized according to four qualification tiers:
 * **Remaining Work (CW-112):**
   - Multi-turn real-provider continuation tests (`CW_QUALIFY_REAL_CODEX=1`).
   - Session resume (`codex resume <id>`) verification with active overlays.
+  - Live model-invoked shell command execution asserting token inaccessibility.
 
 ### 4.2 Hermes Agent (`0.22.5`) — Concurrency Blocker
-* **Status:** **Harness Binary Verified (Single Session)** · Blocked for Concurrent Sessions (CW-113).
+* **Status:** **Harness Binary Verified (Multi-Turn Resume)** · Blocked for Concurrent Launches (CW-113).
 * **Wire Protocol:** OpenAI / DeepSeek Chat Completions (`/v1/chat/completions`) with delta chunk streaming.
 * **Middleware Extension Point:** `plugins/hermes/context-watcher/__init__.py` registers an `llm_request` hook that attaches `x-cw-session-id`, `x-cw-control-token`, and `x-cw-workspace` to requests routed to `_CW_ROUTES`.
 * **Verified Evidence:**
   - `test_harness_binary_hermes_middleware_session_binding`:
-    - `hermes chat` executed against `http://127.0.0.1:{proxy_port}/deepseek`.
-    - Python middleware activated, attached `x-cw-session-id` and `x-cw-control-token`.
+    - Turn 1: `hermes chat` executed against `http://127.0.0.1:{proxy_port}/deepseek`.
+    - Python middleware activated, attached `x-cw-session-id: <native-local-sid>` and `x-cw-control-token`.
     - ContextWatcher proxy authenticated session, stripped control token, and forwarded request.
-    - CwStore recorded bound session and turns.
+    - CwStore recorded bound session `local-...` and Turn 1.
     - Hermes received mock response and completed with code 0.
+    - Active `PinContext` mutation committed to `local-...` in CwStore.
+    - Turn 2: Hermes resumed the session via `hermes chat -r <sid>`.
+    - ContextWatcher proxy intercepted turn 2 under the same bound session ID and injected `CRITICAL_HERMES_PINNED_POLICY` into the Chat Completions `messages` array.
+    - Upstream mock captured turn 2 request containing the overlay.
+    - Hermes completed Turn 2 with exit code 0.
+    - CwStore recorded 2 turns under the bound session.
+    - Upstream captured 0 internal contextWatcher metadata headers.
 * **Identified Blocker (P0 — Race Condition in Wrap Override):**
   - In `plugins/hermes/context-watcher/__init__.py`:
     ```python
@@ -141,7 +149,7 @@ Captured from `test_harness_binary_codex_cli_multiturn_overlay_reapplication`:
   - `headers.get("x-cw-session-id") == None` ✅
   - Upstream receives 0 internal contextWatcher metadata headers.
 
-### 5.2 Overlay Reapplication on Turn 2
+### 5.2 Overlay Reapplication on Turn 2 (Codex CLI)
 Captured from `test_harness_binary_codex_cli_multiturn_overlay_reapplication`:
 * **Turn 1 Outbound:** Initial prompt forwarded without mutation.
 * **Mutation Committed:** `PinContext { label: "SafetyDirective", content: "CRITICAL_POLICY: MAINTAIN_TOOL_SANDBOXING" }`.
@@ -152,11 +160,28 @@ Captured from `test_harness_binary_codex_cli_multiturn_overlay_reapplication`:
     "input": [
       {"role": "user", "content": [{"type": "input_text", "text": "Turn 1 prompt"}]},
       {"role": "assistant", "content": [{"type": "output_text", "text": "Mock responses output"}]},
-      {"role": "user", "content": [{"type": "input_text", "text": "Turn 2 follow-up\n\n<cw_pinned_context>\nCRITICAL_POLICY: MAINTAIN_TOOL_SANDBOXING\n</cw_pinned_context>"}]}
+      {"role": "user", "content": [{"type": "input_text", "text": "Turn 2 prompt\n\n<cw_pinned_context>\nCRITICAL_POLICY: MAINTAIN_TOOL_SANDBOXING\n</cw_pinned_context>"}]}
     ]
   }
   ```
 * **Result:** Overlay applied to active model context; source session history on disk untouched.
+
+### 5.3 Overlay Reapplication on Resumed Turn 2 (Hermes Agent)
+Captured from `test_harness_binary_hermes_middleware_session_binding`:
+* **Turn 1 Outbound:** Initial chat completion prompt forwarded cleanly under bound session `local-...`.
+* **Mutation Committed:** `PinContext { label: "SafetyPolicy", content: "CRITICAL_HERMES_PINNED_POLICY" }`.
+* **Turn 2 Resumed (`hermes chat -r <sid>`):**
+  ```json
+  {
+    "model": "mock-model",
+    "messages": [
+      {"role": "user", "content": "Say turn 1 prompt"},
+      {"role": "assistant", "content": "Mock chat output"},
+      {"role": "user", "content": "Say turn 2 follow-up\n\n<cw_pinned_context>\n- [SafetyPolicy]: CRITICAL_HERMES_PINNED_POLICY\n</cw_pinned_context>"}
+    ]
+  }
+  ```
+* **Result:** Active `llm_request` middleware attached same session ID on resume; proxy intercepted and applied overlay into chat completion messages.
 
 ---
 
@@ -175,10 +200,10 @@ Covers:
 - AC3: Zero duplicate mutation injection
 - AC4: Tool-call and tool-result pairing preservation under active mutations
 - AC5: Signed Anthropic request byte-for-byte and JSON-tree fidelity
-- AC6: Control token stripping and tool sandboxing configuration
-- AC7: Pristine source transcripts untouched (BLAKE3 bit-for-bit check across AGY, OMP, Hermes)
+- AC6: Core configuration sandboxing contract (`shell_environment_policy`)
+- AC7: Core source transcript immutability contract (BLAKE3 bit-for-bit check across AGY import, OMP, Hermes)
 - AC8: Safe fault recovery and Pre-Forward Validation Gate fail-open behavior
-- AC10: Token accounting and provider telemetry reconciliation
+- AC10: Telemetry provenance verification and un-fabricated cache accounting
 
 ### Suite B: Harness Binary Integration Tests
 Requires locally installed agent binaries (`codex`, `hermes`, `omp`). Explicitly fails if a required binary is missing:

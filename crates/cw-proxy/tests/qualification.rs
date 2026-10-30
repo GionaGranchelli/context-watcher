@@ -853,50 +853,80 @@ async fn test_core_contract_ac6_control_token_stripped_and_tool_sandboxing() {
 async fn test_core_contract_ac7_original_transcripts_untouched_bit_for_bit() {
     let f = QualificationFixture::setup().await;
     let client = reqwest::Client::new();
-    let session_id = "test_ac7_untouched_session";
 
-    // Create realistic mock transcript files on disk
     let temp_dir = std::env::temp_dir().join(format!("cw_test_ac7_{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&temp_dir).unwrap();
 
-    let agy_transcript = temp_dir.join("agy_transcript.jsonl");
+    let agy_fixture = std::path::Path::new("../cw-core/tests/fixtures/agy/transcript.jsonl");
+    let agy_transcript = temp_dir.join("transcript.jsonl");
+    if agy_fixture.exists() {
+        std::fs::copy(agy_fixture, &agy_transcript).unwrap();
+    } else {
+        std::fs::write(
+            &agy_transcript,
+            b"{\"step_index\": 1, \"type\": \"USER_INPUT\", \"content\": \"pristine_agy\"}\n",
+        )
+        .unwrap();
+    }
+
     let omp_transcript = temp_dir.join("omp_session.jsonl");
     let hermes_db = temp_dir.join("hermes_state.db");
-
-    let agy_data =
-        b"{\"step_index\": 1, \"type\": \"USER_INPUT\", \"content\": \"pristine_agy\"}\n";
     let omp_data = b"{\"type\": \"message\", \"id\": \"msg_0\", \"message\": {\"role\": \"user\", \"content\": \"pristine_omp\"}}\n";
     let hermes_data = b"PRISTINE_SQLITE_HERMES_HEADER_AND_BODY_DATA_BLOCK";
 
-    std::fs::write(&agy_transcript, agy_data).unwrap();
     std::fs::write(&omp_transcript, omp_data).unwrap();
     std::fs::write(&hermes_db, hermes_data).unwrap();
 
-    let hash_agy_before = blake3::hash(agy_data);
+    let agy_initial = std::fs::read(&agy_transcript).unwrap();
+    let hash_agy_before = blake3::hash(&agy_initial);
     let hash_omp_before = blake3::hash(omp_data);
     let hash_hermes_before = blake3::hash(hermes_data);
 
-    // Perform multiple proxy requests and commit mutations
+    // 1. Ingest AGY transcript via harness adapter into CwStore
+    let agy_session_id =
+        cw_harnesses::import_agy_transcript(&agy_transcript, &f.store, None).unwrap();
+    assert!(!agy_session_id.is_empty());
+
+    // 2. Commit active overlay mutation on the ingested session
+    f.store
+        .save_mutation(&MutationRule {
+            id: "ac7_test_overlay".into(),
+            session_id: agy_session_id.clone(),
+            op: MutationOp::PinContext {
+                label: "ImmutabilityPolicy".into(),
+                content: "PRESERVE_SOURCE_TRANSCRIPT".into(),
+                source_node_id: None,
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: Utc::now(),
+        })
+        .unwrap();
+
+    // 3. Perform proxy requests with committed overlay
+    let sess = f.store.get_session(&agy_session_id).unwrap().unwrap();
     let payload = json!({
-        "model": "gpt-4o",
+        "model": sess.model,
+        "max_tokens": 1024,
         "messages": [{"role": "user", "content": "read transcript"}]
     });
 
-    let resp = client
+    let mut req = client
         .post(format!(
-            "http://127.0.0.1:{}/openai/v1/chat/completions",
+            "http://127.0.0.1:{}/anthropic/v1/messages",
             f.proxy_port
         ))
-        .header("x-cw-session-id", session_id)
+        .header("x-cw-session-id", &agy_session_id)
         .header("x-cw-control-token", &f.control_token)
-        .header("content-type", "application/json")
-        .json(&payload)
-        .send()
-        .await
-        .unwrap();
+        .header("content-type", "application/json");
+    if let Some(ws) = &sess.workspace_root {
+        req = req.header("x-cw-workspace", ws);
+    }
+    let resp = req.json(&payload).send().await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // Verify all on-disk files are bit-for-bit unchanged
+    // 4. Verify all on-disk harness transcript files are bit-for-bit unchanged
     let agy_after = std::fs::read(&agy_transcript).unwrap();
     let omp_after = std::fs::read(&omp_transcript).unwrap();
     let hermes_after = std::fs::read(&hermes_db).unwrap();
@@ -929,9 +959,66 @@ async fn test_core_contract_ac8_safe_recovery_and_validation_gate_fail_open() {
         .unwrap();
     assert_eq!(bad_resp.status(), StatusCode::BAD_REQUEST);
 
-    // 2. Pre-Forward Validation Gate: verify malformed/corrupted mutations fail open
-    // Even if an invalid mutation is committed in store, the proxy must catch
-    // any invariant violation (via validate_protocol_invariants) and forward raw unmutated payload
+    // 2. Pre-Forward Validation Gate: commit a mutation that corrupts the tool call ID
+    // which would create an orphan tool result. The proxy must catch this invariant violation
+    // via validate_protocol_invariants, revert outbound to raw unmutated payload, and forward safely.
+    f.store
+        .upsert_session(&Session {
+            id: session_id.into(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: Some("/tmp".into()),
+            model: "gpt-4o".into(),
+            provider: ProviderKind::OpenAI,
+            title: Some("ac8 recovery session".into()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+        .unwrap();
+
+    // Commit an active mutation rule that targets the assistant tool call ID directly,
+    // mutating it to "corrupted_call_id" which breaks 1:1 pairing with the tool result.
+    f.store
+        .save_mutation(&MutationRule {
+            id: "ac8_corrupting_mutation".into(),
+            session_id: session_id.into(),
+            op: MutationOp::PruneOrStub {
+                target_fingerprint: None,
+                target_call_id: None,
+                target_json_pointer: Some("/messages/1/tool_calls/0/id".into()),
+                stub_text: "corrupted_call_id".into(),
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: Utc::now(),
+        })
+        .unwrap();
+
+    let payload = json!({
+        "model": "gpt-4o",
+        "messages": [
+            {"role": "user", "content": "Check files"},
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_inspect_123",
+                    "type": "function",
+                    "function": {"name": "list_files", "arguments": "{}"}
+                }]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_inspect_123",
+                "content": "file1.rs\nfile2.rs"
+            }
+        ]
+    });
+
+    // Verify raw input is structurally valid before proxy submission
+    assert!(validate_protocol_invariants(&payload, ProviderKind::OpenAI).is_ok());
+
     let good_resp = client
         .post(format!(
             "http://127.0.0.1:{}/openai/v1/chat/completions",
@@ -940,13 +1027,40 @@ async fn test_core_contract_ac8_safe_recovery_and_validation_gate_fail_open() {
         .header("x-cw-session-id", session_id)
         .header("x-cw-control-token", &f.control_token)
         .header("content-type", "application/json")
-        .json(
-            &json!({"model": "gpt-4o", "messages": [{"role": "user", "content": "healthy turn"}]}),
-        )
+        .json(&payload)
         .send()
         .await
         .unwrap();
     assert_eq!(good_resp.status(), StatusCode::OK);
+
+    // Verify upstream received the raw unmutated payload with pairing intact
+    let captured = f.mock.captured.lock().unwrap().clone();
+    assert!(!captured.is_empty());
+    let last_captured = captured.last().unwrap();
+    let req_json = last_captured.json_body.as_ref().expect("captured JSON");
+    let messages = req_json.get("messages").and_then(Value::as_array).unwrap();
+    let assistant_msg = &messages[1];
+    let tool_call_id = assistant_msg
+        .pointer("/tool_calls/0/id")
+        .and_then(Value::as_str)
+        .unwrap();
+    let tool_result_id = messages[2]
+        .get("tool_call_id")
+        .and_then(Value::as_str)
+        .unwrap();
+
+    // The corrupting mutation was caught and dropped; raw tool ID "call_inspect_123" was forwarded!
+    assert_eq!(tool_call_id, "call_inspect_123");
+    assert_eq!(tool_result_id, "call_inspect_123");
+    assert!(validate_protocol_invariants(req_json, ProviderKind::OpenAI).is_ok());
+
+    // Verify turn record in CwStore cleared the applied mutation IDs due to validation fallback
+    let turns = f.store.list_turns(session_id).unwrap();
+    assert_eq!(turns.len(), 1);
+    assert!(
+        turns[0].applied_mutation_ids.is_empty(),
+        "Corrupted mutation rule must be excluded from applied_mutation_ids"
+    );
 }
 
 #[tokio::test]
@@ -1154,6 +1268,7 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
     let f = QualificationFixture::setup().await;
     let proxy_port = f.proxy_port;
     let control_token = f.control_token.clone();
+    let session_id = "hermes_bound_qual_sess";
 
     // Create temporary control token file with 0600 mode
     let temp_token_file = std::env::temp_dir().join(format!("cw_token_{}", uuid::Uuid::new_v4()));
@@ -1166,13 +1281,16 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
 
     let token_path_str = temp_token_file.to_string_lossy().to_string();
 
-    let output = tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::new(hermes_bin);
+    // Turn 1: Hermes executes prompt and binds to configured CW_SESSION_ID
+    let hermes_bin_clone1 = hermes_bin.clone();
+    let token_path_clone1 = token_path_str.clone();
+    let output1 = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(hermes_bin_clone1);
         cmd.args([
             "chat",
             "-Q",
             "-q",
-            "Say hello",
+            "Say turn 1 prompt",
             "--provider",
             "custom",
             "--base-url",
@@ -1184,37 +1302,128 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
             "--source",
             "tool",
         ]);
-        cmd.env("CW_CONTROL_TOKEN_FILE", token_path_str);
+        cmd.env("CW_CONTROL_TOKEN_FILE", token_path_clone1);
+        cmd.env("CW_SESSION_ID", session_id);
         cmd.output()
     })
     .await
     .unwrap()
-    .expect("failed to run hermes binary");
+    .expect("failed to run hermes binary on turn 1");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout1 = String::from_utf8_lossy(&output1.stdout);
+    let stderr1 = String::from_utf8_lossy(&output1.stderr);
+
+    assert_eq!(
+        output1.status.code(),
+        Some(0),
+        "Hermes turn 1 failed: stdout: {stdout1}\nstderr: {stderr1}"
+    );
+    assert!(
+        stdout1.contains("Mock chat output"),
+        "Stdout did not contain mock response: {stdout1}"
+    );
+
+    // Extract Hermes's authenticated native session ID
+    let sid = stderr1
+        .lines()
+        .find_map(|l| l.strip_prefix("session_id: "))
+        .map(str::trim)
+        .expect("Hermes must output its session_id in stderr");
+    assert!(
+        sid.starts_with("local-"),
+        "Unexpected session ID format: {sid}"
+    );
+
+    // Verify proxy bound and recorded Turn 1 under that exact authenticated session ID
+    let bound_session = f
+        .store
+        .get_session(sid)
+        .unwrap()
+        .expect("Expected Hermes session to be bound and recorded in CwStore");
+    assert_eq!(bound_session.id, sid);
+    let turns1 = f.store.list_turns(sid).unwrap();
+    assert_eq!(
+        turns1.len(),
+        1,
+        "Expected 1 turn recorded for bound session"
+    );
+
+    // Commit active overlay mutation on the bound session
+    f.store
+        .save_mutation(&MutationRule {
+            id: "hermes_pin_overlay".into(),
+            session_id: sid.into(),
+            op: MutationOp::PinContext {
+                label: "SafetyDirective".into(),
+                content: "CRITICAL_HERMES_PINNED_POLICY".into(),
+                source_node_id: None,
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: Utc::now(),
+        })
+        .unwrap();
+
+    // Turn 2: Hermes resumes the session (--resume <sid>); middleware preserves session ID
+    let hermes_bin_clone2 = hermes_bin.clone();
+    let token_path_clone2 = token_path_str.clone();
+    let sid_string = sid.to_string();
+    let output2 = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::new(hermes_bin_clone2);
+        cmd.args([
+            "chat",
+            "-Q",
+            "-r",
+            &sid_string,
+            "-q",
+            "Say turn 2 follow-up",
+            "--provider",
+            "custom",
+            "--base-url",
+            &format!("http://127.0.0.1:{proxy_port}/deepseek"),
+            "--api-key",
+            "mock-key",
+            "-m",
+            "mock-model",
+            "--source",
+            "tool",
+        ]);
+        cmd.env("CW_CONTROL_TOKEN_FILE", token_path_clone2);
+        cmd.output()
+    })
+    .await
+    .unwrap()
+    .expect("failed to run hermes binary on turn 2");
+
+    let stdout2 = String::from_utf8_lossy(&output2.stdout);
+    let stderr2 = String::from_utf8_lossy(&output2.stderr);
     let _ = std::fs::remove_file(&temp_token_file);
 
     assert_eq!(
-        output.status.code(),
+        output2.status.code(),
         Some(0),
-        "Hermes failed: stdout: {stdout}\nstderr: {stderr}"
-    );
-    assert!(
-        stdout.contains("Mock chat output"),
-        "Stdout did not contain mock response: {stdout}"
+        "Hermes turn 2 failed: stdout: {stdout2}\nstderr: {stderr2}"
     );
 
-    // Verify proxy recorded turns and Hermes middleware injected the session
-    let sessions = f.store.list_sessions().unwrap();
+    // Verify Turn 2 outbound payload intercepted and received the committed overlay
+    let captured = f.mock.captured.lock().unwrap().clone();
+    let turn2_req = captured.last().expect("Turn 2 request captured");
+    let turn2_body = String::from_utf8_lossy(&turn2_req.body);
     assert!(
-        !sessions.is_empty(),
-        "Expected Hermes session to be bound and recorded in CwStore"
+        turn2_body.contains("CRITICAL_HERMES_PINNED_POLICY"),
+        "Turn 2 request did not contain committed overlay in wire body: {turn2_body}"
+    );
+
+    // Verify session recorded both turns under the same bound session ID
+    let turns2 = f.store.list_turns(sid).unwrap();
+    assert_eq!(
+        turns2.len(),
+        2,
+        "Expected 2 turns recorded for Hermes session"
     );
 
     // Verify upstream received requests with contextWatcher headers stripped
-    let captured = f.mock.captured.lock().unwrap().clone();
-    assert!(!captured.is_empty());
     for req in &captured {
         assert!(!req.headers.contains_key("x-cw-control-token"));
         assert!(!req.headers.contains_key("x-cw-session-id"));

@@ -18,11 +18,11 @@ In accordance with the **CW-116A Behavior Freeze**:
 
 ### Baseline Evolution & Test Growth
 
-| Milestone Stage | Passed Tests | Failed | Ignored | Notes |
-|---|:---:|:---:|:---:|---|
-| **Starting Commit (`f87da234...`) Baseline** | **82 passed** | 0 | 10 | 82 passed in default workspace test suites across crates |
-| **CW-116A Additions** | **+13 new tests** | 0 | 0 | 6 proxy contract tests, 5 CLI unit tests, 1 CLI subprocess dry-run test, 1 store wire request immutability test |
-| **Post-CW-116A Verified Characterization Suite** | **100 passed** | 0 | 10 | 100% pass across all unit, integration, fixture, and safety suites in workspace |
+| Milestone Stage | Passed Tests | Failed | Ignored | Net Increase | Notes |
+|---|:---:|:---:|:---:|:---:|---|
+| **Baseline `main` (`f87da234...`)** | **88 passed** | 0 | 10 | — | Verified across default workspace test suites |
+| **CW-116A Net Additions** | **+12 passed** | 0 | 0 | **+12** | 6 proxy contracts, 5 CLI unit tests, 1 CLI subprocess dry-run test (replacing in-process test), 1 store immutability test |
+| **Current PR #13 Characterization Suite** | **100 passed** | 0 | 10 | **+12** | 100% pass across all unit, integration, fixture, and safety suites in workspace |
 
 ---
 

@@ -475,3 +475,171 @@ async fn preview_does_not_rewrite_actual_turn_and_stale_plan_is_rejected() {
         serde_json::to_value(original).unwrap()
     );
 }
+
+#[tokio::test]
+async fn early_client_disconnect_with_usage_present_records_cancelled() {
+    use futures::StreamExt;
+    use std::time::Duration;
+
+    let (url, task) = mock(Router::new().route(
+        "/v1/messages",
+        post(|| async move {
+            let chunks = vec![
+                Ok::<_, std::io::Error>(
+                    "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_e2e_1\",\"usage\":{\"input_tokens\":50,\"output_tokens\":0}}}\n\n",
+                ),
+                Ok(
+                    "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"partial output\"}}\n\n",
+                ),
+            ];
+            // Slow stream so client disconnects before message_stop
+            let stream = futures::stream::iter(chunks).then(|chunk| async move {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                chunk
+            });
+            Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from_stream(stream))
+                .unwrap()
+        }),
+    ))
+    .await;
+
+    let store = CwStore::open_in_memory().unwrap();
+    let mut state = DaemonState::new(store.clone());
+    let token = state.control_token.clone();
+    state.anthropic_upstream = url;
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .header("x-cw-session-id", "session_cancel_test")
+        .header("x-cw-control-token", &token)
+        .body(Body::from(
+            json!({
+                "model": "claude-3-5-sonnet",
+                "max_tokens": 100,
+                "messages": [{"role": "user", "content": "hi"}]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = build_proxy_router(state).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Consume only the first chunk containing message_start and usage, then drop the stream
+    let mut stream = response.into_body().into_data_stream();
+    let first = stream.next().await.unwrap().unwrap();
+    let text = String::from_utf8_lossy(&first);
+    assert!(text.contains("message_start"));
+    drop(stream);
+
+    // Wait for proxy recorder to finalize via Drop
+    let mut final_turn = None;
+    for _ in 0..100 {
+        if let Ok(Some(turn)) = store.get_latest_turn("session_cancel_test")
+            && turn.outcome.as_deref() != Some("pending")
+            && turn.outcome.is_some()
+        {
+            final_turn = Some(turn);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let turn = final_turn.expect("Turn should transition from pending to final outcome");
+    assert_eq!(
+        turn.outcome.as_deref(),
+        Some("cancelled"),
+        "Client disconnect with usage present must be recorded as cancelled"
+    );
+    assert!(
+        turn.observed_usage.is_some(),
+        "Observed usage must be preserved for token accounting"
+    );
+    task.abort();
+}
+
+#[tokio::test]
+async fn client_disconnect_after_terminal_event_records_completed() {
+    use futures::StreamExt;
+    use std::time::Duration;
+
+    let (url, task) = mock(Router::new().route(
+        "/v1/messages",
+        post(|| async move {
+            let chunks = vec![
+                Ok::<_, std::io::Error>(
+                    "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_e2e_2\",\"usage\":{\"input_tokens\":50,\"output_tokens\":0}}}\n\n",
+                ),
+                Ok(
+                    "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+                ),
+            ];
+            Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from_stream(futures::stream::iter(chunks)))
+                .unwrap()
+        }),
+    ))
+    .await;
+
+    let store = CwStore::open_in_memory().unwrap();
+    let mut state = DaemonState::new(store.clone());
+    let token = state.control_token.clone();
+    state.anthropic_upstream = url;
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .header("x-cw-session-id", "session_terminal_test")
+        .header("x-cw-control-token", &token)
+        .body(Body::from(
+            json!({
+                "model": "claude-3-5-sonnet",
+                "max_tokens": 100,
+                "messages": [{"role": "user", "content": "hi"}]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = build_proxy_router(state).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Consume stream through message_stop, then drop
+    let mut stream = response.into_body().into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.unwrap();
+        if String::from_utf8_lossy(&chunk).contains("message_stop") {
+            break;
+        }
+    }
+    drop(stream);
+
+    // Verify turn outcome in store
+    let mut final_turn = None;
+    for _ in 0..100 {
+        if let Ok(Some(turn)) = store.get_latest_turn("session_terminal_test")
+            && turn.outcome.as_deref() != Some("pending")
+            && turn.outcome.is_some()
+        {
+            final_turn = Some(turn);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let turn = final_turn.expect("Turn should transition from pending to final outcome");
+    assert_eq!(
+        turn.outcome.as_deref(),
+        Some("completed"),
+        "Client disconnect after terminal event must be recorded as completed"
+    );
+    task.abort();
+}

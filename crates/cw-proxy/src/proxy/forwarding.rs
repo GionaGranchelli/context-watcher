@@ -76,14 +76,18 @@ pub async fn forward_to_upstream(
                     Some((Err(error), (source, recorder)))
                 }
                 None => {
-                    if let Some(rec) = recorder.as_mut()
-                        && let Some(task) = rec.finish(if status.is_success() {
-                            "completed"
-                        } else {
+                    if let Some(rec) = recorder.as_mut() {
+                        let terminal = rec.terminal_outcome.clone();
+                        let outcome = if !status.is_success() {
                             "upstream_error"
-                        })
-                    {
-                        let _ = task.await;
+                        } else if let Some(ref term) = terminal {
+                            term.as_str()
+                        } else {
+                            "completed"
+                        };
+                        if let Some(task) = rec.finish(outcome) {
+                            let _ = task.await;
+                        }
                     }
                     None
                 }

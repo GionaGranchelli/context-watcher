@@ -23,7 +23,7 @@ Every harness integration is categorized according to four qualification tiers:
 |---|:---:|:---:|:---:|:---:|---|
 | **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (Multi-turn) | 🟡 Opt-in Suite C | 🟢 Supported (Responses API) | CW-112 (Real-provider qualification & resume) |
 | **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume) | 🟡 Opt-in Suite C | 🟡 Single-session only | CW-113 (Shared override file race condition) |
-| **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | CW-114 (Long-session reliability campaign) |
+| **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | CW-114 (Long-session reliability campaign) |
 
 ---
 
@@ -102,26 +102,27 @@ Every harness integration is categorized according to four qualification tiers:
   - The first process reads and deletes the file. If two Hermes instances launch concurrently (e.g. gateway dispatch or background cron), the second process fails to find the override or receives the wrong session ID.
   - **Resolution Plan for CW-113:** Replace the single static file with per-PID or per-invocation files (e.g. `hermes-session-override.<pid>.json` or explicit environment binding `CW_HERMES_SESSION_FILE`).
 
-### 4.3 OMP / Oh My Pi (`18.12.6`) — Native Runtime Context Hook
-* **Status:** **Harness Binary Verified (Native Runtime Context Hook Verified)** · Completed in CW-111.
-* **Wire Protocol:** OpenAI Chat Completions (`/v1/chat/completions`).
-* **Architecture:**
+### 4.3 OMP / Oh My Pi (`18.12.6`) — Native Runtime Context Hook & Hardened Isolation
+* **Status:** **Harness Binary Verified (Native Runtime Hardened & Multi-Turn Resume Verified)** · Completed in CW-111 / CW-111B.
+* **Wire Protocol:** OpenAI Chat Completions (`/v1/chat/completions`) & Anthropic Messages (`/v1/messages`).
+* **Architecture & Security Boundary (CW-111B Hardening):**
   - `plugins/pi-opencode/index.js` registers native OMP runtime event hooks `pi.on("context", ...)` and `pi.on("before_provider_request", ...)`.
-  - When OMP prepares messages for prompt formatting, the `context` hook extracts current in-memory conversation messages and session identity (`ctx.sessionManager.getSessionId()`).
-  - Reads the local control token securely from `~/.local/share/context-watcher/control-token` (0600 permissions, zero exposure to child tool environments).
-  - Posts messages to `POST /api/v1/sessions/:id/transform` on the local CW daemon/proxy.
-  - Active overlays (e.g. `PinContext`, `PruneOrStub`, `ShadowDedupe`) are applied in-memory, validated by the Pre-Forward Validation Gate, and returned to OMP without touching the on-disk session `.jsonl` transcript.
-  - Fail-Open Guarantee: Network timeouts, offline daemon, or invalid payloads immediately return `{ messages: event.messages }` unmodified, ensuring OMP never crashes or stalls.
-* **Verified Evidence:**
+  - **Zero Credential Exposure:** Private control tokens are read from `~/.local/share/context-watcher/control-token` (0600 permissions). The extension immediately purges `CW_CONTROL_TOKEN` and `CW_CONTROL_TOKEN_FILE` from `process.env` in memory on startup so child processes spawned by OMP tools (bash, scripts) cannot inherit them. `models.json` contains no tokens.
+  - **Loopback Enforcement:** `CW_DAEMON_URL` strictly validates hostname against loopback addresses (`127.0.0.1`, `localhost`, `::1`, `[::1]`). Any non-loopback destination fails closed back to local default `http://127.0.0.1:4400`.
+  - **Canonical Session Identity:** Uses `getCanonicalSessionId(ctx, pi)` across all hooks and `/cw` command handler without truncation (`omp_<sid>`).
+  - **Single-Pass Transformation Idempotency:** Employs in-memory `WeakSet` tracking and turn sequence tagging to guarantee strictly single-pass mutation application across `context`, `before_provider_request`, and proxy.
+  - **Dynamic Provider Resolution:** Automatically resolves provider (`anthropic`, `gemini`, `deepseek`, `ollama`, `openai`) from `ctx.model.provider` or payload shape.
+  - **Fail-Open Guarantee:** If the CW daemon is offline, unauthenticated, or returns an error, the extension fails open instantly, returning pristine messages so agent workflows are never interrupted.
+* **Verified Evidence (3-Turn Native Resume & Fail-Open Test):**
   - `test_harness_binary_omp_native_runtime_overlay_reapplication`:
-    - Turn 1: `omp -p "Turn 1 pristine prompt"` executed against isolated proxy endpoint with native extension loaded.
-    - Upstream mock captured Turn 1 request; OMP exited with status code 0.
-    - Active `PinContext` mutation committed to CwStore (`CRITICAL_OMP_PINNED_POLICY`).
-    - Turn 2: `omp -p "Turn 2 follow-up prompt"` executed under the same session.
-    - Native `context` hook intercepted prompt, queried `/transform`, and injected pinned policy into outbound message array.
-    - Upstream mock captured Turn 2 wire payload containing `CRITICAL_OMP_PINNED_POLICY` and policy content.
-    - OMP completed Turn 2 with exit code 0.
-    - Invariant: Verified all on-disk session transcripts in `$PI_CODING_AGENT_DIR/sessions/` do NOT contain the injected policy, maintaining 100% bit-for-bit transcript immutability.
+    - Turn 1: `omp -p "Turn 1 pristine prompt"` executed against isolated proxy endpoint without `--no-session`. Native OMP writes session transcript to `$PI_CODING_AGENT_DIR/sessions/<slug>/<timestamp>_<uuid>.jsonl`.
+    - Turn 1 completed with exit code 0.
+    - Two active mutations committed to CwStore: `PruneOrStub` (`[cw:pruned_turn1_context]`) and `PinContext` (`CRITICAL_OMP_PINNED_POLICY`).
+    - Turn 2: Native OMP resume executed via `omp -r <uuid> -p "Turn 2 resume prompt"`.
+    - Native `context` hook intercepted in-memory messages, queried `/transform`, and injected both the pruned stub and the pinned policy.
+    - Upstream mock captured Turn 2 wire payload containing both `[cw:pruned_turn1_context]` and `CRITICAL_OMP_PINNED_POLICY`.
+    - On-Disk Invariant: Asserted on-disk `.jsonl` transcript contains the original unmutated Turn 1 prompt and does NOT contain the pruned stub or pinned policy (100% transcript immutability).
+    - Turn 3: Fail-Open verification under offline daemon (`CW_DAEMON_URL="http://127.0.0.1:19999"`). OMP completed cleanly with exit code 0 and pristine prompt forwarded.
     - Upstream captured 0 internal contextWatcher metadata headers (`x-cw-*` stripped).
 
 ---

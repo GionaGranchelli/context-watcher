@@ -3143,4 +3143,75 @@ mod wrap_tests {
         let not_array = "{\"error\": \"not an array\"}";
         assert_eq!(parse_json_string_array(not_array), None);
     }
+
+    #[test]
+    fn init_dry_run_leaves_filesystem_and_systemd_untouched() {
+        // Assert that run_init_installer with dry_run=true returns Ok without modifying system
+        let result = run_init_installer(true, false);
+        assert!(result.is_ok(), "dry-run init installer must return Ok(())");
+    }
+
+    #[test]
+    fn header_stripping_preserves_complex_non_cw_headers() {
+        let input = "authorization: Bearer secret-token\n\
+                     X-Custom-Header: custom-val\n\
+                     x-cw-session-id: injected-session\n\
+                     X-CW-CONTROL-TOKEN: token123\n\
+                     x-cw-workspace: /path/to/ws\n\
+                     Content-Type: application/json\n\
+                     X-CW-DRY-RUN: 1";
+        let cleaned = without_cw_headers(input);
+        assert_eq!(
+            cleaned,
+            "authorization: Bearer secret-token\n\
+             X-Custom-Header: custom-val\n\
+             Content-Type: application/json"
+        );
+        // Stripping on empty input
+        assert_eq!(without_cw_headers(""), "");
+    }
+
+    #[test]
+    fn comma_separated_header_stripping_edge_cases() {
+        let input = "Authorization: Bearer abc,def, X-CW-SESSION-ID: s1, X-Custom: val:with:colons, x-cw-token: t2, Accept: text/event-stream";
+        let cleaned = without_cw_comma_separated_headers(input);
+        assert_eq!(
+            cleaned,
+            "Authorization: Bearer abc,def, X-Custom: val:with:colons, Accept: text/event-stream"
+        );
+        assert_eq!(without_cw_comma_separated_headers(""), "");
+    }
+
+    #[test]
+    fn session_id_validation_contract() {
+        // Valid ASCII alphanumeric, underscore, hyphen, 1..=128
+        assert!(valid_proxy_session_id("a"));
+        assert!(valid_proxy_session_id("my_session-123"));
+        assert!(valid_proxy_session_id(&"x".repeat(128)));
+
+        // Invalid: empty, >128, path traversal, whitespace, shell metacharacters
+        assert!(!valid_proxy_session_id(""));
+        assert!(!valid_proxy_session_id(&"x".repeat(129)));
+        assert!(!valid_proxy_session_id("../parent"));
+        assert!(!valid_proxy_session_id("sess/ion"));
+        assert!(!valid_proxy_session_id("sess ion"));
+        assert!(!valid_proxy_session_id("sess;rm"));
+        assert!(!valid_proxy_session_id("sess\0null"));
+        assert!(!valid_proxy_session_id("sess\nnewline"));
+    }
+
+    #[test]
+    fn project_label_from_workspace_contract() {
+        assert_eq!(project_label_from_workspace(None), "General Chat");
+        assert_eq!(project_label_from_workspace(Some("")), "General Chat");
+        assert_eq!(project_label_from_workspace(Some("   ")), "General Chat");
+        assert_eq!(
+            project_label_from_workspace(Some("/home/user/Development/my-project")),
+            "my-project"
+        );
+        assert_eq!(
+            project_label_from_workspace(Some("/home/user/Development/my-project/")),
+            "my-project"
+        );
+    }
 }

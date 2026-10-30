@@ -3123,7 +3123,7 @@ async fn test_live_continuation_real_codex_multiturn() {
     let sid = session_id.to_string();
     let token = control_token.clone();
 
-    // Turn 1
+    // Turn 1: Create calculator.py
     let output1 = tokio::task::spawn_blocking({
         let codex_bin = codex_bin.clone();
         let api_key = api_key.clone();
@@ -3144,7 +3144,11 @@ async fn test_live_continuation_real_codex_multiturn() {
             cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
                 proxy_port,
             ));
-            cmd.args(["-m", "gpt-4o-mini", "Say live-codex-turn-1"]);
+            cmd.args([
+                "-m",
+                "gpt-4o-mini",
+                "Create a python file calculator.py with a function add(a, b) that returns a + b.",
+            ]);
             cmd.env("OPENAI_API_KEY", api_key);
             cmd.env("CODEX_HOME", &temp_home_clone);
             cmd.env("CW_SESSION_ID", sid);
@@ -3174,7 +3178,7 @@ async fn test_live_continuation_real_codex_multiturn() {
             session_id: sid.clone(),
             op: MutationOp::PinContext {
                 label: "Directive".into(),
-                content: "LIVE_INJECTED_OVERLAY_ACTIVE".into(),
+                content: "CW112_POLICY_ACTIVE".into(),
                 source_node_id: None,
             },
             status: MutationStatus::Committed,
@@ -3184,7 +3188,7 @@ async fn test_live_continuation_real_codex_multiturn() {
         })
         .unwrap();
 
-    // Turn 2: Native Resume
+    // Turn 2: Native Resume to add multiply function
     let output2 = tokio::task::spawn_blocking({
         let codex_bin = codex_bin.clone();
         let api_key = api_key.clone();
@@ -3207,7 +3211,12 @@ async fn test_live_continuation_real_codex_multiturn() {
             cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
                 proxy_port,
             ));
-            cmd.args(["-m", "gpt-4o-mini", &thread_id, "Say live-codex-turn-2"]);
+            cmd.args([
+                "-m",
+                "gpt-4o-mini",
+                &thread_id,
+                "Add a function multiply(a, b) that returns a * b to calculator.py.",
+            ]);
             cmd.env("OPENAI_API_KEY", api_key);
             cmd.env("CODEX_HOME", &temp_home_clone);
             cmd.env("CW_SESSION_ID", sid);
@@ -3221,16 +3230,12 @@ async fn test_live_continuation_real_codex_multiturn() {
 
     let stdout2 = String::from_utf8_lossy(&output2.stdout);
     let stderr2 = String::from_utf8_lossy(&output2.stderr);
-    let _ = std::fs::remove_dir_all(&temp_home);
-    let _ = std::fs::remove_dir_all(&temp_workspace);
-    proxy_task.abort();
 
     assert_eq!(
         output2.status.code(),
         Some(0),
         "Live Codex turn 2 failed: {stderr2}"
     );
-    assert!(stdout2.contains("live-codex-turn-2") || stderr2.contains("live-codex-turn-2"));
 
     let thread_id_2 = extract_thread_id_from_stdout(&stdout2)
         .expect("Codex must emit thread.started with thread_id on live turn 2");
@@ -3239,16 +3244,101 @@ async fn test_live_continuation_real_codex_multiturn() {
         "Native thread ID must match across live resume"
     );
 
+    // Turn 3: Second Native Resume to create and run tests
+    let output3 = tokio::task::spawn_blocking({
+        let codex_bin = codex_bin.clone();
+        let api_key = api_key.clone();
+        let temp_home_clone = temp_home_clone.clone();
+        let temp_ws_clone = temp_ws_clone.clone();
+        let sid = sid.clone();
+        let token = token.clone();
+        let thread_id = thread_id.clone();
+        move || {
+            let mut cmd = Command::new(codex_bin);
+            cmd.current_dir(&temp_ws_clone);
+            cmd.args([
+                "exec",
+                "resume",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+            ]);
+            cmd.args(cw_harnesses::qualification::codex_proxy_config_args(
+                proxy_port,
+            ));
+            cmd.args([
+                "-m",
+                "gpt-4o-mini",
+                &thread_id,
+                "Create a test file test_calculator.py with unit tests for add and multiply, and run python3 test_calculator.py.",
+            ]);
+            cmd.env("OPENAI_API_KEY", api_key);
+            cmd.env("CODEX_HOME", &temp_home_clone);
+            cmd.env("CW_SESSION_ID", sid);
+            cmd.env("CW_CONTROL_TOKEN", token);
+            cmd.output()
+        }
+    })
+    .await
+    .unwrap()
+    .expect("failed to run codex binary on live turn 3");
+
+    let stdout3 = String::from_utf8_lossy(&output3.stdout);
+    let stderr3 = String::from_utf8_lossy(&output3.stderr);
+
+    assert_eq!(
+        output3.status.code(),
+        Some(0),
+        "Live Codex turn 3 failed: {stderr3}"
+    );
+
+    let thread_id_3 = extract_thread_id_from_stdout(&stdout3)
+        .expect("Codex must emit thread.started with thread_id on live turn 3");
+    assert_eq!(
+        thread_id_3, thread_id,
+        "Native thread ID must match across second live resume"
+    );
+
+    // Verify on-disk rollout files are valid JSONL and do not contain injected overlay
+    let rollouts = find_rollout_files(&temp_home.join("sessions"));
+    assert!(
+        !rollouts.is_empty(),
+        "CODEX_HOME/sessions must contain rollout files"
+    );
+    for rf in &rollouts {
+        let content = std::fs::read_to_string(rf).expect("read rollout file");
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                assert!(
+                    serde_json::from_str::<Value>(trimmed).is_ok(),
+                    "Rollout line in {} must be valid JSON",
+                    rf.display()
+                );
+            }
+        }
+        assert!(
+            !content.contains("CW112_POLICY_ACTIVE"),
+            "Rollout file on disk must not contain injected overlay: {}",
+            rf.display()
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&temp_home);
+    let _ = std::fs::remove_dir_all(&temp_workspace);
+    proxy_task.abort();
+
     let sess = store
         .get_session(session_id)
         .unwrap()
         .expect("session recorded");
     assert_eq!(sess.id, session_id);
     let turns = store.list_turns(session_id).unwrap();
-    assert_eq!(
-        turns.len(),
-        2,
-        "Expected 2 turns recorded for live codex session"
+    assert!(
+        turns.len() >= 3,
+        "Expected at least 3 turns recorded for live codex session, got {}",
+        turns.len()
     );
 }
 

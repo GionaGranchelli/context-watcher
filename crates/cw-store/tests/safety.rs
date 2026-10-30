@@ -295,3 +295,53 @@ fn wire_requests_are_immutable_and_blob_storage_is_content_addressed() {
         "Wire egress bytes must be captured at forwarding boundary"
     );
 }
+
+#[test]
+fn purge_history_removes_both_inbound_and_outbound_wire_records() {
+    let store = CwStore::open_in_memory().unwrap();
+    session(&store);
+
+    let payload = json!({"messages": [{"role": "user", "content": "purge wire test"}]});
+    let (turn, _) = analyze_turn_from_payload(
+        "turn_purge_1".into(),
+        "s".into(),
+        None,
+        1,
+        &payload,
+        ProviderKind::OpenAI,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    store.save_turn(&turn, Some(&payload), None, None).unwrap();
+
+    let inbound = b"{\"inbound\": true}";
+    let outbound = b"{\"outbound\": true}";
+    store.save_wire_request("turn_purge_1", inbound).unwrap();
+    store.save_wire_egress("turn_purge_1", outbound).unwrap();
+
+    assert_eq!(
+        store.get_wire_request("turn_purge_1").unwrap().as_deref(),
+        Some(&inbound[..])
+    );
+    assert_eq!(
+        store.get_wire_egress("turn_purge_1").unwrap().as_deref(),
+        Some(&outbound[..])
+    );
+
+    // Purge the session
+    store.purge_history("s", 0).unwrap();
+
+    // Both inbound wire request and outbound wire egress must be removed
+    assert_eq!(
+        store.get_wire_request("turn_purge_1").unwrap(),
+        None,
+        "Inbound wire request must be deleted on session purge"
+    );
+    assert_eq!(
+        store.get_wire_egress("turn_purge_1").unwrap(),
+        None,
+        "Outbound wire egress must be deleted on session purge"
+    );
+}

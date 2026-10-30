@@ -71,7 +71,7 @@ Every harness integration is categorized according to four qualification tiers:
   - Tool sandboxing directly tested: model-invoked tool commands inside Codex confirmed to execute without `CW_CONTROL_TOKEN` in environment (`shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"`).
 * **Live Qualification Status:**
   - `test_live_continuation_real_codex_multiturn` implemented in Suite C with consistent `-c approval_policy="never" -c sandbox_mode="workspace-write"` flags.
-  - Slices requests by invocation snapshot intervals (handling multiple model requests per turn) and captures both prepared payloads (`get_turn_mutated_payload`) and wire egress (`get_wire_egress`) with provider completion verification (`turn.outcome == "completed"`).
+  - Slices requests by invocation snapshot intervals (handling multiple model requests per turn) and captures both prepared payloads (`get_turn_mutated_payload`) and opt-in wire egress (`get_wire_egress`), with independent provider receipt verification (`turn.outcome == "completed"` and usage telemetry).
   - Gated on opt-in `CW_QUALIFY_REAL_CODEX=1` and spend budget authorization. Currently recorded as **LIVE QUALIFICATION BLOCKED** pending spend approval.
 
 ### 4.2 Hermes Agent (`0.22.5`) — Concurrency Hardened & Resume Verified

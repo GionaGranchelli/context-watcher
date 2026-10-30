@@ -205,6 +205,7 @@ impl CwStore {
         )?;
 
         conn.execute_batch("CREATE TABLE IF NOT EXISTS wire_requests(turn_id TEXT PRIMARY KEY,body BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS wire_egress(turn_id TEXT PRIMARY KEY,body BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS request_sequences(session_id TEXT PRIMARY KEY,seq INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS exports(session_id TEXT NOT NULL,path TEXT PRIMARY KEY,content_hash TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS mutation_effectiveness_v2 (
@@ -406,6 +407,7 @@ impl CwStore {
         };
         for id in &ids {
             tx.execute("DELETE FROM wire_requests WHERE turn_id=?1", params![id])?;
+            tx.execute("DELETE FROM wire_egress WHERE turn_id=?1", params![id])?;
             tx.execute(
                 "DELETE FROM mutation_effectiveness_v2 WHERE turn_id=?1",
                 params![id],

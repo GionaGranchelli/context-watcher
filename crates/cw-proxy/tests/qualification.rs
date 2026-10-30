@@ -3122,6 +3122,7 @@ async fn test_live_continuation_real_codex_multiturn() {
     let store = CwStore::open_in_memory().unwrap();
     let mut state = DaemonState::new(store.clone());
     state.openai_upstream = "https://api.openai.com".to_string();
+    state.capture_wire_egress = true;
     let control_token = state.control_token.clone();
 
     let app = build_proxy_router(state);

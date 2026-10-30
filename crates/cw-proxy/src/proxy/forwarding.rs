@@ -18,7 +18,8 @@ pub async fn forward_to_upstream(
     outbound_body: Vec<u8>,
     mut recorder: Option<Recorder>,
 ) -> Response {
-    if let Some(ref rec) = recorder
+    if state.capture_wire_egress
+        && let Some(ref rec) = recorder
         && let Some(ref turn) = rec.turn
     {
         let _ = state.store.save_wire_egress(&turn.id, &outbound_body);

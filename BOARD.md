@@ -211,7 +211,7 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-115** Performance and savings qualification | Backlog | Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims. |
 | **CW-116** Architecture consolidation & maintainability | In Progress (P0) | Three bounded, behavior-preserving PRs: CW-116A characterization/contracts, CW-116B CLI/harness modularization, CW-116C proxy/transformation boundaries. No feature expansion. |
 | **CW-116A** Characterization tests & architecture contracts | Done | Characterization baseline documented in docs/CW-116A-BASELINE.md; architecture decomposition plan in docs/CW-116-ARCHITECTURE.md; 12 net new characterization tests added covering CLI lifecycle, transform API, proxy routing, internal header stripping, dry-run preview, and store immutability; 100/100 workspace tests passing (+12 net increase over 88 baseline) with 0 warnings; PR #13 merged into main. |
-| **CW-116B** CLI & harness architecture | Ready (P0) | Incrementally split CLI and harness lifecycle responsibilities into cohesive modules with minimal contracts. Preserve CLI, environment, auth, session behavior and installation side effects. |
+| **CW-116B** CLI & harness architecture | Done (PR ready) | Decomposed monolithic `main.rs` (3,210 -> 618 lines, -80.7%) and `lib.rs` (2,385 -> 277 lines, -88.4%) into cohesive command handlers (`wrap.rs`, `daemon.rs`, `init.rs`, `reports.rs`, `session.rs`, `slot.rs`, `web.rs`) and harness lifecycle modules (`error.rs`, `qualification.rs`, `sync.rs`, `auto_heal.rs`, `watcher.rs`, `adapters/`). 100/100 workspace tests passing, 12/12 Hermes Python tests passing, 3/3 ignored harness binary qualification tests passing with zero warnings. Report delivered in `docs/CW-116B-REFACTOR-REPORT.md`. |
 | **CW-116C** Proxy & transformation boundaries | Backlog, after CW-116B (P0) | Separate routing, auth, provider forwarding, mutation orchestration and telemetry while preserving raw passthrough, signed content and safety decisions. |
 
 ---
@@ -244,11 +244,11 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🚧 In Progress
 
-* No active implementation milestone. **CW-116A** is merged into `main` (PR #13); **CW-116B** is Ready to begin.
+* None (CW-116B implementation complete; PR opened for review).
 
 ## 📋 Ready
 
-* **CW-116B** CLI and harness lifecycle modularization (ready after CW-116A PR merge).
+* **CW-116C** Proxy and transformation boundaries (ready after CW-116B PR merge).
 
 ---
 

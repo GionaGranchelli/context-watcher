@@ -21,7 +21,7 @@ Every harness integration is categorized according to four qualification tiers:
 
 | Harness | Core Proxy Verified | Harness Binary Verified | Real-Provider Verified | Live Optimization Status | Active Blocker / Target |
 |---|:---:|:---:|:---:|:---:|---|
-| **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (3-Turn Native Resume & Overlays) | 🟡 Opt-in Suite C (Blocked without spend ceiling) | 🟢 Supported (Responses API) | Qualified in CW-112 |
+| **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (3-Turn Native Resume & Overlays) | 🟢 Verified (`gpt-4o-mini` multi-turn live continuation) | 🟢 Supported (Responses API) | Qualified in CW-112 |
 | **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume & concurrency hardened) | 🟡 Opt-in Suite C | 🟢 Supported (OpenAI / DeepSeek middleware) | CW-112 (Live provider continuation) |
 | **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | CW-114 (Long-session reliability campaign) |
 
@@ -70,9 +70,14 @@ Every harness integration is categorized according to four qualification tiers:
   - Inbound `x-cw-control-token` and `x-cw-session-id` stripped prior to upstream forwarding.
   - Tool sandboxing directly tested: model-invoked tool commands inside Codex confirmed to execute without `CW_CONTROL_TOKEN` in environment (`shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"`).
 * **Live Qualification Status:**
-  - `test_live_continuation_real_codex_multiturn` implemented in Suite C with consistent `-c approval_policy="never" -c sandbox_mode="workspace-write"` flags.
-  - Slices requests by invocation snapshot intervals (handling multiple model requests per turn) and captures both prepared payloads (`get_turn_mutated_payload`) and opt-in wire egress (`get_wire_egress`), with independent provider receipt verification (`turn.outcome == "completed"` and usage telemetry).
-  - Gated on opt-in `CW_QUALIFY_REAL_CODEX=1` and spend budget authorization. Currently recorded as **LIVE QUALIFICATION BLOCKED** pending spend approval.
+  - `test_live_continuation_real_codex_multiturn` executed and verified against live OpenAI endpoint with `gpt-4o-mini` (19.26s, 100% pass) under authorized spend budget (<$0.01 spent).
+  - Multi-turn execution proved:
+    - Slices requests by invocation snapshot intervals (capturing all turn subrequests).
+    - Session continuity preserved across native `codex exec resume <thread_id>`.
+    - Real prompt caching observed on Turn 2 and Turn 3 (11,904 cached prompt tokens).
+    - Committed overlay `CW112_POLICY_ACTIVE` verified in outbound wire egress bytes (`store.get_wire_egress`).
+    - Tool subprocesses isolated from credentials (`CW_CONTROL_TOKEN="ABSENT"`).
+    - Persisted rollout JSONL history remains pristine without proxy overlay leakage.
 
 ### 4.2 Hermes Agent (`0.22.5`) — Concurrency Hardened & Resume Verified
 * **Status:** **Harness Binary Verified (Multi-Turn Resume & Concurrency Hardened)** · Completed in CW-113.

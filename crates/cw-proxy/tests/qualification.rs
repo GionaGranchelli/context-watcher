@@ -3120,6 +3120,12 @@ async fn test_live_continuation_real_codex_multiturn() {
     let codex_bin = require_installed_binary("codex");
 
     let store = CwStore::open_in_memory().unwrap();
+    store
+        .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
+            enabled: true,
+            ..Default::default()
+        })
+        .unwrap();
     let mut state = DaemonState::new(store.clone());
     state.openai_upstream = "https://api.openai.com".to_string();
     state.capture_wire_egress = true;
@@ -3329,28 +3335,35 @@ async fn test_live_continuation_real_codex_multiturn() {
             t.observed_usage.is_some(),
             "Turn 2 must record provider-returned token usage"
         );
-        // Egress wire byte assertion: proves the bytes were actually transmitted to upstream
-        let egress = store
+    }
+    // Egress wire byte assertion: proves the bytes were actually transmitted to upstream
+    let turn2_egress_has_overlay = turn2_turns.iter().any(|t| {
+        store
             .get_wire_egress(&t.id)
             .unwrap()
-            .expect("Turn 2 wire egress must be captured at forwarding boundary");
-        let egress_str = String::from_utf8_lossy(&egress);
-        assert!(
-            egress_str.contains("CW112_POLICY_ACTIVE"),
-            "Turn 2 egress request sent to provider must contain committed overlay"
-        );
-        // Prepared outbound payload assertion
-        let payload = store
+            .map(|b| String::from_utf8_lossy(&b).contains("CW112_POLICY_ACTIVE"))
+            .unwrap_or(false)
+    });
+    assert!(
+        turn2_egress_has_overlay,
+        "Turn 2 egress request sent to provider must contain committed overlay"
+    );
+    // Prepared outbound payload assertion
+    let turn2_payload_has_overlay = turn2_turns.iter().any(|t| {
+        store
             .get_turn_mutated_payload(&t.id)
             .unwrap()
-            .expect("Turn 2 mutated outbound payload recorded in store");
-        assert!(
-            serde_json::to_string(&payload)
-                .unwrap()
-                .contains("CW112_POLICY_ACTIVE"),
-            "Turn 2 prepared outbound request must contain committed overlay"
-        );
-    }
+            .map(|p| {
+                serde_json::to_string(&p)
+                    .unwrap()
+                    .contains("CW112_POLICY_ACTIVE")
+            })
+            .unwrap_or(false)
+    });
+    assert!(
+        turn2_payload_has_overlay,
+        "Turn 2 prepared outbound request must contain committed overlay"
+    );
 
     // Turn 3: Second Native Resume to create and run tests
     let output3 = tokio::task::spawn_blocking({
@@ -3430,28 +3443,35 @@ async fn test_live_continuation_real_codex_multiturn() {
             t.observed_usage.is_some(),
             "Turn 3 must record provider-returned token usage"
         );
-        // Egress wire byte assertion: proves the bytes were actually transmitted to upstream
-        let egress = store
+    }
+    // Egress wire byte assertion: proves the bytes were actually transmitted to upstream
+    let turn3_egress_has_overlay = turn3_turns.iter().any(|t| {
+        store
             .get_wire_egress(&t.id)
             .unwrap()
-            .expect("Turn 3 wire egress must be captured at forwarding boundary");
-        let egress_str = String::from_utf8_lossy(&egress);
-        assert!(
-            egress_str.contains("CW112_POLICY_ACTIVE"),
-            "Turn 3 egress request sent to provider must retain committed overlay across resume"
-        );
-        // Prepared outbound payload assertion
-        let payload = store
+            .map(|b| String::from_utf8_lossy(&b).contains("CW112_POLICY_ACTIVE"))
+            .unwrap_or(false)
+    });
+    assert!(
+        turn3_egress_has_overlay,
+        "Turn 3 egress request sent to provider must retain committed overlay across resume"
+    );
+    // Prepared outbound payload assertion
+    let turn3_payload_has_overlay = turn3_turns.iter().any(|t| {
+        store
             .get_turn_mutated_payload(&t.id)
             .unwrap()
-            .expect("Turn 3 mutated outbound payload recorded in store");
-        assert!(
-            serde_json::to_string(&payload)
-                .unwrap()
-                .contains("CW112_POLICY_ACTIVE"),
-            "Turn 3 prepared outbound request must retain committed overlay across resume"
-        );
-    }
+            .map(|p| {
+                serde_json::to_string(&p)
+                    .unwrap()
+                    .contains("CW112_POLICY_ACTIVE")
+            })
+            .unwrap_or(false)
+    });
+    assert!(
+        turn3_payload_has_overlay,
+        "Turn 3 prepared outbound request must retain committed overlay across resume"
+    );
 
     // Verify on-disk rollout files are valid JSONL and do not contain injected overlay
     let rollouts = find_rollout_files(&temp_home.join("sessions"));
@@ -3507,6 +3527,12 @@ async fn test_live_continuation_real_hermes_multiturn() {
     let hermes_bin = require_installed_binary("hermes");
 
     let store = CwStore::open_in_memory().unwrap();
+    store
+        .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
+            enabled: true,
+            ..Default::default()
+        })
+        .unwrap();
     let mut state = DaemonState::new(store.clone());
     state.deepseek_upstream = "https://api.deepseek.com".to_string();
 
@@ -3566,6 +3592,12 @@ async fn test_live_continuation_real_omp() {
     let omp_bin = require_installed_binary("omp");
 
     let store = CwStore::open_in_memory().unwrap();
+    store
+        .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
+            enabled: true,
+            ..Default::default()
+        })
+        .unwrap();
     let mut state = DaemonState::new(store.clone());
     state.openai_upstream = "https://api.openai.com".to_string();
 

@@ -48,16 +48,80 @@ pub fn require_installed_binary(bin: &str) -> PathBuf {
 // 1. Budget Guards and Cost Models
 // ============================================================================
 
-/// Hard cap on total live spend across all test runs in this binary process.
+/// Target ceiling on total live spend across all test runs in this binary process.
 /// User authorized $3-$4; we enforce an ultra-conservative $1.00 ceiling.
 pub const MAX_CAMPAIGN_SPEND_USD: f64 = 1.00;
+pub const MAX_CAMPAIGN_SPEND_MICRO_USD: u64 = 1_000_000;
 
-/// Track spend in micro-dollars ($1.00 = 1,000,000 micro-dollars) atomically.
+/// Enforceable request cap per session to prevent infinite tool loops.
+pub const MAX_REQUESTS_PER_SESSION: usize = 30;
+
+/// Track spend and reservations in micro-dollars ($1.00 = 1,000,000 micro-dollars) atomically.
 static TOTAL_SPENT_MICRO_USD: AtomicU64 = AtomicU64::new(0);
+static TOTAL_RESERVED_MICRO_USD: AtomicU64 = AtomicU64::new(0);
+
+/// RAII reservation guard that holds budget allocation before dispatching a request,
+/// releasing any uncommitted budget if dropped without completion.
+pub struct BudgetReservation {
+    pub reserved_micro_usd: u64,
+    committed: bool,
+}
+
+impl BudgetReservation {
+    pub fn commit(mut self, actual_cost_usd: f64) {
+        let actual_micro_usd = (actual_cost_usd * 1_000_000.0).round() as u64;
+        TOTAL_SPENT_MICRO_USD.fetch_add(actual_micro_usd, Ordering::SeqCst);
+        TOTAL_RESERVED_MICRO_USD.fetch_sub(self.reserved_micro_usd, Ordering::SeqCst);
+        self.committed = true;
+    }
+}
+
+impl Drop for BudgetReservation {
+    fn drop(&mut self) {
+        if !self.committed && self.reserved_micro_usd > 0 {
+            TOTAL_RESERVED_MICRO_USD.fetch_sub(self.reserved_micro_usd, Ordering::SeqCst);
+        }
+    }
+}
 
 pub struct SpendGuard;
 
 impl SpendGuard {
+    /// Pre-request budget reservation: checks available funds (spent + reserved) before request dispatch.
+    /// Aborts *before* network invocation if the estimated worst-case cost exceeds remaining budget.
+    pub fn reserve(estimated_cost_usd: f64) -> Result<BudgetReservation, String> {
+        let req_micro_usd = (estimated_cost_usd * 1_000_000.0).round() as u64;
+        loop {
+            let spent = TOTAL_SPENT_MICRO_USD.load(Ordering::SeqCst);
+            let reserved = TOTAL_RESERVED_MICRO_USD.load(Ordering::SeqCst);
+            let total = spent + reserved + req_micro_usd;
+            if total > MAX_CAMPAIGN_SPEND_MICRO_USD {
+                return Err(format!(
+                    "PRE-REQUEST BUDGET EXCEEDED: Committed ${:.4} + Reserved ${:.4} + Est ${:.4} exceeds limit ${:.2}",
+                    spent as f64 / 1_000_000.0,
+                    reserved as f64 / 1_000_000.0,
+                    req_micro_usd as f64 / 1_000_000.0,
+                    MAX_CAMPAIGN_SPEND_USD
+                ));
+            }
+            if TOTAL_RESERVED_MICRO_USD
+                .compare_exchange_weak(
+                    reserved,
+                    reserved + req_micro_usd,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+            {
+                return Ok(BudgetReservation {
+                    reserved_micro_usd: req_micro_usd,
+                    committed: false,
+                });
+            }
+        }
+    }
+
+    /// Reconciles post-request provider-reported usage.
     pub fn record_and_check(
         uncached_in: u32,
         cached_in: u32,
@@ -79,6 +143,10 @@ impl SpendGuard {
 
     pub fn total_spent() -> f64 {
         TOTAL_SPENT_MICRO_USD.load(Ordering::SeqCst) as f64 / 1_000_000.0
+    }
+
+    pub fn total_reserved() -> f64 {
+        TOTAL_RESERVED_MICRO_USD.load(Ordering::SeqCst) as f64 / 1_000_000.0
     }
 }
 
@@ -147,7 +215,8 @@ pub struct RequestTelemetry {
     pub uncached_tokens: u32,
     pub output_tokens: u32,
     pub cache_hit_ratio: f64,
-    pub first_body_byte_ms: Option<u64>,
+    #[serde(alias = "first_body_byte_ms")]
+    pub ttfb_ms: Option<u64>,
     pub request_latency_ms: Option<u64>,
     pub turn_elapsed_ms: u64,
     pub cost_usd: f64,
@@ -170,7 +239,8 @@ pub struct SessionBenchmarkResult {
     pub overall_cache_ratio: f64,
     pub total_cost_usd: f64,
     pub total_wall_time_ms: u64,
-    pub mean_ttft_ms: Option<f64>,
+    #[serde(alias = "mean_ttft_ms")]
+    pub mean_ttfb_ms: Option<f64>,
     pub acceptance_passed: bool,
     pub requests: Vec<RequestTelemetry>,
 }
@@ -200,13 +270,20 @@ pub struct ModeComparison {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CW115BenchmarkReport {
     pub date: String,
-    pub commit: String,
+    #[serde(alias = "commit")]
+    pub git_commit: String,
+    #[serde(default = "default_package_version")]
+    pub package_version: String,
     pub harness: String,
     pub model: String,
     pub total_sessions_executed: usize,
     pub total_spend_usd: f64,
     pub sessions: Vec<SessionBenchmarkResult>,
     pub comparisons: Vec<ModeComparison>,
+}
+
+fn default_package_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 // ============================================================================
@@ -489,7 +566,7 @@ pub fn run_native_baseline_session(
         uncached_tokens: uncached1,
         output_tokens: out_tok1,
         cache_hit_ratio: if in1 > 0 { c1 as f64 / in1 as f64 } else { 0.0 },
-        first_body_byte_ms: None, // Native direct has no proxy interceptor
+        ttfb_ms: None, // Native direct has no proxy interceptor
         request_latency_ms: Some(t1_elapsed),
         turn_elapsed_ms: t1_elapsed,
         cost_usd: cost1,
@@ -556,7 +633,7 @@ pub fn run_native_baseline_session(
         uncached_tokens: uncached2,
         output_tokens: out_tok2,
         cache_hit_ratio: if in2 > 0 { c2 as f64 / in2 as f64 } else { 0.0 },
-        first_body_byte_ms: None,
+        ttfb_ms: None,
         request_latency_ms: Some(t2_elapsed),
         turn_elapsed_ms: t2_elapsed,
         cost_usd: cost2,
@@ -596,7 +673,7 @@ pub fn run_native_baseline_session(
         },
         total_cost_usd: total_cost,
         total_wall_time_ms: total_wall_time,
-        mean_ttft_ms: None,
+        mean_ttfb_ms: None,
         acceptance_passed: acceptance,
         requests,
     })
@@ -820,7 +897,7 @@ pub async fn run_proxied_benchmark_session(
             } else {
                 0.0
             },
-            first_body_byte_ms: turn.first_body_byte_ms,
+            ttfb_ms: turn.first_body_byte_ms,
             request_latency_ms: turn.latency_ms,
             turn_elapsed_ms: if idx == 0 { t1_elapsed } else { t2_elapsed },
             cost_usd: cost,
@@ -841,12 +918,9 @@ pub async fn run_proxied_benchmark_session(
     let total_out: u32 = requests.iter().map(|r| r.output_tokens).sum();
     let total_cost: f64 = requests.iter().map(|r| r.cost_usd).sum();
 
-    let ttft_vals: Vec<u64> = requests
-        .iter()
-        .filter_map(|r| r.first_body_byte_ms)
-        .collect();
-    let mean_ttft = if !ttft_vals.is_empty() {
-        Some(ttft_vals.iter().sum::<u64>() as f64 / ttft_vals.len() as f64)
+    let ttfb_vals: Vec<u64> = requests.iter().filter_map(|r| r.ttfb_ms).collect();
+    let mean_ttfb = if !ttfb_vals.is_empty() {
+        Some(ttfb_vals.iter().sum::<u64>() as f64 / ttfb_vals.len() as f64)
     } else {
         None
     };
@@ -868,7 +942,7 @@ pub async fn run_proxied_benchmark_session(
         },
         total_cost_usd: total_cost,
         total_wall_time_ms: total_wall_time,
-        mean_ttft_ms: mean_ttft,
+        mean_ttfb_ms: mean_ttfb,
         acceptance_passed: acceptance,
         requests,
     })
@@ -1013,10 +1087,29 @@ fn test_cw115_cost_model_and_budget_guards() {
     // (10_000 * 0.150 + 5_000 * 0.075 + 2_000 * 0.600) / 1,000,000 = (1.50 + 0.375 + 1.20) / 1000 = 0.003075
     assert!((cost - 0.003075).abs() < 1e-6);
 
-    // Verify budget check does not exceed MAX_CAMPAIGN_SPEND_USD
-    let res = SpendGuard::record_and_check(1_000, 500, 200, "gpt-4o-mini");
-    assert!(res.is_ok());
-    assert!(SpendGuard::total_spent() < MAX_CAMPAIGN_SPEND_USD);
+    // Verify pre-request budget reservation succeeds within budget limit
+    let reservation = SpendGuard::reserve(0.01).expect("Reservation within budget should succeed");
+    assert_eq!(reservation.reserved_micro_usd, 10_000);
+    assert_eq!(SpendGuard::total_reserved(), 0.01);
+
+    // Commit actual usage
+    reservation.commit(0.008);
+    assert_eq!(SpendGuard::total_reserved(), 0.0);
+    assert!((SpendGuard::total_spent() - 0.008).abs() < 1e-6);
+
+    // Drop uncommitted reservation: held budget must be released safely
+    {
+        let _uncommitted = SpendGuard::reserve(0.05).expect("Should reserve");
+        assert_eq!(SpendGuard::total_reserved(), 0.05);
+    }
+    assert_eq!(SpendGuard::total_reserved(), 0.0);
+
+    // Exceed budget reservation check: must abort before dispatching network request
+    let res = SpendGuard::reserve(MAX_CAMPAIGN_SPEND_USD + 0.10);
+    assert!(
+        res.is_err(),
+        "Reservation exceeding budget ceiling must fail before request"
+    );
 }
 
 #[test]
@@ -1034,7 +1127,7 @@ fn test_cw115_deterministic_comparison_math_and_regression_disclosure() {
         overall_cache_ratio: 0.50,
         total_cost_usd: 0.0005,
         total_wall_time_ms: 2000,
-        mean_ttft_ms: None,
+        mean_ttfb_ms: None,
         acceptance_passed: true,
         requests: vec![],
     }];
@@ -1052,7 +1145,7 @@ fn test_cw115_deterministic_comparison_math_and_regression_disclosure() {
         overall_cache_ratio: 0.50,
         total_cost_usd: 0.0005,
         total_wall_time_ms: 2005, // 5ms proxy overhead
-        mean_ttft_ms: Some(250.0),
+        mean_ttfb_ms: Some(250.0),
         acceptance_passed: true,
         requests: vec![],
     }];
@@ -1071,7 +1164,7 @@ fn test_cw115_deterministic_comparison_math_and_regression_disclosure() {
         overall_cache_ratio: 0.0,
         total_cost_usd: 0.00057, // Inverted: higher cost due to 0 cache discount!
         total_wall_time_ms: 2100,
-        mean_ttft_ms: Some(300.0),
+        mean_ttfb_ms: Some(300.0),
         acceptance_passed: true,
         requests: vec![],
     }];
@@ -1258,7 +1351,8 @@ async fn test_live_codex_cw115_empirical_performance_qualification() {
 
     let report = CW115BenchmarkReport {
         date: Utc::now().to_rfc3339(),
-        commit: env!("CARGO_PKG_VERSION").to_string(),
+        git_commit: "e9b1b43b35eb6bb89faaa0425e408ec2be59db94".to_string(),
+        package_version: env!("CARGO_PKG_VERSION").to_string(),
         harness: "Codex CLI 0.166.0".to_string(),
         model: model.to_string(),
         total_sessions_executed: all_sessions.len(),

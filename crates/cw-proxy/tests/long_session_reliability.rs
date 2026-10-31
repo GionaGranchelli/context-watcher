@@ -15,7 +15,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -1212,75 +1212,218 @@ fn verify_captured_credentials_isolated(captured: &[CapturedRequest], control_to
     true
 }
 
-fn verify_captured_tool_pairing(captured: &[CapturedRequest]) -> bool {
-    let mut total_emitted_calls = HashSet::new();
-    let mut total_results = HashSet::new();
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolPairingError {
+    NoToolCallsObserved,
+    DuplicateEmittedCallId {
+        call_id: String,
+        request_index: usize,
+    },
+    DuplicateResult {
+        call_id: String,
+        request_index: usize,
+    },
+    OrphanedResult {
+        call_id: String,
+        request_index: usize,
+    },
+    MissingResult {
+        call_id: String,
+        request_index: usize,
+    },
+    MultiplicityMismatch {
+        call_id: String,
+        emitted_count: usize,
+        result_count: usize,
+        request_index: usize,
+    },
+}
 
-    for req in captured {
+impl std::fmt::Display for ToolPairingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoToolCallsObserved => {
+                write!(f, "No tool calls were observed in captured requests")
+            }
+            Self::DuplicateEmittedCallId {
+                call_id,
+                request_index,
+            } => {
+                write!(
+                    f,
+                    "Duplicate emitted tool call ID '{}' in request {}",
+                    call_id, request_index
+                )
+            }
+            Self::DuplicateResult {
+                call_id,
+                request_index,
+            } => {
+                write!(
+                    f,
+                    "Duplicate tool result for call ID '{}' in request {}",
+                    call_id, request_index
+                )
+            }
+            Self::OrphanedResult {
+                call_id,
+                request_index,
+            } => {
+                write!(
+                    f,
+                    "Orphaned tool result for uncalled ID '{}' in request {}",
+                    call_id, request_index
+                )
+            }
+            Self::MissingResult {
+                call_id,
+                request_index,
+            } => {
+                write!(
+                    f,
+                    "Missing tool result for emitted call ID '{}' in request {}",
+                    call_id, request_index
+                )
+            }
+            Self::MultiplicityMismatch {
+                call_id,
+                emitted_count,
+                result_count,
+                request_index,
+            } => {
+                write!(
+                    f,
+                    "Multiplicity mismatch for call ID '{}' in request {}: {} emitted vs {} results",
+                    call_id, request_index, emitted_count, result_count
+                )
+            }
+        }
+    }
+}
+
+fn verify_captured_tool_pairing_with_error(
+    captured: &[CapturedRequest],
+) -> Result<(), ToolPairingError> {
+    let mut session_resolved_calls = HashSet::new();
+
+    for (req_idx, req) in captured.iter().enumerate() {
         if let Some(ref json) = req.json_body {
+            let mut req_emitted: HashMap<String, usize> = HashMap::new();
+            let mut req_results: HashMap<String, usize> = HashMap::new();
+
             // Responses API format (Codex)
             if let Some(input) = json.get("input").and_then(Value::as_array) {
-                let mut req_emitted = HashSet::new();
-                let mut req_results = HashSet::new();
                 for item in input {
                     if item.get("type").and_then(Value::as_str) == Some("function_call") {
                         if let Some(cid) = item.get("call_id").and_then(Value::as_str) {
-                            req_emitted.insert(cid.to_string());
-                            total_emitted_calls.insert(cid.to_string());
+                            let count = req_emitted.entry(cid.to_string()).or_insert(0);
+                            *count += 1;
+                            if *count > 1 {
+                                return Err(ToolPairingError::DuplicateEmittedCallId {
+                                    call_id: cid.to_string(),
+                                    request_index: req_idx,
+                                });
+                            }
                         }
                     } else if item.get("type").and_then(Value::as_str)
                         == Some("function_call_output")
                     {
                         if let Some(cid) = item.get("call_id").and_then(Value::as_str) {
-                            if !req_results.insert(cid.to_string()) {
-                                // Duplicate output for same call ID in request
-                                return false;
+                            let count = req_results.entry(cid.to_string()).or_insert(0);
+                            *count += 1;
+                            if *count > 1 {
+                                return Err(ToolPairingError::DuplicateResult {
+                                    call_id: cid.to_string(),
+                                    request_index: req_idx,
+                                });
                             }
-                            total_results.insert(cid.to_string());
                         }
                     }
                 }
-                for cid in &req_results {
-                    if !req_emitted.contains(cid) {
-                        // Orphaned result without matching call in conversation
-                        return false;
-                    }
-                }
             }
+
             // Chat Completions format (OMP and Hermes)
             if let Some(messages) = json.get("messages").and_then(Value::as_array) {
-                let mut req_emitted = HashSet::new();
-                let mut req_results = HashSet::new();
                 for msg in messages {
                     if let Some(tcs) = msg.get("tool_calls").and_then(Value::as_array) {
                         for tc in tcs {
                             if let Some(id) = tc.get("id").and_then(Value::as_str) {
-                                req_emitted.insert(id.to_string());
-                                total_emitted_calls.insert(id.to_string());
+                                let count = req_emitted.entry(id.to_string()).or_insert(0);
+                                *count += 1;
+                                if *count > 1 {
+                                    return Err(ToolPairingError::DuplicateEmittedCallId {
+                                        call_id: id.to_string(),
+                                        request_index: req_idx,
+                                    });
+                                }
                             }
                         }
                     }
                     if msg.get("role").and_then(Value::as_str) == Some("tool") {
                         if let Some(id) = msg.get("tool_call_id").and_then(Value::as_str) {
-                            if !req_results.insert(id.to_string()) {
-                                // Duplicate output for same call ID in request
-                                return false;
+                            let count = req_results.entry(id.to_string()).or_insert(0);
+                            *count += 1;
+                            if *count > 1 {
+                                return Err(ToolPairingError::DuplicateResult {
+                                    call_id: id.to_string(),
+                                    request_index: req_idx,
+                                });
                             }
-                            total_results.insert(id.to_string());
                         }
                     }
                 }
-                for id in &req_results {
-                    if !req_emitted.contains(id) {
-                        // Orphaned result without matching call in conversation
-                        return false;
+            }
+
+            // If this request has tool interactions, validate bijective ledger properties
+            if !req_emitted.is_empty() || !req_results.is_empty() {
+                // 1. Every result must match an emitted call (no orphans)
+                for cid in req_results.keys() {
+                    if !req_emitted.contains_key(cid) {
+                        return Err(ToolPairingError::OrphanedResult {
+                            call_id: cid.clone(),
+                            request_index: req_idx,
+                        });
                     }
+                }
+
+                // 2. Every emitted call must have a matching result with identical multiplicity (no missing results or multiplicity mismatch)
+                for (cid, emitted_count) in &req_emitted {
+                    let res_count = req_results.get(cid).copied().unwrap_or(0);
+                    if res_count == 0 {
+                        return Err(ToolPairingError::MissingResult {
+                            call_id: cid.clone(),
+                            request_index: req_idx,
+                        });
+                    }
+                    if res_count != *emitted_count {
+                        return Err(ToolPairingError::MultiplicityMismatch {
+                            call_id: cid.clone(),
+                            emitted_count: *emitted_count,
+                            result_count: res_count,
+                            request_index: req_idx,
+                        });
+                    }
+                    session_resolved_calls.insert(cid.clone());
                 }
             }
         }
     }
 
-    !total_emitted_calls.is_empty() && total_emitted_calls == total_results
+    if session_resolved_calls.is_empty() {
+        return Err(ToolPairingError::NoToolCallsObserved);
+    }
+
+    Ok(())
+}
+
+fn verify_captured_tool_pairing(captured: &[CapturedRequest]) -> bool {
+    match verify_captured_tool_pairing_with_error(captured) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("Tool pairing ledger validation failed: {e}");
+            false
+        }
+    }
 }
 
 async fn execute_codex_session(
@@ -2658,12 +2801,35 @@ async fn execute_hermes_session(
         trusted_dir: temp_trusted_dir.clone(),
     };
 
-    let (exec_cmd, base_args): (PathBuf, Vec<String>) =
-        if let Some(py) = resolve_hermes_venv_python(hermes_bin) {
-            (py, vec!["-m".to_string(), "hermes_cli.main".to_string()])
-        } else {
-            (hermes_bin.to_path_buf(), vec![])
-        };
+    let (exec_cmd, base_args): (PathBuf, Vec<String>) = match resolve_hermes_venv_python(hermes_bin)
+    {
+        Some(py) => (py, vec!["-m".to_string(), "hermes_cli.main".to_string()]),
+        None => {
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "Hermes Agent".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "BLOCKED".to_string(),
+                logical_turns: 0,
+                model_requests: 0,
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "BLOCKED: Failed to resolve isolated virtual environment python interpreter from '{}'. Never invoke installed launcher as fallback.",
+                    hermes_bin.display()
+                )),
+            };
+        }
+    };
 
     // Copy repo's context-watcher plugin into temp_hermes_home/plugins/context-watcher
     let plugins_dir = temp_hermes_home.join("plugins");
@@ -3989,4 +4155,314 @@ async fn test_cw114_resilience_concurrent_sessions_distinct_overlays() {
     );
 
     mock_task.abort();
+}
+
+// ============================================================================
+// 9. Negative Regression Tests for Tool Pairing Ledger & Multiplicity
+// ============================================================================
+
+fn make_test_captured(json: Value) -> CapturedRequest {
+    let body = serde_json::to_vec(&json).unwrap();
+    CapturedRequest {
+        path: "/test".to_string(),
+        headers: HeaderMap::new(),
+        body,
+        json_body: Some(json),
+    }
+}
+
+#[test]
+fn test_tool_pairing_rejects_duplicate_emitted_call_id_in_responses_api() {
+    let req = make_test_captured(json!({
+        "input": [
+            {"type": "function_call", "call_id": "call_123", "name": "test_fn", "arguments": "{}"},
+            {"type": "function_call", "call_id": "call_123", "name": "test_fn", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_123", "output": "ok"}
+        ]
+    }));
+    let res = verify_captured_tool_pairing_with_error(&[req]);
+    assert_eq!(
+        res,
+        Err(ToolPairingError::DuplicateEmittedCallId {
+            call_id: "call_123".to_string(),
+            request_index: 0
+        })
+    );
+}
+
+#[test]
+fn test_tool_pairing_rejects_duplicate_emitted_call_id_in_chat_completions() {
+    let req = make_test_captured(json!({
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_123", "type": "function", "function": {"name": "test_fn", "arguments": "{}"}},
+                    {"id": "call_123", "type": "function", "function": {"name": "test_fn", "arguments": "{}"}}
+                ]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_123",
+                "content": "ok"
+            }
+        ]
+    }));
+    let res = verify_captured_tool_pairing_with_error(&[req]);
+    assert_eq!(
+        res,
+        Err(ToolPairingError::DuplicateEmittedCallId {
+            call_id: "call_123".to_string(),
+            request_index: 0
+        })
+    );
+}
+
+#[test]
+fn test_tool_pairing_rejects_duplicate_result_in_responses_api() {
+    let req = make_test_captured(json!({
+        "input": [
+            {"type": "function_call", "call_id": "call_123", "name": "test_fn", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_123", "output": "ok1"},
+            {"type": "function_call_output", "call_id": "call_123", "output": "ok2"}
+        ]
+    }));
+    let res = verify_captured_tool_pairing_with_error(&[req]);
+    assert_eq!(
+        res,
+        Err(ToolPairingError::DuplicateResult {
+            call_id: "call_123".to_string(),
+            request_index: 0
+        })
+    );
+}
+
+#[test]
+fn test_tool_pairing_rejects_duplicate_result_in_chat_completions() {
+    let req = make_test_captured(json!({
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_123", "type": "function", "function": {"name": "test_fn", "arguments": "{}"}}
+                ]
+            },
+            {"role": "tool", "tool_call_id": "call_123", "content": "ok1"},
+            {"role": "tool", "tool_call_id": "call_123", "content": "ok2"}
+        ]
+    }));
+    let res = verify_captured_tool_pairing_with_error(&[req]);
+    assert_eq!(
+        res,
+        Err(ToolPairingError::DuplicateResult {
+            call_id: "call_123".to_string(),
+            request_index: 0
+        })
+    );
+}
+
+#[test]
+fn test_tool_pairing_rejects_orphaned_result_in_responses_api() {
+    let req = make_test_captured(json!({
+        "input": [
+            {"type": "function_call_output", "call_id": "call_orphan", "output": "ok"}
+        ]
+    }));
+    let res = verify_captured_tool_pairing_with_error(&[req]);
+    assert_eq!(
+        res,
+        Err(ToolPairingError::OrphanedResult {
+            call_id: "call_orphan".to_string(),
+            request_index: 0
+        })
+    );
+}
+
+#[test]
+fn test_tool_pairing_rejects_orphaned_result_in_chat_completions() {
+    let req = make_test_captured(json!({
+        "messages": [
+            {"role": "tool", "tool_call_id": "call_orphan", "content": "ok"}
+        ]
+    }));
+    let res = verify_captured_tool_pairing_with_error(&[req]);
+    assert_eq!(
+        res,
+        Err(ToolPairingError::OrphanedResult {
+            call_id: "call_orphan".to_string(),
+            request_index: 0
+        })
+    );
+}
+
+#[test]
+fn test_tool_pairing_rejects_missing_result_in_responses_api() {
+    let req = make_test_captured(json!({
+        "input": [
+            {"type": "function_call", "call_id": "call_missing", "name": "test_fn", "arguments": "{}"}
+        ]
+    }));
+    let res = verify_captured_tool_pairing_with_error(&[req]);
+    assert_eq!(
+        res,
+        Err(ToolPairingError::MissingResult {
+            call_id: "call_missing".to_string(),
+            request_index: 0
+        })
+    );
+}
+
+#[test]
+fn test_tool_pairing_rejects_missing_result_in_chat_completions() {
+    let req = make_test_captured(json!({
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_missing", "type": "function", "function": {"name": "test_fn", "arguments": "{}"}}
+                ]
+            }
+        ]
+    }));
+    let res = verify_captured_tool_pairing_with_error(&[req]);
+    assert_eq!(
+        res,
+        Err(ToolPairingError::MissingResult {
+            call_id: "call_missing".to_string(),
+            request_index: 0
+        })
+    );
+}
+
+#[test]
+fn test_tool_pairing_rejects_multiplicity_mismatch_hidden_by_set_equality() {
+    // Demonstration of the exact user review defect:
+    // Emitted call 1: call_123
+    // Emitted call 2: call_123
+    // Tool result 1:  call_123
+    // A HashSet of call IDs would contain {"call_123"} for both calls and results,
+    // falsely declaring equality. The occurrence-based ledger must reject this.
+    let req = make_test_captured(json!({
+        "input": [
+            {"type": "function_call", "call_id": "call_123", "name": "test_fn", "arguments": "{}"},
+            {"type": "function_call", "call_id": "call_123", "name": "test_fn", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_123", "output": "ok"}
+        ]
+    }));
+    assert!(
+        !verify_captured_tool_pairing(std::slice::from_ref(&req)),
+        "Multiplicity mismatch must fail verify_captured_tool_pairing"
+    );
+    assert!(
+        matches!(
+            verify_captured_tool_pairing_with_error(&[req]),
+            Err(ToolPairingError::DuplicateEmittedCallId { .. })
+                | Err(ToolPairingError::MultiplicityMismatch { .. })
+        ),
+        "Must return an explicit multiplicity or duplicate emitted call error"
+    );
+}
+
+#[test]
+fn test_tool_pairing_accepts_valid_historical_replay_across_requests() {
+    // Request 0: User turn (0 tool calls, 0 results)
+    let req0 = make_test_captured(json!({
+        "messages": [
+            {"role": "user", "content": "Initial user task"}
+        ]
+    }));
+
+    // Request 1: Agent emits call_1 and receives result_1
+    let req1 = make_test_captured(json!({
+        "messages": [
+            {"role": "user", "content": "Initial user task"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "test_fn", "arguments": "{}"}}
+                ]
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "result 1"}
+        ]
+    }));
+
+    // Request 2: Resumed turn replays call_1 and result_1 in history without duplicating invocations
+    let req2 = make_test_captured(json!({
+        "messages": [
+            {"role": "user", "content": "Initial user task"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "test_fn", "arguments": "{}"}}
+                ]
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "result 1"},
+            {"role": "assistant", "content": "Task 1 completed"},
+            {"role": "user", "content": "Follow-up turn 2 prompt"}
+        ]
+    }));
+
+    // Request 3: Turn 2 emits call_2 and receives result_2 while replaying historical call_1
+    let req3 = make_test_captured(json!({
+        "messages": [
+            {"role": "user", "content": "Initial user task"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function", "function": {"name": "test_fn", "arguments": "{}"}}
+                ]
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "result 1"},
+            {"role": "assistant", "content": "Task 1 completed"},
+            {"role": "user", "content": "Follow-up turn 2 prompt"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"id": "call_2", "type": "function", "function": {"name": "test_fn_2", "arguments": "{}"}}
+                ]
+            },
+            {"role": "tool", "tool_call_id": "call_2", "content": "result 2"}
+        ]
+    }));
+
+    let requests = vec![req0, req1, req2, req3];
+    assert!(
+        verify_captured_tool_pairing(&requests),
+        "Legitimate historical replay must pass tool pairing validation"
+    );
+    assert_eq!(verify_captured_tool_pairing_with_error(&requests), Ok(()));
+}
+
+#[tokio::test]
+async fn test_hermes_venv_resolution_failure_blocks_qualification_without_executing_launcher() {
+    let fixture = WorkloadFixture::create(TaskFamily::F1BugFixing);
+    let store = CwStore::open_in_memory().unwrap();
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    let fake_bin = PathBuf::from("/nonexistent/isolated/path/to/hermes");
+
+    let result = execute_hermes_session(
+        &fake_bin,
+        40000,
+        "test-token",
+        "cw114-test-blocked-hermes",
+        &fixture,
+        &store,
+        TaskFamily::F1BugFixing,
+        1,
+        captured,
+    )
+    .await;
+
+    assert_eq!(
+        result.status, "BLOCKED",
+        "Failing to resolve isolated venv interpreter must immediately BLOCK qualification"
+    );
+    assert!(
+        result
+            .failure_class
+            .as_deref()
+            .unwrap_or("")
+            .contains("BLOCKED: Failed to resolve isolated virtual environment"),
+        "Failure class must document the isolation resolution failure"
+    );
 }

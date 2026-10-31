@@ -52,10 +52,19 @@ Following qualification review, the test harness runner in `crates/cw-proxy/test
    - The test runner asserts `output.status.success()` on every turn. If any harness process returns a non-zero exit code or times out, the session immediately fails.
    - Acceptance tests are executed and asserted passing after every tool execution before the logical turn count is incremented.
 
-3. **Bijective Tool-Pairing Ledger Validation:**
-   - Tool pairing validation enforces a strict bijective ledger rather than simply searching for at least one matched pair:
-     - **Responses API (Codex):** Audits `function_call` vs `function_call_output` call IDs within the `input` array. Enforces that no call ID has duplicate outputs, no orphaned results exist without an originating call, and the total conversation emitted calls strictly equal total results (`!total_emitted_calls.is_empty() && total_emitted_calls == total_results`).
-     - **Chat Completions (OMP & Hermes):** Audits `tool_calls` `id` vs `role: "tool"` `tool_call_id` within the `messages` array, asserting zero duplicates, zero orphaned outputs, and complete bijection across the entire conversation.
+3. **Tool-Pairing Multiplicity Ledger Validation & Defect Rejection:**
+   - Rather than relying on `HashSet` set equality (`total_emitted_calls == total_results`), which inadvertently discards duplicate tool call IDs or results (e.g. 2 emitted calls for `call_123` and only 1 result), `verify_captured_tool_pairing_with_error` maintains exact occurrence counts per request using `HashMap<String, usize>` and evaluates a formal `ToolPairingError` ledger:
+     - **Responses API (Codex):** Audits `function_call` vs `function_call_output` call IDs within the `input` array.
+     - **Chat Completions (OMP & Hermes):** Audits `tool_calls` `id` vs `role: "tool"` `tool_call_id` within the `messages` array.
+   - Enforces 6 strict validation invariants:
+     - Rejects zero-tool runs: `ToolPairingError::NoToolCallsObserved`.
+     - Rejects duplicate emitted call IDs in the same request: `ToolPairingError::DuplicateEmittedCallId`.
+     - Rejects duplicate tool results for the same call ID: `ToolPairingError::DuplicateResult`.
+     - Rejects orphaned tool results without an emitted call: `ToolPairingError::OrphanedResult`.
+     - Rejects missing results for an emitted tool call: `ToolPairingError::MissingResult`.
+     - Rejects count mismatches hidden by set equality: `ToolPairingError::MultiplicityMismatch`.
+   - **Legitimate Historical Replay Support:** Correctly accounts for multi-turn LLM harnesses that replay earlier conversation turns on every subsequent model request. Replayed historical pairs maintain 1:1 balance in subsequent requests and do not register spurious new tool invocations.
+   - Verified by 10 negative regression and replay unit tests covering both OpenAI Responses and Chat Completions protocols.
 
 4. **Per-Turn Native Session ID Resume Verification Across Process Boundaries:**
    - Native session ID continuity is enforced on every single resume turn across process restarts:
@@ -69,10 +78,11 @@ Following qualification review, the test harness runner in `crates/cw-proxy/test
      - All pre-mutation turns (prior to overlay commitment) are asserted clean: `!payload.contains("CW114_POLICY_ACTIVE")`.
      - All post-mutation turns (turns 5..8 across process restarts) are individually asserted to contain `"CW114_POLICY_ACTIVE"`, verifying that the deterministic overlay is reapplied on every subsequent request across CLI process invocations.
 
-6. **Complete Hermes Isolation & Zero Launcher Writes:**
+6. **Complete Hermes Isolation & Launcher Fallback Elimination:**
    - The test runner executes Hermes by resolving the committed venv interpreter (`.../environments/*/venv/bin/python -m hermes_cli.main`) directly from the binary's installation directory.
    - Because `sys.prefix != sys.base_prefix` in the committed venv, Hermes skips its internal `publish_launchers` and package-manager synchronization routine.
    - Zero writes to user launcher scripts (`~/.hermes/hermes-agent/.hermes/bin/*`) occur.
+   - **No Fallback to Installed Launcher:** If virtual-environment resolution fails (`resolve_hermes_venv_python` returns `None`), the runner immediately aborts with `status: "BLOCKED"` and an actionable failure message, never falling back to executing the installed launcher (`hermes_bin`). Verified by unit test `test_hermes_venv_resolution_failure_blocks_qualification_without_executing_launcher`.
    - RAII cleanup (`HermesCleanupGuard`) deletes only temporary test-created directories (`temp_home` and `temp_trusted_dir`), guaranteeing 100% isolation of user installation state.
 
 7. **Zero Invented Session ID Fallbacks:**
@@ -220,9 +230,11 @@ All 45 sessions were executed against installed harness binaries (`codex`, `omp`
 ## 7. Command Reference for Reproducibility
 
 ```bash
-# 1. Run all Gate 0 pre-campaign regression tests
+# 1. Run all Gate 0 pre-campaign regression tests and tool-pairing ledger tests
 cargo test -p cw-proxy --test safety http_200_partial_sse_stream_eof_without_terminal_event_records_stream_error
 cargo test -p cw-proxy recorder::test
+cargo test -p cw-proxy --test long_session_reliability test_tool_pairing
+cargo test -p cw-proxy --test long_session_reliability test_hermes_venv_resolution_failure
 
 # 2. Run deterministic single-session tests for each harness
 cargo test -p cw-proxy --test long_session_reliability test_cw114_single_session_codex_deterministic -- --nocapture

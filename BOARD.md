@@ -3,7 +3,7 @@
 > **Legend:** `P0` = Critical Path | `P1` = Core Feature | `P2` = Enhancement
 > **Workflow:** Move items across `Ready` $\to$ `In Progress` $\to$ `Review` $\to$ `Done`. Always reference ticket IDs (`CW-XXX`) in commits and PRs.
 
-> **Current delivery priority:** CW-117 (Cache-Aware Optimization Policy Engine — Phase 1). Performance qualification (CW-115), maintainability gate (CW-116), Codex qualification (CW-112), and Long-Session Reliability campaign (CW-114) complete.
+> **Current delivery priority:** CW-117B (Shadow Policy Empirical Calibration & Evidence Loop). CW-117 Phase 1 policy engine merged (PR #23); performance qualification (CW-115), maintainability gate (CW-116), Codex qualification (CW-112), and Long-Session Reliability campaign (CW-114) complete.
 
 ---
 
@@ -248,11 +248,17 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🚧 In Progress
 
-* **CW-117** Cache-Aware Optimization Policy Engine (Phase 1) — PR Ready
+* **CW-117B** Shadow Policy Empirical Calibration & Evidence Loop — Replay & Calibration Ready
 
 ## 📋 Ready
 
 * None
+
+---
+
+## ✅ Completed (Recent)
+
+* **CW-117** Cache-Aware Optimization Policy Engine (Phase 1) — Merged via PR #23.
 
 ---
 

@@ -52,12 +52,13 @@ pub fn require_installed_binary(bin: &str) -> PathBuf {
 // 1. Budget Guards and Cost Models
 // ============================================================================
 
-/// Target ceiling on total live spend across all test runs in this binary process.
-/// User authorized $3-$4; we enforce an ultra-conservative $1.00 ceiling.
+/// Pre-request budget admission ceiling across all test runs in this binary process.
+/// Acts as session-level admission control (blocking new dispatches if remaining budget is insufficient);
+/// does not act as an in-flight byte-level wire ceiling during active streaming.
 pub const MAX_CAMPAIGN_SPEND_USD: f64 = 1.00;
 pub const MAX_CAMPAIGN_SPEND_MICRO_USD: u64 = 1_000_000;
 
-/// Enforceable request cap per session to prevent infinite tool loops.
+/// Post-execution request limit verified on persisted turns to detect and fail runaway tool loops.
 pub const MAX_REQUESTS_PER_SESSION: usize = 30;
 
 /// Track spend and reservations in micro-dollars ($1.00 = 1,000,000 micro-dollars) atomically.
@@ -335,7 +336,11 @@ pub struct FourModeComparison {
     pub mode1_cost_savings_usd: f64,
     pub mode1_cost_savings_pct: f64,
     pub mode1_wall_time_delta_ms: f64,
-    pub mode1_prefix_preserved: bool,
+    /// Indicates whether Mode 1 retained an equivalent or higher cache-hit ratio than Mode 0.
+    /// Note: Cache ratio retention correlates with cache preservation, but byte-level prefix
+    /// identity is proven separately via deterministic wire fixture tests, not inferred here.
+    #[serde(alias = "mode1_prefix_preserved")]
+    pub mode1_cache_ratio_retained: bool,
 
     pub mode2_token_reduction_vs_mode0: i64,
     pub mode2_token_reduction_pct: f64,
@@ -1312,8 +1317,9 @@ pub fn compute_four_mode_comparisons(
     let mut observations = Vec::new();
     if m1_cache_delta >= -0.01 {
         observations.push(format!(
-            "Mode 1 Cache-Safe Tail Preservation: cache hit ratio preserved ({:.1}% vs Mode 0 {:.1}%), prefix intact",
-            mean_cache_ratio_1 * 100.0, mean_cache_ratio_0 * 100.0
+            "Mode 1 Cache Retention: cache hit ratio retained ({:.1}% vs Mode 0 {:.1}%)",
+            mean_cache_ratio_1 * 100.0,
+            mean_cache_ratio_0 * 100.0
         ));
     }
     if m2_cache_inval {
@@ -1349,7 +1355,7 @@ pub fn compute_four_mode_comparisons(
         mode1_cost_savings_usd: m1_cost_savings,
         mode1_cost_savings_pct: m1_cost_savings_pct,
         mode1_wall_time_delta_ms: m1_time_delta,
-        mode1_prefix_preserved: m1_cache_delta >= -0.01,
+        mode1_cache_ratio_retained: m1_cache_delta >= -0.01,
 
         mode2_token_reduction_vs_mode0: m2_tok_red,
         mode2_token_reduction_pct: m2_tok_red_pct,
@@ -1775,7 +1781,10 @@ fn test_cw115_four_mode_isolation_and_prefix_preservation() {
         compute_four_mode_comparisons("F1BugFixing", &dummy_m0, &dummy_m1, &dummy_m2, &dummy_m3);
 
     // Verify findings and disclosures
-    assert!(comp.mode1_prefix_preserved, "Mode 1 must preserve prefix");
+    assert!(
+        comp.mode1_cache_ratio_retained,
+        "Mode 1 must retain cache ratio"
+    );
     assert!(
         comp.mode2_cache_invalidation_occurred,
         "Mode 2 must trigger cache invalidation detection"
@@ -1783,8 +1792,8 @@ fn test_cw115_four_mode_isolation_and_prefix_preservation() {
     assert!(
         comp.observations_and_regressions
             .iter()
-            .any(|o| o.contains("Mode 1 Cache-Safe Tail Preservation")),
-        "Must record Mode 1 preservation"
+            .any(|o| o.contains("Mode 1 Cache Retention")),
+        "Must record Mode 1 cache retention"
     );
     assert!(
         comp.observations_and_regressions
@@ -1992,9 +2001,9 @@ async fn test_live_codex_cw115_four_mode_isolation_experiment() {
         comparison.mode1_token_delta_vs_mode0, comparison.mode1_token_delta_pct
     );
     println!(
-        "   Cache ratio delta: {:+.2}% | Prefix preserved: {}",
+        "   Cache ratio delta: {:+.2}% | Cache ratio retained: {}",
         comparison.mode1_cache_ratio_delta * 100.0,
-        comparison.mode1_prefix_preserved
+        comparison.mode1_cache_ratio_retained
     );
     println!(
         "   Cost savings: ${:+.5} ({:+.2}%)",

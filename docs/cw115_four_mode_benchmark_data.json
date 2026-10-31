@@ -2331,7 +2331,7 @@
     "mode1_cost_savings_usd": 0.01205595,
     "mode1_cost_savings_pct": 37.70830987501408,
     "mode1_wall_time_delta_ms": -23992.0,
-    "mode1_prefix_preserved": true,
+    "mode1_cache_ratio_retained": true,
     "mode2_token_reduction_vs_mode0": 84505,
     "mode2_token_reduction_pct": 24.14566546659809,
     "mode2_cache_ratio_delta": 0.04933760411132637,
@@ -2346,7 +2346,7 @@
     "mode3_cost_savings_pct": 48.30912434785872,
     "mode3_wall_time_delta_ms": -18617.0,
     "observations_and_regressions": [
-      "Mode 1 Cache-Safe Tail Preservation: cache hit ratio preserved (92.2% vs Mode 0 89.6%), prefix intact"
+      "Mode 1 Cache Retention: cache hit ratio retained (92.2% vs Mode 0 89.6%)"
     ]
   }
 }

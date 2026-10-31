@@ -296,16 +296,24 @@ Implemented in [`crates/cw-proxy/tests/performance_qualification.rs`](../crates/
   - **Passthrough Overhead (Mode B vs Mode A):** Mean streaming overhead $< 2\text{ms/chunk}$; byte-level forwarding fidelity on intercepted payloads; TTFB averaging ~628ms; wall time within normal provider endpoint variation (-17.8% net delta due to cloud inference cluster timing); token totals reflect stochastic agent tool iteration paths (-90,190 mean delta).
   - **Headline Aggregate Finding (Mode C vs Mode B, Both Repetitions):** Across both repetitions, optimization increased total input tokens by **+50.0%** (451,353 vs 300,976) and calculated cost by **+46.2%** ($0.03950 vs $0.02702) due to mid-session prompt cache invalidation in Repetition 1.
   - **Cache-Aligned Counterexample (Repetition 2):** When optimizations preserved the prompt cache prefix, Mode C reduced input tokens by **-21.3%** (144,528 $\to$ 113,725), wall clock execution time by **-29.2%** (25.89s $\to$ 18.34s), and calculated cost by **-20.7%** ($0.01300 $\to$ $0.01031).
+  - **Phase 2 Four-Mode Optimization Isolation Experiment:** Isolating optimization into Mode 0 (Passthrough Control), Mode 1 (Cache-Safe Tail Pin), Mode 2 (Historical Pruning), and Mode 3 (Combined Optimization) across live Codex CLI `gpt-4o-mini` runs (documented in `docs/CW-115-FOUR-MODE-ISOLATION-REPORT.md` and `docs/cw115_four_mode_benchmark_data.json`):
+    - **Mode 1 (Tail-Only PinContext):** Retained 92.24% cache hit ratio (vs Mode 0 89.57%) in the live run; bit-for-bit prefix preservation proven deterministically via wire fixture test; observed -34.06% input token reduction via behavioral model steering (17 vs 23 requests), -37.71% cost savings ($0.01992 vs $0.03197), and -39.75% wall time speedup (36.4s vs 60.4s).
+    - **Mode 2 (Historical Pruning Only):** Cut 84,505 input tokens (-24.15%) and reduced cost by -25.49% ($0.02382 vs $0.03197) when the pruned stub remained consistent across continuation turns.
+    - **Mode 3 (Combined Optimization):** Delivered compound maximum reduction of -50.02% input tokens (174,920 vs 349,980), -43.5% model requests (13 vs 23), and -48.31% cost savings ($0.01653 vs $0.03197).
   - **Architectural Validation:** Confirms ContextWatcher's core architectural principle: **KV-Cache Awareness First**. Pruning historical turns when a warm cache exists destroys the 50% prompt-cache discount and induces exploratory requests; mutations must operate strictly in tail/cache-safe mode (`min` strategy) whenever a warm prefix is detected.
 * **Execution:**
   ```bash
-  # Deterministic cost model, budget guards, and regression math (CI test suite)
+  # Deterministic cost model, budget guards, regression math & prefix preservation (CI test suite)
   cargo test -p cw-proxy --test performance_qualification
 
   # Opt-in live provider benchmark (requires OPENAI_API_KEY and CW_QUALIFY_REAL_CODEX=1)
   export OPENAI_API_KEY="sk-..."
   export CW_QUALIFY_REAL_CODEX=1
   cargo test -p cw-proxy --test performance_qualification test_live_codex_cw115_empirical_performance_qualification -- --ignored --nocapture
+
+  # Opt-in live 4-mode optimization isolation experiment
+  export CW_QUALIFY_FOUR_MODE=1
+  cargo test -p cw-proxy --test performance_qualification test_live_codex_cw115_four_mode_isolation_experiment -- --ignored --nocapture
   ```
 
 

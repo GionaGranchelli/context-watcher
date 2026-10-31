@@ -8,8 +8,8 @@ Welcome to `contextWatcher` (`cw`). Every human or AI agent working in this repo
 
 **Before coding**, read [BOARD.md](BOARD.md), [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), and [docs/HARNESS_MATRIX.md](docs/HARNESS_MATRIX.md). Checked historical board tasks are not current product qualification. Ground claims in code, fixtures, CI and reproducible evidence.
 
-- **Completed:** CW-116 Maintainability Gate (PRs #13, #14, #16); CW-112 Codex CLI qualification (PRs #17, #18); CW-114 Long-Session Reliability Campaign across harnesses (PR #20).
-- **Active: CW-115**, empirical performance and savings qualification (Mode A Native Baseline vs Mode B Passthrough vs Mode C Optimized across coding workloads).
+- **Completed:** CW-116 Maintainability Gate (PRs #13, #14, #16); CW-112 Codex CLI qualification (PRs #17, #18); CW-114 Long-Session Reliability Campaign across harnesses (PR #20); CW-115 Performance and Savings Qualification (Phase 1 3-mode pilot merged via PR #21; Phase 2 four-mode optimization isolation verified).
+- **Next Backlog:** CW-103 broader Codex/Hermes continuation, CW-104 local model qualification, CW-R11 large-history IO qualification.
 - Preserve public CLI/API, session identity, authenticated vs observation-only behavior, raw provider wire bytes/streaming, signed and unknown content, transcript originals, mutation eligibility and fail-open behavior. Do not claim observed cache savings where only estimates exist.
 - Use temporary isolated HOME/config and data directories, mock ports and test stores. Do not edit actual user Hermes config, live session transcripts, installed agent settings or running services.
 - Explicitly distinguish default CI tests, separately invoked ignored harness-binary tests and opt-in live-provider tests. Never report a skipped or unavailable test as passed. Avoid duplicating production algorithms or guards inside tests.

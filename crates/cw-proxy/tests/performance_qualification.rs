@@ -13,7 +13,11 @@
 // Enforces strict spend budget (< $1.00 total) and non-fabrication invariants.
 
 use chrono::{DateTime, Utc};
-use cw_core::ir::{MutationOp, MutationRule, MutationStatus};
+use cw_core::{
+    ir::{MutationOp, MutationRule, MutationStatus, ProviderKind},
+    mutation::{apply_mutations_to_payload, estimate_mutation_impact},
+    normalizer::parse_request_to_nodes,
+};
 use cw_proxy::{proxy::build_proxy_router, state::DaemonState};
 use cw_store::CwStore;
 use serde::{Deserialize, Serialize};
@@ -48,12 +52,13 @@ pub fn require_installed_binary(bin: &str) -> PathBuf {
 // 1. Budget Guards and Cost Models
 // ============================================================================
 
-/// Target ceiling on total live spend across all test runs in this binary process.
-/// User authorized $3-$4; we enforce an ultra-conservative $1.00 ceiling.
+/// Pre-request budget admission ceiling across all test runs in this binary process.
+/// Acts as session-level admission control (blocking new dispatches if remaining budget is insufficient);
+/// does not act as an in-flight byte-level wire ceiling during active streaming.
 pub const MAX_CAMPAIGN_SPEND_USD: f64 = 1.00;
 pub const MAX_CAMPAIGN_SPEND_MICRO_USD: u64 = 1_000_000;
 
-/// Enforceable request cap per session to prevent infinite tool loops.
+/// Post-execution request limit verified on persisted turns to detect and fail runaway tool loops.
 pub const MAX_REQUESTS_PER_SESSION: usize = 30;
 
 /// Track spend and reservations in micro-dollars ($1.00 = 1,000,000 micro-dollars) atomically.
@@ -183,6 +188,14 @@ pub enum ExperimentMode {
     ModeBPassthrough,
     #[serde(rename = "mode_c_optimized")]
     ModeCOptimized,
+    #[serde(rename = "mode_0_passthrough")]
+    Mode0Passthrough,
+    #[serde(rename = "mode_1_tail_only")]
+    Mode1CacheSafeTail,
+    #[serde(rename = "mode_2_historical_pruning")]
+    Mode2HistoricalPruning,
+    #[serde(rename = "mode_3_combined")]
+    Mode3Combined,
 }
 
 impl ExperimentMode {
@@ -191,6 +204,10 @@ impl ExperimentMode {
             Self::ModeANativeBaseline => "Mode A (Native Baseline)",
             Self::ModeBPassthrough => "Mode B (CW Passthrough)",
             Self::ModeCOptimized => "Mode C (CW Optimized)",
+            Self::Mode0Passthrough => "Mode 0 (Passthrough Baseline)",
+            Self::Mode1CacheSafeTail => "Mode 1 (Cache-Safe Tail Operations)",
+            Self::Mode2HistoricalPruning => "Mode 2 (Historical Pruning)",
+            Self::Mode3Combined => "Mode 3 (Combined Optimization)",
         }
     }
 
@@ -199,7 +216,25 @@ impl ExperimentMode {
             Self::ModeANativeBaseline => "Mode_A",
             Self::ModeBPassthrough => "Mode_B",
             Self::ModeCOptimized => "Mode_C",
+            Self::Mode0Passthrough => "Mode_0",
+            Self::Mode1CacheSafeTail => "Mode_1",
+            Self::Mode2HistoricalPruning => "Mode_2",
+            Self::Mode3Combined => "Mode_3",
         }
+    }
+
+    pub fn applies_historical_pruning(&self) -> bool {
+        matches!(
+            self,
+            Self::ModeCOptimized | Self::Mode2HistoricalPruning | Self::Mode3Combined
+        )
+    }
+
+    pub fn applies_tail_pinning(&self) -> bool {
+        matches!(
+            self,
+            Self::ModeCOptimized | Self::Mode1CacheSafeTail | Self::Mode3Combined
+        )
     }
 }
 
@@ -284,6 +319,58 @@ pub struct CW115BenchmarkReport {
 
 fn default_package_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FourModeComparison {
+    pub task_family: String,
+    pub mode0_mean_input_tokens: f64,
+    pub mode0_mean_cached_tokens: f64,
+    pub mode0_mean_cache_ratio: f64,
+    pub mode0_mean_cost_usd: f64,
+    pub mode0_mean_wall_time_ms: f64,
+
+    pub mode1_token_delta_vs_mode0: i64,
+    pub mode1_token_delta_pct: f64,
+    pub mode1_cache_ratio_delta: f64,
+    pub mode1_cost_savings_usd: f64,
+    pub mode1_cost_savings_pct: f64,
+    pub mode1_wall_time_delta_ms: f64,
+    /// Indicates whether Mode 1 retained an equivalent or higher cache-hit ratio than Mode 0.
+    /// Note: Cache ratio retention correlates with cache preservation, but byte-level prefix
+    /// identity is proven separately via deterministic wire fixture tests, not inferred here.
+    #[serde(alias = "mode1_prefix_preserved")]
+    pub mode1_cache_ratio_retained: bool,
+
+    pub mode2_token_reduction_vs_mode0: i64,
+    pub mode2_token_reduction_pct: f64,
+    pub mode2_cache_ratio_delta: f64,
+    pub mode2_cost_savings_usd: f64,
+    pub mode2_cost_savings_pct: f64,
+    pub mode2_wall_time_delta_ms: f64,
+    pub mode2_cache_invalidation_occurred: bool,
+
+    pub mode3_token_reduction_vs_mode0: i64,
+    pub mode3_token_reduction_pct: f64,
+    pub mode3_cache_ratio_delta: f64,
+    pub mode3_cost_savings_usd: f64,
+    pub mode3_cost_savings_pct: f64,
+    pub mode3_wall_time_delta_ms: f64,
+
+    pub observations_and_regressions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CW115FourModeReport {
+    pub date: String,
+    pub git_commit: String,
+    pub package_version: String,
+    pub harness: String,
+    pub model: String,
+    pub total_sessions_executed: usize,
+    pub total_spend_usd: f64,
+    pub sessions: Vec<SessionBenchmarkResult>,
+    pub comparison: FourModeComparison,
 }
 
 // ============================================================================
@@ -697,11 +784,12 @@ pub async fn run_proxied_benchmark_session(
     repetition: usize,
 ) -> Result<SessionBenchmarkResult, String> {
     let store = CwStore::open_in_memory().map_err(|e| e.to_string())?;
-    let is_optimized = mode == ExperimentMode::ModeCOptimized;
+    let apply_prune = mode.applies_historical_pruning();
+    let apply_pin = mode.applies_tail_pinning();
 
     store
         .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
-            enabled: is_optimized,
+            enabled: apply_prune || apply_pin,
             ..Default::default()
         })
         .map_err(|e| e.to_string())?;
@@ -772,8 +860,8 @@ pub async fn run_proxied_benchmark_session(
     let tid1 =
         extract_thread_id(&stdout1).ok_or_else(|| "Missing thread_id on Turn 1".to_string())?;
 
-    // In Mode C: commit surgical optimization after Turn 1
-    if is_optimized {
+    // In modes applying historical pruning: commit surgical PruneOrStub after Turn 1
+    if apply_prune {
         let t1_turns = store.list_turns(session_id).unwrap_or_default();
         for turn in &t1_turns {
             for node in &turn.nodes {
@@ -805,7 +893,10 @@ pub async fn run_proxied_benchmark_session(
                 }
             }
         }
+    }
 
+    // In modes applying cache-safe tail operations: commit PinContext directive
+    if apply_pin {
         store
             .save_mutation(&MutationRule {
                 id: format!("opt_pin_directive_{}", session_id),
@@ -1093,6 +1184,198 @@ pub fn compute_mode_comparisons(
     }
 }
 
+pub fn compute_four_mode_comparisons(
+    family_name: &str,
+    results_m0: &[SessionBenchmarkResult],
+    results_m1: &[SessionBenchmarkResult],
+    results_m2: &[SessionBenchmarkResult],
+    results_m3: &[SessionBenchmarkResult],
+) -> FourModeComparison {
+    let mean_in_0 = results_m0
+        .iter()
+        .map(|s| s.total_input_tokens as f64)
+        .sum::<f64>()
+        / results_m0.len().max(1) as f64;
+    let mean_cached_0 = results_m0
+        .iter()
+        .map(|s| s.total_cached_tokens as f64)
+        .sum::<f64>()
+        / results_m0.len().max(1) as f64;
+    let mean_cache_ratio_0 = results_m0
+        .iter()
+        .map(|s| s.overall_cache_ratio)
+        .sum::<f64>()
+        / results_m0.len().max(1) as f64;
+    let mean_cost_0 =
+        results_m0.iter().map(|s| s.total_cost_usd).sum::<f64>() / results_m0.len().max(1) as f64;
+    let mean_time_0 = results_m0
+        .iter()
+        .map(|s| s.total_wall_time_ms as f64)
+        .sum::<f64>()
+        / results_m0.len().max(1) as f64;
+
+    let mean_in_1 = results_m1
+        .iter()
+        .map(|s| s.total_input_tokens as f64)
+        .sum::<f64>()
+        / results_m1.len().max(1) as f64;
+    let mean_cache_ratio_1 = results_m1
+        .iter()
+        .map(|s| s.overall_cache_ratio)
+        .sum::<f64>()
+        / results_m1.len().max(1) as f64;
+    let mean_cost_1 =
+        results_m1.iter().map(|s| s.total_cost_usd).sum::<f64>() / results_m1.len().max(1) as f64;
+    let mean_time_1 = results_m1
+        .iter()
+        .map(|s| s.total_wall_time_ms as f64)
+        .sum::<f64>()
+        / results_m1.len().max(1) as f64;
+
+    let mean_in_2 = results_m2
+        .iter()
+        .map(|s| s.total_input_tokens as f64)
+        .sum::<f64>()
+        / results_m2.len().max(1) as f64;
+    let mean_cache_ratio_2 = results_m2
+        .iter()
+        .map(|s| s.overall_cache_ratio)
+        .sum::<f64>()
+        / results_m2.len().max(1) as f64;
+    let mean_cost_2 =
+        results_m2.iter().map(|s| s.total_cost_usd).sum::<f64>() / results_m2.len().max(1) as f64;
+    let mean_time_2 = results_m2
+        .iter()
+        .map(|s| s.total_wall_time_ms as f64)
+        .sum::<f64>()
+        / results_m2.len().max(1) as f64;
+
+    let mean_in_3 = results_m3
+        .iter()
+        .map(|s| s.total_input_tokens as f64)
+        .sum::<f64>()
+        / results_m3.len().max(1) as f64;
+    let mean_cache_ratio_3 = results_m3
+        .iter()
+        .map(|s| s.overall_cache_ratio)
+        .sum::<f64>()
+        / results_m3.len().max(1) as f64;
+    let mean_cost_3 =
+        results_m3.iter().map(|s| s.total_cost_usd).sum::<f64>() / results_m3.len().max(1) as f64;
+    let mean_time_3 = results_m3
+        .iter()
+        .map(|s| s.total_wall_time_ms as f64)
+        .sum::<f64>()
+        / results_m3.len().max(1) as f64;
+
+    let m1_tok_delta = (mean_in_1 - mean_in_0).round() as i64;
+    let m1_tok_delta_pct = if mean_in_0 > 0.0 {
+        (m1_tok_delta as f64 / mean_in_0) * 100.0
+    } else {
+        0.0
+    };
+    let m1_cache_delta = mean_cache_ratio_1 - mean_cache_ratio_0;
+    let m1_cost_savings = mean_cost_0 - mean_cost_1;
+    let m1_cost_savings_pct = if mean_cost_0 > 0.0 {
+        (m1_cost_savings / mean_cost_0) * 100.0
+    } else {
+        0.0
+    };
+    let m1_time_delta = mean_time_1 - mean_time_0;
+
+    let m2_tok_red = (mean_in_0 - mean_in_2).round() as i64;
+    let m2_tok_red_pct = if mean_in_0 > 0.0 {
+        (m2_tok_red as f64 / mean_in_0) * 100.0
+    } else {
+        0.0
+    };
+    let m2_cache_delta = mean_cache_ratio_2 - mean_cache_ratio_0;
+    let m2_cost_savings = mean_cost_0 - mean_cost_2;
+    let m2_cost_savings_pct = if mean_cost_0 > 0.0 {
+        (m2_cost_savings / mean_cost_0) * 100.0
+    } else {
+        0.0
+    };
+    let m2_time_delta = mean_time_2 - mean_time_0;
+    let m2_cache_inval = m2_cache_delta < -0.05;
+
+    let m3_tok_red = (mean_in_0 - mean_in_3).round() as i64;
+    let m3_tok_red_pct = if mean_in_0 > 0.0 {
+        (m3_tok_red as f64 / mean_in_0) * 100.0
+    } else {
+        0.0
+    };
+    let m3_cache_delta = mean_cache_ratio_3 - mean_cache_ratio_0;
+    let m3_cost_savings = mean_cost_0 - mean_cost_3;
+    let m3_cost_savings_pct = if mean_cost_0 > 0.0 {
+        (m3_cost_savings / mean_cost_0) * 100.0
+    } else {
+        0.0
+    };
+    let m3_time_delta = mean_time_3 - mean_time_0;
+
+    let mut observations = Vec::new();
+    if m1_cache_delta >= -0.01 {
+        observations.push(format!(
+            "Mode 1 Cache Retention: cache hit ratio retained ({:.1}% vs Mode 0 {:.1}%)",
+            mean_cache_ratio_1 * 100.0,
+            mean_cache_ratio_0 * 100.0
+        ));
+    }
+    if m2_cache_inval {
+        observations.push(format!(
+            "Mode 2 Historical Pruning Cache Invalidation: cache hit ratio dropped by {:.1}% ({:.1}% vs Mode 0 {:.1}%) due to prefix modification",
+            m2_cache_delta.abs() * 100.0, mean_cache_ratio_2 * 100.0, mean_cache_ratio_0 * 100.0
+        ));
+    }
+    if mean_cost_2 > mean_cost_0 {
+        observations.push(format!(
+            "Mode 2 Cost Inversion: Mode 2 (${:.5}) cost more than Mode 0 (${:.5}) because cache discount loss exceeded pruned token savings",
+            mean_cost_2, mean_cost_0
+        ));
+    }
+    if mean_cost_3 > mean_cost_0 {
+        observations.push(format!(
+            "Mode 3 Cost Inversion: Combined optimization (${:.5}) cost more than Mode 0 (${:.5})",
+            mean_cost_3, mean_cost_0
+        ));
+    }
+
+    FourModeComparison {
+        task_family: family_name.to_string(),
+        mode0_mean_input_tokens: mean_in_0,
+        mode0_mean_cached_tokens: mean_cached_0,
+        mode0_mean_cache_ratio: mean_cache_ratio_0,
+        mode0_mean_cost_usd: mean_cost_0,
+        mode0_mean_wall_time_ms: mean_time_0,
+
+        mode1_token_delta_vs_mode0: m1_tok_delta,
+        mode1_token_delta_pct: m1_tok_delta_pct,
+        mode1_cache_ratio_delta: m1_cache_delta,
+        mode1_cost_savings_usd: m1_cost_savings,
+        mode1_cost_savings_pct: m1_cost_savings_pct,
+        mode1_wall_time_delta_ms: m1_time_delta,
+        mode1_cache_ratio_retained: m1_cache_delta >= -0.01,
+
+        mode2_token_reduction_vs_mode0: m2_tok_red,
+        mode2_token_reduction_pct: m2_tok_red_pct,
+        mode2_cache_ratio_delta: m2_cache_delta,
+        mode2_cost_savings_usd: m2_cost_savings,
+        mode2_cost_savings_pct: m2_cost_savings_pct,
+        mode2_wall_time_delta_ms: m2_time_delta,
+        mode2_cache_invalidation_occurred: m2_cache_inval,
+
+        mode3_token_reduction_vs_mode0: m3_tok_red,
+        mode3_token_reduction_pct: m3_tok_red_pct,
+        mode3_cache_ratio_delta: m3_cache_delta,
+        mode3_cost_savings_usd: m3_cost_savings,
+        mode3_cost_savings_pct: m3_cost_savings_pct,
+        mode3_wall_time_delta_ms: m3_time_delta,
+
+        observations_and_regressions: observations,
+    }
+}
+
 // ============================================================================
 // 8. Deterministic Test (Always Runs in Default CI)
 // ============================================================================
@@ -1228,6 +1511,563 @@ fn test_cw115_deterministic_comparison_math_and_regression_disclosure() {
             .any(|r| r.contains("Cost Inversion")),
         "Report must disclose cost inversions where cache loss outweighs token cuts"
     );
+}
+
+#[test]
+fn test_cw115_four_mode_isolation_and_prefix_preservation() {
+    // 1. Verify Mode Isolation properties on ExperimentMode
+    assert!(!ExperimentMode::Mode0Passthrough.applies_historical_pruning());
+    assert!(!ExperimentMode::Mode0Passthrough.applies_tail_pinning());
+
+    assert!(!ExperimentMode::Mode1CacheSafeTail.applies_historical_pruning());
+    assert!(ExperimentMode::Mode1CacheSafeTail.applies_tail_pinning());
+
+    assert!(ExperimentMode::Mode2HistoricalPruning.applies_historical_pruning());
+    assert!(!ExperimentMode::Mode2HistoricalPruning.applies_tail_pinning());
+
+    assert!(ExperimentMode::Mode3Combined.applies_historical_pruning());
+    assert!(ExperimentMode::Mode3Combined.applies_tail_pinning());
+
+    // 2. Concrete Wire Payload Prefix Preservation Check (Requirement 6)
+    // Setup a 5-item OpenAI Responses conversation payload across Turn 1 & Turn 2:
+    // [0] user: "Solve bug"
+    // [1] assistant: function_call "call_exec_01", tool: "exec_command"
+    // [2] function_call_output: "FAILED: ZeroDivisionError... 200 lines of execution logs"
+    // [3] assistant: "I have resolved the ZeroDivisionError defect."
+    // [4] user: "Now add docstrings and type annotations"
+    let base_payload = json!({
+        "model": "gpt-4o-mini",
+        "input": [
+            {
+                "type": "message",
+                "role": "user",
+                "content": "Solve the bug in math_ops.py"
+            },
+            {
+                "type": "function_call",
+                "call_id": "call_exec_01",
+                "name": "exec_command",
+                "arguments": "{\"cmd\":\"python3 test_math_ops.py\"}"
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "call_exec_01",
+                "output": "FAILED: ZeroDivisionError in math_ops.py:4\nVerbose test execution log with 200 lines..."
+            },
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": "I have resolved the ZeroDivisionError defect."
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": "Now add docstrings and type annotations"
+            }
+        ]
+    });
+
+    let nodes = parse_request_to_nodes(&base_payload, ProviderKind::OpenAI, 2).unwrap();
+    let tool_res_node = nodes
+        .iter()
+        .find(|n| matches!(n.kind, cw_core::ir::NodeKind::ToolResult { .. }))
+        .expect("Must have ToolResult node");
+
+    let pin_rule = MutationRule {
+        id: "rule_pin_tail".to_string(),
+        session_id: "test_session".to_string(),
+        op: MutationOp::PinContext {
+            label: "ActiveDirective".to_string(),
+            content: "OPTIMIZATION_ACTIVE: keep helper signatures concise and clean.".to_string(),
+            source_node_id: None,
+        },
+        status: MutationStatus::Committed,
+        estimated_saved_tokens: 0,
+        estimated_kv_break_tokens: 0,
+        created_at: Utc::now(),
+    };
+
+    let prune_rule = MutationRule {
+        id: "rule_prune_hist".to_string(),
+        session_id: "test_session".to_string(),
+        op: MutationOp::PruneOrStub {
+            target_fingerprint: Some(tool_res_node.fingerprint.0.clone()),
+            target_call_id: Some("call_exec_01".to_string()),
+            target_json_pointer: Some(tool_res_node.raw_json_pointer.clone()),
+            stub_text: "[cw:pruned Turn 1 test execution log - resolved]".to_string(),
+        },
+        status: MutationStatus::Committed,
+        estimated_saved_tokens: tool_res_node.token_span.count as i32,
+        estimated_kv_break_tokens: 0,
+        created_at: Utc::now(),
+    };
+
+    // Mode 0: Zero mutations
+    let mut payload_m0 = base_payload.clone();
+    let rep_m0 = apply_mutations_to_payload(&mut payload_m0, ProviderKind::OpenAI, &[], 2);
+    assert_eq!(rep_m0.applied_rule_ids.len(), 0);
+    assert_eq!(
+        payload_m0, base_payload,
+        "Mode 0 must leave payload 100% untouched"
+    );
+
+    // Mode 1: Cache-Safe Tail Operations (PinContext ONLY)
+    let mut payload_m1 = base_payload.clone();
+    let rep_m1 = apply_mutations_to_payload(
+        &mut payload_m1,
+        ProviderKind::OpenAI,
+        std::slice::from_ref(&pin_rule),
+        2,
+    );
+    assert_eq!(rep_m1.applied_rule_ids, vec!["rule_pin_tail"]);
+    // CRITICAL INVARIANT: The entire historical prefix (items 0, 1, 2, 3) MUST BE 100% BIT-FOR-BIT IDENTICAL to Mode 0!
+    assert_eq!(
+        payload_m1["input"][0], payload_m0["input"][0],
+        "Mode 1 user prefix must be untouched"
+    );
+    assert_eq!(
+        payload_m1["input"][1], payload_m0["input"][1],
+        "Mode 1 assistant tool call prefix must be untouched"
+    );
+    assert_eq!(
+        payload_m1["input"][2], payload_m0["input"][2],
+        "Mode 1 tool_result prefix must be untouched"
+    );
+    assert_eq!(
+        payload_m1["input"][3], payload_m0["input"][3],
+        "Mode 1 assistant response prefix must be untouched"
+    );
+    // Only the tail message (item 4) receives the pinned block
+    let m1_tail_text = payload_m1["input"][4]["content"].as_str().unwrap();
+    assert!(m1_tail_text.contains("<cw_pinned_context>"));
+    assert!(m1_tail_text.contains("OPTIMIZATION_ACTIVE"));
+    // Verify KV cache break calculation for Mode 1 is strictly 0:
+    let (_saved_m1, kv_break_m1) = estimate_mutation_impact(&pin_rule.op, &nodes, None);
+    assert_eq!(
+        kv_break_m1, 0,
+        "Mode 1 tail operation must have 0 KV cache break tokens!"
+    );
+
+    // Mode 2: Historical Pruning (PruneOrStub ONLY, no tail pin)
+    let mut payload_m2 = base_payload.clone();
+    let rep_m2 = apply_mutations_to_payload(
+        &mut payload_m2,
+        ProviderKind::OpenAI,
+        std::slice::from_ref(&prune_rule),
+        2,
+    );
+    assert_eq!(rep_m2.applied_rule_ids, vec!["rule_prune_hist"]);
+    // Historical prefix item 2 is mutated, breaking the prefix match!
+    assert_ne!(
+        payload_m2["input"][2], payload_m0["input"][2],
+        "Mode 2 must mutate historical tool result"
+    );
+    assert!(
+        payload_m2["input"][2]["output"]
+            .as_str()
+            .unwrap()
+            .contains("[cw:pruned")
+    );
+    // Items 0, 1, 3 remain intact
+    assert_eq!(payload_m2["input"][0], payload_m0["input"][0]);
+    assert_eq!(payload_m2["input"][1], payload_m0["input"][1]);
+    assert_eq!(payload_m2["input"][3], payload_m0["input"][3]);
+    // Tail message (item 4) has NO pinned block
+    assert_eq!(
+        payload_m2["input"][4], payload_m0["input"][4],
+        "Mode 2 tail must have no pinned block"
+    );
+    // Verify KV cache break calculation for Mode 2 is > 0:
+    let (_saved_m2, kv_break_m2) = estimate_mutation_impact(&prune_rule.op, &nodes, None);
+    assert!(
+        kv_break_m2 > 0,
+        "Mode 2 historical pruning must record positive KV break tokens"
+    );
+
+    // Mode 3: Combined Optimization (PruneOrStub AND PinContext)
+    let mut payload_m3 = base_payload.clone();
+    let rep_m3 = apply_mutations_to_payload(
+        &mut payload_m3,
+        ProviderKind::OpenAI,
+        &[prune_rule.clone(), pin_rule.clone()],
+        2,
+    );
+    assert_eq!(rep_m3.applied_rule_ids.len(), 2);
+    // Historical item 2 is mutated AND tail item 4 has pinned block
+    assert_ne!(payload_m3["input"][2], payload_m0["input"][2]);
+    assert!(
+        payload_m3["input"][4]["content"]
+            .as_str()
+            .unwrap()
+            .contains("<cw_pinned_context>")
+    );
+
+    // 3. Mathematical Comparative Analysis Across 4 Modes
+    let dummy_m0 = vec![SessionBenchmarkResult {
+        session_id: "m0".into(),
+        mode: ExperimentMode::Mode0Passthrough,
+        task_family: "F1BugFixing".into(),
+        repetition: 1,
+        model: "gpt-4o-mini".into(),
+        total_input_tokens: 10_000,
+        total_cached_tokens: 5_000,
+        total_uncached_tokens: 5_000,
+        total_output_tokens: 1_000,
+        overall_cache_ratio: 0.50,
+        total_cost_usd: 0.001725,
+        total_wall_time_ms: 10_000,
+        mean_ttfb_ms: Some(250.0),
+        acceptance_passed: true,
+        requests: vec![],
+    }];
+
+    // Mode 1: Cache preserved, prefix intact, small tail token addition
+    let dummy_m1 = vec![SessionBenchmarkResult {
+        session_id: "m1".into(),
+        mode: ExperimentMode::Mode1CacheSafeTail,
+        task_family: "F1BugFixing".into(),
+        repetition: 1,
+        model: "gpt-4o-mini".into(),
+        total_input_tokens: 10_020,
+        total_cached_tokens: 5_000,
+        total_uncached_tokens: 5_020,
+        total_output_tokens: 950,
+        overall_cache_ratio: 0.499,
+        total_cost_usd: 0.001698,
+        total_wall_time_ms: 9_800,
+        mean_ttfb_ms: Some(248.0),
+        acceptance_passed: true,
+        requests: vec![],
+    }];
+
+    // Mode 2: Tokens reduced (7,000 in), but cache broken (cached drops to 0)
+    let dummy_m2 = vec![SessionBenchmarkResult {
+        session_id: "m2".into(),
+        mode: ExperimentMode::Mode2HistoricalPruning,
+        task_family: "F1BugFixing".into(),
+        repetition: 1,
+        model: "gpt-4o-mini".into(),
+        total_input_tokens: 7_000,
+        total_cached_tokens: 0, // Invalidation
+        total_uncached_tokens: 7_000,
+        total_output_tokens: 1_200,
+        overall_cache_ratio: 0.0,
+        total_cost_usd: 0.001770, // Cost inversion! More expensive than Mode 0 ($0.001725)
+        total_wall_time_ms: 10_500,
+        mean_ttfb_ms: Some(290.0),
+        acceptance_passed: true,
+        requests: vec![],
+    }];
+
+    let dummy_m3 = vec![SessionBenchmarkResult {
+        session_id: "m3".into(),
+        mode: ExperimentMode::Mode3Combined,
+        task_family: "F1BugFixing".into(),
+        repetition: 1,
+        model: "gpt-4o-mini".into(),
+        total_input_tokens: 7_020,
+        total_cached_tokens: 0,
+        total_uncached_tokens: 7_020,
+        total_output_tokens: 1_200,
+        overall_cache_ratio: 0.0,
+        total_cost_usd: 0.001773, // Cost inversion!
+        total_wall_time_ms: 10_600,
+        mean_ttfb_ms: Some(295.0),
+        acceptance_passed: true,
+        requests: vec![],
+    }];
+
+    let comp =
+        compute_four_mode_comparisons("F1BugFixing", &dummy_m0, &dummy_m1, &dummy_m2, &dummy_m3);
+
+    // Verify findings and disclosures
+    assert!(
+        comp.mode1_cache_ratio_retained,
+        "Mode 1 must retain cache ratio"
+    );
+    assert!(
+        comp.mode2_cache_invalidation_occurred,
+        "Mode 2 must trigger cache invalidation detection"
+    );
+    assert!(
+        comp.observations_and_regressions
+            .iter()
+            .any(|o| o.contains("Mode 1 Cache Retention")),
+        "Must record Mode 1 cache retention"
+    );
+    assert!(
+        comp.observations_and_regressions
+            .iter()
+            .any(|o| o.contains("Mode 2 Historical Pruning Cache Invalidation")),
+        "Must disclose Mode 2 cache invalidation"
+    );
+    assert!(
+        comp.observations_and_regressions
+            .iter()
+            .any(|o| o.contains("Mode 2 Cost Inversion")),
+        "Must disclose Mode 2 cost inversion"
+    );
+    assert!(
+        comp.observations_and_regressions
+            .iter()
+            .any(|o| o.contains("Mode 3 Cost Inversion")),
+        "Must disclose Mode 3 cost inversion"
+    );
+}
+
+#[tokio::test]
+#[ignore = "opt-in real Codex four-mode isolation experiment; requires CW_QUALIFY_FOUR_MODE=1 and OPENAI_API_KEY with authorized budget"]
+async fn test_live_codex_cw115_four_mode_isolation_experiment() {
+    let opt_in = std::env::var("CW_QUALIFY_FOUR_MODE")
+        .or_else(|_| std::env::var("CW_QUALIFY_REAL_CODEX"))
+        .unwrap_or_default();
+    if opt_in != "1" {
+        panic!("SKIPPED: Live qualification requires CW_QUALIFY_FOUR_MODE=1 and authorized budget");
+    }
+    let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY required for live test");
+    let codex_bin = require_installed_binary("codex");
+
+    let model = "gpt-4o-mini";
+    let repetitions = 1;
+
+    let mut results_m0 = Vec::new();
+    let mut results_m1 = Vec::new();
+    let mut results_m2 = Vec::new();
+    let mut results_m3 = Vec::new();
+    let mut all_sessions = Vec::new();
+
+    println!("\n=======================================================");
+    println!("CW-115 Four-Mode Optimization Isolation Experiment");
+    println!(
+        "Model: {} | Harness: Codex CLI | Workload: F1 BugFixing",
+        model
+    );
+    println!(
+        "Modes: Mode 0 (Passthrough) vs Mode 1 (Tail Pin Only) vs Mode 2 (Hist Prune Only) vs Mode 3 (Combined)"
+    );
+    println!("Spend Ceiling: ${:.2}", MAX_CAMPAIGN_SPEND_USD);
+    println!("=======================================================\n");
+
+    for rep in 1..=repetitions {
+        // Mode 0: Passthrough Baseline
+        println!(
+            "[TRIAL] Executing Mode 0 (Passthrough Baseline) rep {}",
+            rep
+        );
+        let fixture_0 = WorkloadFixture::create_f1_bug_fixing();
+        let sid_0 = format!("cw115_m0_passthrough_f1_rep{}", rep);
+        let res_0 = run_proxied_benchmark_session(
+            &codex_bin,
+            &api_key,
+            model,
+            &fixture_0,
+            &sid_0,
+            ExperimentMode::Mode0Passthrough,
+            rep,
+        )
+        .await
+        .expect("Mode 0 session failed");
+        assert!(res_0.acceptance_passed, "Mode 0 must pass acceptance test");
+        println!(
+            "  -> Mode 0 rep {}: in={}, cached={}, cost=${:.5}, elapsed={}ms",
+            rep,
+            res_0.total_input_tokens,
+            res_0.total_cached_tokens,
+            res_0.total_cost_usd,
+            res_0.total_wall_time_ms
+        );
+        all_sessions.push(res_0.clone());
+        results_m0.push(res_0);
+
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        // Mode 1: Cache-Safe Tail Operations (PinContext only)
+        println!(
+            "[TRIAL] Executing Mode 1 (Cache-Safe Tail Operations) rep {}",
+            rep
+        );
+        let fixture_1 = WorkloadFixture::create_f1_bug_fixing();
+        let sid_1 = format!("cw115_m1_tail_f1_rep{}", rep);
+        let res_1 = run_proxied_benchmark_session(
+            &codex_bin,
+            &api_key,
+            model,
+            &fixture_1,
+            &sid_1,
+            ExperimentMode::Mode1CacheSafeTail,
+            rep,
+        )
+        .await
+        .expect("Mode 1 session failed");
+        assert!(res_1.acceptance_passed, "Mode 1 must pass acceptance test");
+        println!(
+            "  -> Mode 1 rep {}: in={}, cached={}, cost=${:.5}, elapsed={}ms",
+            rep,
+            res_1.total_input_tokens,
+            res_1.total_cached_tokens,
+            res_1.total_cost_usd,
+            res_1.total_wall_time_ms
+        );
+        all_sessions.push(res_1.clone());
+        results_m1.push(res_1);
+
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        // Mode 2: Historical Pruning (PruneOrStub only)
+        println!("[TRIAL] Executing Mode 2 (Historical Pruning) rep {}", rep);
+        let fixture_2 = WorkloadFixture::create_f1_bug_fixing();
+        let sid_2 = format!("cw115_m2_prune_f1_rep{}", rep);
+        let res_2 = run_proxied_benchmark_session(
+            &codex_bin,
+            &api_key,
+            model,
+            &fixture_2,
+            &sid_2,
+            ExperimentMode::Mode2HistoricalPruning,
+            rep,
+        )
+        .await
+        .expect("Mode 2 session failed");
+        assert!(res_2.acceptance_passed, "Mode 2 must pass acceptance test");
+        println!(
+            "  -> Mode 2 rep {}: in={}, cached={}, cost=${:.5}, elapsed={}ms",
+            rep,
+            res_2.total_input_tokens,
+            res_2.total_cached_tokens,
+            res_2.total_cost_usd,
+            res_2.total_wall_time_ms
+        );
+        all_sessions.push(res_2.clone());
+        results_m2.push(res_2);
+
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+
+        // Mode 3: Combined Optimization (Prune + Pin)
+        println!(
+            "[TRIAL] Executing Mode 3 (Combined Optimization) rep {}",
+            rep
+        );
+        let fixture_3 = WorkloadFixture::create_f1_bug_fixing();
+        let sid_3 = format!("cw115_m3_combined_f1_rep{}", rep);
+        let res_3 = run_proxied_benchmark_session(
+            &codex_bin,
+            &api_key,
+            model,
+            &fixture_3,
+            &sid_3,
+            ExperimentMode::Mode3Combined,
+            rep,
+        )
+        .await
+        .expect("Mode 3 session failed");
+        assert!(res_3.acceptance_passed, "Mode 3 must pass acceptance test");
+        println!(
+            "  -> Mode 3 rep {}: in={}, cached={}, cost=${:.5}, elapsed={}ms",
+            rep,
+            res_3.total_input_tokens,
+            res_3.total_cached_tokens,
+            res_3.total_cost_usd,
+            res_3.total_wall_time_ms
+        );
+        all_sessions.push(res_3.clone());
+        results_m3.push(res_3);
+
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
+
+    let comparison = compute_four_mode_comparisons(
+        "F1BugFixing",
+        &results_m0,
+        &results_m1,
+        &results_m2,
+        &results_m3,
+    );
+
+    println!("\n=======================================================");
+    println!("CW-115 FOUR-MODE ISOLATION EXPERIMENT RESULTS");
+    println!("=======================================================");
+    println!("1. Mode 0 (Passthrough Baseline):");
+    println!(
+        "   Input: {:.0} tok | Cached: {:.0} tok ({:.1}%) | Cost: ${:.5} | Wall time: {:.0} ms",
+        comparison.mode0_mean_input_tokens,
+        comparison.mode0_mean_cached_tokens,
+        comparison.mode0_mean_cache_ratio * 100.0,
+        comparison.mode0_mean_cost_usd,
+        comparison.mode0_mean_wall_time_ms
+    );
+    println!("2. Mode 1 (Cache-Safe Tail Operations vs Mode 0):");
+    println!(
+        "   Token delta: {:+} tokens ({:+.2}%)",
+        comparison.mode1_token_delta_vs_mode0, comparison.mode1_token_delta_pct
+    );
+    println!(
+        "   Cache ratio delta: {:+.2}% | Cache ratio retained: {}",
+        comparison.mode1_cache_ratio_delta * 100.0,
+        comparison.mode1_cache_ratio_retained
+    );
+    println!(
+        "   Cost savings: ${:+.5} ({:+.2}%)",
+        comparison.mode1_cost_savings_usd, comparison.mode1_cost_savings_pct
+    );
+    println!("3. Mode 2 (Historical Pruning vs Mode 0):");
+    println!(
+        "   Token reduction: {:+} tokens ({:+.2}%)",
+        comparison.mode2_token_reduction_vs_mode0, comparison.mode2_token_reduction_pct
+    );
+    println!(
+        "   Cache ratio delta: {:+.2}% | Invalidation occurred: {}",
+        comparison.mode2_cache_ratio_delta * 100.0,
+        comparison.mode2_cache_invalidation_occurred
+    );
+    println!(
+        "   Cost savings: ${:+.5} ({:+.2}%)",
+        comparison.mode2_cost_savings_usd, comparison.mode2_cost_savings_pct
+    );
+    println!("4. Mode 3 (Combined Optimization vs Mode 0):");
+    println!(
+        "   Token reduction: {:+} tokens ({:+.2}%)",
+        comparison.mode3_token_reduction_vs_mode0, comparison.mode3_token_reduction_pct
+    );
+    println!(
+        "   Cache ratio delta: {:+.2}%",
+        comparison.mode3_cache_ratio_delta * 100.0
+    );
+    println!(
+        "   Cost savings: ${:+.5} ({:+.2}%)",
+        comparison.mode3_cost_savings_usd, comparison.mode3_cost_savings_pct
+    );
+    println!(
+        "5. Total Campaign Spend: ${:.4} (Ceiling: ${:.2})",
+        SpendGuard::total_spent(),
+        MAX_CAMPAIGN_SPEND_USD
+    );
+    println!("6. Observations and Regressions:");
+    for obs in &comparison.observations_and_regressions {
+        println!("   - {}", obs);
+    }
+    println!("=======================================================\n");
+
+    let report = CW115FourModeReport {
+        date: Utc::now().to_rfc3339(),
+        git_commit: "72bec0d78c0224ce24ca47e3aca48ed72d622c67".to_string(),
+        package_version: env!("CARGO_PKG_VERSION").to_string(),
+        harness: "Codex CLI 0.166.0".to_string(),
+        model: model.to_string(),
+        total_sessions_executed: all_sessions.len(),
+        total_spend_usd: SpendGuard::total_spent(),
+        sessions: all_sessions,
+        comparison,
+    };
+
+    let report_json = serde_json::to_string_pretty(&report).unwrap();
+    let data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("docs")
+        .join("cw115_four_mode_benchmark_data.json");
+    fs::write(data_path, report_json).expect("failed to write four-mode benchmark json");
 }
 
 // ============================================================================

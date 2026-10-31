@@ -2,9 +2,10 @@
 
 **Campaign Status:** Completed (100% Pass Rate: 45/45 Deterministic Sessions)  
 **Date:** October 31, 2026  
-**Baseline Commit:** `5627fed91bf052c4fe28d499811381a3d9626bfa`  
-**Harness Matrix:** Codex CLI (`0.166.0`), OMP (`18.12.6`), Hermes Agent (`v0.22.5`)  
-**Scope:** 5 Workload Task Families $\times$ 3 Harnesses $\times$ 3 Repetitions (45 Sessions, 360 Checkpoints / Logical Turns) + Phase 4 Fault-Injection Suite
+**Final Commit:** `915bf9b4185db350db74ec3332e1db372088e48b`  
+**Execution Duration:** 353.26s (5m 53s)  
+**Harness Matrix:** Codex CLI (`0.166.0`), OMP (`18.12.6`), Hermes Agent (`v0.22.5`, commit `8ec749f`, Python 3.14.9, OpenAI SDK 2.54.0)  
+**Scope:** 5 Workload Task Families $\times$ 3 Harnesses $\times$ 3 Repetitions (45 Sessions, 360 Checkpoints / Logical Turns, 405 Model Requests) + Phase 4 Fault-Injection Suite
 
 ---
 
@@ -17,7 +18,7 @@ ContextWatcher (`cw`) serves as an active context manipulation engine, KV-cache 
 1. **Deterministic Protocol & Agentic Integration Qualification (CW-114 Scope vs CW-115 Scope):**
    Milestone **CW-114** qualifies deterministic integration and protocol reliability across multi-turn sessions and native resume boundaries using scripted tool executions. It verifies that ContextWatcher's proxy, canonical IR, and mutation overlay engines handle long sessions, process restarts, tool call pairing, and fault recoveries with 100% reliability. This deterministic baseline lays the foundation for **CW-115**, which performs empirical qualification of autonomous model problem-solving, live-provider token savings, and KV-cache performance.
 2. **Gate 0 Stream Terminal Invariant:** Resolved upstream SSE stream termination edge-cases. Partial SSE streams ending at HTTP EOF without provider terminal events (`message_stop`, `response.completed`, `[DONE]`) are now classified as `stream_error` instead of falsely recording `completed`.
-3. **Deterministic 45-Session Matrix:** Executed the entire 45-session campaign (3 harnesses $\times$ 5 task families $\times$ 3 repetitions) through 8 distinct checkpoint turns per session (total 360 checkpoints). All 45 sessions achieved a status of **`PASS`**, and all workspace acceptance criteria passed. The campaign suite enforces strict zero-tolerance assertions: `passed_sessions == 45`, `failed_sessions == 0`, `blocked_sessions == 0`, and `total_sessions == 45`.
+3. **Deterministic 45-Session Matrix:** Executed the entire 45-session campaign (3 harnesses $\times$ 5 task families $\times$ 3 repetitions) through 8 distinct checkpoint turns per session (total 360 checkpoints, 405 captured & audited model requests in 353.26s on commit `915bf9b4185db350db74ec3332e1db372088e48b`). All 45 sessions achieved a status of **`PASS`**, and all workspace acceptance criteria passed. The campaign suite enforces strict zero-tolerance assertions: `passed_sessions == 45`, `failed_sessions == 0`, `blocked_sessions == 0`, and `total_sessions == 45`.
 4. **Native Resume & Per-Turn Overlay Reapplication:** Successfully verified across all three harnesses that committed context overlays (`MutationRule::PinContext`) persist across native CLI process boundaries (`codex exec resume`, `omp -r <uuid>`, `hermes chat -r <sid>`) without corrupting provider conversations or on-disk transcripts. Every post-mutation turn (turns 5..8 across process restarts) is individually verified to contain the committed overlay, while all pre-mutation turns are verified clean.
 5. **Phase 4 Fault Injection & Resilience:**
    - **Mid-stream drop:** Proxy records `stream_error` without corrupting downstream client parsers.
@@ -142,51 +143,51 @@ All 45 sessions were executed against installed harness binaries (`codex`, `omp`
 
 | # | Session ID | Harness | Task Family | Rep | Logical Turns | Model Requests | Resume Preserved | Overlay Applied | Tool Pairing | Acceptance | Status |
 |:---:|:---|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 1 | `cw114_codex_F1_rep1` | Codex CLI | F1 Bug Fixing | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 2 | `cw114_codex_F1_rep2` | Codex CLI | F1 Bug Fixing | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 3 | `cw114_codex_F1_rep3` | Codex CLI | F1 Bug Fixing | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 4 | `cw114_codex_F2_rep1` | Codex CLI | F2 Refactoring | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 5 | `cw114_codex_F2_rep2` | Codex CLI | F2 Refactoring | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 6 | `cw114_codex_F2_rep3` | Codex CLI | F2 Refactoring | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 7 | `cw114_codex_F3_rep1` | Codex CLI | F3 Feature Impl | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 8 | `cw114_codex_F3_rep2` | Codex CLI | F3 Feature Impl | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 9 | `cw114_codex_F3_rep3` | Codex CLI | F3 Feature Impl | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 10 | `cw114_codex_F4_rep1` | Codex CLI | F4 TDD | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 11 | `cw114_codex_F4_rep2` | Codex CLI | F4 TDD | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 12 | `cw114_codex_F4_rep3` | Codex CLI | F4 TDD | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 13 | `cw114_codex_F5_rep1` | Codex CLI | F5 Recovery | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 14 | `cw114_codex_F5_rep2` | Codex CLI | F5 Recovery | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 15 | `cw114_codex_F5_rep3` | Codex CLI | F5 Recovery | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 16 | `cw114_omp_F1_rep1` | OMP | F1 Bug Fixing | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 17 | `cw114_omp_F1_rep2` | OMP | F1 Bug Fixing | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 18 | `cw114_omp_F1_rep3` | OMP | F1 Bug Fixing | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 19 | `cw114_omp_F2_rep1` | OMP | F2 Refactoring | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 20 | `cw114_omp_F2_rep2` | OMP | F2 Refactoring | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 21 | `cw114_omp_F2_rep3` | OMP | F2 Refactoring | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 22 | `cw114_omp_F3_rep1` | OMP | F3 Feature Impl | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 23 | `cw114_omp_F3_rep2` | OMP | F3 Feature Impl | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 24 | `cw114_omp_F3_rep3` | OMP | F3 Feature Impl | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 25 | `cw114_omp_F4_rep1` | OMP | F4 TDD | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 26 | `cw114_omp_F4_rep2` | OMP | F4 TDD | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 27 | `cw114_omp_F4_rep3` | OMP | F4 TDD | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 28 | `cw114_omp_F5_rep1` | OMP | F5 Recovery | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 29 | `cw114_omp_F5_rep2` | OMP | F5 Recovery | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 30 | `cw114_omp_F5_rep3` | OMP | F5 Recovery | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 31 | `cw114_hermes_F1_rep1` | Hermes Agent | F1 Bug Fixing | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 32 | `cw114_hermes_F1_rep2` | Hermes Agent | F1 Bug Fixing | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 33 | `cw114_hermes_F1_rep3` | Hermes Agent | F1 Bug Fixing | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 34 | `cw114_hermes_F2_rep1` | Hermes Agent | F2 Refactoring | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 35 | `cw114_hermes_F2_rep2` | Hermes Agent | F2 Refactoring | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 36 | `cw114_hermes_F2_rep3` | Hermes Agent | F2 Refactoring | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 37 | `cw114_hermes_F3_rep1` | Hermes Agent | F3 Feature Impl | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 38 | `cw114_hermes_F3_rep2` | Hermes Agent | F3 Feature Impl | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 39 | `cw114_hermes_F3_rep3` | Hermes Agent | F3 Feature Impl | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 40 | `cw114_hermes_F4_rep1` | Hermes Agent | F4 TDD | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 41 | `cw114_hermes_F4_rep2` | Hermes Agent | F4 TDD | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 42 | `cw114_hermes_F4_rep3` | Hermes Agent | F4 TDD | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 43 | `cw114_hermes_F5_rep1` | Hermes Agent | F5 Recovery | 1 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 44 | `cw114_hermes_F5_rep2` | Hermes Agent | F5 Recovery | 2 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
-| 45 | `cw114_hermes_F5_rep3` | Hermes Agent | F5 Recovery | 3 | 8 | 8 | Yes | Yes | Yes | Pass | **PASS** |
+| 1 | `cw114_codex_F1_rep1` | Codex CLI | F1 Bug Fixing | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 2 | `cw114_codex_F1_rep2` | Codex CLI | F1 Bug Fixing | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 3 | `cw114_codex_F1_rep3` | Codex CLI | F1 Bug Fixing | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 4 | `cw114_codex_F2_rep1` | Codex CLI | F2 Refactoring | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 5 | `cw114_codex_F2_rep2` | Codex CLI | F2 Refactoring | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 6 | `cw114_codex_F2_rep3` | Codex CLI | F2 Refactoring | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 7 | `cw114_codex_F3_rep1` | Codex CLI | F3 Feature Impl | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 8 | `cw114_codex_F3_rep2` | Codex CLI | F3 Feature Impl | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 9 | `cw114_codex_F3_rep3` | Codex CLI | F3 Feature Impl | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 10 | `cw114_codex_F4_rep1` | Codex CLI | F4 TDD | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 11 | `cw114_codex_F4_rep2` | Codex CLI | F4 TDD | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 12 | `cw114_codex_F4_rep3` | Codex CLI | F4 TDD | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 13 | `cw114_codex_F5_rep1` | Codex CLI | F5 Recovery | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 14 | `cw114_codex_F5_rep2` | Codex CLI | F5 Recovery | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 15 | `cw114_codex_F5_rep3` | Codex CLI | F5 Recovery | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 16 | `cw114_omp_F1_rep1` | OMP | F1 Bug Fixing | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 17 | `cw114_omp_F1_rep2` | OMP | F1 Bug Fixing | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 18 | `cw114_omp_F1_rep3` | OMP | F1 Bug Fixing | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 19 | `cw114_omp_F2_rep1` | OMP | F2 Refactoring | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 20 | `cw114_omp_F2_rep2` | OMP | F2 Refactoring | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 21 | `cw114_omp_F2_rep3` | OMP | F2 Refactoring | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 22 | `cw114_omp_F3_rep1` | OMP | F3 Feature Impl | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 23 | `cw114_omp_F3_rep2` | OMP | F3 Feature Impl | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 24 | `cw114_omp_F3_rep3` | OMP | F3 Feature Impl | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 25 | `cw114_omp_F4_rep1` | OMP | F4 TDD | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 26 | `cw114_omp_F4_rep2` | OMP | F4 TDD | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 27 | `cw114_omp_F4_rep3` | OMP | F4 TDD | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 28 | `cw114_omp_F5_rep1` | OMP | F5 Recovery | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 29 | `cw114_omp_F5_rep2` | OMP | F5 Recovery | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 30 | `cw114_omp_F5_rep3` | OMP | F5 Recovery | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 31 | `cw114_hermes_F1_rep1` | Hermes Agent | F1 Bug Fixing | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 32 | `cw114_hermes_F1_rep2` | Hermes Agent | F1 Bug Fixing | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 33 | `cw114_hermes_F1_rep3` | Hermes Agent | F1 Bug Fixing | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 34 | `cw114_hermes_F2_rep1` | Hermes Agent | F2 Refactoring | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 35 | `cw114_hermes_F2_rep2` | Hermes Agent | F2 Refactoring | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 36 | `cw114_hermes_F2_rep3` | Hermes Agent | F2 Refactoring | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 37 | `cw114_hermes_F3_rep1` | Hermes Agent | F3 Feature Impl | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 38 | `cw114_hermes_F3_rep2` | Hermes Agent | F3 Feature Impl | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 39 | `cw114_hermes_F3_rep3` | Hermes Agent | F3 Feature Impl | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 40 | `cw114_hermes_F4_rep1` | Hermes Agent | F4 TDD | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 41 | `cw114_hermes_F4_rep2` | Hermes Agent | F4 TDD | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 42 | `cw114_hermes_F4_rep3` | Hermes Agent | F4 TDD | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 43 | `cw114_hermes_F5_rep1` | Hermes Agent | F5 Recovery | 1 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 44 | `cw114_hermes_F5_rep2` | Hermes Agent | F5 Recovery | 2 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
+| 45 | `cw114_hermes_F5_rep3` | Hermes Agent | F5 Recovery | 3 | 8 | 9 | Yes | Yes | Yes | Pass | **PASS** |
 
 ### Summary Statistics
 - **Total Sessions Executed:** 45 / 45 (100%)
@@ -194,6 +195,8 @@ All 45 sessions were executed against installed harness binaries (`codex`, `omp`
 - **Failed Sessions:** 0 (0.0%)
 - **Blocked / Incomplete:** 0 (0.0%)
 - **Total Checkpoints / Logical Turns Qualified:** 360 turns
+- **Total Model Requests Captured & Audited:** 405 requests
+- **Total Execution Duration:** 353.26s (5m 53s)
 
 ---
 

@@ -871,6 +871,14 @@ pub async fn run_proxied_benchmark_session(
     let turns = store.list_turns(session_id).map_err(|e| e.to_string())?;
     assert!(!turns.is_empty(), "Store must record at least 1 turn");
 
+    // Enforce upper bound on agent request iterations to prevent runaway looping
+    if turns.len() > MAX_REQUESTS_PER_SESSION {
+        return Err(format!(
+            "MAX_REQUESTS_PER_SESSION ({MAX_REQUESTS_PER_SESSION}) exceeded: session executed {} requests",
+            turns.len()
+        ));
+    }
+
     for (idx, turn) in turns.iter().enumerate() {
         let usage = turn.observed_usage.clone().unwrap_or(json!({}));
         let in_tok = usage
@@ -885,7 +893,8 @@ pub async fn run_proxied_benchmark_session(
             .and_then(Value::as_u64)
             .unwrap_or(turn.token_usage.output_tokens as u64) as u32;
         let uncached = in_tok.saturating_sub(c_tok);
-        let cost = SpendGuard::record_and_check(uncached, c_tok, out_tok, model)?;
+        // Calculate cost per request without incrementing the global counter (avoid double-counting)
+        let cost = calculate_provider_cost(uncached, c_tok, out_tok, model);
 
         requests.push(RequestTelemetry {
             mode,
@@ -1118,6 +1127,27 @@ fn test_cw115_cost_model_and_budget_guards() {
         res.is_err(),
         "Reservation exceeding budget ceiling must fail before request"
     );
+
+    // Regression test for double-counting defect:
+    // A $0.10 reservation reconciled against $0.025 of actual usage produces
+    // exactly $0.025 in committed spend delta and 0 outstanding reservations.
+    let start_spent = SpendGuard::total_spent();
+    let recon_reservation = SpendGuard::reserve(0.10).expect("Should reserve $0.10 for session");
+    assert_eq!(recon_reservation.reserved_micro_usd, 100_000);
+    assert!((SpendGuard::total_reserved() - 0.10).abs() < 1e-6);
+
+    // Calculate individual turn costs without incrementing global spend counter
+    let cost_req1 = calculate_provider_cost(10_000, 5_000, 1_000, "gpt-4o-mini");
+    let cost_req2 = 0.025 - cost_req1;
+    let turn_total = cost_req1 + cost_req2;
+    assert!((turn_total - 0.025).abs() < 1e-6);
+    // Global spend counter must remain unchanged before session reconciliation
+    assert!((SpendGuard::total_spent() - start_spent).abs() < 1e-6);
+
+    // Reconcile session total exactly once
+    recon_reservation.commit(turn_total);
+    assert_eq!(SpendGuard::total_reserved(), 0.0);
+    assert!((SpendGuard::total_spent() - (start_spent + 0.025)).abs() < 1e-6);
 }
 
 #[test]

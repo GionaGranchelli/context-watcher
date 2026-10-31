@@ -103,10 +103,11 @@ All values below originate directly from OpenAI provider response telemetry (`us
 * Dollar costs are calculated directly from OpenAI's official published rates for `gpt-4o-mini`:
   $$\text{Cost} = \frac{\text{Uncached Input} \times \$0.150 + \text{Cached Input} \times \$0.075 + \text{Output} \times \$0.600}{1,000,000}$$
 * All dollar figures are explicitly identified as pricing calculations derived from observed usage, not independently reconciled invoices.
-* **Spend Control Mechanism:**
-  * **Pilot Spend Monitoring:** The initial exploratory live pilot operated with advisory post-turn spend tracking and session assertions, consuming **$0.1095 USD** total spend across all 6 sessions (well below the $1.00 envelope).
-  * **Pre-Request Reservation Enforced:** To provide hard guarantees for subsequent executions, [`SpendGuard::reserve()`](../crates/cw-proxy/tests/performance_qualification.rs) is wired into the runner to reserve budget allocations before launching harness processes, aborting before network invocation if remaining ceiling is insufficient.
-  * **Enforceable Request Caps:** Sessions enforce a hard limit of `MAX_REQUESTS_PER_SESSION = 30` to prevent runaway agent loops.
+* **Spend Control Mechanism (Session-Level Admission Control):**
+  * **Exploratory Pilot Execution:** The initial 6-session exploratory pilot operated with advisory post-turn spend tracking, consuming **$0.1095 USD** total spend across all 6 sessions (well below the $1.00 envelope).
+  * **Session-Level Admission Control:** To gate spending on subsequent benchmark runs, [`SpendGuard::reserve()`](../crates/cw-proxy/tests/performance_qualification.rs) acts as session-level admission control. It reserves a nominal $0.10 allocation before launching each session; if cumulative committed spend plus in-flight reservation exceeds the $1.00 ceiling, the session is refused admission and not dispatched. Upon session completion, the reservation is reconciled against actual calculated cost (preventing double-counting).
+  * **Enforced Request Caps:** Sessions enforce a hard limit of `MAX_REQUESTS_PER_SESSION = 30` to prevent runaway agent loops from exceeding expected turn limits.
+  * **Ceiling Nuance:** Because an external agent binary issues provider requests internally without a byte-by-byte wire killswitch, the $1.00 ceiling operates as session-level admission control and loop bounding, rather than an absolute byte-level provider wire hard cap.
 
 ---
 

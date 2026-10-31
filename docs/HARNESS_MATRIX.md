@@ -288,7 +288,7 @@ Implemented in [`crates/cw-proxy/tests/long_session_reliability.rs`](../crates/c
 
 Implemented in [`crates/cw-proxy/tests/performance_qualification.rs`](../crates/cw-proxy/tests/performance_qualification.rs) and documented in [`docs/CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md`](CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md), with raw machine-readable telemetry recorded in [`docs/cw115_benchmark_data.json`](cw115_benchmark_data.json).
 
-* **Scope & Methodology:** Evaluates 3 distinct experiment modes across real coding-agent workloads with real provider telemetry and strict micro-dollar spend guardrails in the **Codex CLI (`0.166.0`) F1 Bug-Fixing Live Pilot**:
+* **Scope & Methodology:** Evaluates 3 distinct experiment modes across real coding-agent workloads with real provider telemetry, session-level budget admission control ($1.00 ceiling), and loop limits (`MAX_REQUESTS_PER_SESSION = 30`) in the **Codex CLI (`0.166.0`) F1 Bug-Fixing Live Pilot**:
   - **Mode A (Native Baseline):** Harness connects directly to provider without proxy or intermediate hops.
   - **Mode B (CW Passthrough):** Harness routes through `cw-proxy` with active mutations disabled (`AutoPilotConfig.enabled = false`, 0 mutations).
   - **Mode C (CW Optimized):** Harness routes through `cw-proxy` with active committed context optimizations (historical tool output pruning and tail pin overlays).

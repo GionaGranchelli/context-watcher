@@ -6,7 +6,7 @@
 **Branch:** `feat/cw-117-cache-aware-policy`  
 **Crates Affected:** `cw-core` (`policy.rs`, `autopilot.rs`, `ir.rs`, `lib.rs`)  
 **Mode:** Strict Shadow Mode Only (Decisions recorded; 0 mutations committed or applied)  
-**Deterministic Test Suite:** `crates/cw-core/tests/policy_test.rs` (18/18 passed)  
+**Deterministic Test Suite:** `crates/cw-core/tests/policy_test.rs` (20/20 passed)  
 
 ---
 
@@ -150,7 +150,7 @@ Actual mutation applied by shadow policy: false
 
 ## 6. Deterministic Qualification Evidence
 
-Qualification suite located in [`crates/cw-core/tests/policy_test.rs`](file:///home/gionag/Development/contextWatcher/crates/cw-core/tests/policy_test.rs). All 18 tests pass deterministically in default CI:
+Qualification suite located in [`crates/cw-core/tests/policy_test.rs`](../crates/cw-core/tests/policy_test.rs). All 20 tests pass deterministically in default CI:
 
 | # | Test Name | Scenario Tested | Result |
 |:---:|:---|:---|:---:|
@@ -172,6 +172,8 @@ Qualification suite located in [`crates/cw-core/tests/policy_test.rs`](file:///h
 | 16 | `test_policy_classify_cache_state_fails_closed_on_zero_length_input` | Zero-length input prompt (`total_tokens == 0`) | Fails closed to `Unknown` |
 | 17 | `test_policy_loose_or_unverified_model_names_rejected` | Loose model patterns (`gpt-4o-custom`, `custom-sonnet`) | Rejected (`None` profile); defers in evaluation |
 | 18 | `test_policy_shadow_mode_suppresses_mutations_even_if_autopilot_enabled` | `autopilot.enabled: true` + `strict_shadow_only: true` | Suppresses mutation application; payload unmutated |
+| 19 | `test_policy_signed_thinking_block_rejection_candidate_and_plan` | Candidate and plan targeting signed thinking | `REJECT` (`SafetyViolation`) at candidate and plan levels |
+| 20 | `test_policy_plan_rebuilding_and_cold_cache_no_benefit_reason_codes` | Plan on rebuilding cache / cold cache with 0 savings | `DEFER` (`CacheRebuilding`) / `NO_OP` (`NoDemonstrableBenefit`) |
 
 ---
 

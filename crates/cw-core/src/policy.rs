@@ -272,15 +272,21 @@ pub struct ModelPricingProfile {
 }
 
 /// Look up the verified pricing profile for a given provider and model name.
-/// Requires explicit, verified model identifiers to avoid assigning legacy pricing to unknown models.
+/// Requires an explicit allowlist of supported model IDs and validated dated aliases to avoid
+/// assigning legacy pricing to unsupported or arbitrary model variants.
 pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<ModelPricingProfile> {
     let lower = model.to_ascii_lowercase();
     match provider {
         ProviderKind::OpenAI => {
-            let is_gpt_4o_mini = lower == "gpt-4o-mini" || lower.starts_with("gpt-4o-mini-202");
-            let is_gpt_4o =
-                lower == "gpt-4o" || lower.starts_with("gpt-4o-202") || lower == "gpt-4o-latest";
-            if is_gpt_4o_mini {
+            const GPT_4O_MINI_MODELS: &[&str] = &["gpt-4o-mini", "gpt-4o-mini-2024-07-18"];
+            const GPT_4O_MODELS: &[&str] = &[
+                "gpt-4o",
+                "gpt-4o-latest",
+                "gpt-4o-2024-05-13",
+                "gpt-4o-2024-08-06",
+                "gpt-4o-2024-11-20",
+            ];
+            if GPT_4O_MINI_MODELS.contains(&lower.as_str()) {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "gpt-4o-mini".to_string(),
@@ -291,7 +297,7 @@ pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<Model
                     min_cache_threshold_tokens: 1024,
                     is_supported: true,
                 })
-            } else if is_gpt_4o {
+            } else if GPT_4O_MODELS.contains(&lower.as_str()) {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "gpt-4o".to_string(),
@@ -307,7 +313,20 @@ pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<Model
             }
         }
         ProviderKind::Anthropic => {
-            if lower.starts_with("claude-3-5-sonnet") || lower.starts_with("claude-3-sonnet") {
+            const CLAUDE_SONNET_MODELS: &[&str] = &[
+                "claude-3-5-sonnet",
+                "claude-3-5-sonnet-latest",
+                "claude-3-5-sonnet-20241022",
+                "claude-3-5-sonnet-20240620",
+            ];
+            const CLAUDE_HAIKU_MODELS: &[&str] = &[
+                "claude-3-haiku",
+                "claude-3-haiku-20240307",
+                "claude-3-5-haiku",
+                "claude-3-5-haiku-latest",
+                "claude-3-5-haiku-20241022",
+            ];
+            if CLAUDE_SONNET_MODELS.contains(&lower.as_str()) {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "claude-3-5-sonnet".to_string(),
@@ -318,7 +337,7 @@ pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<Model
                     min_cache_threshold_tokens: 1024,
                     is_supported: true,
                 })
-            } else if lower.starts_with("claude-3-haiku") || lower.starts_with("claude-3-5-haiku") {
+            } else if CLAUDE_HAIKU_MODELS.contains(&lower.as_str()) {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "claude-3-haiku".to_string(),
@@ -334,7 +353,22 @@ pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<Model
             }
         }
         ProviderKind::Gemini => {
-            if lower.starts_with("gemini-1.5-flash") {
+            const GEMINI_FLASH_MODELS: &[&str] = &[
+                "gemini-1.5-flash",
+                "gemini-1.5-flash-latest",
+                "gemini-1.5-flash-001",
+                "gemini-1.5-flash-002",
+                "gemini-1.5-flash-8b",
+                "gemini-1.5-flash-8b-latest",
+                "gemini-1.5-flash-8b-001",
+            ];
+            const GEMINI_PRO_MODELS: &[&str] = &[
+                "gemini-1.5-pro",
+                "gemini-1.5-pro-latest",
+                "gemini-1.5-pro-001",
+                "gemini-1.5-pro-002",
+            ];
+            if GEMINI_FLASH_MODELS.contains(&lower.as_str()) {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "gemini-1.5-flash".to_string(),
@@ -345,7 +379,7 @@ pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<Model
                     min_cache_threshold_tokens: 32768,
                     is_supported: true,
                 })
-            } else if lower.starts_with("gemini-1.5-pro") {
+            } else if GEMINI_PRO_MODELS.contains(&lower.as_str()) {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "gemini-1.5-pro".to_string(),
@@ -712,6 +746,7 @@ pub fn evaluate_decision(
 
     let mut targets_protected_tool = false;
     let mut targets_forbidden_kind = false;
+    let mut targets_signed_thinking = false;
     let mut target_node_start: Option<u32> = None;
 
     match op {
@@ -733,7 +768,10 @@ pub fn evaluate_decision(
                     || match (&node.kind, target_call_id.as_ref()) {
                         (NodeKind::ToolResult { call_id, .. }, Some(tc)) => call_id == tc,
                         _ => false,
-                    };
+                    }
+                    || candidate_id
+                        .map(|cid| cid.ends_with(&node.id) || cid.contains(&node.id))
+                        .unwrap_or(false);
                 if matches {
                     target_node_start = Some(node.token_span.start);
                     if matches!(
@@ -744,6 +782,14 @@ pub fn evaluate_decision(
                             | NodeKind::ToolCall { .. }
                     ) {
                         targets_forbidden_kind = true;
+                    }
+                    if let NodeKind::AssistantThinking {
+                        signature: Some(sig),
+                        ..
+                    } = &node.kind
+                        && !sig.is_empty()
+                    {
+                        targets_signed_thinking = true;
                     }
                     if is_protected_tool_result(node, idx, turn.nodes.len(), last_assistant_idx) {
                         targets_protected_tool = true;
@@ -761,6 +807,14 @@ pub fn evaluate_decision(
                     if target_node_start.is_none() {
                         target_node_start = Some(node.token_span.start);
                     }
+                    if let NodeKind::AssistantThinking {
+                        signature: Some(sig),
+                        ..
+                    } = &node.kind
+                        && !sig.is_empty()
+                    {
+                        targets_signed_thinking = true;
+                    }
                     if is_protected_tool_result(node, idx, turn.nodes.len(), last_assistant_idx) {
                         targets_protected_tool = true;
                     }
@@ -775,6 +829,32 @@ pub fn evaluate_decision(
             decision: OptimizationDecision::Reject,
             reason_code: DecisionReasonCode::SafetyViolation,
             explanation: "Candidate targets protected node kind (UserPrompt, SystemPrompt, or AssistantText).".to_string(),
+            candidate_id: candidate_id.map(ToString::to_string),
+            plan_id: plan_id.map(ToString::to_string),
+            cache_state: cache_obs.state,
+            estimated_kv_break_tokens: 0,
+            net_token_delta: 0,
+            economic_evaluation: None,
+            evidence: DecisionEvidence {
+                session_id,
+                turn_seq,
+                provider,
+                model,
+                telemetry_provenance: cache_obs.provenance,
+                reported_cached_tokens: cache_obs.observed_cached_tokens,
+                is_append_only: is_append,
+                lifecycle_safe: false,
+                analysis_complete: true,
+            },
+            timestamp: Utc::now(),
+        };
+    }
+
+    if targets_signed_thinking {
+        return PolicyDecision {
+            decision: OptimizationDecision::Reject,
+            reason_code: DecisionReasonCode::SafetyViolation,
+            explanation: "Candidate targets signed thinking block (cryptographic thinking signatures cannot be mutated or pruned).".to_string(),
             candidate_id: candidate_id.map(ToString::to_string),
             plan_id: plan_id.map(ToString::to_string),
             cache_state: cache_obs.state,
@@ -1210,20 +1290,95 @@ pub fn evaluate_plan_decisions(
             },
             timestamp: Utc::now(),
         }
-    } else if cache_obs.state == CacheState::ColdLikely
-        && total_saved > 0
-        && econ.net_benefit_usd > 0.0
-    {
+    } else if cache_obs.state == CacheState::ColdLikely {
+        if total_saved > 0 && econ.net_benefit_usd > 0.0 {
+            PolicyDecision {
+                decision: OptimizationDecision::Apply,
+                reason_code: DecisionReasonCode::ModeledEconomicBenefitPositive,
+                explanation: format!(
+                    "Cold cache verified: plan saves {total_saved} tokens (modeled ${:.5} USD benefit) without cache penalty.",
+                    econ.net_benefit_usd
+                ),
+                candidate_id: None,
+                plan_id: Some(plan.id.clone()),
+                cache_state: CacheState::ColdLikely,
+                estimated_kv_break_tokens: plan.kv_cache_break_tokens,
+                net_token_delta: total_saved,
+                economic_evaluation: Some(econ),
+                evidence: DecisionEvidence {
+                    session_id: turn.session_id.clone(),
+                    turn_seq: turn.sequence_number,
+                    provider: cache_obs.provider,
+                    model: cache_obs.model.clone(),
+                    telemetry_provenance: cache_obs.provenance,
+                    reported_cached_tokens: cache_obs.observed_cached_tokens,
+                    is_append_only: is_pure_append,
+                    lifecycle_safe: true,
+                    analysis_complete: turn.analysis_complete,
+                },
+                timestamp: Utc::now(),
+            }
+        } else {
+            PolicyDecision {
+                decision: OptimizationDecision::NoOp,
+                reason_code: DecisionReasonCode::NoDemonstrableBenefit,
+                explanation: "Plan on cold cache yields non-positive token savings or non-positive economic benefit.".to_string(),
+                candidate_id: None,
+                plan_id: Some(plan.id.clone()),
+                cache_state: CacheState::ColdLikely,
+                estimated_kv_break_tokens: plan.kv_cache_break_tokens,
+                net_token_delta: total_saved,
+                economic_evaluation: Some(econ),
+                evidence: DecisionEvidence {
+                    session_id: turn.session_id.clone(),
+                    turn_seq: turn.sequence_number,
+                    provider: cache_obs.provider,
+                    model: cache_obs.model.clone(),
+                    telemetry_provenance: cache_obs.provenance,
+                    reported_cached_tokens: cache_obs.observed_cached_tokens,
+                    is_append_only: is_pure_append,
+                    lifecycle_safe: true,
+                    analysis_complete: turn.analysis_complete,
+                },
+                timestamp: Utc::now(),
+            }
+        }
+    } else if cache_obs.state == CacheState::Rebuilding {
         PolicyDecision {
-            decision: OptimizationDecision::Apply,
-            reason_code: DecisionReasonCode::ModeledEconomicBenefitPositive,
-            explanation: format!(
-                "Cold cache verified: plan saves {total_saved} tokens (modeled ${:.5} USD benefit) without cache penalty.",
-                econ.net_benefit_usd
-            ),
+            decision: OptimizationDecision::Defer,
+            reason_code: DecisionReasonCode::CacheRebuilding,
+            explanation:
+                "Cache prefix is actively rebuilding from prior compaction; deferring plan."
+                    .to_string(),
             candidate_id: None,
             plan_id: Some(plan.id.clone()),
-            cache_state: CacheState::ColdLikely,
+            cache_state: CacheState::Rebuilding,
+            estimated_kv_break_tokens: plan.kv_cache_break_tokens,
+            net_token_delta: total_saved,
+            economic_evaluation: Some(econ),
+            evidence: DecisionEvidence {
+                session_id: turn.session_id.clone(),
+                turn_seq: turn.sequence_number,
+                provider: cache_obs.provider,
+                model: cache_obs.model.clone(),
+                telemetry_provenance: cache_obs.provenance,
+                reported_cached_tokens: cache_obs.observed_cached_tokens,
+                is_append_only: is_pure_append,
+                lifecycle_safe: true,
+                analysis_complete: turn.analysis_complete,
+            },
+            timestamp: Utc::now(),
+        }
+    } else if pricing.is_none() || !pricing.map(|p| p.is_supported).unwrap_or(false) {
+        PolicyDecision {
+            decision: OptimizationDecision::Defer,
+            reason_code: DecisionReasonCode::MissingPricingProfile,
+            explanation:
+                "Pricing profile missing or unsupported; cannot authorize plan optimization."
+                    .to_string(),
+            candidate_id: None,
+            plan_id: Some(plan.id.clone()),
+            cache_state: cache_obs.state,
             estimated_kv_break_tokens: plan.kv_cache_break_tokens,
             net_token_delta: total_saved,
             economic_evaluation: Some(econ),

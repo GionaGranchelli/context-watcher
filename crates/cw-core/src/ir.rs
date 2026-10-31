@@ -447,8 +447,6 @@ pub struct ContextTurn {
     pub first_body_byte_ms: Option<u64>,
     #[serde(default)]
     pub applied_mutation_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub shadow_policy_decisions: Vec<crate::policy::PolicyDecision>,
     pub id: TurnId,
     pub session_id: SessionId,
     pub parent_turn_id: Option<TurnId>,

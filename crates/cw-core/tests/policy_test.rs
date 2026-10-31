@@ -922,17 +922,29 @@ fn test_policy_zero_length_input_fails_closed_to_unknown() {
 
 #[test]
 fn test_policy_loose_or_unverified_model_names_rejected() {
-    // Unverified model strings must not receive legacy pricing
+    // Unverified model strings and variants sharing prefixes must NOT receive pricing profiles
     assert!(find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-custom-finetune").is_none());
+    assert!(find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini-experimental").is_none());
+    assert!(find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-custom").is_none());
     assert!(find_pricing_profile(ProviderKind::Anthropic, "custom-sonnet-v1").is_none());
     assert!(find_pricing_profile(ProviderKind::Anthropic, "claude-2-sonnet").is_none());
+    assert!(
+        find_pricing_profile(ProviderKind::Anthropic, "claude-3-5-sonnet-custom-tuning").is_none()
+    );
+    assert!(find_pricing_profile(ProviderKind::Anthropic, "claude-3-5-sonnet-preview").is_none());
     assert!(find_pricing_profile(ProviderKind::Gemini, "fine-tune-flash").is_none());
     assert!(find_pricing_profile(ProviderKind::Gemini, "gemini-1.0-pro").is_none());
+    assert!(find_pricing_profile(ProviderKind::Gemini, "gemini-1.5-pro-preview-0514").is_none());
+    assert!(find_pricing_profile(ProviderKind::Gemini, "gemini-1.5-pro-experimental").is_none());
+    assert!(find_pricing_profile(ProviderKind::Gemini, "gemini-1.5-flash-tuning").is_none());
 
-    // Verified prefixes must still match correctly
+    // Verified explicit models and dated aliases must match correctly
     assert!(find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini-2024-07-18").is_some());
     assert!(find_pricing_profile(ProviderKind::Anthropic, "claude-3-5-sonnet-20241022").is_some());
+    assert!(find_pricing_profile(ProviderKind::Anthropic, "claude-3-5-sonnet-latest").is_some());
+    assert!(find_pricing_profile(ProviderKind::Anthropic, "claude-3-haiku-20240307").is_some());
     assert!(find_pricing_profile(ProviderKind::Gemini, "gemini-1.5-flash-latest").is_some());
+    assert!(find_pricing_profile(ProviderKind::Gemini, "gemini-1.5-pro-002").is_some());
 }
 
 #[test]
@@ -978,4 +990,228 @@ fn test_policy_strict_shadow_only_suppresses_active_mutations() {
 
     // Payload 100% byte-for-byte unmutated
     assert_eq!(payload, original);
+}
+
+#[test]
+fn test_policy_signed_thinking_block_rejection_candidate_and_plan() {
+    // P1 Safety Invariant: The decision engine must explicitly reject candidates targeting
+    // signed thinking content, preventing policy Apply for anything the mutation engine refuses.
+    let payload = json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [
+            { "role": "user", "content": "Explain KV caching." },
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "thinking",
+                        "thinking": "Internal chain-of-thought about radix trees and attention cache residency.",
+                        "signature": "sig_cryptographic_verification_token_anthropic_42"
+                    },
+                    {
+                        "type": "text",
+                        "content": "KV caching stores key-value projections across attention layers."
+                    }
+                ]
+            }
+        ]
+    });
+
+    let (turn, _) = analyze_turn_from_payload(
+        "turn_signed_thinking".into(),
+        "sess_signed_thinking".into(),
+        None,
+        1,
+        &payload,
+        ProviderKind::Anthropic,
+        None,
+        Some(0), // Cold cache
+        None,
+    )
+    .unwrap();
+
+    let thinking_node = turn
+        .nodes
+        .iter()
+        .find(|n| {
+            matches!(
+                n.kind,
+                NodeKind::AssistantThinking {
+                    signature: Some(_),
+                    ..
+                }
+            )
+        })
+        .expect("Signed thinking node must exist in parsed turn");
+
+    let prefix_fp = compute_prefix_fingerprint(&turn.nodes);
+    let cache_obs = classify_cache_state(
+        &turn.session_id,
+        ProviderKind::Anthropic,
+        "claude-3-5-sonnet-20241022",
+        turn.sequence_number,
+        Some(&prefix_fp),
+        None,
+        Some(&turn.kv_cache_report),
+        false,
+    );
+
+    let pricing = find_pricing_profile(ProviderKind::Anthropic, "claude-3-5-sonnet-20241022");
+
+    let candidate = OptimizationCandidateItem {
+        item_id: format!("cut_think_{}", thinking_node.id),
+        node_id: Some(thinking_node.id.clone()),
+        turn_seq: thinking_node.turn_seq,
+        timestamp: None,
+        title: "Prune Signed Thinking".into(),
+        action_kind: "prune_thinking".into(),
+        what_we_do: "Prune".into(),
+        why_it_matters: "Diet".into(),
+        content_preview: "".into(),
+        tokens_before: 200,
+        tokens_after: 10,
+        saved_tokens: 190,
+        kv_break_tokens: 0,
+        mutation_op: MutationOp::PruneOrStub {
+            target_fingerprint: Some(thinking_node.fingerprint.0.clone()),
+            target_call_id: None,
+            target_json_pointer: Some(thinking_node.raw_json_pointer.clone()),
+            stub_text: "[pruned]".into(),
+        },
+    };
+
+    let plan = OptimizationStrategyPlan {
+        id: "plan_with_signed_thinking".into(),
+        name: "Signed Thinking Plan".into(),
+        tagline: "".into(),
+        kv_badge: "".into(),
+        what_and_how: "".into(),
+        expected_quality_impact: "".into(),
+        tokens_before: 200,
+        tokens_after: 10,
+        saved_tokens: 190,
+        saved_pct: 95.0,
+        kv_cache_break_tokens: 0,
+        break_even_turns: 1,
+        health_score_before: 50,
+        health_score_after: 90,
+        items: vec![candidate.clone()],
+    };
+
+    // 1. Candidate-level evaluation: MUST REJECT with SafetyViolation
+    let candidate_decision = evaluate_decision(
+        Some(&candidate.item_id),
+        Some(&plan.id),
+        &candidate.mutation_op,
+        &turn,
+        &cache_obs,
+        pricing.as_ref(),
+        3,
+    );
+    assert_eq!(candidate_decision.decision, OptimizationDecision::Reject);
+    assert_eq!(
+        candidate_decision.reason_code,
+        DecisionReasonCode::SafetyViolation
+    );
+    assert!(candidate_decision.explanation.contains("signed thinking"));
+
+    // 2. Plan-level evaluation: MUST REJECT with SafetyViolation
+    let (plan_decision, item_decisions) =
+        evaluate_plan_decisions(&plan, &turn, &cache_obs, pricing.as_ref(), 3);
+    assert_eq!(item_decisions[0].decision, OptimizationDecision::Reject);
+    assert_eq!(plan_decision.decision, OptimizationDecision::Reject);
+    assert_eq!(
+        plan_decision.reason_code,
+        DecisionReasonCode::SafetyViolation
+    );
+    assert!(plan_decision.explanation.contains("rejected"));
+}
+
+#[test]
+fn test_policy_plan_rebuilding_and_cold_cache_no_benefit_reason_codes() {
+    let turn = make_synthetic_turn("sess_codes", Some(0), true);
+    let prefix_fp = compute_prefix_fingerprint(&turn.nodes);
+
+    // Case 1: Rebuilding cache state must return CacheRebuilding, NOT CacheTelemetryUnknown
+    let rebuilding_obs = CacheObservation {
+        state: CacheState::Rebuilding,
+        provenance: TelemetryProvenance::ObservedProvider,
+        observed_cached_tokens: Some(500),
+        reported_input_tokens: Some(1500),
+        provider: ProviderKind::OpenAI,
+        model: "gpt-4o-mini".to_string(),
+        session_id: turn.session_id.clone(),
+        prefix_fingerprint: Some(prefix_fp.clone()),
+        observed_at: Utc::now(),
+        turn_seq: turn.sequence_number,
+        notes: vec!["Prefix rebuilding".to_string()],
+    };
+    let pricing = find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini");
+
+    let plan = OptimizationStrategyPlan {
+        id: "plan_rebuilding".into(),
+        name: "Test Plan".into(),
+        tagline: "".into(),
+        kv_badge: "".into(),
+        what_and_how: "".into(),
+        expected_quality_impact: "".into(),
+        tokens_before: 500,
+        tokens_after: 200,
+        saved_tokens: 300,
+        saved_pct: 60.0,
+        kv_cache_break_tokens: 100,
+        break_even_turns: 1,
+        health_score_before: 50,
+        health_score_after: 90,
+        items: vec![],
+    };
+
+    let (rebuilding_decision, _) =
+        evaluate_plan_decisions(&plan, &turn, &rebuilding_obs, pricing.as_ref(), 3);
+    assert_eq!(rebuilding_decision.decision, OptimizationDecision::Defer);
+    assert_eq!(
+        rebuilding_decision.reason_code,
+        DecisionReasonCode::CacheRebuilding
+    );
+
+    // Case 2: Cold cache with zero savings must return NoDemonstrableBenefit, NOT CacheTelemetryUnknown
+    let cold_obs = CacheObservation {
+        state: CacheState::ColdLikely,
+        provenance: TelemetryProvenance::ObservedProvider,
+        observed_cached_tokens: Some(0),
+        reported_input_tokens: Some(1500),
+        provider: ProviderKind::OpenAI,
+        model: "gpt-4o-mini".to_string(),
+        session_id: turn.session_id.clone(),
+        prefix_fingerprint: Some(prefix_fp),
+        observed_at: Utc::now(),
+        turn_seq: turn.sequence_number,
+        notes: vec![],
+    };
+
+    let zero_savings_plan = OptimizationStrategyPlan {
+        id: "plan_zero_savings".into(),
+        name: "Zero Savings Plan".into(),
+        tagline: "".into(),
+        kv_badge: "".into(),
+        what_and_how: "".into(),
+        expected_quality_impact: "".into(),
+        tokens_before: 500,
+        tokens_after: 500,
+        saved_tokens: 0,
+        saved_pct: 0.0,
+        kv_cache_break_tokens: 0,
+        break_even_turns: 1,
+        health_score_before: 50,
+        health_score_after: 50,
+        items: vec![],
+    };
+
+    let (zero_decision, _) =
+        evaluate_plan_decisions(&zero_savings_plan, &turn, &cold_obs, pricing.as_ref(), 3);
+    assert_eq!(zero_decision.decision, OptimizationDecision::NoOp);
+    assert_eq!(
+        zero_decision.reason_code,
+        DecisionReasonCode::NoDemonstrableBenefit
+    );
 }

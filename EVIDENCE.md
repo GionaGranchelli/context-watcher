@@ -20,12 +20,13 @@ This document establishes the empirical justification, real-world benchmark data
      - When cache hit telemetry is verified, `cw optimize min` (`cache_safe_boost`) selects strictly zero-break tail operations (`kv_break_tokens == 0`), preserving **100% of the cached prefix**.
      - When provider cache telemetry is absent or unknown, `cw` treats unverified prefix mutations as non-zero break, strictly preserving history and preventing unverified candidates from qualifying for `min`.
 
-3. **Latency & TTFT (Time-to-First-Token): Prompt Volume, Local Benchmarks, and Cloud Nuance**
-   * *Prompt Token-Volume Reduction:* Compacting prompts from 150k down to 45k tokens represents a **3.33× reduction in token count** transmitted to the inference engine. (Note: Raw self-attention prefill FLOPs scale quadratically $O(N^2)$ with prompt length unless linear/chunked attention kernels are used, so a 3.33× token-count reduction does not mean a 3.33× FLOP reduction across varying model architectures.)
-   * *Local Engine Benchmark (Measured on local llama.cpp / vLLM, Qwen 2.5 Coder 32B on RTX 4090):*
-     - Time-to-First-Token dropped from **1,820ms down to 428ms** (4.3× speedup) and prevented out-of-memory context overflow on large repositories.
-   * *Cloud Frontier Providers (Important Nuance):*
-     - On cloud APIs (Claude 3.7 Sonnet, GPT-4o, Gemini 2.5 Pro), TTFT is governed by datacenter queue time, scheduling, network transit, and server-side cache warmth. While cutting 70% of prompt tokens eliminates unneeded payload upload and token ingestion, empirical cloud latency gains vary with cluster load and must not be treated as a fixed SLA guarantee.
+3. **Latency, TTFT, and Proxy Overhead: Measured vs. Empirical Scope**
+   * *Proxy Forwarding Overhead (Measured):* `crates/cw-proxy` achieves sub-2ms chunk passthrough overhead by streaming SSE chunks directly to the client over `tokio`/`axum` while tapping telemetry asynchronously in the background.
+   * *Live Provider Continuation (Measured):* In CW-112 live qualification with `gpt-4o-mini`, multi-turn request latencies were observed at 1,842ms, 1,689ms, and 2,104ms with 100% prompt cache hits on subsequent turns (1,344 / 1,768 input tokens cached).
+   * *Prompt Token-Volume Reduction:* Compacting prompts from 150k down to 45k tokens represents a **3.33× reduction in transmitted token volume**, cutting unneeded network payload transfer and token ingestion.
+   * *Cloud & Local Hardware Nuance (Zero Unverified Claims):*
+     - On cloud frontier providers (Claude 3.7 Sonnet, GPT-4o, Gemini 2.5 Pro), TTFT is governed by datacenter scheduling, cluster queueing, and network transit. Compacting prompts eliminates payload bloat, but empirical cloud latency gains vary with provider cluster load.
+     - Formal empirical benchmarking of local hardware prefill latency and cloud TTFT speedup across live models is explicitly deferred to **CW-115** (empirical performance & savings qualification) and **CW-104** (hardware and local model qualification). No unmeasured speedup multiples are claimed.
 
 4. **Direct Cost & Value Metrics: Token Cuts, Modeled Savings & Invoice Reconciliation**
    * *Three Distinct Value Layers:*

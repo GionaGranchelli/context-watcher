@@ -508,6 +508,7 @@ pub fn run_native_baseline_session(
         std::env::temp_dir().join(format!("codex_home_mode_a_{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&temp_home).map_err(|e| e.to_string())?;
 
+    let session_reservation = SpendGuard::reserve(0.10)?;
     let mut requests = Vec::new();
     let session_start = Instant::now();
 
@@ -553,7 +554,7 @@ pub fn run_native_baseline_session(
         }
     };
     let uncached1 = in1.saturating_sub(c1);
-    let cost1 = SpendGuard::record_and_check(uncached1, c1, out_tok1, model)?;
+    let cost1 = calculate_provider_cost(uncached1, c1, out_tok1, model);
 
     requests.push(RequestTelemetry {
         mode: ExperimentMode::ModeANativeBaseline,
@@ -620,7 +621,7 @@ pub fn run_native_baseline_session(
         }
     };
     let uncached2 = in2.saturating_sub(c2);
-    let cost2 = SpendGuard::record_and_check(uncached2, c2, out_tok2, model)?;
+    let cost2 = calculate_provider_cost(uncached2, c2, out_tok2, model);
 
     requests.push(RequestTelemetry {
         mode: ExperimentMode::ModeANativeBaseline,
@@ -655,6 +656,9 @@ pub fn run_native_baseline_session(
     let total_uncached: u32 = requests.iter().map(|r| r.uncached_tokens).sum();
     let total_out: u32 = requests.iter().map(|r| r.output_tokens).sum();
     let total_cost: f64 = requests.iter().map(|r| r.cost_usd).sum();
+
+    // Reconcile pre-request reservation with actual session cost
+    session_reservation.commit(total_cost);
 
     Ok(SessionBenchmarkResult {
         session_id: session_id.to_string(),
@@ -720,6 +724,7 @@ pub async fn run_proxied_benchmark_session(
         std::env::temp_dir().join(format!("codex_home_proxied_{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&temp_home).map_err(|e| e.to_string())?;
 
+    let session_reservation = SpendGuard::reserve(0.10)?;
     let mut requests = Vec::new();
     let session_start = Instant::now();
 
@@ -924,6 +929,9 @@ pub async fn run_proxied_benchmark_session(
     } else {
         None
     };
+
+    // Reconcile pre-request reservation with actual session cost
+    session_reservation.commit(total_cost);
 
     Ok(SessionBenchmarkResult {
         session_id: session_id.to_string(),
@@ -1320,7 +1328,7 @@ async fn test_live_codex_cw115_empirical_performance_qualification() {
         comparison_f1.passthrough_latency_overhead_pct
     );
     println!(
-        "   Token divergence: {} tokens (exact passthrough integrity)",
+        "   Live session token delta (Mode B mean - Mode A mean): {} tokens (stochastic iteration variance)",
         comparison_f1.passthrough_token_divergence
     );
     println!("2. Optimization Net Benefit (Mode C vs Mode B):");

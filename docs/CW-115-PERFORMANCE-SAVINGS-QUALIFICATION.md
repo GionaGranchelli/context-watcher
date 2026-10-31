@@ -61,7 +61,7 @@ Across both matched repetitions in the live pilot, comparing Mode C (Optimized) 
 | **Proxy Tap Overhead** | < 2.0 ms / chunk | < 2.0 ms / chunk | < 2.0 ms / chunk |
 | **Functional Pass Rate** | 100% (PASS) | 100% (PASS) | 100% (PASS) |
 
-* **Zero Token Divergence:** Raw payload byte forwarding and SSE streaming chunks preserve 100% fidelity.
+* **Passthrough Forwarding vs Live Token Divergence:** As verified in unit contract tests (AC5), `cw-proxy` forwards raw payload bytes and SSE streaming chunks with 100% byte-for-byte fidelity in passthrough mode. In live multi-turn agent runs, however, natural LLM generation non-determinism means that Mode A and Mode B follow different tool iteration trajectories. Across the two repetitions, Mode A consumed 318,541 and 162,815 input tokens, while Mode B consumed 156,448 and 144,528 input tokens (a net -90,190 mean token difference between independent stochastic runs). Live A/B runs should not be described as zero-divergence.
 * **Streaming Overhead:** Proxy chunk forwarding introduces $< 2\text{ms}$ overhead per SSE block.
 * **Wall-Clock Variation:** The net difference in session duration (-17.8%) reflects normal OpenAI cloud cluster routing and queueing jitter rather than proxy latency.
 
@@ -104,9 +104,9 @@ All values below originate directly from OpenAI provider response telemetry (`us
   $$\text{Cost} = \frac{\text{Uncached Input} \times \$0.150 + \text{Cached Input} \times \$0.075 + \text{Output} \times \$0.600}{1,000,000}$$
 * All dollar figures are explicitly identified as pricing calculations derived from observed usage, not independently reconciled invoices.
 * **Spend Control Mechanism:**
-  * **Pre-Request Reservation:** [`SpendGuard::reserve()`](../crates/cw-proxy/tests/performance_qualification.rs) checks committed spend plus active reservations against the $1.00 ceiling before dispatching requests, aborting before network invocation if budget is exceeded.
+  * **Pilot Spend Monitoring:** The initial exploratory live pilot operated with advisory post-turn spend tracking and session assertions, consuming **$0.1095 USD** total spend across all 6 sessions (well below the $1.00 envelope).
+  * **Pre-Request Reservation Enforced:** To provide hard guarantees for subsequent executions, [`SpendGuard::reserve()`](../crates/cw-proxy/tests/performance_qualification.rs) is wired into the runner to reserve budget allocations before launching harness processes, aborting before network invocation if remaining ceiling is insufficient.
   * **Enforceable Request Caps:** Sessions enforce a hard limit of `MAX_REQUESTS_PER_SESSION = 30` to prevent runaway agent loops.
-  * **Actual Campaign Spend:** The entire 6-session pilot consumed **$0.1095 USD** total spend.
 
 ---
 

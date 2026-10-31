@@ -140,18 +140,41 @@ pub fn classify_cache_state(
     // 3. Telemetry is available from provider
     let hit_tokens = report.hit_tokens;
 
-    // Check compatibility with prior observation if present
+    // Check compatibility with prior observation if present: fail closed to Unknown if incompatible
     if let Some(prior) = prior_observation {
+        let mut incompatible = false;
         if prior.session_id != session_id {
             notes.push("Session ID mismatch against prior observation.".to_string());
+            incompatible = true;
         }
         if prior.provider != provider || prior.model != model {
             notes.push("Provider/model changed between observations.".to_string());
+            incompatible = true;
         }
         if let (Some(prior_fp), Some(curr_fp)) = (&prior.prefix_fingerprint, current_prefix_fp)
             && prior_fp != curr_fp
         {
             notes.push("Prefix fingerprint diverged from prior observation.".to_string());
+            incompatible = true;
+        }
+        if incompatible {
+            notes.push(
+                "Failing closed to Unknown state due to incompatible prior observation evidence."
+                    .to_string(),
+            );
+            return CacheObservation {
+                state: CacheState::Unknown,
+                provenance: TelemetryProvenance::None,
+                observed_cached_tokens: None,
+                reported_input_tokens: None,
+                provider,
+                model: model.to_string(),
+                session_id: session_id.to_string(),
+                prefix_fingerprint: current_prefix_fp.map(ToString::to_string),
+                observed_at: Utc::now(),
+                turn_seq,
+                notes,
+            };
         }
     }
 
@@ -174,11 +197,11 @@ pub fn classify_cache_state(
         }
     } else {
         // Hit tokens == 0 with observed telemetry
-        // Determine whether this is credibly cold or below threshold/ambiguous
+        // Determine whether this is credibly cold or below threshold/insufficient
         let total_tokens = report.hit_tokens + report.newly_cached_tokens;
         let min_threshold = min_cache_threshold_for_model(provider, model);
 
-        if total_tokens > 0 && total_tokens < min_threshold {
+        if total_tokens < min_threshold {
             notes.push(format!(
                 "Input tokens ({total_tokens}) below provider caching threshold ({min_threshold}); cache eligibility unavailable."
             ));
@@ -249,11 +272,15 @@ pub struct ModelPricingProfile {
 }
 
 /// Look up the verified pricing profile for a given provider and model name.
+/// Requires explicit, verified model identifiers to avoid assigning legacy pricing to unknown models.
 pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<ModelPricingProfile> {
     let lower = model.to_ascii_lowercase();
     match provider {
         ProviderKind::OpenAI => {
-            if lower.contains("gpt-4o-mini") {
+            let is_gpt_4o_mini = lower == "gpt-4o-mini" || lower.starts_with("gpt-4o-mini-202");
+            let is_gpt_4o =
+                lower == "gpt-4o" || lower.starts_with("gpt-4o-202") || lower == "gpt-4o-latest";
+            if is_gpt_4o_mini {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "gpt-4o-mini".to_string(),
@@ -264,7 +291,7 @@ pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<Model
                     min_cache_threshold_tokens: 1024,
                     is_supported: true,
                 })
-            } else if lower.contains("gpt-4o") {
+            } else if is_gpt_4o {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "gpt-4o".to_string(),
@@ -280,24 +307,24 @@ pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<Model
             }
         }
         ProviderKind::Anthropic => {
-            if lower.contains("claude-3-5-sonnet") || lower.contains("sonnet") {
+            if lower.starts_with("claude-3-5-sonnet") || lower.starts_with("claude-3-sonnet") {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "claude-3-5-sonnet".to_string(),
                     uncached_input_per_mtok: 3.00,
-                    cached_input_read_per_mtok: 0.30, // 90% discount
-                    cache_write_per_mtok: 3.75,       // +25% write surcharge
+                    cached_input_read_per_mtok: 0.30, // 90% discount ($0.30/M)
+                    cache_write_per_mtok: 3.75, // Total 5-min cache-write rate is 1.25x base ($3.75/M total)
                     output_per_mtok: 15.00,
                     min_cache_threshold_tokens: 1024,
                     is_supported: true,
                 })
-            } else if lower.contains("claude-3-haiku") || lower.contains("haiku") {
+            } else if lower.starts_with("claude-3-haiku") || lower.starts_with("claude-3-5-haiku") {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "claude-3-haiku".to_string(),
                     uncached_input_per_mtok: 0.25,
                     cached_input_read_per_mtok: 0.025, // 90% discount
-                    cache_write_per_mtok: 0.30,
+                    cache_write_per_mtok: 0.3125,      // 1.25x base ($0.3125/M total)
                     output_per_mtok: 1.25,
                     min_cache_threshold_tokens: 1024,
                     is_supported: true,
@@ -307,7 +334,7 @@ pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<Model
             }
         }
         ProviderKind::Gemini => {
-            if lower.contains("flash") {
+            if lower.starts_with("gemini-1.5-flash") {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "gemini-1.5-flash".to_string(),
@@ -318,7 +345,7 @@ pub fn find_pricing_profile(provider: ProviderKind, model: &str) -> Option<Model
                     min_cache_threshold_tokens: 32768,
                     is_supported: true,
                 })
-            } else if lower.contains("pro") {
+            } else if lower.starts_with("gemini-1.5-pro") {
                 Some(ModelPricingProfile {
                     provider,
                     model_pattern: "gemini-1.5-pro".to_string(),
@@ -438,19 +465,24 @@ pub fn evaluate_economic_impact(
     } else {
         match cache_obs.state {
             CacheState::WarmVerified => {
-                // Prefix up to earliest_kv_break_start remains cached; remainder must be re-read uncached!
+                // Prefix up to earliest_kv_break_start remains cached; remainder must be re-read.
                 let break_start = earliest_kv_break_start.unwrap_or(0);
                 let preserved_cached = cached_tokens.min(break_start);
-                let invalidated_uncached = opt_total_tokens.saturating_sub(preserved_cached);
-                let write_tokens = if profile.cache_write_per_mtok > 0.0 {
-                    invalidated_uncached
+                let invalidated_tokens = opt_total_tokens.saturating_sub(preserved_cached);
+
+                // Pricing distinction: tokens written to cache on providers with cache-write fees (Anthropic)
+                // are billed at cache_write_per_mtok (1.25x base in total). They must NOT also be charged
+                // as uncached input. On providers with free caching (OpenAI/Gemini), write fee is 0, so tokens
+                // are billed at normal uncached input rate.
+                let (uncached_read, write_tokens) = if profile.cache_write_per_mtok > 0.0 {
+                    (0u32, invalidated_tokens)
                 } else {
-                    0
+                    (invalidated_tokens, 0u32)
                 };
                 reasons.push(format!(
-                    "Warm cache prefix broken at token {break_start}; {invalidated_uncached} tokens must be re-read as uncached input."
+                    "Warm cache prefix broken at token {break_start}; {invalidated_tokens} tokens must be re-established (billed at cache-write or uncached rate)."
                 ));
-                (preserved_cached, invalidated_uncached, write_tokens)
+                (preserved_cached, uncached_read, write_tokens)
             }
             CacheState::ColdLikely => {
                 // Cache is cold anyway: zero cached tokens, all tokens read at uncached rate.
@@ -462,8 +494,13 @@ pub fn evaluate_economic_impact(
                 // Conservative estimation
                 let break_start = earliest_kv_break_start.unwrap_or(0);
                 let preserved_cached = cached_tokens.min(break_start);
-                let uncached_tail = opt_total_tokens.saturating_sub(preserved_cached);
-                (preserved_cached, uncached_tail, 0u32)
+                let invalidated = opt_total_tokens.saturating_sub(preserved_cached);
+                let (uncached_read, write_tokens) = if profile.cache_write_per_mtok > 0.0 {
+                    (0u32, invalidated)
+                } else {
+                    (invalidated, 0u32)
+                };
+                (preserved_cached, uncached_read, write_tokens)
             }
         }
     };
@@ -507,15 +544,20 @@ pub fn evaluate_economic_impact(
         }
     }
 
-    let confidence = match (cache_obs.provenance, cache_obs.state) {
-        (
-            TelemetryProvenance::ObservedProvider,
-            CacheState::WarmVerified | CacheState::ColdLikely,
-        ) => EvaluationConfidence::High,
-        (TelemetryProvenance::ObservedProvider, _) | (TelemetryProvenance::LocalEstimate, _) => {
-            EvaluationConfidence::Medium
+    // Future multi-turn projections (horizon > 1) depend on modeled assumptions about future prompt reuse,
+    // so they are marked Medium (estimated) confidence, distinguishing verified observations from modeled expectations.
+    let confidence = if horizon > 1 {
+        EvaluationConfidence::Medium
+    } else {
+        match (cache_obs.provenance, cache_obs.state) {
+            (
+                TelemetryProvenance::ObservedProvider,
+                CacheState::WarmVerified | CacheState::ColdLikely,
+            ) => EvaluationConfidence::High,
+            (TelemetryProvenance::ObservedProvider, _)
+            | (TelemetryProvenance::LocalEstimate, _) => EvaluationConfidence::Medium,
+            _ => EvaluationConfidence::Low,
         }
-        _ => EvaluationConfidence::Low,
     };
 
     EconomicEvaluation {
@@ -545,8 +587,8 @@ pub enum OptimizationDecision {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DecisionReasonCode {
-    /// Economic net benefit verified with cache safety.
-    EconomicBenefitVerified,
+    /// Modeled economic net benefit is positive over the continuation horizon with cache safety.
+    ModeledEconomicBenefitPositive,
     /// Cache prefix at risk: warm cache would suffer costly invalidation.
     CachePrefixAtRisk,
     /// Telemetry absent, unverified, or ambiguous.
@@ -971,9 +1013,9 @@ pub fn evaluate_decision(
             if saved_tokens > 0 && econ.net_benefit_usd > 0.0 {
                 PolicyDecision {
                     decision: OptimizationDecision::Apply,
-                    reason_code: DecisionReasonCode::EconomicBenefitVerified,
+                    reason_code: DecisionReasonCode::ModeledEconomicBenefitPositive,
                     explanation: format!(
-                        "Cold cache verified: token reduction (saving {saved_tokens} tokens, ${:.5} USD) carries zero cache penalty.",
+                        "Cold cache verified: token reduction (saving {saved_tokens} tokens, modeled ${:.5} USD benefit) carries zero cache penalty.",
                         econ.net_benefit_usd
                     ),
                     candidate_id: candidate_id.map(ToString::to_string),
@@ -1073,14 +1115,21 @@ pub fn evaluate_plan_decisions(
         horizon_turns,
     );
 
-    let plan_decision = if candidate_decisions
+    let plan_decision = if let Some(rejected_candidate) = candidate_decisions
         .iter()
-        .any(|d| d.decision == OptimizationDecision::Reject)
+        .find(|d| d.decision == OptimizationDecision::Reject)
     {
         PolicyDecision {
             decision: OptimizationDecision::Reject,
-            reason_code: DecisionReasonCode::SafetyViolation,
-            explanation: "Plan contains one or more rejected candidate operations.".to_string(),
+            reason_code: rejected_candidate.reason_code.clone(),
+            explanation: format!(
+                "Plan rejected because candidate '{}' was rejected: {}",
+                rejected_candidate
+                    .candidate_id
+                    .as_deref()
+                    .unwrap_or("unknown"),
+                rejected_candidate.explanation
+            ),
             candidate_id: None,
             plan_id: Some(plan.id.clone()),
             cache_state: cache_obs.state,
@@ -1096,6 +1145,41 @@ pub fn evaluate_plan_decisions(
                 reported_cached_tokens: cache_obs.observed_cached_tokens,
                 is_append_only: is_pure_append,
                 lifecycle_safe: false,
+                analysis_complete: turn.analysis_complete,
+            },
+            timestamp: Utc::now(),
+        }
+    } else if let Some(deferred_candidate) = candidate_decisions
+        .iter()
+        .find(|d| d.decision == OptimizationDecision::Defer)
+    {
+        // P0 Safety Invariant: Never allow an economic projection to override a candidate-level safety/lifecycle deferral!
+        PolicyDecision {
+            decision: OptimizationDecision::Defer,
+            reason_code: deferred_candidate.reason_code.clone(),
+            explanation: format!(
+                "Plan deferred because candidate '{}' was deferred: {}",
+                deferred_candidate
+                    .candidate_id
+                    .as_deref()
+                    .unwrap_or("unknown"),
+                deferred_candidate.explanation
+            ),
+            candidate_id: None,
+            plan_id: Some(plan.id.clone()),
+            cache_state: cache_obs.state,
+            estimated_kv_break_tokens: plan.kv_cache_break_tokens,
+            net_token_delta: total_saved,
+            economic_evaluation: Some(econ),
+            evidence: DecisionEvidence {
+                session_id: turn.session_id.clone(),
+                turn_seq: turn.sequence_number,
+                provider: cache_obs.provider,
+                model: cache_obs.model.clone(),
+                telemetry_provenance: cache_obs.provenance,
+                reported_cached_tokens: cache_obs.observed_cached_tokens,
+                is_append_only: is_pure_append,
+                lifecycle_safe: deferred_candidate.evidence.lifecycle_safe,
                 analysis_complete: turn.analysis_complete,
             },
             timestamp: Utc::now(),
@@ -1132,9 +1216,9 @@ pub fn evaluate_plan_decisions(
     {
         PolicyDecision {
             decision: OptimizationDecision::Apply,
-            reason_code: DecisionReasonCode::EconomicBenefitVerified,
+            reason_code: DecisionReasonCode::ModeledEconomicBenefitPositive,
             explanation: format!(
-                "Cold cache verified: plan saves {total_saved} tokens (${:.5} USD) without cache penalty.",
+                "Cold cache verified: plan saves {total_saved} tokens (modeled ${:.5} USD benefit) without cache penalty.",
                 econ.net_benefit_usd
             ),
             candidate_id: None,
@@ -1216,14 +1300,23 @@ pub fn evaluate_plan_decisions(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShadowPolicyConfig {
     pub enabled: bool,
+    /// When true (default: true), prevents any active mutations from running in the autopilot pipeline,
+    /// guaranteeing zero payload modifications while observing shadow policy decisions.
+    #[serde(default = "default_true")]
+    pub strict_shadow_only: bool,
     pub horizon_turns: u32,
     pub record_diagnostics: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for ShadowPolicyConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            strict_shadow_only: true,
             horizon_turns: 3,
             record_diagnostics: true,
         }

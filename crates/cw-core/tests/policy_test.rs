@@ -223,24 +223,14 @@ fn test_policy_4_stale_or_incompatible_cache_observation() {
         false,
     );
 
-    // Mismatches are documented in notes
+    // Incompatible evidence fails closed to Unknown
+    assert_eq!(cache_obs.state, CacheState::Unknown);
+    assert_eq!(cache_obs.provenance, TelemetryProvenance::None);
     assert!(
         cache_obs
             .notes
             .iter()
-            .any(|n| n.contains("Session ID mismatch"))
-    );
-    assert!(
-        cache_obs
-            .notes
-            .iter()
-            .any(|n| n.contains("Provider/model changed"))
-    );
-    assert!(
-        cache_obs
-            .notes
-            .iter()
-            .any(|n| n.contains("Prefix fingerprint diverged"))
+            .any(|n| n.contains("Failing closed to Unknown"))
     );
 }
 
@@ -285,7 +275,7 @@ fn test_policy_5_cold_cache_beneficial_candidate_applies() {
     assert_eq!(decision.decision, OptimizationDecision::Apply);
     assert_eq!(
         decision.reason_code,
-        DecisionReasonCode::EconomicBenefitVerified
+        DecisionReasonCode::ModeledEconomicBenefitPositive
     );
     assert!(decision.net_token_delta > 0);
     assert!(
@@ -636,6 +626,7 @@ fn test_policy_11_feature_flag_disabled_leaves_behavior_unchanged() {
         enabled: false,
         shadow_policy: ShadowPolicyConfig {
             enabled: false,
+            strict_shadow_only: true,
             horizon_turns: 3,
             record_diagnostics: false,
         },
@@ -673,6 +664,7 @@ fn test_policy_12_shadow_mode_enabled_records_decisions_without_mutations() {
         enabled: false, // Active mutations DISABLED
         shadow_policy: ShadowPolicyConfig {
             enabled: true, // Shadow mode ENABLED
+            strict_shadow_only: true,
             horizon_turns: 3,
             record_diagnostics: true,
         },
@@ -779,4 +771,211 @@ fn test_policy_pricing_profiles_gemini_threshold_handling() {
             .iter()
             .any(|n| n.contains("below provider caching threshold"))
     );
+}
+
+#[test]
+fn test_policy_p0_plan_defers_when_candidate_deferred_for_lifecycle() {
+    // P0 Review Finding: A positive financial projection on a cold cache must NEVER override
+    // a candidate's lifecycle or safety deferral.
+    let payload = json!({
+        "model": "gpt-4o-mini",
+        "messages": [
+            { "role": "user", "content": "Fetch latest metrics." },
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    { "id": "call_active_tail", "type": "function", "function": { "name": "exec_cmd", "arguments": "{}" } }
+                ]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_active_tail",
+                "content": "output from active tool awaiting assistant interpretation with long execution log stream\n".repeat(120)
+            }
+        ]
+    });
+
+    let (turn, _) = analyze_turn_from_payload(
+        "turn_lifecycle_p0".into(),
+        "sess_life_p0".into(),
+        None,
+        1,
+        &payload,
+        ProviderKind::OpenAI,
+        None,
+        Some(0), // Cold cache
+        None,
+    )
+    .unwrap();
+
+    let prefix_fp = compute_prefix_fingerprint(&turn.nodes);
+    let cache_obs = classify_cache_state(
+        &turn.session_id,
+        ProviderKind::OpenAI,
+        "gpt-4o-mini",
+        turn.sequence_number,
+        Some(&prefix_fp),
+        None,
+        Some(&turn.kv_cache_report),
+        false,
+    );
+    assert_eq!(cache_obs.state, CacheState::ColdLikely);
+
+    let pricing = find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini");
+
+    let candidate = OptimizationCandidateItem {
+        item_id: "prune_protected_tail".into(),
+        node_id: turn.nodes.last().map(|n| n.id.clone()),
+        turn_seq: turn.sequence_number,
+        timestamp: None,
+        title: "Prune Active Tail".into(),
+        action_kind: "cut_output".into(),
+        what_we_do: "Prune".into(),
+        why_it_matters: "Diet".into(),
+        content_preview: "".into(),
+        tokens_before: 500,
+        tokens_after: 20,
+        saved_tokens: 480, // Substantial positive token savings
+        kv_break_tokens: 0,
+        mutation_op: MutationOp::PruneOrStub {
+            target_fingerprint: None,
+            target_call_id: Some("call_active_tail".into()),
+            target_json_pointer: None,
+            stub_text: "[pruned]".into(),
+        },
+    };
+
+    let plan = OptimizationStrategyPlan {
+        id: "plan_with_protected_candidate".into(),
+        name: "Aggressive Plan".into(),
+        tagline: "".into(),
+        kv_badge: "".into(),
+        what_and_how: "".into(),
+        expected_quality_impact: "".into(),
+        tokens_before: 500,
+        tokens_after: 20,
+        saved_tokens: 480,
+        saved_pct: 96.0,
+        kv_cache_break_tokens: 0,
+        break_even_turns: 1,
+        health_score_before: 50,
+        health_score_after: 90,
+        items: vec![candidate],
+    };
+
+    let (plan_dec, item_decs) =
+        evaluate_plan_decisions(&plan, &turn, &cache_obs, pricing.as_ref(), 3);
+
+    // Candidate is deferred for lifecycle protection
+    assert_eq!(item_decs[0].decision, OptimizationDecision::Defer);
+    assert_eq!(
+        item_decs[0].reason_code,
+        DecisionReasonCode::ActiveToolLifecycleProtection
+    );
+
+    // Plan-level decision MUST be Defer, NOT Apply, despite ColdLikely cache and positive savings!
+    assert_eq!(plan_dec.decision, OptimizationDecision::Defer);
+    assert_eq!(
+        plan_dec.reason_code,
+        DecisionReasonCode::ActiveToolLifecycleProtection
+    );
+    assert!(
+        plan_dec
+            .explanation
+            .contains("Plan deferred because candidate")
+    );
+}
+
+#[test]
+fn test_policy_zero_length_input_fails_closed_to_unknown() {
+    let report = KvCacheReport {
+        hit_tokens: 0,
+        newly_cached_tokens: 0,
+        invalidated_tokens: 0,
+        uncached_tail_tokens: 0,
+        hit_ratio: 0.0,
+        divergence_token_index: None,
+        invalidation_cause: None,
+        telemetry_available: true,
+    };
+
+    let obs = classify_cache_state(
+        "sess_zero",
+        ProviderKind::OpenAI,
+        "gpt-4o-mini",
+        1,
+        None,
+        None,
+        Some(&report),
+        false,
+    );
+
+    // Zero-length input prompt must fail closed to Unknown, never ColdLikely
+    assert_eq!(obs.state, CacheState::Unknown);
+    assert!(
+        obs.notes
+            .iter()
+            .any(|n| n.contains("below provider caching threshold"))
+    );
+}
+
+#[test]
+fn test_policy_loose_or_unverified_model_names_rejected() {
+    // Unverified model strings must not receive legacy pricing
+    assert!(find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-custom-finetune").is_none());
+    assert!(find_pricing_profile(ProviderKind::Anthropic, "custom-sonnet-v1").is_none());
+    assert!(find_pricing_profile(ProviderKind::Anthropic, "claude-2-sonnet").is_none());
+    assert!(find_pricing_profile(ProviderKind::Gemini, "fine-tune-flash").is_none());
+    assert!(find_pricing_profile(ProviderKind::Gemini, "gemini-1.0-pro").is_none());
+
+    // Verified prefixes must still match correctly
+    assert!(find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini-2024-07-18").is_some());
+    assert!(find_pricing_profile(ProviderKind::Anthropic, "claude-3-5-sonnet-20241022").is_some());
+    assert!(find_pricing_profile(ProviderKind::Gemini, "gemini-1.5-flash-latest").is_some());
+}
+
+#[test]
+fn test_policy_strict_shadow_only_suppresses_active_mutations() {
+    let turn = make_synthetic_turn("sess_strict_shadow", Some(1500), true);
+    let mut payload = json!({
+        "messages": [
+            { "role": "user", "content": "Hello" }
+        ]
+    });
+    let original = payload.clone();
+
+    // Autopilot active enabled = true, BUT shadow_policy strict_shadow_only = true
+    let config = AutoPilotConfig {
+        enabled: true,
+        auto_cache_safe_pin: true,
+        pin_min_context_tokens: 100, // Would normally trigger auto pin
+        shadow_policy: ShadowPolicyConfig {
+            enabled: true,
+            strict_shadow_only: true, // Strict shadow mode
+            horizon_turns: 3,
+            record_diagnostics: true,
+        },
+        ..Default::default()
+    };
+
+    let report = evaluate_autopilot_policies(
+        &config,
+        &turn.session_id,
+        "gpt-4o-mini",
+        ProviderKind::OpenAI,
+        turn.sequence_number,
+        &turn.nodes,
+        Some(&turn),
+        &mut payload,
+    );
+
+    // Shadow decisions recorded
+    assert!(!report.shadow_decisions.is_empty());
+
+    // Active mutations suppressed
+    assert!(report.generated_mutations.is_empty());
+
+    // Payload 100% byte-for-byte unmutated
+    assert_eq!(payload, original);
 }

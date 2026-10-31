@@ -89,7 +89,10 @@ pub fn evaluate_autopilot_policies(
     let total_tokens: u32 = nodes.iter().map(|n| n.token_span.count).sum();
     let (is_local, _) = detect_local_engine(model, provider);
 
-    if config.enabled {
+    let suppress_mutations =
+        config.shadow_policy.enabled && config.shadow_policy.strict_shadow_only;
+
+    if config.enabled && !suppress_mutations {
         // Tail results must reach the model unchanged; log spilling is not an automatic policy.
         // Policy 2: Auto Cache-Safe Pin (when total tokens > threshold and rule salience < 42%)
         if config.auto_cache_safe_pin && total_tokens >= config.pin_min_context_tokens {
@@ -233,7 +236,7 @@ pub fn evaluate_autopilot_policies(
         ));
     }
 
-    if !report.generated_mutations.is_empty() {
+    if !report.generated_mutations.is_empty() && !suppress_mutations {
         apply_mutations_to_payload(payload, provider, &report.generated_mutations, turn_seq);
     }
 

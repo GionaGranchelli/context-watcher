@@ -21,15 +21,15 @@ Every harness integration is categorized according to four qualification tiers:
 
 | Harness | Core Proxy Verified | Harness Binary Verified | Real-Provider Verified | Live Optimization Status | Active Blocker / Target |
 |---|:---:|:---:|:---:|:---:|---|
-| **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (3-Turn Native Resume & Overlays) | 🟢 Verified (`gpt-4o-mini` multi-turn live continuation) | 🟢 Supported (Responses API) | Qualified in CW-112 |
-| **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume & concurrency hardened) | 🟡 Opt-in Suite C | 🟢 Supported (OpenAI / DeepSeek middleware) | CW-112 (Live provider continuation) |
-| **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | CW-114 (Long-session reliability campaign) |
+| **Codex CLI (`0.166.0`)** | 🟢 Verified | 🟢 Verified (3-Turn Native Resume & Overlays) | 🟢 Verified (`gpt-4o-mini` multi-turn live continuation) | 🟢 Supported (Responses API) | Qualified in CW-112 & CW-114 |
+| **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume & concurrency hardened) | 🟡 Opt-in Suite C | 🟢 Supported (OpenAI / DeepSeek middleware) | Qualified in CW-113 & CW-114 |
+| **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | Qualified in CW-111B & CW-114 |
 
 ---
 
 ## 3. The 10 Acceptance Criteria Matrix
 
-| # | Acceptance Criterion | Required Invariant | Codex CLI (`0.165.0`) | Hermes Agent (`0.22.5`) | OMP / Oh My Pi (`18.12.6`) |
+| # | Acceptance Criterion | Required Invariant | Codex CLI (`0.166.0`) | Hermes Agent (`0.22.5`) | OMP / Oh My Pi (`18.12.6`) |
 |---|---|---|:---:|:---:|:---:|
 | **AC1** | **Session Identity & Binding** | Correct session bound across multi-turn and resume without crossover | 🟢 **Harness Binary Verified**<br>`x-cw-session-id` header via custom model provider | 🟢 **Harness Binary Verified (Concurrency Hardened)**<br>Native `local-...` session bound across turn 1 and `--resume` turn 2; concurrent launches isolated via UUID-scoped handoff files (`CW_HERMES_OVERRIDE_FILE`) and per-session gateway tracking (CW-113) | 🟢 **Harness Binary Verified**<br>Session identity bound via `CW_SESSION_ID` / `sessionManager.getSessionId()`; control token read from 0600 file |
 | **AC2** | **Committed Overlay Reapplication** | Overlays committed on turn $N$ apply to outbound model payload on turn $N+1$ | 🟢 **Harness Binary Verified**<br>Multi-turn test confirms `PinContext` applied to turn 2 Responses `input` array | 🟢 **Harness Binary Verified**<br>Turn 2 `--resume` outbound Chat Completions payload contains committed `PinContext` policy | 🟢 **Harness Binary Verified**<br>Native `context` hook intercepts in-memory messages, queries `/transform`, and injects committed overlays into outbound prompt |
@@ -46,7 +46,7 @@ Every harness integration is categorized according to four qualification tiers:
 
 ## 4. Per-Harness Architecture & Verified Baselines
 
-### 4.1 Codex CLI (`0.165.0`) — Reference Implementation
+### 4.1 Codex CLI (`0.166.0`) — Reference Implementation
 * **Status:** **Harness Binary Verified (3-Turn Native Resume & Overlays Qualified)** · Completed in CW-112 (see [CW-112-CODEX-QUALIFICATION.md](CW-112-CODEX-QUALIFICATION.md)).
 * **Wire Protocol:** OpenAI Responses API (`/openai/v1/responses`) with streaming Server-Sent Events (`text/event-stream`).
 * **Session Transport:** Native provider config arguments:
@@ -259,3 +259,26 @@ export OPENAI_API_KEY="sk-..."
 export CW_QUALIFY_REAL_OMP=1
 cargo test -p cw-proxy --test qualification test_live_continuation_real_omp -- --ignored --nocapture
 ```
+
+---
+
+## 7. Long-Session Reliability Campaign (CW-114)
+
+Implemented in [`crates/cw-proxy/tests/long_session_reliability.rs`](../crates/cw-proxy/tests/long_session_reliability.rs) and documented in [`docs/CW-114-LONG-SESSION-RELIABILITY.md`](CW-114-LONG-SESSION-RELIABILITY.md).
+
+* **Scope:** 5 realistic coding-task families (`F1_BugFixing`, `F2_Refactoring`, `F3_FeatureImplementation`, `F4_Tdd`, `F5_InvestigationRecovery`) evaluated across 3 repetitions on all 3 target harnesses (Codex CLI, OMP, Hermes Agent) = **45 total sessions, 360 logical checkpoints/turns**.
+* **Results:**
+  - **Pass Rate:** **100% (45/45 passed, 0 failed, 0 degraded)**.
+  - **Tool Pairing Validity:** 100% across all 360 turns.
+  - **Session Isolation & Transcript Integrity:** 100% across all sessions; 0 credential leaks; 0 transcript corruptions.
+  - **Fault Injection & Resilience:** Verified mid-stream drop detection (`stream_error`), HTTP 502/429 retry backoff recovery, daemon restart state preservation, and concurrent session overlay isolation.
+* **Execution:**
+  ```bash
+  # Deterministic 45-session matrix
+  cargo test -p cw-proxy --test long_session_reliability test_cw114_deterministic_45_session_campaign -- --ignored --nocapture
+
+  # Fault injection & resilience suite
+  cargo test -p cw-proxy --test long_session_reliability test_cw114_fault_injection -- --ignored --nocapture
+  cargo test -p cw-proxy --test long_session_reliability test_cw114_resilience -- --ignored --nocapture
+  ```
+

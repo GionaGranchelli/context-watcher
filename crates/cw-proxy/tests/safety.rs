@@ -643,3 +643,78 @@ async fn client_disconnect_after_terminal_event_records_completed() {
     );
     task.abort();
 }
+
+#[tokio::test]
+async fn http_200_partial_sse_stream_eof_without_terminal_event_records_stream_error() {
+    use futures::StreamExt;
+    use std::time::Duration;
+
+    let (url, task) = mock(Router::new().route(
+        "/v1/chat/completions",
+        post(|| async move {
+            let chunks = vec![
+                Ok::<_, std::io::Error>(
+                    "data: {\"choices\":[{\"delta\":{\"content\":\"chunk 1\"}}]}\n\n",
+                ),
+                Ok("data: {\"choices\":[{\"delta\":{\"content\":\"chunk 2\"}}]}\n\n"),
+            ];
+            // Upstream closes stream with EOF without sending [DONE] or finish_reason
+            Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(Body::from_stream(futures::stream::iter(chunks)))
+                .unwrap()
+        }),
+    ))
+    .await;
+
+    let store = CwStore::open_in_memory().unwrap();
+    let mut state = DaemonState::new(store.clone());
+    let token = state.control_token.clone();
+    state.openai_upstream = url;
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/openai/v1/chat/completions")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .header("x-cw-session-id", "session_partial_eof_test")
+        .header("x-cw-control-token", &token)
+        .body(Body::from(
+            json!({
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "hi"}]
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let response = build_proxy_router(state).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Read full stream to EOF
+    let mut stream = response.into_body().into_data_stream();
+    while let Some(chunk) = stream.next().await {
+        let _ = chunk.unwrap();
+    }
+
+    // Verify turn in store was marked as stream_error, not completed
+    let mut final_turn = None;
+    for _ in 0..100 {
+        if let Ok(Some(turn)) = store.get_latest_turn("session_partial_eof_test")
+            && turn.outcome.as_deref() != Some("pending")
+            && turn.outcome.is_some()
+        {
+            final_turn = Some(turn);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    let turn = final_turn.expect("Turn should transition from pending to final outcome");
+    assert_eq!(
+        turn.outcome.as_deref(),
+        Some("stream_error"),
+        "Partial SSE stream ending at EOF without [DONE] must be recorded as stream_error"
+    );
+    task.abort();
+}

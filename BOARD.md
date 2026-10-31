@@ -3,7 +3,7 @@
 > **Legend:** `P0` = Critical Path | `P1` = Core Feature | `P2` = Enhancement
 > **Workflow:** Move items across `Ready` $\to$ `In Progress` $\to$ `Review` $\to$ `Done`. Always reference ticket IDs (`CW-XXX`) in commits and PRs.
 
-> **Current delivery priority after CW-112 qualification:** CW-114 (Long-session reliability campaign across harnesses), followed by CW-115. Maintainability gate (CW-116) and Codex qualification (CW-112) complete.
+> **Current delivery priority after CW-114 qualification:** CW-115 (Empirical performance and savings qualification). Maintainability gate (CW-116), Codex qualification (CW-112), and Long-Session Reliability campaign (CW-114) complete.
 
 ---
 
@@ -207,8 +207,8 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-111B** OMP native runtime hardening | Done | Eliminated control token from `models.json` and deleted unsafe helper; purged `CW_CONTROL_TOKEN` from `process.env` in memory on startup; enforced loopback-only URLs on `CW_DAEMON_URL`; prioritized native session ID to eliminate cross-session binding under switching; replaced time/length heuristics with reference-based WeakSet idempotency; hardened `PruneOrStub` safety to strictly forbid pointer-only user/system prompt modification; verified 3-turn native resume (`omp -r <uuid>`), wire pinning, on-disk transcript preservation, and offline fail-open recovery. |
 | **CW-112** Codex CLI multi-turn qualification | Done | 3-turn native session resume (`codex exec resume <thread_id>`), tool execution, overlay reapplication, credential sandboxing, on-disk rollout immutability, and live provider continuation with prompt caching verified with installed Codex CLI 0.165.0 and `gpt-4o-mini`. Documented in docs/CW-112-CODEX-QUALIFICATION.md. |
 | **CW-113** Hermes Agent lifecycle hardening | Done | Replaced shared override file with UUID-scoped `hermes-override-<uuid>.json` (mode 0600, atomic `create_new`); middleware validates non-symlink, mode 0600, age <= 120s, and atomically unlinks on consumption; gateway daemon session isolation in `_SESSION_OVERRIDES`; passed 7-gate multi-process qualification and 20-session stress test. |
-| **CW-114** Long-session reliability campaign | Backlog | Unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families, 3 repetitions per harness. |
-| **CW-115** Performance and savings qualification | Backlog | Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims. |
+| **CW-114** Long-session reliability campaign | Done | Unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families $\times$ 3 repetitions = 45 sessions (100% pass, 45/45 passed, 0 failed, 360 checkpoints). Documented in `docs/CW-114-LONG-SESSION-RELIABILITY.md`. |
+| **CW-115** Performance and savings qualification | Ready | Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims. |
 | **CW-116** Architecture consolidation & maintainability | Done | Three bounded, behavior-preserving PRs: CW-116A characterization/contracts, CW-116B CLI/harness modularization, CW-116C proxy/transformation boundaries. Maintainability gate complete. |
 | **CW-116A** Characterization tests & architecture contracts | Done | Characterization baseline documented in docs/CW-116A-BASELINE.md; architecture decomposition plan in docs/CW-116-ARCHITECTURE.md; 12 net new characterization tests added covering CLI lifecycle, transform API, proxy routing, internal header stripping, dry-run preview, and store immutability; 100/100 workspace tests passing (+12 net increase over 88 baseline) with 0 warnings; PR #13 merged into main. |
 | **CW-116B** CLI & harness architecture | Done | Decomposed monolithic `main.rs` (3,210 -> 618 lines, -80.7%) and `lib.rs` (2,385 -> 277 lines, -88.4%) into cohesive command handlers (`wrap.rs`, `daemon.rs`, `init.rs`, `reports.rs`, `session.rs`, `slot.rs`, `web.rs`) and harness lifecycle modules (`error.rs`, `qualification.rs`, `sync.rs`, `auto_heal.rs`, `watcher.rs`, `adapters/`). 100/100 workspace tests passing, 12/12 Hermes Python tests passing, 3/3 ignored harness binary qualification tests passing with zero warnings; PR #14 merged into main. |
@@ -247,19 +247,17 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🚧 In Progress
 
-* **CW-114** Long-session reliability campaign across harnesses (P0) — Preparing unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families.
+* None
 
 ## 📋 Ready
 
-* **CW-115** Performance and savings qualification (P0)
+* **CW-115** Performance and savings qualification (P0) — Empirical measurement of token savings, prefill acceleration, and cache reuse without speculative claims.
 
 ---
 
 ## 🗂️ Backlog (ordered)
 
-* **CW-103** Resume broader Codex/Hermes qualification through CW-112; Hermes concurrency is completed.
-* **CW-114** Long-session reliability (same acceptance suite for three harnesses).
-* **CW-115** Performance and savings qualification (measured baseline vs optimized execution).
+* **CW-103** Broader Codex/Hermes qualification continuation (CW-112 live qualification and CW-114 multi-task completed).
 * **CW-104** Hardware and local model qualification.
 * **CW-R11** Large-history IO and pagination qualification.
 * **CW-R12** Broader task-family and provider qualification.

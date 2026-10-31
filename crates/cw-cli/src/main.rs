@@ -262,6 +262,18 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Replay historical benchmark traces and calibrate shadow policy predictions (CW-117B)
+    Calibrate {
+        /// Optional path to historical benchmark dataset (defaults to committed cw115 datasets)
+        #[arg(long)]
+        dataset: Option<String>,
+        /// Continuation horizon in turns (default: 3)
+        #[arg(long, default_value_t = 3)]
+        horizon: u32,
+        /// Output machine-readable JSON calibration report
+        #[arg(long)]
+        json: bool,
+    },
     /// Engine-Level PagedAttention & Slot Bridge (Horizon 3 / CW-070)
     Slot {
         /// Target a specific session ID
@@ -601,6 +613,13 @@ async fn main() -> Result<()> {
         } => {
             let store = CwStore::open(&db_path)?;
             commands::reports::run_hud_report(&store, session, compact, ecg, json)?;
+        }
+        Commands::Calibrate {
+            dataset,
+            horizon,
+            json,
+        } => {
+            commands::calibrate::handle_calibrate(dataset, horizon, json)?;
         }
         Commands::Init { dry_run, no_start } => {
             commands::init::run_init_installer(dry_run, !no_start)?;

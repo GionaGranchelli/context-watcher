@@ -212,7 +212,23 @@ impl CwStore {
             mutation_id TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL,
             tokens_saved INTEGER NOT NULL, kv_cache_hit_rate REAL NOT NULL, ttft_ms INTEGER, created_at TEXT NOT NULL,
             PRIMARY KEY(mutation_id,turn_id));
-            INSERT OR IGNORE INTO mutation_effectiveness_v2 SELECT * FROM mutation_effectiveness;")?;
+            INSERT OR IGNORE INTO mutation_effectiveness_v2 SELECT * FROM mutation_effectiveness;
+            CREATE TABLE IF NOT EXISTS shadow_decision_evidence (
+                record_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                request_index INTEGER NOT NULL,
+                turn_index INTEGER NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                cache_state TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                reason_code TEXT NOT NULL,
+                estimated_saved_tokens INTEGER NOT NULL,
+                estimated_kv_break_tokens INTEGER NOT NULL,
+                predicted_net_benefit_usd REAL NOT NULL,
+                evidence_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );")?;
 
         // Ensure any sessions originating from ~/.omp/ are properly categorized as OMP
         let _ = conn.execute(
@@ -963,6 +979,64 @@ impl CwStore {
             Some(s) => Ok(serde_json::from_str(&s)?),
             None => Ok(Vec::new()),
         }
+    }
+
+    pub fn save_shadow_decision_evidence(
+        &self,
+        record: &cw_core::calibration::ShadowDecisionEvidence,
+    ) -> Result<(), StoreError> {
+        let json_str = serde_json::to_string(record)?;
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO shadow_decision_evidence (
+                record_id, session_id, request_index, turn_index, provider, model,
+                cache_state, decision, reason_code, estimated_saved_tokens,
+                estimated_kv_break_tokens, predicted_net_benefit_usd, evidence_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            params![
+                record.record_id,
+                record.session_id,
+                record.request_index,
+                record.turn_index,
+                record.provider.as_str(),
+                record.model,
+                format!("{:?}", record.cache_state),
+                format!("{:?}", record.decision),
+                format!("{:?}", record.reason_code),
+                record.estimated_saved_tokens,
+                record.estimated_kv_break_tokens,
+                record.predicted_net_benefit_usd,
+                json_str,
+                record.decision_timestamp.to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_shadow_decision_evidence(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Vec<cw_core::calibration::ShadowDecisionEvidence>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut out = Vec::new();
+        if let Some(sid) = session_id {
+            let mut stmt = conn.prepare(
+                "SELECT evidence_json FROM shadow_decision_evidence WHERE session_id = ?1 ORDER BY request_index ASC",
+            )?;
+            let rows = stmt.query_map(params![sid], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT evidence_json FROM shadow_decision_evidence ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        }
+        Ok(out)
     }
 
     pub fn upsert_firewall_rule(&self, rule: &FirewallRule) -> Result<(), StoreError> {

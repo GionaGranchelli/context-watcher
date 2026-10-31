@@ -1,0 +1,304 @@
+[
+  {
+    "dataset_source": "cw115_benchmark_data.json",
+    "git_commit": "e9b1b43b35eb6bb89faaa0425e408ec2be59db94",
+    "total_sessions": 6,
+    "total_requests": 59,
+    "cache_state_distribution": {
+      "ColdLikely": 4,
+      "WarmVerified": 55
+    },
+    "cache_agreement": {
+      "warm_verified_count": 55,
+      "warm_verified_retained_cache": 49,
+      "warm_verified_cache_drops": 0,
+      "cold_likely_count": 4,
+      "cold_likely_retained_zero": 0,
+      "cold_likely_subsequent_warm": 4,
+      "unknown_count": 0,
+      "rebuilding_count": 0,
+      "overall_state_consistency_pct": 89.83050847457628
+    },
+    "economic_reconciliation": {
+      "total_dataset_reported_cost_usd": 0.10946414999999998,
+      "total_profile_recalculated_cost_usd": 0.10946414999999998,
+      "absolute_cost_variance_usd": 0.0,
+      "max_single_request_variance_usd": 8.673617379884035e-19,
+      "pricing_profile_coverage_pct": 100.0
+    },
+    "horizon_metrics": {
+      "assumed_horizon_turns": 3,
+      "mean_actual_session_requests": 9.833333333333334,
+      "min_session_requests": 2,
+      "max_session_requests": 23,
+      "horizon_truncation_count": 16
+    },
+    "policy_decisions": {
+      "total_decisions": 59,
+      "apply_count": 4,
+      "defer_count": 55,
+      "reject_count": 0,
+      "no_op_count": 0,
+      "reasons_breakdown": {
+        "CachePrefixAtRisk": 55,
+        "ModeledEconomicBenefitPositive": 4
+      },
+      "unverifiable_counterfactual_count": 4
+    },
+    "discrepancies": [
+      {
+        "case_number": 2,
+        "title": "Cold prompt primed cache for subsequent high hit ratio",
+        "session_id": "cw115_passthrough_f1_rep1",
+        "request_index": 1,
+        "severity": "Info",
+        "observed_phenomenon": "Cold initial prompt of 11981 tokens established prefix, enabling 11776 cached tokens on Request #2.",
+        "policy_implication": "Turn 1 ColdLikely state transitions cleanly to WarmVerified on Turn 2 once prefix reuse is observed.",
+        "recommendation": "Preserve Turn 1 cold compaction authorization while ensuring Turn 2 immediately switches to WarmVerified deferral."
+      },
+      {
+        "case_number": 2,
+        "title": "Cold prompt primed cache for subsequent high hit ratio",
+        "session_id": "cw115_optimized_f1_rep1",
+        "request_index": 1,
+        "severity": "Info",
+        "observed_phenomenon": "Cold initial prompt of 11989 tokens established prefix, enabling 11904 cached tokens on Request #2.",
+        "policy_implication": "Turn 1 ColdLikely state transitions cleanly to WarmVerified on Turn 2 once prefix reuse is observed.",
+        "recommendation": "Preserve Turn 1 cold compaction authorization while ensuring Turn 2 immediately switches to WarmVerified deferral."
+      },
+      {
+        "case_number": 3,
+        "title": "Applied historical pruning caused prefix break and surge in uncached tokens",
+        "session_id": "cw115_optimized_f1_rep1",
+        "request_index": 6,
+        "severity": "High",
+        "observed_phenomenon": "Request #6 applied mutations [\"opt_prune_node_4_15\", \"opt_prune_node_5_17\", \"opt_prune_node_6_20\", \"opt_prune_node_7_22\", \"opt_pin_directive_cw115_optimized_f1_rep1\"]; uncached tokens surged to 1348 despite 11264 cached tokens.",
+        "policy_implication": "Blind historical pruning on an active prefix incurs high invalidation penalty. CW-117 policy correctly defers this on WarmVerified cache.",
+        "recommendation": "Enforce CachePrefixAtRisk deferral when cache is WarmVerified unless net multi-turn benefit overcomes break penalty."
+      },
+      {
+        "case_number": 7,
+        "title": "One-time tail steering directive applied without prefix invalidation",
+        "session_id": "cw115_optimized_f1_rep1",
+        "request_index": 6,
+        "severity": "Info",
+        "observed_phenomenon": "Request #6 applied PinContext directive ([\"opt_prune_node_4_15\", \"opt_prune_node_5_17\", \"opt_prune_node_6_20\", \"opt_prune_node_7_22\", \"opt_pin_directive_cw115_optimized_f1_rep1\"]); cached tokens remained intact on subsequent turns.",
+        "policy_implication": "Tail pin preserves cached prefix (0 KV break) while behaviorally guiding the agent to complete in fewer total requests.",
+        "recommendation": "Conservatively model direct token cut as 0 USD while acknowledging behavioral request reduction in empirical reports."
+      },
+      {
+        "case_number": 3,
+        "title": "Applied historical pruning caused prefix break and surge in uncached tokens",
+        "session_id": "cw115_optimized_f1_rep1",
+        "request_index": 7,
+        "severity": "High",
+        "observed_phenomenon": "Request #7 applied mutations [\"opt_prune_node_4_15\", \"opt_prune_node_5_17\", \"opt_prune_node_6_20\", \"opt_prune_node_7_22\"]; uncached tokens surged to 1211 despite 12160 cached tokens.",
+        "policy_implication": "Blind historical pruning on an active prefix incurs high invalidation penalty. CW-117 policy correctly defers this on WarmVerified cache.",
+        "recommendation": "Enforce CachePrefixAtRisk deferral when cache is WarmVerified unless net multi-turn benefit overcomes break penalty."
+      },
+      {
+        "case_number": 2,
+        "title": "Cold prompt primed cache for subsequent high hit ratio",
+        "session_id": "cw115_passthrough_f1_rep2",
+        "request_index": 1,
+        "severity": "Info",
+        "observed_phenomenon": "Cold initial prompt of 12009 tokens established prefix, enabling 11904 cached tokens on Request #2.",
+        "policy_implication": "Turn 1 ColdLikely state transitions cleanly to WarmVerified on Turn 2 once prefix reuse is observed.",
+        "recommendation": "Preserve Turn 1 cold compaction authorization while ensuring Turn 2 immediately switches to WarmVerified deferral."
+      },
+      {
+        "case_number": 2,
+        "title": "Cold prompt primed cache for subsequent high hit ratio",
+        "session_id": "cw115_optimized_f1_rep2",
+        "request_index": 1,
+        "severity": "Info",
+        "observed_phenomenon": "Cold initial prompt of 11973 tokens established prefix, enabling 11776 cached tokens on Request #2.",
+        "policy_implication": "Turn 1 ColdLikely state transitions cleanly to WarmVerified on Turn 2 once prefix reuse is observed.",
+        "recommendation": "Preserve Turn 1 cold compaction authorization while ensuring Turn 2 immediately switches to WarmVerified deferral."
+      },
+      {
+        "case_number": 3,
+        "title": "Applied historical pruning caused prefix break and surge in uncached tokens",
+        "session_id": "cw115_optimized_f1_rep2",
+        "request_index": 6,
+        "severity": "High",
+        "observed_phenomenon": "Request #6 applied mutations [\"opt_prune_node_3_14\", \"opt_prune_node_4_16\", \"opt_prune_node_6_19\", \"opt_prune_node_7_21\", \"opt_pin_directive_cw115_optimized_f1_rep2\"]; uncached tokens surged to 1229 despite 11264 cached tokens.",
+        "policy_implication": "Blind historical pruning on an active prefix incurs high invalidation penalty. CW-117 policy correctly defers this on WarmVerified cache.",
+        "recommendation": "Enforce CachePrefixAtRisk deferral when cache is WarmVerified unless net multi-turn benefit overcomes break penalty."
+      },
+      {
+        "case_number": 7,
+        "title": "One-time tail steering directive applied without prefix invalidation",
+        "session_id": "cw115_optimized_f1_rep2",
+        "request_index": 6,
+        "severity": "Info",
+        "observed_phenomenon": "Request #6 applied PinContext directive ([\"opt_prune_node_3_14\", \"opt_prune_node_4_16\", \"opt_prune_node_6_19\", \"opt_prune_node_7_21\", \"opt_pin_directive_cw115_optimized_f1_rep2\"]); cached tokens remained intact on subsequent turns.",
+        "policy_implication": "Tail pin preserves cached prefix (0 KV break) while behaviorally guiding the agent to complete in fewer total requests.",
+        "recommendation": "Conservatively model direct token cut as 0 USD while acknowledging behavioral request reduction in empirical reports."
+      },
+      {
+        "case_number": 6,
+        "title": "Assumed continuation horizon (H=3) differs substantially from mean session length",
+        "session_id": "aggregate_sessions",
+        "request_index": 0,
+        "severity": "Medium",
+        "observed_phenomenon": "Configured horizon H=3 turns, but observed sessions averaged 9.8 requests (range 2-23).",
+        "policy_implication": "A 3-turn break-even horizon underestimates the compound cost of a prefix invalidation on long-running 15-25 turn sessions.",
+        "recommendation": "Allow dynamic horizon scaling based on task family and observed conversation turn count in Phase 2."
+      }
+    ],
+    "data_limitations": [
+      "Historical dataset omits raw prompt bodies; prefix fingerprints are unavailable (None).",
+      "Per-node mutation candidate snapshots for unmutated passthrough traces were not captured at proxy time.",
+      "Mode A native Codex traces aggregate multi-turn tool loops into fewer coarse requests.",
+      "Counterfactual savings on passthrough traces cannot be treated as realized costs without an active execution trial."
+    ],
+    "generated_at": "2026-10-31T20:42:50.779345847Z"
+  },
+  {
+    "dataset_source": "cw115_four_mode_benchmark_data.json",
+    "git_commit": "72bec0d78c0224ce24ca47e3aca48ed72d622c67",
+    "total_sessions": 4,
+    "total_requests": 71,
+    "cache_state_distribution": {
+      "WarmVerified": 67,
+      "ColdLikely": 4
+    },
+    "cache_agreement": {
+      "warm_verified_count": 67,
+      "warm_verified_retained_cache": 62,
+      "warm_verified_cache_drops": 1,
+      "cold_likely_count": 4,
+      "cold_likely_retained_zero": 0,
+      "cold_likely_subsequent_warm": 4,
+      "unknown_count": 0,
+      "rebuilding_count": 0,
+      "overall_state_consistency_pct": 92.95774647887323
+    },
+    "economic_reconciliation": {
+      "total_dataset_reported_cost_usd": 0.09223650000000001,
+      "total_profile_recalculated_cost_usd": 0.09223650000000001,
+      "absolute_cost_variance_usd": 0.0,
+      "max_single_request_variance_usd": 4.336808689942018e-19,
+      "pricing_profile_coverage_pct": 100.0
+    },
+    "horizon_metrics": {
+      "assumed_horizon_turns": 3,
+      "mean_actual_session_requests": 17.75,
+      "min_session_requests": 13,
+      "max_session_requests": 23,
+      "horizon_truncation_count": 12
+    },
+    "policy_decisions": {
+      "total_decisions": 71,
+      "apply_count": 4,
+      "defer_count": 67,
+      "reject_count": 0,
+      "no_op_count": 0,
+      "reasons_breakdown": {
+        "CachePrefixAtRisk": 67,
+        "ModeledEconomicBenefitPositive": 4
+      },
+      "unverifiable_counterfactual_count": 4
+    },
+    "discrepancies": [
+      {
+        "case_number": 2,
+        "title": "Cold prompt primed cache for subsequent high hit ratio",
+        "session_id": "cw115_m0_passthrough_f1_rep1",
+        "request_index": 1,
+        "severity": "Info",
+        "observed_phenomenon": "Cold initial prompt of 11981 tokens established prefix, enabling 11776 cached tokens on Request #2.",
+        "policy_implication": "Turn 1 ColdLikely state transitions cleanly to WarmVerified on Turn 2 once prefix reuse is observed.",
+        "recommendation": "Preserve Turn 1 cold compaction authorization while ensuring Turn 2 immediately switches to WarmVerified deferral."
+      },
+      {
+        "case_number": 1,
+        "title": "Warm cache dropped to 0 hits on subsequent request",
+        "session_id": "cw115_m0_passthrough_f1_rep1",
+        "request_index": 8,
+        "severity": "Medium",
+        "observed_phenomenon": "Request #8 had 13184 cached tokens (hit ratio 0.94), but Request #9 reported 0 cached tokens.",
+        "policy_implication": "Predicted baseline continuation would expect cached read rates, but provider experienced transient cache eviction or node rerouting.",
+        "recommendation": "Track consecutive cache drops and transition to Unknown state when cache drop is detected without prefix change."
+      },
+      {
+        "case_number": 2,
+        "title": "Cold prompt primed cache for subsequent high hit ratio",
+        "session_id": "cw115_m1_tail_f1_rep1",
+        "request_index": 1,
+        "severity": "Info",
+        "observed_phenomenon": "Cold initial prompt of 11984 tokens established prefix, enabling 11776 cached tokens on Request #2.",
+        "policy_implication": "Turn 1 ColdLikely state transitions cleanly to WarmVerified on Turn 2 once prefix reuse is observed.",
+        "recommendation": "Preserve Turn 1 cold compaction authorization while ensuring Turn 2 immediately switches to WarmVerified deferral."
+      },
+      {
+        "case_number": 7,
+        "title": "One-time tail steering directive applied without prefix invalidation",
+        "session_id": "cw115_m1_tail_f1_rep1",
+        "request_index": 6,
+        "severity": "Info",
+        "observed_phenomenon": "Request #6 applied PinContext directive ([\"opt_pin_directive_cw115_m1_tail_f1_rep1\"]); cached tokens remained intact on subsequent turns.",
+        "policy_implication": "Tail pin preserves cached prefix (0 KV break) while behaviorally guiding the agent to complete in fewer total requests.",
+        "recommendation": "Conservatively model direct token cut as 0 USD while acknowledging behavioral request reduction in empirical reports."
+      },
+      {
+        "case_number": 3,
+        "title": "Applied historical pruning caused prefix break and surge in uncached tokens",
+        "session_id": "cw115_m2_prune_f1_rep1",
+        "request_index": 6,
+        "severity": "High",
+        "observed_phenomenon": "Request #6 applied mutations [\"opt_prune_node_4_15\", \"opt_prune_node_5_17\", \"opt_prune_node_6_20\", \"opt_prune_node_8_23\"]; uncached tokens surged to 1423 despite 11264 cached tokens.",
+        "policy_implication": "Blind historical pruning on an active prefix incurs high invalidation penalty. CW-117 policy correctly defers this on WarmVerified cache.",
+        "recommendation": "Enforce CachePrefixAtRisk deferral when cache is WarmVerified unless net multi-turn benefit overcomes break penalty."
+      },
+      {
+        "case_number": 2,
+        "title": "Cold prompt primed cache for subsequent high hit ratio",
+        "session_id": "cw115_m3_combined_f1_rep1",
+        "request_index": 1,
+        "severity": "Info",
+        "observed_phenomenon": "Cold initial prompt of 11979 tokens established prefix, enabling 11904 cached tokens on Request #2.",
+        "policy_implication": "Turn 1 ColdLikely state transitions cleanly to WarmVerified on Turn 2 once prefix reuse is observed.",
+        "recommendation": "Preserve Turn 1 cold compaction authorization while ensuring Turn 2 immediately switches to WarmVerified deferral."
+      },
+      {
+        "case_number": 3,
+        "title": "Applied historical pruning caused prefix break and surge in uncached tokens",
+        "session_id": "cw115_m3_combined_f1_rep1",
+        "request_index": 6,
+        "severity": "High",
+        "observed_phenomenon": "Request #6 applied mutations [\"opt_prune_node_4_15\", \"opt_prune_node_5_17\", \"opt_prune_node_6_20\", \"opt_prune_node_8_23\", \"opt_pin_directive_cw115_m3_combined_f1_rep1\"]; uncached tokens surged to 1413 despite 11264 cached tokens.",
+        "policy_implication": "Blind historical pruning on an active prefix incurs high invalidation penalty. CW-117 policy correctly defers this on WarmVerified cache.",
+        "recommendation": "Enforce CachePrefixAtRisk deferral when cache is WarmVerified unless net multi-turn benefit overcomes break penalty."
+      },
+      {
+        "case_number": 7,
+        "title": "One-time tail steering directive applied without prefix invalidation",
+        "session_id": "cw115_m3_combined_f1_rep1",
+        "request_index": 6,
+        "severity": "Info",
+        "observed_phenomenon": "Request #6 applied PinContext directive ([\"opt_prune_node_4_15\", \"opt_prune_node_5_17\", \"opt_prune_node_6_20\", \"opt_prune_node_8_23\", \"opt_pin_directive_cw115_m3_combined_f1_rep1\"]); cached tokens remained intact on subsequent turns.",
+        "policy_implication": "Tail pin preserves cached prefix (0 KV break) while behaviorally guiding the agent to complete in fewer total requests.",
+        "recommendation": "Conservatively model direct token cut as 0 USD while acknowledging behavioral request reduction in empirical reports."
+      },
+      {
+        "case_number": 6,
+        "title": "Assumed continuation horizon (H=3) differs substantially from mean session length",
+        "session_id": "aggregate_sessions",
+        "request_index": 0,
+        "severity": "Medium",
+        "observed_phenomenon": "Configured horizon H=3 turns, but observed sessions averaged 17.8 requests (range 13-23).",
+        "policy_implication": "A 3-turn break-even horizon underestimates the compound cost of a prefix invalidation on long-running 15-25 turn sessions.",
+        "recommendation": "Allow dynamic horizon scaling based on task family and observed conversation turn count in Phase 2."
+      }
+    ],
+    "data_limitations": [
+      "Historical dataset omits raw prompt bodies; prefix fingerprints are unavailable (None).",
+      "Per-node mutation candidate snapshots for unmutated passthrough traces were not captured at proxy time.",
+      "Mode A native Codex traces aggregate multi-turn tool loops into fewer coarse requests.",
+      "Counterfactual savings on passthrough traces cannot be treated as realized costs without an active execution trial."
+    ],
+    "generated_at": "2026-10-31T20:42:50.781914104Z"
+  }
+]

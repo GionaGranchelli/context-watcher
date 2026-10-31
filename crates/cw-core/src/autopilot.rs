@@ -33,6 +33,8 @@ pub struct AutoPilotConfig {
     pub min_health_score: u8,
     pub heal_strategy: String,
     pub auto_sync_to_disk: bool,
+    #[serde(default)]
+    pub shadow_policy: crate::policy::ShadowPolicyConfig,
 }
 
 impl Default for AutoPilotConfig {
@@ -52,6 +54,7 @@ impl Default for AutoPilotConfig {
             min_health_score: 75,
             heal_strategy: "surgical_log_diet".to_string(),
             auto_sync_to_disk: false,
+            shadow_policy: crate::policy::ShadowPolicyConfig::default(),
         }
     }
 }
@@ -61,6 +64,8 @@ pub struct AutoPilotReport {
     pub triggered_policies: Vec<String>,
     pub generated_mutations: Vec<MutationRule>,
     pub spilled_log_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shadow_decisions: Vec<crate::policy::PolicyDecision>,
 }
 
 /// Evaluates hands-free Auto-Pilot policies on an incoming request payload or turn.
@@ -76,7 +81,7 @@ pub fn evaluate_autopilot_policies(
     turn: Option<&ContextTurn>,
     payload: &mut Value,
 ) -> AutoPilotReport {
-    if !config.enabled {
+    if !config.enabled && !config.shadow_policy.enabled {
         return AutoPilotReport::default();
     }
 
@@ -84,115 +89,148 @@ pub fn evaluate_autopilot_policies(
     let total_tokens: u32 = nodes.iter().map(|n| n.token_span.count).sum();
     let (is_local, _) = detect_local_engine(model, provider);
 
-    // Tail results must reach the model unchanged; log spilling is not an automatic policy.
-    // Policy 2: Auto Cache-Safe Pin (when total tokens > threshold and rule salience < 42%)
-    if config.auto_cache_safe_pin && total_tokens >= config.pin_min_context_tokens {
-        let mut pinned_any = false;
-        for node in nodes {
-            if matches!(node.kind, NodeKind::InjectedRule { .. }) && node.attention_salience < 0.42
-            {
-                let snippet: String = node
-                    .kind
-                    .text_for_tokenization()
-                    .lines()
-                    .take(8)
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let snippet_trimmed: String = snippet.chars().take(240).collect();
-                let rule = MutationRule {
-                    id: format!("ap_pin_{}", &Uuid::new_v4().to_string()[..8]),
-                    session_id: session_id.to_string(),
-                    op: MutationOp::PinContext {
-                        label: format!("Auto-Pinned {}", node.kind.short_label()),
-                        content: snippet_trimmed,
-                        source_node_id: Some(node.id.clone()),
-                    },
-                    status: MutationStatus::Committed,
-                    estimated_saved_tokens: -35,
-                    estimated_kv_break_tokens: 0,
-                    created_at: Utc::now(),
-                };
-                report.generated_mutations.push(rule);
-                pinned_any = true;
+    if config.enabled {
+        // Tail results must reach the model unchanged; log spilling is not an automatic policy.
+        // Policy 2: Auto Cache-Safe Pin (when total tokens > threshold and rule salience < 42%)
+        if config.auto_cache_safe_pin && total_tokens >= config.pin_min_context_tokens {
+            let mut pinned_any = false;
+            for node in nodes {
+                if matches!(node.kind, NodeKind::InjectedRule { .. })
+                    && node.attention_salience < 0.42
+                {
+                    let snippet: String = node
+                        .kind
+                        .text_for_tokenization()
+                        .lines()
+                        .take(8)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let snippet_trimmed: String = snippet.chars().take(240).collect();
+                    let rule = MutationRule {
+                        id: format!("ap_pin_{}", &Uuid::new_v4().to_string()[..8]),
+                        session_id: session_id.to_string(),
+                        op: MutationOp::PinContext {
+                            label: format!("Auto-Pinned {}", node.kind.short_label()),
+                            content: snippet_trimmed,
+                            source_node_id: Some(node.id.clone()),
+                        },
+                        status: MutationStatus::Committed,
+                        estimated_saved_tokens: -35,
+                        estimated_kv_break_tokens: 0,
+                        created_at: Utc::now(),
+                    };
+                    report.generated_mutations.push(rule);
+                    pinned_any = true;
+                }
+            }
+            if pinned_any {
+                report
+                    .triggered_policies
+                    .push("auto_cache_safe_pin".to_string());
             }
         }
-        if pinned_any {
-            report
-                .triggered_policies
-                .push("auto_cache_safe_pin".to_string());
-        }
-    }
 
-    // Policy 3 & 4: Auto Diet at Breakpoint OR Local Model Sliding-Window Guard
-    let trigger_cloud_breakpoint =
-        config.auto_diet_at_breakpoint && total_tokens >= config.breakpoint_tokens;
-    let trigger_local_guard = config.local_model_window_guard
-        && is_local
-        && total_tokens >= config.local_window_threshold_tokens;
+        // Policy 3 & 4: Auto Diet at Breakpoint OR Local Model Sliding-Window Guard
+        let trigger_cloud_breakpoint =
+            config.auto_diet_at_breakpoint && total_tokens >= config.breakpoint_tokens;
+        let trigger_local_guard = config.local_model_window_guard
+            && is_local
+            && total_tokens >= config.local_window_threshold_tokens;
 
-    if trigger_cloud_breakpoint || trigger_local_guard {
-        report.generated_mutations.push(MutationRule {
-            id: format!("ap_dedupe_{}", &Uuid::new_v4().to_string()[..8]),
-            session_id: session_id.to_string(),
-            op: MutationOp::ShadowDedupe { file_path: None },
-            status: MutationStatus::Committed,
-            estimated_saved_tokens: 0,
-            estimated_kv_break_tokens: 0,
-            created_at: Utc::now(),
-        });
-        if trigger_local_guard {
-            report
-                .triggered_policies
-                .push("local_model_window_guard".to_string());
-        } else {
-            report
-                .triggered_policies
-                .push("auto_diet_at_breakpoint".to_string());
-        }
-    }
-
-    // Policy 5: Low-Health Self-Healer (proactively triggered when health score drops below threshold)
-    if config.auto_heal_low_health
-        && let Some(turn_ref) = turn
-        && turn_ref.health_score < config.min_health_score
-    {
-        let strat_id = resolve_strategy_alias(&config.heal_strategy);
-        let plans = build_optimization_plans(turn_ref);
-        let chosen_plan = plans
-            .iter()
-            .find(|p| p.id == strat_id && !p.items.is_empty())
-            .or_else(|| {
-                ["clean_code_state", "surgical_log_diet", "max_token_diet"]
-                    .into_iter()
-                    .find_map(|fallback| {
-                        plans
-                            .iter()
-                            .find(|p| p.id == fallback && !p.items.is_empty())
-                    })
+        if trigger_cloud_breakpoint || trigger_local_guard {
+            report.generated_mutations.push(MutationRule {
+                id: format!("ap_dedupe_{}", &Uuid::new_v4().to_string()[..8]),
+                session_id: session_id.to_string(),
+                op: MutationOp::ShadowDedupe { file_path: None },
+                status: MutationStatus::Committed,
+                estimated_saved_tokens: 0,
+                estimated_kv_break_tokens: 0,
+                created_at: Utc::now(),
             });
-
-        if let Some(plan) = chosen_plan {
-            for item in &plan.items {
-                report.generated_mutations.push(MutationRule {
-                    id: format!("ap_heal_{}", &Uuid::new_v4().to_string()[..8]),
-                    session_id: session_id.to_string(),
-                    op: item.mutation_op.clone(),
-                    status: MutationStatus::Committed,
-                    estimated_saved_tokens: item.saved_tokens.max(0),
-                    estimated_kv_break_tokens: item.kv_break_tokens,
-                    created_at: Utc::now(),
-                });
-            }
-            if !plan.items.is_empty() {
-                report.triggered_policies.push(format!(
-                    "low_health_self_healer(score={}<{}, strat={}, ops={})",
-                    turn_ref.health_score,
-                    config.min_health_score,
-                    plan.id,
-                    plan.items.len()
-                ));
+            if trigger_local_guard {
+                report
+                    .triggered_policies
+                    .push("local_model_window_guard".to_string());
+            } else {
+                report
+                    .triggered_policies
+                    .push("auto_diet_at_breakpoint".to_string());
             }
         }
+
+        // Policy 5: Low-Health Self-Healer (proactively triggered when health score drops below threshold)
+        if config.auto_heal_low_health
+            && let Some(turn_ref) = turn
+            && turn_ref.health_score < config.min_health_score
+        {
+            let strat_id = resolve_strategy_alias(&config.heal_strategy);
+            let plans = build_optimization_plans(turn_ref);
+            let chosen_plan = plans
+                .iter()
+                .find(|p| p.id == strat_id && !p.items.is_empty())
+                .or_else(|| {
+                    ["clean_code_state", "surgical_log_diet", "max_token_diet"]
+                        .into_iter()
+                        .find_map(|fallback| {
+                            plans
+                                .iter()
+                                .find(|p| p.id == fallback && !p.items.is_empty())
+                        })
+                });
+
+            if let Some(plan) = chosen_plan {
+                for item in &plan.items {
+                    report.generated_mutations.push(MutationRule {
+                        id: format!("ap_heal_{}", &Uuid::new_v4().to_string()[..8]),
+                        session_id: session_id.to_string(),
+                        op: item.mutation_op.clone(),
+                        status: MutationStatus::Committed,
+                        estimated_saved_tokens: item.saved_tokens.max(0),
+                        estimated_kv_break_tokens: item.kv_break_tokens,
+                        created_at: Utc::now(),
+                    });
+                }
+                if !plan.items.is_empty() {
+                    report.triggered_policies.push(format!(
+                        "low_health_self_healer(score={}<{}, strat={}, ops={})",
+                        turn_ref.health_score,
+                        config.min_health_score,
+                        plan.id,
+                        plan.items.len()
+                    ));
+                }
+            }
+        }
+    }
+
+    if config.shadow_policy.enabled
+        && let Some(turn_ref) = turn
+    {
+        let plans = build_optimization_plans(turn_ref);
+        let prefix_fp = crate::policy::compute_prefix_fingerprint(&turn_ref.nodes);
+        let cache_obs = crate::policy::classify_cache_state(
+            session_id,
+            provider,
+            model,
+            turn_seq,
+            Some(&prefix_fp),
+            None,
+            Some(&turn_ref.kv_cache_report),
+            false,
+        );
+        let pricing = crate::policy::find_pricing_profile(provider, model);
+        let shadow_decs = crate::policy::evaluate_shadow_policy(
+            &config.shadow_policy,
+            turn_ref,
+            &cache_obs,
+            pricing.as_ref(),
+            &plans,
+        );
+        report.shadow_decisions = shadow_decs;
+        report.triggered_policies.push(format!(
+            "shadow_cache_policy_evaluator(decisions={})",
+            report.shadow_decisions.len()
+        ));
     }
 
     if !report.generated_mutations.is_empty() {

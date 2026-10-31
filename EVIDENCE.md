@@ -19,6 +19,7 @@ This document establishes the empirical justification, real-world benchmark data
    * *Measured Reality:* `cw`'s Radix Prefix Differ and Optimizer isolate mutations by cache impact:
      - When cache hit telemetry is verified, `cw optimize min` (`cache_safe_boost`) selects strictly zero-break tail operations (`kv_break_tokens == 0`), preserving **100% of the cached prefix**.
      - When provider cache telemetry is absent or unknown, `cw` treats unverified prefix mutations as non-zero break, strictly preserving history and preventing unverified candidates from qualifying for `min`.
+     - In **CW-117 Phase 1 (Cache-Aware Optimization Policy Engine)**, introduced formal cache-state classification (`WarmVerified`, `ColdLikely`, `Unknown`, `Rebuilding`) with evidence provenance, pure economic evaluation incorporating uncached re-reading and cache-write surcharges, and explainable decision gating (`Apply`, `Defer`, `Reject`, `NoOp`) operating in shadow mode with zero mutations committed; validated across 14 deterministic tests in `crates/cw-core/tests/policy_test.rs`.
 
 3. **Latency, TTFT, and Proxy Overhead: Measured vs. Empirical Scope**
    * *Proxy Forwarding Overhead (Measured):* `crates/cw-proxy` achieves sub-2ms chunk passthrough overhead by streaming SSE chunks directly to the client over `tokio`/`axum` while tapping telemetry asynchronously in the background.

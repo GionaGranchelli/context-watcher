@@ -4,11 +4,12 @@ Welcome to `contextWatcher` (`cw`). Every human or AI agent working in this repo
 
 ---
 
-## 0. Active milestone: CW-115 Empirical Performance & Savings Qualification
+## 0. Active milestone: CW-117 Cache-Aware Optimization Policy Engine (Phase 1)
 
 **Before coding**, read [BOARD.md](BOARD.md), [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), and [docs/HARNESS_MATRIX.md](docs/HARNESS_MATRIX.md). Checked historical board tasks are not current product qualification. Ground claims in code, fixtures, CI and reproducible evidence.
 
-- **Completed:** CW-116 Maintainability Gate (PRs #13, #14, #16); CW-112 Codex CLI qualification (PRs #17, #18); CW-114 Long-Session Reliability Campaign across harnesses (PR #20); CW-115 Performance and Savings Qualification (Phase 1 3-mode pilot merged via PR #21; Phase 2 four-mode optimization isolation verified).
+- **Completed:** CW-116 Maintainability Gate (PRs #13, #14, #16); CW-112 Codex CLI qualification (PRs #17, #18); CW-114 Long-Session Reliability Campaign across harnesses (PR #20); CW-115 Performance and Savings Qualification (Phase 1 merged via PR #21; Phase 2 four-mode isolation merged via PR #22).
+- **Active:** CW-117 Cache-Aware Optimization Policy Engine (Phase 1 shadow-mode decision engine, deterministic qualification, and pure economic model).
 - **Next Backlog:** CW-103 broader Codex/Hermes continuation, CW-104 local model qualification, CW-R11 large-history IO qualification.
 - Preserve public CLI/API, session identity, authenticated vs observation-only behavior, raw provider wire bytes/streaming, signed and unknown content, transcript originals, mutation eligibility and fail-open behavior. Do not claim observed cache savings where only estimates exist.
 - Use temporary isolated HOME/config and data directories, mock ports and test stores. Do not edit actual user Hermes config, live session transcripts, installed agent settings or running services.

@@ -14,10 +14,12 @@ ContextWatcher (`cw`) serves as an active context manipulation engine, KV-cache 
 
 ### Key Achievements
 
-1. **Gate 0 Stream Terminal Invariant:** Resolved upstream SSE stream termination edge-cases. Partial SSE streams ending at HTTP EOF without provider terminal events (`message_stop`, `response.completed`, `[DONE]`) are now classified as `stream_error` instead of falsely recording `completed`.
-2. **Deterministic 45-Session Matrix:** Executed the entire 45-session campaign (3 harnesses $\times$ 5 task families $\times$ 3 repetitions) through 8 distinct checkpoint turns per session (total 360 checkpoints). All 45 sessions achieved a status of **`PASS`**, and all workspace acceptance criteria passed.
-3. **Native Resume & Overlay Preservation:** Successfully verified across all three harnesses that committed context overlays (`MutationRule::PinContext`) persist across native CLI process boundaries (`codex exec resume`, `omp -r <uuid>`, `hermes chat -r <sid>`) without corrupting provider conversations or on-disk transcripts.
-4. **Phase 4 Fault Injection & Resilience:**
+1. **Deterministic Protocol & Agentic Integration Qualification (CW-114 Scope vs CW-115 Scope):**
+   Milestone **CW-114** qualifies deterministic integration and protocol reliability across multi-turn sessions and native resume boundaries using scripted tool executions. It verifies that ContextWatcher's proxy, canonical IR, and mutation overlay engines handle long sessions, process restarts, tool call pairing, and fault recoveries with 100% reliability. This deterministic baseline lays the foundation for **CW-115**, which performs empirical qualification of autonomous model problem-solving, live-provider token savings, and KV-cache performance.
+2. **Gate 0 Stream Terminal Invariant:** Resolved upstream SSE stream termination edge-cases. Partial SSE streams ending at HTTP EOF without provider terminal events (`message_stop`, `response.completed`, `[DONE]`) are now classified as `stream_error` instead of falsely recording `completed`.
+3. **Deterministic 45-Session Matrix:** Executed the entire 45-session campaign (3 harnesses $\times$ 5 task families $\times$ 3 repetitions) through 8 distinct checkpoint turns per session (total 360 checkpoints). All 45 sessions achieved a status of **`PASS`**, and all workspace acceptance criteria passed. The campaign suite enforces strict zero-tolerance assertions: `passed_sessions == 45`, `failed_sessions == 0`, `blocked_sessions == 0`, and `total_sessions == 45`.
+4. **Native Resume & Per-Turn Overlay Reapplication:** Successfully verified across all three harnesses that committed context overlays (`MutationRule::PinContext`) persist across native CLI process boundaries (`codex exec resume`, `omp -r <uuid>`, `hermes chat -r <sid>`) without corrupting provider conversations or on-disk transcripts. Every post-mutation turn (turns 5..8 across process restarts) is individually verified to contain the committed overlay, while all pre-mutation turns are verified clean.
+5. **Phase 4 Fault Injection & Resilience:**
    - **Mid-stream drop:** Proxy records `stream_error` without corrupting downstream client parsers.
    - **HTTP 502 / 429 recovery:** Proxy records `upstream_error` on transient failures and recovers cleanly upon retry (`completed`).
    - **Daemon crash / restart:** Sessions and committed mutations survive full proxy process termination and restart using persistent SQLite storage.
@@ -36,7 +38,7 @@ Before initiating the long-session campaign, two critical recorder defects were 
 
 ### 2.1 Review Findings Remediation & Rigorous Harness Contracts
 
-Following initial qualification review, the test harness runner in `crates/cw-proxy/tests/long_session_reliability.rs` and the Hermes integration plugin in `plugins/hermes/context-watcher/__init__.py` were hardened against 6 critical qualification invariants:
+Following qualification review, the test harness runner in `crates/cw-proxy/tests/long_session_reliability.rs` and the Hermes integration plugin in `plugins/hermes/context-watcher/__init__.py` were hardened against 8 critical qualification invariants:
 
 1. **Zero Provider-Side Filesystem Writes (Harness-Executed Tools Only):**
    - In earlier mock implementations, the mock provider simulated task completion by writing solution files directly to disk.
@@ -50,23 +52,41 @@ Following initial qualification review, the test harness runner in `crates/cw-pr
    - The test runner asserts `output.status.success()` on every turn. If any harness process returns a non-zero exit code or times out, the session immediately fails.
    - Acceptance tests are executed and asserted passing after every tool execution before the logical turn count is incremented.
 
-3. **Assertion-Derived Reliability Invariants (Zero Hardcoded Booleans):**
-   - `tool_pairing_intact`: Derived strictly from captured wire requests asserting that every `tool_call_id` in the prompt matches its corresponding tool result item without orphaned calls.
-   - `credentials_isolated`: Derived from inspecting all captured HTTP request headers (confirming `x-cw-control-token` and `control_token` values never reach the upstream provider) and verifying environment isolation in tool execution (confirming `CW_CONTROL_TOKEN` is excluded).
-   - `transcripts_unmodified`: Derived by inspecting session history files on disk and verifying that active mutations (e.g. `CW114_POLICY_ACTIVE`) were never written to disk transcripts.
-   - `resume_preserved`: Derived by asserting that the recovered native session ID is non-empty and logical turns reached 8 under the resumed session.
-   - `overlay_applied`: Derived by querying SQLite turn storage via `store.get_turn_mutated_payload(&turn_id)` to verify the transformed payload contains the committed overlay.
-   - `stream_completion_clean`: Derived by verifying that every turn in the store recorded `outcome == "completed"`.
+3. **Bijective Tool-Pairing Ledger Validation:**
+   - Tool pairing validation enforces a strict bijective ledger rather than simply searching for at least one matched pair:
+     - **Responses API (Codex):** Audits `function_call` vs `function_call_output` call IDs within the `input` array. Enforces that no call ID has duplicate outputs, no orphaned results exist without an originating call, and the total conversation emitted calls strictly equal total results (`!total_emitted_calls.is_empty() && total_emitted_calls == total_results`).
+     - **Chat Completions (OMP & Hermes):** Audits `tool_calls` `id` vs `role: "tool"` `tool_call_id` within the `messages` array, asserting zero duplicates, zero orphaned outputs, and complete bijection across the entire conversation.
 
-4. **Zero Invented Session ID Fallbacks:**
+4. **Per-Turn Native Session ID Resume Verification Across Process Boundaries:**
+   - Native session ID continuity is enforced on every single resume turn across process restarts:
+     - **Codex CLI:** Asserts `thread.started` `thread_id` on every turn (turns 2..8) exactly matches the initial `thread_id` established on turn 1.
+     - **OMP:** Asserts the persistent session JSONL file `<temp_agent_dir>/sessions/*<native_sid>*.jsonl` is preserved and appended to across all turns 2..8.
+     - **Hermes Agent:** Asserts the returned session identifier in `hermes chat -r <sid>` output exactly matches `native_sid` on every turn 2..8.
+   - Failure to preserve session identity on any turn fails the session qualification immediately with a descriptive failure class.
+
+5. **Individual Per-Turn Overlay Reapplication Across Process Restarts:**
+   - Instead of checking if an overlay appears on any turn, the suite enforces exact lifecycle timing:
+     - All pre-mutation turns (prior to overlay commitment) are asserted clean: `!payload.contains("CW114_POLICY_ACTIVE")`.
+     - All post-mutation turns (turns 5..8 across process restarts) are individually asserted to contain `"CW114_POLICY_ACTIVE"`, verifying that the deterministic overlay is reapplied on every subsequent request across CLI process invocations.
+
+6. **Complete Hermes Isolation & Zero Launcher Writes:**
+   - The test runner executes Hermes by resolving the committed venv interpreter (`.../environments/*/venv/bin/python -m hermes_cli.main`) directly from the binary's installation directory.
+   - Because `sys.prefix != sys.base_prefix` in the committed venv, Hermes skips its internal `publish_launchers` and package-manager synchronization routine.
+   - Zero writes to user launcher scripts (`~/.hermes/hermes-agent/.hermes/bin/*`) occur.
+   - RAII cleanup (`HermesCleanupGuard`) deletes only temporary test-created directories (`temp_home` and `temp_trusted_dir`), guaranteeing 100% isolation of user installation state.
+
+7. **Zero Invented Session ID Fallbacks:**
    - If a native session ID cannot be recovered from harness output, the qualification runner immediately fails qualification (`status: "FAIL"`) with an explicit failure class rather than falling back to an invented ID.
 
-5. **Isolated Temporary Directories & Fixture Credentials:**
-   - Control tokens are generated into a dedicated temporary file (`0o600` permissions) under an isolated trusted directory (`temp_trusted_dir`), completely isolated from real user directories (`~/.local/share/context-watcher/control-token`).
-   - Hermes execution uses a temporary isolated `HERMES_HOME` and trusted directory, with RAII cleanup (`HermesCleanupGuard`) guaranteeing gateway termination, directory removal, and launcher integrity restoration.
-
-6. **Consistent Tested Codex Version:**
-   - Codex CLI is recorded consistently as `codex-cli 0.166.0` across the qualification report and `docs/HARNESS_MATRIX.md`.
+8. **Strict Zero-Tolerance Campaign Assertions:**
+   - The 45-session campaign suite in `test_cw114_deterministic_45_session_campaign` explicitly asserts:
+     ```rust
+     assert_eq!(report.passed_sessions, 45);
+     assert_eq!(report.failed_sessions, 0);
+     assert_eq!(report.blocked_sessions, 0);
+     assert_eq!(report.total_sessions, 45);
+     ```
+   - Guaranteeing that skipped or blocked sessions immediately fail qualification.
 
 ---
 

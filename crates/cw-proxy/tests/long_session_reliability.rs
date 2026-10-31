@@ -1213,64 +1213,74 @@ fn verify_captured_credentials_isolated(captured: &[CapturedRequest], control_to
 }
 
 fn verify_captured_tool_pairing(captured: &[CapturedRequest]) -> bool {
-    let mut found_pairing = false;
+    let mut total_emitted_calls = HashSet::new();
+    let mut total_results = HashSet::new();
+
     for req in captured {
         if let Some(ref json) = req.json_body {
             // Responses API format (Codex)
             if let Some(input) = json.get("input").and_then(Value::as_array) {
-                let call_ids: HashSet<String> = input
-                    .iter()
-                    .filter(|item| {
-                        item.get("type").and_then(Value::as_str) == Some("function_call")
-                    })
-                    .filter_map(|item| {
-                        item.get("call_id")
-                            .and_then(Value::as_str)
-                            .map(|s| s.to_string())
-                    })
-                    .collect();
-                let output_call_ids: HashSet<String> = input
-                    .iter()
-                    .filter(|item| {
-                        item.get("type").and_then(Value::as_str) == Some("function_call_output")
-                    })
-                    .filter_map(|item| {
-                        item.get("call_id")
-                            .and_then(Value::as_str)
-                            .map(|s| s.to_string())
-                    })
-                    .collect();
-                for cid in &call_ids {
-                    if output_call_ids.contains(cid) {
-                        found_pairing = true;
+                let mut req_emitted = HashSet::new();
+                let mut req_results = HashSet::new();
+                for item in input {
+                    if item.get("type").and_then(Value::as_str) == Some("function_call") {
+                        if let Some(cid) = item.get("call_id").and_then(Value::as_str) {
+                            req_emitted.insert(cid.to_string());
+                            total_emitted_calls.insert(cid.to_string());
+                        }
+                    } else if item.get("type").and_then(Value::as_str)
+                        == Some("function_call_output")
+                    {
+                        if let Some(cid) = item.get("call_id").and_then(Value::as_str) {
+                            if !req_results.insert(cid.to_string()) {
+                                // Duplicate output for same call ID in request
+                                return false;
+                            }
+                            total_results.insert(cid.to_string());
+                        }
+                    }
+                }
+                for cid in &req_results {
+                    if !req_emitted.contains(cid) {
+                        // Orphaned result without matching call in conversation
+                        return false;
                     }
                 }
             }
             // Chat Completions format (OMP and Hermes)
             if let Some(messages) = json.get("messages").and_then(Value::as_array) {
-                let mut tool_call_ids = HashSet::new();
+                let mut req_emitted = HashSet::new();
+                let mut req_results = HashSet::new();
                 for msg in messages {
                     if let Some(tcs) = msg.get("tool_calls").and_then(Value::as_array) {
                         for tc in tcs {
                             if let Some(id) = tc.get("id").and_then(Value::as_str) {
-                                tool_call_ids.insert(id.to_string());
+                                req_emitted.insert(id.to_string());
+                                total_emitted_calls.insert(id.to_string());
                             }
                         }
                     }
-                }
-                for msg in messages {
                     if msg.get("role").and_then(Value::as_str) == Some("tool") {
                         if let Some(id) = msg.get("tool_call_id").and_then(Value::as_str) {
-                            if tool_call_ids.contains(id) {
-                                found_pairing = true;
+                            if !req_results.insert(id.to_string()) {
+                                // Duplicate output for same call ID in request
+                                return false;
                             }
+                            total_results.insert(id.to_string());
                         }
+                    }
+                }
+                for id in &req_results {
+                    if !req_emitted.contains(id) {
+                        // Orphaned result without matching call in conversation
+                        return false;
                     }
                 }
             }
         }
     }
-    found_pairing
+
+    !total_emitted_calls.is_empty() && total_emitted_calls == total_results
 }
 
 async fn execute_codex_session(
@@ -1501,12 +1511,49 @@ async fn execute_codex_session(
                     ),
                 };
             }
+        } else {
+            let mut turn_thread_id = String::new();
+            for line in stdout.lines() {
+                if let Ok(val) = serde_json::from_str::<Value>(line)
+                    && val.get("type").and_then(Value::as_str) == Some("thread.started")
+                    && let Some(tid) = val.get("thread_id").and_then(Value::as_str)
+                {
+                    turn_thread_id = tid.to_string();
+                    break;
+                }
+            }
+            if turn_thread_id != thread_id {
+                let _ = fs::remove_dir_all(&temp_home);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Codex CLI".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "Codex initial resume turn {turn_idx} thread_id mismatch: expected {thread_id}, got {turn_thread_id}"
+                    )),
+                };
+            }
         }
 
         logical_turns += 1;
     }
 
     // Commit context overlay rule to ContextWatcher store before checkpoint 5
+    let pre_mutation_count = store.list_turns(cw_session_id).unwrap_or_default().len();
     store
         .save_mutation(&MutationRule {
             id: format!("mut_{cw_session_id}"),
@@ -1648,6 +1695,42 @@ async fn execute_codex_session(
             };
         }
 
+        let mut turn_thread_id = String::new();
+        for line in stdout.lines() {
+            if let Ok(val) = serde_json::from_str::<Value>(line)
+                && val.get("type").and_then(Value::as_str) == Some("thread.started")
+                && let Some(tid) = val.get("thread_id").and_then(Value::as_str)
+            {
+                turn_thread_id = tid.to_string();
+                break;
+            }
+        }
+        if turn_thread_id != thread_id {
+            let _ = fs::remove_dir_all(&temp_home);
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "Codex CLI".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "FAIL".to_string(),
+                logical_turns,
+                model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "Codex post-mutation resume turn {turn_idx} thread_id mismatch: expected {thread_id}, got {turn_thread_id}"
+                )),
+            };
+        }
+
         logical_turns += 1;
     }
 
@@ -1675,18 +1758,36 @@ async fn execute_codex_session(
     let model_requests = turns.len();
     let resume_preserved = !thread_id.is_empty() && logical_turns == 8;
 
-    // Verify overlay presence on turns after commitment
-    let overlay_applied = turns.iter().any(|t| {
+    // Verify overlay presence:
+    // 1. Pre-mutation turns must NOT contain CW114_POLICY_ACTIVE
+    let pre_mutation_clean = turns.iter().take(pre_mutation_count).all(|t| {
         store
             .get_turn_mutated_payload(&t.id)
             .unwrap()
             .map(|p| {
-                serde_json::to_string(&p)
-                    .unwrap()
+                !serde_json::to_string(&p)
+                    .unwrap_or_default()
                     .contains("CW114_POLICY_ACTIVE")
             })
-            .unwrap_or(false)
+            .unwrap_or(true)
     });
+
+    // 2. Post-mutation turns (5..8) must each individually contain CW114_POLICY_ACTIVE across process restarts
+    let post_mutation_turns: Vec<_> = turns.iter().skip(pre_mutation_count).collect();
+    let overlay_reapplied_across_resume = post_mutation_turns.len() == 4
+        && post_mutation_turns.iter().all(|t| {
+            store
+                .get_turn_mutated_payload(&t.id)
+                .unwrap()
+                .map(|p| {
+                    serde_json::to_string(&p)
+                        .unwrap_or_default()
+                        .contains("CW114_POLICY_ACTIVE")
+                })
+                .unwrap_or(false)
+        });
+
+    let overlay_applied = pre_mutation_clean && overlay_reapplied_across_resume;
 
     let stream_completion_clean = turns
         .iter()
@@ -1731,6 +1832,18 @@ async fn execute_codex_session(
         && stream_completion_clean;
     let agentic_reliability = tool_pairing_intact && acceptance_test_passed && logical_turns == 8;
 
+    eprintln!(
+        "DEBUG CODEX: resume_preserved={resume_preserved}, overlay_applied={overlay_applied} (pre_clean={pre_mutation_clean}, post_reapplied={overlay_reapplied_across_resume}), credentials_isolated={credentials_isolated} (tool={tool_sandbox_clean}, wire={proxy_wire_clean}), transcripts_unmodified={transcripts_unmodified}, stream_clean={stream_completion_clean}, tool_pairing={tool_pairing_intact}, acceptance={acceptance_test_passed}"
+    );
+
+    let failure_class = if !(protocol_reliability && agentic_reliability) {
+        Some(format!(
+            "protocol_reliability={protocol_reliability} (resume={resume_preserved}, overlay={overlay_applied}, creds={credentials_isolated}, transcripts={transcripts_unmodified}, stream={stream_completion_clean}), agentic_reliability={agentic_reliability} (pairing={tool_pairing_intact}, acceptance={acceptance_test_passed})"
+        ))
+    } else {
+        None
+    };
+
     SessionQualificationResult {
         session_id: cw_session_id.to_string(),
         harness: "Codex CLI".to_string(),
@@ -1753,7 +1866,7 @@ async fn execute_codex_session(
         stream_completion_clean,
         protocol_reliability,
         agentic_reliability,
-        failure_class: None,
+        failure_class,
     }
 }
 
@@ -2039,6 +2152,45 @@ async fn execute_omp_session(
                     ),
                 };
             }
+        } else {
+            let session_dir = temp_agent_dir.join("sessions");
+            let mut found_session_file = false;
+            if session_dir.exists() {
+                for f in find_jsonl_files(&session_dir) {
+                    if let Some(stem) = f.file_stem().and_then(|s| s.to_str()) {
+                        if stem.contains(&native_sid) {
+                            found_session_file = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if !found_session_file {
+                let _ = fs::remove_dir_all(&temp_agent_dir);
+                let _ = fs::remove_dir_all(&token_dir);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "OMP".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "OMP turn {turn_idx} failed to preserve native session file for {native_sid}"
+                    )),
+                };
+            }
         }
 
         logical_turns += 1;
@@ -2056,6 +2208,13 @@ async fn execute_omp_session(
         created_at: Utc::now(),
         updated_at: Utc::now(),
     });
+
+    let pre_mutation_count = store
+        .list_sessions()
+        .unwrap_or_default()
+        .iter()
+        .map(|s| store.list_turns(&s.id).unwrap_or_default().len())
+        .sum::<usize>();
 
     // Commit overlay before checkpoint 5 on both cw_session_id and canonical_sid
     for target_sid in &[cw_session_id, &canonical_sid] {
@@ -2191,28 +2350,105 @@ async fn execute_omp_session(
             };
         }
 
+        let session_dir = temp_agent_dir.join("sessions");
+        let mut found_session_file = false;
+        if session_dir.exists() {
+            for f in find_jsonl_files(&session_dir) {
+                if let Some(stem) = f.file_stem().and_then(|s| s.to_str()) {
+                    if stem.contains(&native_sid) {
+                        found_session_file = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !found_session_file {
+            let _ = fs::remove_dir_all(&temp_agent_dir);
+            let _ = fs::remove_dir_all(&token_dir);
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "OMP".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "FAIL".to_string(),
+                logical_turns,
+                model_requests: 0,
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "OMP resume turn {turn_idx} failed to preserve native session file for {native_sid}"
+                )),
+            };
+        }
+
         logical_turns += 1;
     }
 
     let all_sessions = store.list_sessions().unwrap_or_default();
     let mut all_turns = Vec::new();
     for s in &all_sessions {
-        all_turns.extend(store.list_turns(&s.id).unwrap_or_default());
+        let sturns = store.list_turns(&s.id).unwrap_or_default();
+        eprintln!("OMP Session {}: {} turns", s.id, sturns.len());
+        all_turns.extend(sturns);
+    }
+    all_turns.sort_by_key(|t| t.created_at);
+
+    for (idx, t) in all_turns.iter().enumerate() {
+        let payload = store.get_turn_mutated_payload(&t.id).unwrap();
+        eprintln!(
+            "OMP Turn {} (sid={}, id={}) mutated payload present: {}, contains overlay: {}",
+            idx + 1,
+            t.session_id,
+            t.id,
+            payload.is_some(),
+            payload
+                .as_ref()
+                .map(|p| serde_json::to_string(p)
+                    .unwrap_or_default()
+                    .contains("CW114_POLICY_ACTIVE"))
+                .unwrap_or(false)
+        );
     }
 
     let model_requests = all_turns.len();
     let resume_preserved = !native_sid.is_empty() && logical_turns == 8;
 
-    let overlay_applied = all_turns.iter().any(|t| {
+    // Verify overlay presence:
+    // 1. Pre-mutation turns must NOT contain CW114_POLICY_ACTIVE
+    let pre_mutation_clean = all_turns.iter().take(pre_mutation_count).all(|t| {
         let payload = store.get_turn_mutated_payload(&t.id).unwrap();
         payload
             .map(|p| {
-                serde_json::to_string(&p)
-                    .unwrap()
+                !serde_json::to_string(&p)
+                    .unwrap_or_default()
                     .contains("CW114_POLICY_ACTIVE")
             })
-            .unwrap_or(false)
+            .unwrap_or(true)
     });
+
+    // 2. Post-mutation turns (5..8) must each individually contain CW114_POLICY_ACTIVE across process restarts
+    let post_mutation_turns: Vec<_> = all_turns.iter().skip(pre_mutation_count).collect();
+    let overlay_reapplied_across_resume = post_mutation_turns.len() == 4
+        && post_mutation_turns.iter().all(|t| {
+            let payload = store.get_turn_mutated_payload(&t.id).unwrap();
+            payload
+                .map(|p| {
+                    serde_json::to_string(&p)
+                        .unwrap_or_default()
+                        .contains("CW114_POLICY_ACTIVE")
+                })
+                .unwrap_or(false)
+        });
+
+    let overlay_applied = pre_mutation_clean && overlay_reapplied_across_resume;
 
     // Check transcript immutability: scan temp_agent_dir for .jsonl session files
     let mut transcripts_unmodified = true;
@@ -2245,6 +2481,18 @@ async fn execute_omp_session(
         && stream_completion_clean;
     let agentic_reliability = tool_pairing_intact && acceptance_test_passed && logical_turns == 8;
 
+    eprintln!(
+        "DEBUG OMP: resume_preserved={resume_preserved}, overlay_applied={overlay_applied} (pre_clean={pre_mutation_clean}, post_reapplied={overlay_reapplied_across_resume}), credentials_isolated={credentials_isolated}, transcripts_unmodified={transcripts_unmodified}, stream_clean={stream_completion_clean}, tool_pairing={tool_pairing_intact}, acceptance={acceptance_test_passed}"
+    );
+
+    let failure_class = if !(protocol_reliability && agentic_reliability) {
+        Some(format!(
+            "protocol_reliability={protocol_reliability} (resume={resume_preserved}, overlay={overlay_applied}, creds={credentials_isolated}, transcripts={transcripts_unmodified}, stream={stream_completion_clean}), agentic_reliability={agentic_reliability} (pairing={tool_pairing_intact}, acceptance={acceptance_test_passed})"
+        ))
+    } else {
+        None
+    };
+
     SessionQualificationResult {
         session_id: cw_session_id.to_string(),
         harness: "OMP".to_string(),
@@ -2267,8 +2515,87 @@ async fn execute_omp_session(
         stream_completion_clean,
         protocol_reliability,
         agentic_reliability,
-        failure_class: None,
+        failure_class,
     }
+}
+
+fn resolve_hermes_venv_python(hermes_bin: &Path) -> Option<PathBuf> {
+    let mut current = hermes_bin.to_path_buf();
+    let mut visited = HashSet::new();
+
+    while visited.insert(current.clone()) {
+        if !current.exists() {
+            break;
+        }
+        if current.is_symlink() {
+            if let Ok(target) = fs::read_link(&current) {
+                current = if target.is_absolute() {
+                    target
+                } else {
+                    current.parent().unwrap_or(Path::new("")).join(target)
+                };
+                continue;
+            }
+        }
+        if let Ok(content) = fs::read_to_string(&current) {
+            let mut found_target = None;
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("exec ") {
+                    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let candidate = parts[1].trim_matches(|c| c == '"' || c == '\'');
+                        let cand_path = PathBuf::from(candidate);
+                        if cand_path.is_file() && cand_path != current {
+                            found_target = Some(cand_path);
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(target) = found_target {
+                current = target;
+                continue;
+            }
+        }
+        break;
+    }
+
+    let mut p = current.clone();
+    while let Some(parent) = p.parent() {
+        if parent == p {
+            break;
+        }
+        let hermes_root = if parent.file_name().and_then(|n| n.to_str()) == Some(".hermes") {
+            parent.to_path_buf()
+        } else if parent.join(".hermes").is_dir() {
+            parent.join(".hermes")
+        } else {
+            p = parent.to_path_buf();
+            continue;
+        };
+
+        let installs_dir = hermes_root.join("installs");
+        if let Ok(entries) = fs::read_dir(installs_dir) {
+            for entry in entries.flatten() {
+                let envs_dir = entry.path().join("environments");
+                if let Ok(env_entries) = fs::read_dir(envs_dir) {
+                    for env_entry in env_entries.flatten() {
+                        let py = env_entry.path().join("venv/bin/python");
+                        if py.is_file() {
+                            return Some(py);
+                        }
+                        let py3 = env_entry.path().join("venv/bin/python3");
+                        if py3.is_file() {
+                            return Some(py3);
+                        }
+                    }
+                }
+            }
+        }
+        p = parent.to_path_buf();
+    }
+    None
 }
 
 async fn execute_hermes_session(
@@ -2289,21 +2616,10 @@ async fn execute_hermes_session(
         family
     );
 
-    // Dedicated temporary isolated HERMES_HOME
+    // Dedicated temporary isolated HERMES_HOME (strictly isolated, zero symlinks to user home)
     let temp_hermes_home =
         std::env::temp_dir().join(format!("hermes_home_{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&temp_hermes_home).unwrap();
-    let user_hermes = PathBuf::from("/home/gionag/.hermes");
-    if user_hermes.join("installs").exists() {
-        let _ = std::os::unix::fs::symlink(
-            user_hermes.join("installs"),
-            temp_hermes_home.join("installs"),
-        );
-    }
-    if user_hermes.join("tools").exists() {
-        let _ =
-            std::os::unix::fs::symlink(user_hermes.join("tools"), temp_hermes_home.join("tools"));
-    }
 
     struct HermesCleanupGuard {
         home: PathBuf,
@@ -2324,25 +2640,6 @@ async fn execute_hermes_session(
             }
             let _ = fs::remove_dir_all(&self.home);
             let _ = fs::remove_dir_all(&self.trusted_dir);
-
-            // Always restore the user's hermes launchers to the stable home tools Python
-            for name in ["hermes", "hermes-acp"] {
-                let launcher_path = PathBuf::from(format!(
-                    "/home/gionag/.hermes/hermes-agent/.hermes/bin/{name}"
-                ));
-                if let Ok(content) = fs::read_to_string(&launcher_path) {
-                    if let Some(first_newline) = content.find('\n') {
-                        let rest = &content[first_newline + 1..];
-                        if let Some(second_newline) = rest.find('\n') {
-                            let tail = &rest[second_newline..];
-                            let fixed = format!(
-                                "#!/bin/sh\nexec /home/gionag/.hermes/tools/python-3.14.9+20261021-linux-x64/bin/python3 -I -c 'import os, re, sys{tail}"
-                            );
-                            let _ = fs::write(&launcher_path, fixed);
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -2360,6 +2657,13 @@ async fn execute_hermes_session(
         home: temp_hermes_home.clone(),
         trusted_dir: temp_trusted_dir.clone(),
     };
+
+    let (exec_cmd, base_args): (PathBuf, Vec<String>) =
+        if let Some(py) = resolve_hermes_venv_python(hermes_bin) {
+            (py, vec!["-m".to_string(), "hermes_cli.main".to_string()])
+        } else {
+            (hermes_bin.to_path_buf(), vec![])
+        };
 
     // Copy repo's context-watcher plugin into temp_hermes_home/plugins/context-watcher
     let plugins_dir = temp_hermes_home.join("plugins");
@@ -2428,7 +2732,8 @@ terminal:
         }
         created_overrides.push(override_path.clone());
 
-        let hermes_bin = hermes_bin.to_path_buf();
+        let exec_cmd_clone = exec_cmd.clone();
+        let base_args_clone = base_args.clone();
         let ws = fixture.workspace_dir.clone();
         let tok = token_path_str.clone();
         let op = override_path.to_string_lossy().to_string();
@@ -2439,7 +2744,8 @@ terminal:
         let output = match tokio::time::timeout(
             Duration::from_secs(120),
             tokio::task::spawn_blocking(move || {
-                let mut cmd = Command::new(hermes_bin);
+                let mut cmd = Command::new(exec_cmd_clone);
+                cmd.args(&base_args_clone);
                 if turn_idx == 1 {
                     cmd.args([
                         "chat",
@@ -2649,6 +2955,32 @@ terminal:
                     ),
                 };
             }
+        } else {
+            let combined = format!("{stdout}\n{stderr}");
+            if !combined.contains(&native_sid) {
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Hermes Agent".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "Hermes resume turn {turn_idx} output does not contain native session ID {native_sid}"
+                    )),
+                };
+            }
         }
 
         logical_turns += 1;
@@ -2667,6 +2999,7 @@ terminal:
     });
 
     // Commit overlay before checkpoint 5
+    let pre_mutation_count = store.list_turns(cw_session_id).unwrap_or_default().len();
     store
         .save_mutation(&MutationRule {
             id: format!("mut_{cw_session_id}"),
@@ -2700,7 +3033,8 @@ terminal:
         }
         created_overrides.push(override_path.clone());
 
-        let hermes_bin = hermes_bin.to_path_buf();
+        let exec_cmd_clone = exec_cmd.clone();
+        let base_args_clone = base_args.clone();
         let ws = fixture.workspace_dir.clone();
         let tok = token_path_str.clone();
         let op = override_path.to_string_lossy().to_string();
@@ -2711,7 +3045,8 @@ terminal:
         let output = match tokio::time::timeout(
             Duration::from_secs(120),
             tokio::task::spawn_blocking(move || {
-                let mut cmd = Command::new(hermes_bin);
+                let mut cmd = Command::new(exec_cmd_clone);
+                cmd.args(&base_args_clone);
                 cmd.args([
                     "chat",
                     "-r",
@@ -2793,9 +3128,9 @@ terminal:
             }
         };
 
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
             return SessionQualificationResult {
                 session_id: cw_session_id.to_string(),
                 harness: "Hermes Agent".to_string(),
@@ -2816,6 +3151,32 @@ terminal:
                 agentic_reliability: false,
                 failure_class: Some(format!(
                     "Hermes resume turn {turn_idx} failed: stderr={stderr}, stdout={stdout}"
+                )),
+            };
+        }
+
+        let combined = format!("{stdout}\n{stderr}");
+        if !combined.contains(&native_sid) {
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "Hermes Agent".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "FAIL".to_string(),
+                logical_turns,
+                model_requests: 0,
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "Hermes resume turn {turn_idx} output does not contain native session ID {native_sid}"
                 )),
             };
         }
@@ -2847,17 +3208,36 @@ terminal:
     let model_requests = turns.len();
     let resume_preserved = !native_sid.is_empty() && logical_turns == 8;
 
-    let overlay_applied = turns.iter().any(|t| {
+    // Verify overlay presence:
+    // 1. Pre-mutation turns must NOT contain CW114_POLICY_ACTIVE
+    let pre_mutation_clean = turns.iter().take(pre_mutation_count).all(|t| {
         store
             .get_turn_mutated_payload(&t.id)
             .unwrap()
             .map(|p| {
-                serde_json::to_string(&p)
-                    .unwrap()
+                !serde_json::to_string(&p)
+                    .unwrap_or_default()
                     .contains("CW114_POLICY_ACTIVE")
             })
-            .unwrap_or(false)
+            .unwrap_or(true)
     });
+
+    // 2. Post-mutation turns (5..8) must each individually contain CW114_POLICY_ACTIVE across process restarts
+    let post_mutation_turns: Vec<_> = turns.iter().skip(pre_mutation_count).collect();
+    let overlay_reapplied_across_resume = post_mutation_turns.len() == 4
+        && post_mutation_turns.iter().all(|t| {
+            store
+                .get_turn_mutated_payload(&t.id)
+                .unwrap()
+                .map(|p| {
+                    serde_json::to_string(&p)
+                        .unwrap_or_default()
+                        .contains("CW114_POLICY_ACTIVE")
+                })
+                .unwrap_or(false)
+        });
+
+    let overlay_applied = pre_mutation_clean && overlay_reapplied_across_resume;
 
     let cap_guard = captured.lock().unwrap();
     let credentials_isolated = verify_captured_credentials_isolated(&cap_guard, control_token);
@@ -3047,9 +3427,11 @@ async fn test_cw114_deterministic_45_session_campaign() {
     println!("=======================================================\n");
 
     assert_eq!(
-        report.failed_sessions, 0,
-        "All executed sessions in the campaign must pass without failure"
+        report.passed_sessions, 45,
+        "All 45 sessions must pass without any blocked or failed sessions"
     );
+    assert_eq!(report.failed_sessions, 0, "Zero sessions may fail");
+    assert_eq!(report.blocked_sessions, 0, "Zero sessions may be blocked");
     assert_eq!(
         report.total_sessions, 45,
         "Campaign must run all 45 sessions across the matrix"

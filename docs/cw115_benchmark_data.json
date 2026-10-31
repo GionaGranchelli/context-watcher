@@ -1,0 +1,1994 @@
+{
+  "date": "2026-10-31T13:38:40.118218236+00:00",
+  "git_commit": "e9b1b43b35eb6bb89faaa0425e408ec2be59db94",
+  "package_version": "0.2.4",
+  "harness": "Codex CLI 0.166.0",
+  "model": "gpt-4o-mini",
+  "total_sessions_executed": 6,
+  "total_spend_usd": 0.109467,
+  "sessions": [
+    {
+      "session_id": "cw115_native_f1_rep1",
+      "mode": "mode_a_native_baseline",
+      "task_family": "F1BugFixing",
+      "repetition": 1,
+      "model": "gpt-4o-mini",
+      "total_input_tokens": 318541,
+      "total_cached_tokens": 286464,
+      "total_uncached_tokens": 32077,
+      "total_output_tokens": 4279,
+      "overall_cache_ratio": 0.8993002470639573,
+      "total_cost_usd": 0.02886375,
+      "total_wall_time_ms": 50875,
+      "mean_ttfb_ms": null,
+      "acceptance_passed": true,
+      "requests": [
+        {
+          "mode": "mode_a_native_baseline",
+          "session_id": "cw115_native_f1_rep1",
+          "turn_index": 1,
+          "request_index": 1,
+          "model": "gpt-4o-mini",
+          "input_tokens": 61861,
+          "cached_tokens": 48640,
+          "uncached_tokens": 13221,
+          "output_tokens": 541,
+          "cache_hit_ratio": 0.7862789156334362,
+          "ttfb_ms": null,
+          "request_latency_ms": 12018,
+          "turn_elapsed_ms": 12018,
+          "cost_usd": 0.005955749999999999,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "cached_input_tokens": 48640,
+            "input_tokens": 61861,
+            "output_tokens": 541
+          },
+          "timestamp": "2026-10-31T13:35:34.544097326Z"
+        },
+        {
+          "mode": "mode_a_native_baseline",
+          "session_id": "cw115_native_f1_rep1",
+          "turn_index": 2,
+          "request_index": 2,
+          "model": "gpt-4o-mini",
+          "input_tokens": 256680,
+          "cached_tokens": 237824,
+          "uncached_tokens": 18856,
+          "output_tokens": 3738,
+          "cache_hit_ratio": 0.9265388810970858,
+          "ttfb_ms": null,
+          "request_latency_ms": 38856,
+          "turn_elapsed_ms": 38856,
+          "cost_usd": 0.022908,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "cached_input_tokens": 237824,
+            "input_tokens": 256680,
+            "output_tokens": 3738
+          },
+          "timestamp": "2026-10-31T13:36:13.401359871Z"
+        }
+      ]
+    },
+    {
+      "session_id": "cw115_passthrough_f1_rep1",
+      "mode": "mode_b_passthrough",
+      "task_family": "F1BugFixing",
+      "repetition": 1,
+      "model": "gpt-4o-mini",
+      "total_input_tokens": 156448,
+      "total_cached_tokens": 140544,
+      "total_uncached_tokens": 15904,
+      "total_output_tokens": 1818,
+      "overall_cache_ratio": 0.8983432194722847,
+      "total_cost_usd": 0.014017199999999999,
+      "total_wall_time_ms": 26769,
+      "mean_ttfb_ms": 601.9166666666666,
+      "acceptance_passed": true,
+      "requests": [
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 1,
+          "request_index": 1,
+          "model": "gpt-4o-mini",
+          "input_tokens": 11981,
+          "cached_tokens": 0,
+          "uncached_tokens": 11981,
+          "output_tokens": 22,
+          "cache_hit_ratio": 0.0,
+          "ttfb_ms": 816,
+          "request_latency_ms": 1119,
+          "turn_elapsed_ms": 6973,
+          "cost_usd": 0.00181035,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 11981,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0
+            },
+            "output_tokens": 22,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12003
+          },
+          "timestamp": "2026-10-31T13:36:15.210430213Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 2,
+          "request_index": 2,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12085,
+          "cached_tokens": 11776,
+          "uncached_tokens": 309,
+          "output_tokens": 23,
+          "cache_hit_ratio": 0.9744311129499379,
+          "ttfb_ms": 496,
+          "request_latency_ms": 692,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.0009433499999999999,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12085,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 11776
+            },
+            "output_tokens": 23,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12108
+          },
+          "timestamp": "2026-10-31T13:36:16.432954199Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 3,
+          "request_index": 3,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12279,
+          "cached_tokens": 11904,
+          "uncached_tokens": 375,
+          "output_tokens": 193,
+          "cache_hit_ratio": 0.9694600537503054,
+          "ttfb_ms": 483,
+          "request_latency_ms": 2182,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.00106485,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12279,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 11904
+            },
+            "output_tokens": 193,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12472
+          },
+          "timestamp": "2026-10-31T13:36:17.215685030Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 4,
+          "request_index": 4,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12511,
+          "cached_tokens": 12288,
+          "uncached_tokens": 223,
+          "output_tokens": 24,
+          "cache_hit_ratio": 0.9821756853968507,
+          "ttfb_ms": 480,
+          "request_latency_ms": 759,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.00096945,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12511,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12288
+            },
+            "output_tokens": 24,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12535
+          },
+          "timestamp": "2026-10-31T13:36:19.491138719Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 5,
+          "request_index": 5,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12590,
+          "cached_tokens": 12288,
+          "uncached_tokens": 302,
+          "output_tokens": 102,
+          "cache_hit_ratio": 0.9760127084988086,
+          "ttfb_ms": 560,
+          "request_latency_ms": 1442,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.0010280999999999999,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12590,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12288
+            },
+            "output_tokens": 102,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12692
+          },
+          "timestamp": "2026-10-31T13:36:20.388050891Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 6,
+          "request_index": 6,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12732,
+          "cached_tokens": 12544,
+          "uncached_tokens": 188,
+          "output_tokens": 149,
+          "cache_hit_ratio": 0.9852340559220861,
+          "ttfb_ms": 592,
+          "request_latency_ms": 1643,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.0010584,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12732,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12544
+            },
+            "output_tokens": 149,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12881
+          },
+          "timestamp": "2026-10-31T13:36:22.162117495Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 7,
+          "request_index": 7,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12976,
+          "cached_tokens": 12544,
+          "uncached_tokens": 432,
+          "output_tokens": 187,
+          "cache_hit_ratio": 0.966707768187423,
+          "ttfb_ms": 674,
+          "request_latency_ms": 4707,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.0011178,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12976,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12544
+            },
+            "output_tokens": 187,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13163
+          },
+          "timestamp": "2026-10-31T13:36:23.923397119Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 8,
+          "request_index": 8,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13261,
+          "cached_tokens": 12800,
+          "uncached_tokens": 461,
+          "output_tokens": 176,
+          "cache_hit_ratio": 0.9652364075107458,
+          "ttfb_ms": 764,
+          "request_latency_ms": 2212,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.00113475,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 13261,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12800
+            },
+            "output_tokens": 176,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13437
+          },
+          "timestamp": "2026-10-31T13:36:28.725545935Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 9,
+          "request_index": 9,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13533,
+          "cached_tokens": 13184,
+          "uncached_tokens": 349,
+          "output_tokens": 182,
+          "cache_hit_ratio": 0.9742111874676717,
+          "ttfb_ms": 605,
+          "request_latency_ms": 2100,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.00115035,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 13533,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13184
+            },
+            "output_tokens": 182,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13715
+          },
+          "timestamp": "2026-10-31T13:36:31.060272738Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 10,
+          "request_index": 10,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13812,
+          "cached_tokens": 13440,
+          "uncached_tokens": 372,
+          "output_tokens": 223,
+          "cache_hit_ratio": 0.9730668983492615,
+          "ttfb_ms": 528,
+          "request_latency_ms": 2443,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.0011975999999999998,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 13812,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13440
+            },
+            "output_tokens": 223,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 14035
+          },
+          "timestamp": "2026-10-31T13:36:33.281999176Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 11,
+          "request_index": 11,
+          "model": "gpt-4o-mini",
+          "input_tokens": 14132,
+          "cached_tokens": 13696,
+          "uncached_tokens": 436,
+          "output_tokens": 329,
+          "cache_hit_ratio": 0.9691480328332862,
+          "ttfb_ms": 581,
+          "request_latency_ms": 3448,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.00129,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 14132,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13696
+            },
+            "output_tokens": 329,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 14461
+          },
+          "timestamp": "2026-10-31T13:36:35.824355853Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep1",
+          "turn_index": 12,
+          "request_index": 12,
+          "model": "gpt-4o-mini",
+          "input_tokens": 14556,
+          "cached_tokens": 14080,
+          "uncached_tokens": 476,
+          "output_tokens": 208,
+          "cache_hit_ratio": 0.9672987084363837,
+          "ttfb_ms": 644,
+          "request_latency_ms": 2230,
+          "turn_elapsed_ms": 19785,
+          "cost_usd": 0.0012522,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 14556,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 14080
+            },
+            "output_tokens": 208,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 14764
+          },
+          "timestamp": "2026-10-31T13:36:39.385933004Z"
+        }
+      ]
+    },
+    {
+      "session_id": "cw115_optimized_f1_rep1",
+      "mode": "mode_c_optimized",
+      "task_family": "F1BugFixing",
+      "repetition": 1,
+      "model": "gpt-4o-mini",
+      "total_input_tokens": 337628,
+      "total_cached_tokens": 315904,
+      "total_uncached_tokens": 21724,
+      "total_output_tokens": 3724,
+      "overall_cache_ratio": 0.9356569952729039,
+      "total_cost_usd": 0.029185799999999994,
+      "total_wall_time_ms": 52980,
+      "mean_ttfb_ms": 640.3913043478261,
+      "acceptance_passed": true,
+      "requests": [
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 1,
+          "request_index": 1,
+          "model": "gpt-4o-mini",
+          "input_tokens": 11989,
+          "cached_tokens": 0,
+          "uncached_tokens": 11989,
+          "output_tokens": 76,
+          "cache_hit_ratio": 0.0,
+          "ttfb_ms": 741,
+          "request_latency_ms": 1540,
+          "turn_elapsed_ms": 8581,
+          "cost_usd": 0.00184395,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 11989,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0
+            },
+            "output_tokens": 76,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12065
+          },
+          "timestamp": "2026-10-31T13:36:43.531393874Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 2,
+          "request_index": 2,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12149,
+          "cached_tokens": 11904,
+          "uncached_tokens": 245,
+          "output_tokens": 19,
+          "cache_hit_ratio": 0.9798337311712898,
+          "ttfb_ms": 567,
+          "request_latency_ms": 736,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0009409499999999999,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12149,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 11904
+            },
+            "output_tokens": 19,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12168
+          },
+          "timestamp": "2026-10-31T13:36:45.197492593Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 3,
+          "request_index": 3,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12338,
+          "cached_tokens": 12032,
+          "uncached_tokens": 306,
+          "output_tokens": 280,
+          "cache_hit_ratio": 0.9751985735127249,
+          "ttfb_ms": 662,
+          "request_latency_ms": 3175,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0011163,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12338,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12032
+            },
+            "output_tokens": 280,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12618
+          },
+          "timestamp": "2026-10-31T13:36:46.051462780Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 4,
+          "request_index": 4,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12659,
+          "cached_tokens": 12416,
+          "uncached_tokens": 243,
+          "output_tokens": 20,
+          "cache_hit_ratio": 0.9808041709455724,
+          "ttfb_ms": 590,
+          "request_latency_ms": 986,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.00097965,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12659,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12416
+            },
+            "output_tokens": 20,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12679
+          },
+          "timestamp": "2026-10-31T13:36:49.334793679Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 5,
+          "request_index": 5,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12734,
+          "cached_tokens": 12544,
+          "uncached_tokens": 190,
+          "output_tokens": 79,
+          "cache_hit_ratio": 0.9850793152190985,
+          "ttfb_ms": 496,
+          "request_latency_ms": 1285,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0010167,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12734,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12544
+            },
+            "output_tokens": 79,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12813
+          },
+          "timestamp": "2026-10-31T13:36:50.439589007Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 6,
+          "request_index": 6,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12612,
+          "cached_tokens": 11264,
+          "uncached_tokens": 1348,
+          "output_tokens": 427,
+          "cache_hit_ratio": 0.8931176657151919,
+          "ttfb_ms": 567,
+          "request_latency_ms": 4219,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0013032,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22",
+            "opt_pin_directive_cw115_optimized_f1_rep1"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 12612,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 11264
+            },
+            "output_tokens": 427,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13039
+          },
+          "timestamp": "2026-10-31T13:36:52.097694949Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 7,
+          "request_index": 7,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13371,
+          "cached_tokens": 12160,
+          "uncached_tokens": 1211,
+          "output_tokens": 320,
+          "cache_hit_ratio": 0.9094308578266398,
+          "ttfb_ms": 620,
+          "request_latency_ms": 3432,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0012856500000000002,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 13371,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12160
+            },
+            "output_tokens": 320,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13691
+          },
+          "timestamp": "2026-10-31T13:36:56.457645992Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 8,
+          "request_index": 8,
+          "model": "gpt-4o-mini",
+          "input_tokens": 14038,
+          "cached_tokens": 13184,
+          "uncached_tokens": 854,
+          "output_tokens": 74,
+          "cache_hit_ratio": 0.9391651232369284,
+          "ttfb_ms": 1061,
+          "request_latency_ms": 2998,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0011612999999999999,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 14038,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13184
+            },
+            "output_tokens": 74,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 14112
+          },
+          "timestamp": "2026-10-31T13:37:00.019724125Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 9,
+          "request_index": 9,
+          "model": "gpt-4o-mini",
+          "input_tokens": 14153,
+          "cached_tokens": 13952,
+          "uncached_tokens": 201,
+          "output_tokens": 342,
+          "cache_hit_ratio": 0.9857980640146965,
+          "ttfb_ms": 783,
+          "request_latency_ms": 4250,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.00128175,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 14153,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13952
+            },
+            "output_tokens": 342,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 14495
+          },
+          "timestamp": "2026-10-31T13:37:03.107312726Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 10,
+          "request_index": 10,
+          "model": "gpt-4o-mini",
+          "input_tokens": 14593,
+          "cached_tokens": 13952,
+          "uncached_tokens": 641,
+          "output_tokens": 315,
+          "cache_hit_ratio": 0.9560748303981361,
+          "ttfb_ms": 606,
+          "request_latency_ms": 3370,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0013315499999999997,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 14593,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13952
+            },
+            "output_tokens": 315,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 14908
+          },
+          "timestamp": "2026-10-31T13:37:07.472278258Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 11,
+          "request_index": 11,
+          "model": "gpt-4o-mini",
+          "input_tokens": 15006,
+          "cached_tokens": 14464,
+          "uncached_tokens": 542,
+          "output_tokens": 73,
+          "cache_hit_ratio": 0.9638811142209783,
+          "ttfb_ms": 704,
+          "request_latency_ms": 1432,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0012099,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 15006,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 14464
+            },
+            "output_tokens": 73,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 15079
+          },
+          "timestamp": "2026-10-31T13:37:10.959980941Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 12,
+          "request_index": 12,
+          "model": "gpt-4o-mini",
+          "input_tokens": 15118,
+          "cached_tokens": 14848,
+          "uncached_tokens": 270,
+          "output_tokens": 25,
+          "cache_hit_ratio": 0.9821404947744411,
+          "ttfb_ms": 582,
+          "request_latency_ms": 825,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0011691,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 15118,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 14848
+            },
+            "output_tokens": 25,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 15143
+          },
+          "timestamp": "2026-10-31T13:37:12.507823923Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 13,
+          "request_index": 13,
+          "model": "gpt-4o-mini",
+          "input_tokens": 15182,
+          "cached_tokens": 14976,
+          "uncached_tokens": 206,
+          "output_tokens": 45,
+          "cache_hit_ratio": 0.9864313002239494,
+          "ttfb_ms": 565,
+          "request_latency_ms": 990,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0011810999999999998,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 15182,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 14976
+            },
+            "output_tokens": 45,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 15227
+          },
+          "timestamp": "2026-10-31T13:37:13.449097283Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 14,
+          "request_index": 14,
+          "model": "gpt-4o-mini",
+          "input_tokens": 15267,
+          "cached_tokens": 14976,
+          "uncached_tokens": 291,
+          "output_tokens": 23,
+          "cache_hit_ratio": 0.9809392808017292,
+          "ttfb_ms": 599,
+          "request_latency_ms": 845,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0011806499999999999,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 15267,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 14976
+            },
+            "output_tokens": 23,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 15290
+          },
+          "timestamp": "2026-10-31T13:37:14.554560586Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 15,
+          "request_index": 15,
+          "model": "gpt-4o-mini",
+          "input_tokens": 15329,
+          "cached_tokens": 15104,
+          "uncached_tokens": 225,
+          "output_tokens": 40,
+          "cache_hit_ratio": 0.9853219388087938,
+          "ttfb_ms": 546,
+          "request_latency_ms": 1017,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0011905499999999999,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 15329,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 15104
+            },
+            "output_tokens": 40,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 15369
+          },
+          "timestamp": "2026-10-31T13:37:15.511694294Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 16,
+          "request_index": 16,
+          "model": "gpt-4o-mini",
+          "input_tokens": 15453,
+          "cached_tokens": 15104,
+          "uncached_tokens": 349,
+          "output_tokens": 339,
+          "cache_hit_ratio": 0.9774153885976833,
+          "ttfb_ms": 532,
+          "request_latency_ms": 3335,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0013885500000000001,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 15453,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 15104
+            },
+            "output_tokens": 339,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 15792
+          },
+          "timestamp": "2026-10-31T13:37:16.642348474Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 17,
+          "request_index": 17,
+          "model": "gpt-4o-mini",
+          "input_tokens": 15890,
+          "cached_tokens": 15360,
+          "uncached_tokens": 530,
+          "output_tokens": 336,
+          "cache_hit_ratio": 0.9666456891126495,
+          "ttfb_ms": 530,
+          "request_latency_ms": 3449,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0014330999999999999,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 15890,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 15360
+            },
+            "output_tokens": 336,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 16226
+          },
+          "timestamp": "2026-10-31T13:37:20.100597078Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 18,
+          "request_index": 18,
+          "model": "gpt-4o-mini",
+          "input_tokens": 16322,
+          "cached_tokens": 15744,
+          "uncached_tokens": 578,
+          "output_tokens": 81,
+          "cache_hit_ratio": 0.9645876730792795,
+          "ttfb_ms": 677,
+          "request_latency_ms": 1643,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0013161,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 16322,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 15744
+            },
+            "output_tokens": 81,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 16403
+          },
+          "timestamp": "2026-10-31T13:37:23.669769576Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 19,
+          "request_index": 19,
+          "model": "gpt-4o-mini",
+          "input_tokens": 16443,
+          "cached_tokens": 16256,
+          "uncached_tokens": 187,
+          "output_tokens": 45,
+          "cache_hit_ratio": 0.9886273794319771,
+          "ttfb_ms": 594,
+          "request_latency_ms": 949,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.00127425,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 16443,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 16256
+            },
+            "output_tokens": 45,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 16488
+          },
+          "timestamp": "2026-10-31T13:37:25.431057116Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 20,
+          "request_index": 20,
+          "model": "gpt-4o-mini",
+          "input_tokens": 16527,
+          "cached_tokens": 16256,
+          "uncached_tokens": 271,
+          "output_tokens": 23,
+          "cache_hit_ratio": 0.9836025897017002,
+          "ttfb_ms": 540,
+          "request_latency_ms": 777,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.00127365,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 16527,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 16256
+            },
+            "output_tokens": 23,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 16550
+          },
+          "timestamp": "2026-10-31T13:37:26.496906008Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 21,
+          "request_index": 21,
+          "model": "gpt-4o-mini",
+          "input_tokens": 16590,
+          "cached_tokens": 16384,
+          "uncached_tokens": 206,
+          "output_tokens": 40,
+          "cache_hit_ratio": 0.9875828812537674,
+          "ttfb_ms": 581,
+          "request_latency_ms": 897,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0012836999999999998,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 16590,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 16384
+            },
+            "output_tokens": 40,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 16630
+          },
+          "timestamp": "2026-10-31T13:37:27.384440711Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 22,
+          "request_index": 22,
+          "model": "gpt-4o-mini",
+          "input_tokens": 16716,
+          "cached_tokens": 16384,
+          "uncached_tokens": 332,
+          "output_tokens": 338,
+          "cache_hit_ratio": 0.9801387891840153,
+          "ttfb_ms": 866,
+          "request_latency_ms": 3976,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0014814,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 16716,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 16384
+            },
+            "output_tokens": 338,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 17054
+          },
+          "timestamp": "2026-10-31T13:37:28.400073583Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep1",
+          "turn_index": 23,
+          "request_index": 23,
+          "model": "gpt-4o-mini",
+          "input_tokens": 17149,
+          "cached_tokens": 16640,
+          "uncached_tokens": 509,
+          "output_tokens": 364,
+          "cache_hit_ratio": 0.9703189690360954,
+          "ttfb_ms": 720,
+          "request_latency_ms": 3650,
+          "turn_elapsed_ms": 44367,
+          "cost_usd": 0.0015427499999999999,
+          "applied_mutation_ids": [
+            "opt_prune_node_4_15",
+            "opt_prune_node_5_17",
+            "opt_prune_node_6_20",
+            "opt_prune_node_7_22"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 17149,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 16640
+            },
+            "output_tokens": 364,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 17513
+          },
+          "timestamp": "2026-10-31T13:37:32.503243663Z"
+        }
+      ]
+    },
+    {
+      "session_id": "cw115_native_f1_rep2",
+      "mode": "mode_a_native_baseline",
+      "task_family": "F1BugFixing",
+      "repetition": 2,
+      "model": "gpt-4o-mini",
+      "total_input_tokens": 162815,
+      "total_cached_tokens": 147840,
+      "total_uncached_tokens": 14975,
+      "total_output_tokens": 1246,
+      "overall_cache_ratio": 0.908024444922151,
+      "total_cost_usd": 0.01408185,
+      "total_wall_time_ms": 13216,
+      "mean_ttfb_ms": null,
+      "acceptance_passed": true,
+      "requests": [
+        {
+          "mode": "mode_a_native_baseline",
+          "session_id": "cw115_native_f1_rep2",
+          "turn_index": 1,
+          "request_index": 1,
+          "model": "gpt-4o-mini",
+          "input_tokens": 61847,
+          "cached_tokens": 54784,
+          "uncached_tokens": 7063,
+          "output_tokens": 457,
+          "cache_hit_ratio": 0.8857988261354633,
+          "ttfb_ms": null,
+          "request_latency_ms": 7828,
+          "turn_elapsed_ms": 7828,
+          "cost_usd": 0.00544245,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "cached_input_tokens": 54784,
+            "input_tokens": 61847,
+            "output_tokens": 457
+          },
+          "timestamp": "2026-10-31T13:37:45.689443745Z"
+        },
+        {
+          "mode": "mode_a_native_baseline",
+          "session_id": "cw115_native_f1_rep2",
+          "turn_index": 2,
+          "request_index": 2,
+          "model": "gpt-4o-mini",
+          "input_tokens": 100968,
+          "cached_tokens": 93056,
+          "uncached_tokens": 7912,
+          "output_tokens": 789,
+          "cache_hit_ratio": 0.9216385389430315,
+          "ttfb_ms": null,
+          "request_latency_ms": 5387,
+          "turn_elapsed_ms": 5387,
+          "cost_usd": 0.0086394,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "cached_input_tokens": 93056,
+            "input_tokens": 100968,
+            "output_tokens": 789
+          },
+          "timestamp": "2026-10-31T13:37:51.076883047Z"
+        }
+      ]
+    },
+    {
+      "session_id": "cw115_passthrough_f1_rep2",
+      "mode": "mode_b_passthrough",
+      "task_family": "F1BugFixing",
+      "repetition": 2,
+      "model": "gpt-4o-mini",
+      "total_input_tokens": 144528,
+      "total_cached_tokens": 129280,
+      "total_uncached_tokens": 15248,
+      "total_output_tokens": 1702,
+      "overall_cache_ratio": 0.8944979519539467,
+      "total_cost_usd": 0.013004400000000001,
+      "total_wall_time_ms": 25887,
+      "mean_ttfb_ms": 653.5454545454545,
+      "acceptance_passed": true,
+      "requests": [
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 1,
+          "request_index": 1,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12009,
+          "cached_tokens": 0,
+          "uncached_tokens": 12009,
+          "output_tokens": 83,
+          "cache_hit_ratio": 0.0,
+          "ttfb_ms": 908,
+          "request_latency_ms": 2024,
+          "turn_elapsed_ms": 9913,
+          "cost_usd": 0.00185115,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12009,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0
+            },
+            "output_tokens": 83,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12092
+          },
+          "timestamp": "2026-10-31T13:37:52.876846683Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 2,
+          "request_index": 2,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12175,
+          "cached_tokens": 11904,
+          "uncached_tokens": 271,
+          "output_tokens": 19,
+          "cache_hit_ratio": 0.977741273100616,
+          "ttfb_ms": 539,
+          "request_latency_ms": 745,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.0009448499999999999,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12175,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 11904
+            },
+            "output_tokens": 19,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12194
+          },
+          "timestamp": "2026-10-31T13:37:55.023469633Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 3,
+          "request_index": 3,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12364,
+          "cached_tokens": 12032,
+          "uncached_tokens": 332,
+          "output_tokens": 274,
+          "cache_hit_ratio": 0.9731478485926884,
+          "ttfb_ms": 560,
+          "request_latency_ms": 3149,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.0011166,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12364,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12032
+            },
+            "output_tokens": 274,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12638
+          },
+          "timestamp": "2026-10-31T13:37:55.885846854Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 4,
+          "request_index": 4,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12679,
+          "cached_tokens": 12416,
+          "uncached_tokens": 263,
+          "output_tokens": 117,
+          "cache_hit_ratio": 0.979257039198675,
+          "ttfb_ms": 660,
+          "request_latency_ms": 1749,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.00104085,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12679,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12416
+            },
+            "output_tokens": 117,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12796
+          },
+          "timestamp": "2026-10-31T13:37:59.142667937Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 5,
+          "request_index": 5,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12852,
+          "cached_tokens": 12544,
+          "uncached_tokens": 308,
+          "output_tokens": 88,
+          "cache_hit_ratio": 0.9760348583877996,
+          "ttfb_ms": 557,
+          "request_latency_ms": 1350,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.0010398,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12852,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12544
+            },
+            "output_tokens": 88,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12940
+          },
+          "timestamp": "2026-10-31T13:38:01.045773425Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 6,
+          "request_index": 6,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12982,
+          "cached_tokens": 12800,
+          "uncached_tokens": 182,
+          "output_tokens": 234,
+          "cache_hit_ratio": 0.9859805885071637,
+          "ttfb_ms": 685,
+          "request_latency_ms": 2745,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.0011277,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12982,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12800
+            },
+            "output_tokens": 234,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13216
+          },
+          "timestamp": "2026-10-31T13:38:02.765534306Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 7,
+          "request_index": 7,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13308,
+          "cached_tokens": 12928,
+          "uncached_tokens": 380,
+          "output_tokens": 224,
+          "cache_hit_ratio": 0.9714457469191464,
+          "ttfb_ms": 734,
+          "request_latency_ms": 3579,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.001161,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 13308,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12928
+            },
+            "output_tokens": 224,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13532
+          },
+          "timestamp": "2026-10-31T13:38:05.641879985Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 8,
+          "request_index": 8,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13616,
+          "cached_tokens": 13184,
+          "uncached_tokens": 432,
+          "output_tokens": 235,
+          "cache_hit_ratio": 0.9682726204465335,
+          "ttfb_ms": 632,
+          "request_latency_ms": 2817,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.0011946,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 13616,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13184
+            },
+            "output_tokens": 235,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13851
+          },
+          "timestamp": "2026-10-31T13:38:09.325621852Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 9,
+          "request_index": 9,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13936,
+          "cached_tokens": 13440,
+          "uncached_tokens": 496,
+          "output_tokens": 228,
+          "cache_hit_ratio": 0.9644087256027555,
+          "ttfb_ms": 788,
+          "request_latency_ms": 2862,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.0012192000000000001,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 13936,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13440
+            },
+            "output_tokens": 228,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 14164
+          },
+          "timestamp": "2026-10-31T13:38:12.260265952Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 10,
+          "request_index": 10,
+          "model": "gpt-4o-mini",
+          "input_tokens": 14207,
+          "cached_tokens": 13824,
+          "uncached_tokens": 383,
+          "output_tokens": 138,
+          "cache_hit_ratio": 0.9730414584359822,
+          "ttfb_ms": 605,
+          "request_latency_ms": 1970,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.00117705,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 14207,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13824
+            },
+            "output_tokens": 138,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 14345
+          },
+          "timestamp": "2026-10-31T13:38:15.215089741Z"
+        },
+        {
+          "mode": "mode_b_passthrough",
+          "session_id": "cw115_passthrough_f1_rep2",
+          "turn_index": 11,
+          "request_index": 11,
+          "model": "gpt-4o-mini",
+          "input_tokens": 14400,
+          "cached_tokens": 14208,
+          "uncached_tokens": 192,
+          "output_tokens": 62,
+          "cache_hit_ratio": 0.9866666666666667,
+          "ttfb_ms": 521,
+          "request_latency_ms": 1065,
+          "turn_elapsed_ms": 15963,
+          "cost_usd": 0.0011316,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 14400,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 14208
+            },
+            "output_tokens": 62,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 14462
+          },
+          "timestamp": "2026-10-31T13:38:17.339826635Z"
+        }
+      ]
+    },
+    {
+      "session_id": "cw115_optimized_f1_rep2",
+      "mode": "mode_c_optimized",
+      "task_family": "F1BugFixing",
+      "repetition": 2,
+      "model": "gpt-4o-mini",
+      "total_input_tokens": 113725,
+      "total_cached_tokens": 97920,
+      "total_uncached_tokens": 15805,
+      "total_output_tokens": 994,
+      "overall_cache_ratio": 0.8610244009672455,
+      "total_cost_usd": 0.010311150000000002,
+      "total_wall_time_ms": 18336,
+      "mean_ttfb_ms": 879.0,
+      "acceptance_passed": true,
+      "requests": [
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep2",
+          "turn_index": 1,
+          "request_index": 1,
+          "model": "gpt-4o-mini",
+          "input_tokens": 11973,
+          "cached_tokens": 0,
+          "uncached_tokens": 11973,
+          "output_tokens": 25,
+          "cache_hit_ratio": 0.0,
+          "ttfb_ms": 962,
+          "request_latency_ms": 1375,
+          "turn_elapsed_ms": 8946,
+          "cost_usd": 0.0018109500000000002,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 11973,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 0
+            },
+            "output_tokens": 25,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 11998
+          },
+          "timestamp": "2026-10-31T13:38:20.372346155Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep2",
+          "turn_index": 2,
+          "request_index": 2,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12080,
+          "cached_tokens": 11776,
+          "uncached_tokens": 304,
+          "output_tokens": 26,
+          "cache_hit_ratio": 0.9748344370860927,
+          "ttfb_ms": 675,
+          "request_latency_ms": 968,
+          "turn_elapsed_ms": 9377,
+          "cost_usd": 0.0009444,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12080,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 11776
+            },
+            "output_tokens": 26,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12106
+          },
+          "timestamp": "2026-10-31T13:38:21.852771334Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep2",
+          "turn_index": 3,
+          "request_index": 3,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12275,
+          "cached_tokens": 11904,
+          "uncached_tokens": 371,
+          "output_tokens": 212,
+          "cache_hit_ratio": 0.969775967413442,
+          "ttfb_ms": 1641,
+          "request_latency_ms": 3415,
+          "turn_elapsed_ms": 9377,
+          "cost_usd": 0.0010756499999999998,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12275,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 11904
+            },
+            "output_tokens": 212,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12487
+          },
+          "timestamp": "2026-10-31T13:38:22.912191063Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep2",
+          "turn_index": 4,
+          "request_index": 4,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12527,
+          "cached_tokens": 12288,
+          "uncached_tokens": 239,
+          "output_tokens": 27,
+          "cache_hit_ratio": 0.9809212101859982,
+          "ttfb_ms": 700,
+          "request_latency_ms": 1022,
+          "turn_elapsed_ms": 9377,
+          "cost_usd": 0.00097365,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12527,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12288
+            },
+            "output_tokens": 27,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12554
+          },
+          "timestamp": "2026-10-31T13:38:26.430745198Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep2",
+          "turn_index": 5,
+          "request_index": 5,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12608,
+          "cached_tokens": 12416,
+          "uncached_tokens": 192,
+          "output_tokens": 83,
+          "cache_hit_ratio": 0.9847715736040609,
+          "ttfb_ms": 589,
+          "request_latency_ms": 1356,
+          "turn_elapsed_ms": 9377,
+          "cost_usd": 0.0010098,
+          "applied_mutation_ids": [],
+          "raw_provider_usage": {
+            "input_tokens": 12608,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12416
+            },
+            "output_tokens": 83,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12691
+          },
+          "timestamp": "2026-10-31T13:38:27.602287355Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep2",
+          "turn_index": 6,
+          "request_index": 6,
+          "model": "gpt-4o-mini",
+          "input_tokens": 12493,
+          "cached_tokens": 11264,
+          "uncached_tokens": 1229,
+          "output_tokens": 265,
+          "cache_hit_ratio": 0.9016249099495718,
+          "ttfb_ms": 1135,
+          "request_latency_ms": 3456,
+          "turn_elapsed_ms": 9377,
+          "cost_usd": 0.00118815,
+          "applied_mutation_ids": [
+            "opt_prune_node_3_14",
+            "opt_prune_node_4_16",
+            "opt_prune_node_6_19",
+            "opt_prune_node_7_21",
+            "opt_pin_directive_cw115_optimized_f1_rep2"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 12493,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 11264
+            },
+            "output_tokens": 265,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 12758
+          },
+          "timestamp": "2026-10-31T13:38:29.305290522Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep2",
+          "turn_index": 7,
+          "request_index": 7,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13029,
+          "cached_tokens": 12288,
+          "uncached_tokens": 741,
+          "output_tokens": 260,
+          "cache_hit_ratio": 0.9431268708266175,
+          "ttfb_ms": 764,
+          "request_latency_ms": 2781,
+          "turn_elapsed_ms": 9377,
+          "cost_usd": 0.0011887500000000001,
+          "applied_mutation_ids": [
+            "opt_prune_node_3_14",
+            "opt_prune_node_4_16",
+            "opt_prune_node_6_19",
+            "opt_prune_node_7_21"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 13029,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12288
+            },
+            "output_tokens": 260,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13289
+          },
+          "timestamp": "2026-10-31T13:38:32.876531341Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep2",
+          "turn_index": 8,
+          "request_index": 8,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13329,
+          "cached_tokens": 12800,
+          "uncached_tokens": 529,
+          "output_tokens": 27,
+          "cache_hit_ratio": 0.9603121014329657,
+          "ttfb_ms": 684,
+          "request_latency_ms": 942,
+          "turn_elapsed_ms": 9377,
+          "cost_usd": 0.0010555500000000002,
+          "applied_mutation_ids": [
+            "opt_prune_node_3_14",
+            "opt_prune_node_4_16",
+            "opt_prune_node_6_19",
+            "opt_prune_node_7_21"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 13329,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 12800
+            },
+            "output_tokens": 27,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13356
+          },
+          "timestamp": "2026-10-31T13:38:35.769668831Z"
+        },
+        {
+          "mode": "mode_c_optimized",
+          "session_id": "cw115_optimized_f1_rep2",
+          "turn_index": 9,
+          "request_index": 9,
+          "model": "gpt-4o-mini",
+          "input_tokens": 13411,
+          "cached_tokens": 13184,
+          "uncached_tokens": 227,
+          "output_tokens": 69,
+          "cache_hit_ratio": 0.9830735963015436,
+          "ttfb_ms": 761,
+          "request_latency_ms": 1477,
+          "turn_elapsed_ms": 9377,
+          "cost_usd": 0.00106425,
+          "applied_mutation_ids": [
+            "opt_prune_node_3_14",
+            "opt_prune_node_4_16",
+            "opt_prune_node_6_19",
+            "opt_prune_node_7_21"
+          ],
+          "raw_provider_usage": {
+            "input_tokens": 13411,
+            "input_tokens_details": {
+              "cache_write_tokens": 0,
+              "cached_tokens": 13184
+            },
+            "output_tokens": 69,
+            "output_tokens_details": {
+              "reasoning_tokens": 0
+            },
+            "total_tokens": 13480
+          },
+          "timestamp": "2026-10-31T13:38:36.864381279Z"
+        }
+      ]
+    }
+  ],
+  "comparisons": [
+    {
+      "task_family": "F1BugFixing",
+      "passthrough_latency_overhead_ms": -5717.5,
+      "passthrough_latency_overhead_pct": -17.841818664087,
+      "passthrough_token_divergence": -90190,
+      "token_reduction_vs_passthrough": -75189,
+      "token_reduction_pct_vs_passthrough": -49.963452235394186,
+      "cache_ratio_delta_vs_passthrough": 0.001920112406959107,
+      "cost_savings_usd_vs_passthrough": -0.006237674999999998,
+      "cost_savings_pct_vs_passthrough": -46.16806554756194,
+      "net_token_reduction_vs_native": 15002,
+      "net_token_reduction_pct_vs_native": 6.233224474193736,
+      "net_cost_savings_usd_vs_native": 0.0017243250000000022,
+      "net_cost_savings_pct_vs_native": 8.030275511344595,
+      "net_latency_delta_ms_vs_native": 3612.5,
+      "regressions_noted": [
+        "Cost Inversion: Mode C ($0.01975) cost more than Mode B ($0.01351) because cache miss penalty exceeded input token savings"
+      ]
+    }
+  ]
+}

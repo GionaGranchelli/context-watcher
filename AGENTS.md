@@ -4,12 +4,12 @@ Welcome to `contextWatcher` (`cw`). Every human or AI agent working in this repo
 
 ---
 
-## 0. Active milestone: CW-114 Long-Session Reliability Campaign Across Harnesses
+## 0. Active milestone: CW-115 Empirical Performance & Savings Qualification
 
 **Before coding**, read [BOARD.md](BOARD.md), [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), and [docs/HARNESS_MATRIX.md](docs/HARNESS_MATRIX.md). Checked historical board tasks are not current product qualification. Ground claims in code, fixtures, CI and reproducible evidence.
 
-- **Completed:** CW-116 Maintainability Gate (CW-116A characterization/contracts in PR #13, CW-116B CLI/harness modularization in PR #14, and CW-116C proxy/transformation boundaries in PR #16); CW-112 Codex CLI qualification (Phase 1 mock qualification in PR #17, and Phase 2 live real-provider qualification with prompt caching and wire egress evidence, documented in `docs/CW-112-CODEX-QUALIFICATION.md`).
-- **Active: CW-114**, long-session reliability campaign across harnesses (OMP, Codex, Hermes across 5 coding-task families), **then CW-115**, empirical performance and savings qualification.
+- **Completed:** CW-116 Maintainability Gate (PRs #13, #14, #16); CW-112 Codex CLI qualification (PRs #17, #18); CW-114 Long-Session Reliability Campaign across harnesses (PR #20).
+- **Active: CW-115**, empirical performance and savings qualification (Mode A Native Baseline vs Mode B Passthrough vs Mode C Optimized across coding workloads).
 - Preserve public CLI/API, session identity, authenticated vs observation-only behavior, raw provider wire bytes/streaming, signed and unknown content, transcript originals, mutation eligibility and fail-open behavior. Do not claim observed cache savings where only estimates exist.
 - Use temporary isolated HOME/config and data directories, mock ports and test stores. Do not edit actual user Hermes config, live session transcripts, installed agent settings or running services.
 - Explicitly distinguish default CI tests, separately invoked ignored harness-binary tests and opt-in live-provider tests. Never report a skipped or unavailable test as passed. Avoid duplicating production algorithms or guards inside tests.

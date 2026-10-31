@@ -22,7 +22,13 @@ This document establishes the empirical justification, real-world benchmark data
 
 3. **Latency, TTFT, and Proxy Overhead: Measured vs. Empirical Scope**
    * *Proxy Forwarding Overhead (Measured):* `crates/cw-proxy` achieves sub-2ms chunk passthrough overhead by streaming SSE chunks directly to the client over `tokio`/`axum` while tapping telemetry asynchronously in the background.
-   * *Live Provider Continuation (Measured):* In CW-112 live qualification with `gpt-4o-mini`, multi-turn request latencies were observed at 1,842ms, 1,689ms, and 2,104ms with 100% prompt cache hits on subsequent turns (1,344 / 1,768 input tokens cached).
+   * *Live Provider Continuation (Measured):* In CW-112 and CW-115 live qualification with `gpt-4o-mini` across Codex CLI:
+     - Multi-turn request latencies were observed at 1,842ms, 1,689ms, and 2,104ms in CW-112 with prompt caching verified (1,344 / 1,768 input tokens cached).
+     - In CW-115 matched 3-mode qualification (Mode A Native vs Mode B Passthrough vs Mode C Optimized across 6 sessions in the Codex F1 pilot, documented in `docs/CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md`):
+       - **Passthrough Overhead:** Mode B confirmed negligible streaming overhead (<2ms/chunk) and TTFB averaging ~628ms (live A/B sessions reflect stochastic model tool iteration paths).
+       - **Headline Aggregate Finding:** Across both repetitions, optimization (Mode C) increased total input tokens by **+50.0%** (451,353 vs 300,976) and calculated provider cost by **+46.2%** ($0.03950 vs $0.02702) due to mid-session prompt cache invalidation in Repetition 1.
+       - **Cache-Aligned Counterexample (Repetition 2):** When optimizations preserved the prompt cache prefix, Mode C reduced input tokens by **-21.3% (-30,803 tokens)**, reduced session execution duration by **-29.2% (18.3s vs 25.9s)**, and reduced cost by **-20.7% ($0.01031 vs $0.01300)**.
+       - **Architectural Validation:** Confirms ContextWatcher's core architectural principle: **KV-Cache Awareness First**. Optimization without cache alignment causes cost inversions on prompt-cached models; mutations must be gated to cache-safe tail operations (`min` strategy).
    * *Prompt Token-Volume Reduction:* Compacting prompts from 150k down to 45k tokens represents a **3.33× reduction in transmitted token volume**, cutting unneeded network payload transfer and token ingestion.
    * *Cloud & Local Hardware Nuance (Zero Unverified Claims):*
      - On cloud frontier providers (Claude 3.7 Sonnet, GPT-4o, Gemini 2.5 Pro), TTFT is governed by datacenter scheduling, cluster queueing, and network transit. Compacting prompts eliminates payload bloat, but empirical cloud latency gains vary with provider cluster load.

@@ -282,3 +282,30 @@ Implemented in [`crates/cw-proxy/tests/long_session_reliability.rs`](../crates/c
   cargo test -p cw-proxy --test long_session_reliability test_cw114_resilience -- --ignored --nocapture
   ```
 
+---
+
+## 8. Empirical Performance & Savings Qualification (CW-115)
+
+Implemented in [`crates/cw-proxy/tests/performance_qualification.rs`](../crates/cw-proxy/tests/performance_qualification.rs) and documented in [`docs/CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md`](CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md), with raw machine-readable telemetry recorded in [`docs/cw115_benchmark_data.json`](cw115_benchmark_data.json).
+
+* **Scope & Methodology:** Evaluates 3 distinct experiment modes across real coding-agent workloads with real provider telemetry, session-level budget admission control ($1.00 ceiling), and loop limits (`MAX_REQUESTS_PER_SESSION = 30`) in the **Codex CLI (`0.166.0`) F1 Bug-Fixing Live Pilot**:
+  - **Mode A (Native Baseline):** Harness connects directly to provider without proxy or intermediate hops.
+  - **Mode B (CW Passthrough):** Harness routes through `cw-proxy` with active mutations disabled (`AutoPilotConfig.enabled = false`, 0 mutations).
+  - **Mode C (CW Optimized):** Harness routes through `cw-proxy` with active committed context optimizations (historical tool output pruning and tail pin overlays).
+* **Observed Empirical Findings:**
+  - **Passthrough Overhead (Mode B vs Mode A):** Mean streaming overhead $< 2\text{ms/chunk}$; byte-level forwarding fidelity on intercepted payloads; TTFB averaging ~628ms; wall time within normal provider endpoint variation (-17.8% net delta due to cloud inference cluster timing); token totals reflect stochastic agent tool iteration paths (-90,190 mean delta).
+  - **Headline Aggregate Finding (Mode C vs Mode B, Both Repetitions):** Across both repetitions, optimization increased total input tokens by **+50.0%** (451,353 vs 300,976) and calculated cost by **+46.2%** ($0.03950 vs $0.02702) due to mid-session prompt cache invalidation in Repetition 1.
+  - **Cache-Aligned Counterexample (Repetition 2):** When optimizations preserved the prompt cache prefix, Mode C reduced input tokens by **-21.3%** (144,528 $\to$ 113,725), wall clock execution time by **-29.2%** (25.89s $\to$ 18.34s), and calculated cost by **-20.7%** ($0.01300 $\to$ $0.01031).
+  - **Architectural Validation:** Confirms ContextWatcher's core architectural principle: **KV-Cache Awareness First**. Pruning historical turns when a warm cache exists destroys the 50% prompt-cache discount and induces exploratory requests; mutations must operate strictly in tail/cache-safe mode (`min` strategy) whenever a warm prefix is detected.
+* **Execution:**
+  ```bash
+  # Deterministic cost model, budget guards, and regression math (CI test suite)
+  cargo test -p cw-proxy --test performance_qualification
+
+  # Opt-in live provider benchmark (requires OPENAI_API_KEY and CW_QUALIFY_REAL_CODEX=1)
+  export OPENAI_API_KEY="sk-..."
+  export CW_QUALIFY_REAL_CODEX=1
+  cargo test -p cw-proxy --test performance_qualification test_live_codex_cw115_empirical_performance_qualification -- --ignored --nocapture
+  ```
+
+

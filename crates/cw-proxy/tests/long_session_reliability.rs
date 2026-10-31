@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments, clippy::collapsible_if)]
+
 use axum::{
     Json, Router,
     body::Body,
@@ -13,10 +15,11 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tower::ServiceExt;
@@ -366,7 +369,17 @@ pub struct SessionQualificationResult {
     pub credentials_isolated: bool,
     pub acceptance_test_passed: bool,
     pub stream_completion_clean: bool,
+    pub protocol_reliability: bool,
+    pub agentic_reliability: bool,
     pub failure_class: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CapturedRequest {
+    pub path: String,
+    pub headers: HeaderMap,
+    pub body: Vec<u8>,
+    pub json_body: Option<Value>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -462,6 +475,8 @@ impl CampaignRunner {
                 credentials_isolated: true,
                 acceptance_test_passed: false,
                 stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
                 failure_class: Some(format!("Binary '{}' not installed", harness.binary_name())),
             };
         }
@@ -476,19 +491,12 @@ impl CampaignRunner {
             .unwrap();
 
         let mut state = DaemonState::new(store.clone());
-        if let Ok(tok) =
-            fs::read_to_string("/home/gionag/.local/share/context-watcher/control-token")
-        {
-            let tok = tok.trim().to_string();
-            if !tok.is_empty() {
-                state.control_token = tok;
-            }
-        }
         let control_token = state.control_token.clone();
 
-        // Setup mock provider for this task family
+        // Setup mock provider with request capturing for this task family
+        let captured = Arc::new(Mutex::new(Vec::new()));
         let (mock_url, mock_server) =
-            setup_task_mock_provider(family, fixture.workspace_dir.clone()).await;
+            setup_task_mock_provider(family, fixture.workspace_dir.clone(), captured.clone()).await;
         state.openai_upstream = mock_url.clone();
         state.anthropic_upstream = mock_url.clone();
         state.deepseek_upstream = mock_url.clone();
@@ -510,6 +518,9 @@ impl CampaignRunner {
                     &sid,
                     &fixture,
                     &store,
+                    family,
+                    repetition,
+                    captured.clone(),
                 )
                 .await
             }
@@ -521,6 +532,9 @@ impl CampaignRunner {
                     &sid,
                     &fixture,
                     &store,
+                    family,
+                    repetition,
+                    captured.clone(),
                 )
                 .await
             }
@@ -532,6 +546,9 @@ impl CampaignRunner {
                     &sid,
                     &fixture,
                     &store,
+                    family,
+                    repetition,
+                    captured.clone(),
                 )
                 .await
             }
@@ -541,17 +558,7 @@ impl CampaignRunner {
         proxy_task.abort();
         mock_server.abort();
 
-        // Final acceptance test verification
-        let acceptance_passed = fixture.verify_acceptance_tests();
-
-        let mut res = run_result;
-        res.acceptance_test_passed = acceptance_passed;
-        if res.status == "PASS" && !acceptance_passed {
-            res.status = "FAIL".to_string();
-            res.failure_class = Some("Acceptance tests failed in final workspace".to_string());
-        }
-
-        res
+        run_result
     }
 
     pub async fn run_full_campaign(&self) -> CampaignReport {
@@ -596,12 +603,104 @@ impl CampaignRunner {
 // 5. Mock Provider Setup with Realistic Tool Executions for F1..F5
 // ============================================================================
 
+fn family_tool_action(family: TaskFamily) -> (&'static str, &'static str) {
+    match family {
+        TaskFamily::F1BugFixing => (
+            "math_ops.py",
+            r#"# math_ops.py - repaired by tool
+def divide_or_fallback(a, b, fallback=0.0):
+    if b == 0:
+        return fallback
+    return a / b
+
+def safe_mean(numbers):
+    if not numbers:
+        return 0.0
+    return sum(numbers) / len(numbers)
+"#,
+        ),
+        TaskFamily::F2Refactoring => (
+            "string_utils.py",
+            r#"# string_utils.py - refactored by tool
+def _truncate_with_ellipsis(text, max_len):
+    if len(text) > max_len:
+        return text[:max_len-3] + "..."
+    return text
+
+def format_header(title, max_len=20):
+    cleaned = title.strip()
+    truncated = _truncate_with_ellipsis(cleaned, max_len)
+    if truncated.endswith("..."):
+        return truncated
+    return truncated.upper()
+
+def format_footer(note, max_len=20):
+    cleaned = note.strip()
+    truncated = _truncate_with_ellipsis(cleaned, max_len)
+    if truncated.endswith("..."):
+        return truncated
+    return truncated.lower()
+"#,
+        ),
+        TaskFamily::F3FeatureImplementation => (
+            "cache.py",
+            r#"# cache.py - implemented by tool
+class CachedStore:
+    def __init__(self, backing_store):
+        self.backing_store = backing_store
+        self.cache = {}
+    def get(self, k):
+        if k in self.cache:
+            return self.cache[k]
+        val = self.backing_store.get(k)
+        if val is not None:
+            self.cache[k] = val
+        return val
+    def put(self, k, v):
+        self.cache[k] = v
+        self.backing_store.put(k, v)
+"#,
+        ),
+        TaskFamily::F4Tdd => (
+            "validator.py",
+            r#"# validator.py - implemented by tool
+def validate_registration(username, email, age):
+    if not username or not username.strip():
+        return False
+    if "@" not in email or "." not in email:
+        return False
+    if age < 18 or age > 120:
+        return False
+    return True
+"#,
+        ),
+        TaskFamily::F5InvestigationRecovery => (
+            "pipeline.py",
+            r#"# pipeline.py - recovered by tool
+def run_pipeline(records):
+    filtered = [r for r in records if r.get("score", 0) >= 70]
+    return sorted(filtered, key=lambda r: r.get("score", 0), reverse=True)
+"#,
+        ),
+    }
+}
+
 async fn setup_task_mock_provider(
     family: TaskFamily,
     workspace: PathBuf,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
 ) -> (String, tokio::task::JoinHandle<()>) {
     let workspace = Arc::new(workspace);
-    let workspace_clone = workspace.clone();
+    let ws_clone1 = workspace.clone();
+    let ws_clone2 = workspace.clone();
+    let ws_clone3 = workspace.clone();
+    let ws_clone4 = workspace.clone();
+    let ws_clone5 = workspace.clone();
+    let cap_clone1 = captured.clone();
+    let cap_clone2 = captured.clone();
+    let cap_clone3 = captured.clone();
+    let cap_clone4 = captured.clone();
+    let cap_clone5 = captured.clone();
 
     let app = Router::new()
         .route(
@@ -642,51 +741,81 @@ async fn setup_task_mock_provider(
         )
         .route(
             "/v1/responses",
-            post({
-                let ws = workspace_clone.clone();
-                move |headers: HeaderMap, body: axum::body::Bytes| {
-                    let ws = ws.clone();
-                    async move { handle_family_responses(family, headers, body, ws).await }
-                }
+            post(move |headers: HeaderMap, body: axum::body::Bytes| {
+                let ws = ws_clone1.clone();
+                let cap = cap_clone1.clone();
+                async move { handle_family_responses(family, headers, body, ws, cap).await }
             }),
         )
         .route(
             "/v1/chat/completions",
-            post({
-                let ws = workspace_clone.clone();
-                move |headers: HeaderMap, body: axum::body::Bytes| {
-                    let ws = ws.clone();
-                    async move { handle_family_chat(family, headers, body, ws).await }
+            post(move |headers: HeaderMap, body: axum::body::Bytes| {
+                let ws = ws_clone2.clone();
+                let cap = cap_clone2.clone();
+                async move {
+                    handle_family_chat(
+                        family,
+                        headers,
+                        body,
+                        "/v1/chat/completions".to_string(),
+                        ws,
+                        cap,
+                    )
+                    .await
                 }
             }),
         )
         .route(
             "/chat/completions",
-            post({
-                let ws = workspace_clone.clone();
-                move |headers: HeaderMap, body: axum::body::Bytes| {
-                    let ws = ws.clone();
-                    async move { handle_family_chat(family, headers, body, ws).await }
+            post(move |headers: HeaderMap, body: axum::body::Bytes| {
+                let ws = ws_clone3.clone();
+                let cap = cap_clone3.clone();
+                async move {
+                    handle_family_chat(
+                        family,
+                        headers,
+                        body,
+                        "/chat/completions".to_string(),
+                        ws,
+                        cap,
+                    )
+                    .await
                 }
             }),
         )
         .route(
             "/deepseek/chat/completions",
-            post({
-                let ws = workspace_clone.clone();
-                move |headers: HeaderMap, body: axum::body::Bytes| {
-                    let ws = ws.clone();
-                    async move { handle_family_chat(family, headers, body, ws).await }
+            post(move |headers: HeaderMap, body: axum::body::Bytes| {
+                let ws = ws_clone4.clone();
+                let cap = cap_clone4.clone();
+                async move {
+                    handle_family_chat(
+                        family,
+                        headers,
+                        body,
+                        "/deepseek/chat/completions".to_string(),
+                        ws,
+                        cap,
+                    )
+                    .await
                 }
             }),
         )
         .route(
             "/deepseek/v1/chat/completions",
-            post({
-                let ws = workspace_clone.clone();
-                move |headers: HeaderMap, body: axum::body::Bytes| {
-                    let ws = ws.clone();
-                    async move { handle_family_chat(family, headers, body, ws).await }
+            post(move |headers: HeaderMap, body: axum::body::Bytes| {
+                let ws = ws_clone5.clone();
+                let cap = cap_clone5.clone();
+                async move {
+                    handle_family_chat(
+                        family,
+                        headers,
+                        body,
+                        "/deepseek/v1/chat/completions".to_string(),
+                        ws,
+                        cap,
+                    )
+                    .await
                 }
             }),
         );
@@ -702,277 +831,447 @@ async fn setup_task_mock_provider(
 
 async fn handle_family_responses(
     family: TaskFamily,
-    _headers: HeaderMap,
-    _body: axum::body::Bytes,
-    workspace: Arc<PathBuf>,
-) -> Response {
-    // Apply code repair/implementation directly in the workspace based on task family
-    match family {
-        TaskFamily::F1BugFixing => {
-            fs::write(
-                workspace.join("math_ops.py"),
-                r#"# math_ops.py - repaired
-def divide_or_fallback(a, b, fallback=0.0):
-    if b == 0:
-        return fallback
-    return a / b
-
-def safe_mean(numbers):
-    if not numbers:
-        return 0.0
-    return sum(numbers) / len(numbers)
-"#,
-            )
-            .unwrap();
-        }
-        TaskFamily::F2Refactoring => {
-            fs::write(
-                workspace.join("string_utils.py"),
-                r#"# string_utils.py - refactored
-def _truncate_with_ellipsis(text, max_len):
-    if len(text) > max_len:
-        return text[:max_len-3] + "..."
-    return text
-
-def format_header(title, max_len=20):
-    cleaned = title.strip()
-    truncated = _truncate_with_ellipsis(cleaned, max_len)
-    if truncated.endswith("..."):
-        return truncated
-    return truncated.upper()
-
-def format_footer(note, max_len=20):
-    cleaned = note.strip()
-    truncated = _truncate_with_ellipsis(cleaned, max_len)
-    if truncated.endswith("..."):
-        return truncated
-    return truncated.lower()
-"#,
-            )
-            .unwrap();
-        }
-        TaskFamily::F3FeatureImplementation => {
-            fs::write(
-                workspace.join("cache.py"),
-                r#"# cache.py - implemented
-class CachedStore:
-    def __init__(self, backing_store):
-        self.backing_store = backing_store
-        self.cache = {}
-    def get(self, k):
-        if k in self.cache:
-            return self.cache[k]
-        val = self.backing_store.get(k)
-        if val is not None:
-            self.cache[k] = val
-        return val
-    def put(self, k, v):
-        self.cache[k] = v
-        self.backing_store.put(k, v)
-"#,
-            )
-            .unwrap();
-        }
-        TaskFamily::F4Tdd => {
-            fs::write(
-                workspace.join("validator.py"),
-                r#"# validator.py - implemented
-def validate_registration(username, email, age):
-    if not username or not username.strip():
-        return False
-    if "@" not in email or "." not in email:
-        return False
-    if age < 18 or age > 120:
-        return False
-    return True
-"#,
-            )
-            .unwrap();
-        }
-        TaskFamily::F5InvestigationRecovery => {
-            fs::write(
-                workspace.join("pipeline.py"),
-                r#"# pipeline.py - recovered
-def run_pipeline(records):
-    filtered = [r for r in records if r.get("score", 0) >= 70]
-    return sorted(filtered, key=lambda r: r.get("score", 0), reverse=True)
-"#,
-            )
-            .unwrap();
-        }
-    }
-
-    let text = format!("Task {} step executed successfully.", family.code());
-    let events = [
-        json!({"type": "response.created", "response": {"id": "resp_cw114", "status": "in_progress"}}),
-        json!({"type": "response.output_item.added", "output_index": 0, "item": {"id": "msg_cw114", "type": "message", "role": "assistant", "content": []}}),
-        json!({"type": "response.content_part.added", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": ""}}),
-        json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": text}),
-        json!({"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": text}),
-        json!({"type": "response.content_part.done", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": text}}),
-        json!({"type": "response.output_item.done", "output_index": 0, "item": {"id": "msg_cw114", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}}),
-        json!({"type": "response.completed", "response": {"id": "resp_cw114", "status": "completed", "output": [{"id": "msg_cw114", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}], "usage": {"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}}}),
-    ];
-
-    let mut sse_body = String::new();
-    for ev in events {
-        sse_body.push_str(&format!(
-            "data: {}\n\n",
-            serde_json::to_string(&ev).unwrap()
-        ));
-    }
-    sse_body.push_str("data: [DONE]\n\n");
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("content-type", "text/event-stream")
-        .header("cache-control", "no-cache")
-        .body(Body::from(sse_body))
-        .unwrap()
-}
-
-async fn handle_family_chat(
-    family: TaskFamily,
-    _headers: HeaderMap,
+    headers: HeaderMap,
     body: axum::body::Bytes,
     workspace: Arc<PathBuf>,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
 ) -> Response {
-    // Apply workspace file updates
-    match family {
-        TaskFamily::F1BugFixing => {
-            fs::write(
-                workspace.join("math_ops.py"),
-                r#"def divide_or_fallback(a, b, fallback=0.0):
-    if b == 0:
-        return fallback
-    return a / b
-
-def safe_mean(numbers):
-    if not numbers:
-        return 0.0
-    return sum(numbers) / len(numbers)
-"#,
-            )
-            .unwrap();
-        }
-        TaskFamily::F2Refactoring => {
-            fs::write(
-                workspace.join("string_utils.py"),
-                r#"def _truncate_with_ellipsis(text, max_len):
-    if len(text) > max_len:
-        return text[:max_len-3] + "..."
-    return text
-
-def format_header(title, max_len=20):
-    cleaned = title.strip()
-    truncated = _truncate_with_ellipsis(cleaned, max_len)
-    if truncated.endswith("..."):
-        return truncated
-    return truncated.upper()
-
-def format_footer(note, max_len=20):
-    cleaned = note.strip()
-    truncated = _truncate_with_ellipsis(cleaned, max_len)
-    if truncated.endswith("..."):
-        return truncated
-    return truncated.lower()
-"#,
-            )
-            .unwrap();
-        }
-        TaskFamily::F3FeatureImplementation => {
-            fs::write(
-                workspace.join("cache.py"),
-                r#"class CachedStore:
-    def __init__(self, backing_store):
-        self.backing_store = backing_store
-        self.cache = {}
-    def get(self, k):
-        if k in self.cache:
-            return self.cache[k]
-        val = self.backing_store.get(k)
-        if val is not None:
-            self.cache[k] = val
-        return val
-    def put(self, k, v):
-        self.cache[k] = v
-        self.backing_store.put(k, v)
-"#,
-            )
-            .unwrap();
-        }
-        TaskFamily::F4Tdd => {
-            fs::write(
-                workspace.join("validator.py"),
-                r#"def validate_registration(username, email, age):
-    if not username or not username.strip():
-        return False
-    if "@" not in email or "." not in email:
-        return False
-    if age < 18 or age > 120:
-        return False
-    return True
-"#,
-            )
-            .unwrap();
-        }
-        TaskFamily::F5InvestigationRecovery => {
-            fs::write(
-                workspace.join("pipeline.py"),
-                r#"def run_pipeline(records):
-    filtered = [r for r in records if r.get("score", 0) >= 70]
-    return sorted(filtered, key=lambda r: r.get("score", 0), reverse=True)
-"#,
-            )
-            .unwrap();
-        }
-    }
-
     let json_val = serde_json::from_slice::<Value>(&body).ok();
-    let is_stream = json_val
-        .as_ref()
-        .and_then(|v| v.get("stream"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
 
-    if is_stream {
-        let chunks = [
-            json!({"id": "cmpl-cw114", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "Executing step for "}, "finish_reason": null}]}),
-            json!({"id": "cmpl-cw114", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {"content": family.code()}, "finish_reason": null}]}),
-            json!({"id": "cmpl-cw114", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 100, "completion_tokens": 20}}),
+    captured.lock().unwrap().push(CapturedRequest {
+        path: "/v1/responses".to_string(),
+        headers: headers.clone(),
+        body: body.to_vec(),
+        json_body: json_val.clone(),
+    });
+
+    let (filename, content) = family_tool_action(family);
+    let target_file = workspace.join(filename);
+
+    let has_tool_output = json_val.as_ref().is_some_and(|payload| {
+        payload
+            .get("input")
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                })
+            })
+    });
+
+    let file_already_repaired = target_file.exists()
+        && fs::read_to_string(&target_file)
+            .map(|s| {
+                s.contains("repaired by tool")
+                    || s.contains("refactored by tool")
+                    || s.contains("implemented by tool")
+                    || s.contains("recovered by tool")
+            })
+            .unwrap_or(false);
+
+    if !file_already_repaired && !has_tool_output {
+        let call_id = format!(
+            "call_{}",
+            &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
+        );
+        let hex_content: String = content
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        let cmd = format!(
+            "python3 -c \"import os; open('env_check.txt', 'w').write(os.environ.get('CW_CONTROL_TOKEN', 'ABSENT')); open('{}', 'wb').write(bytes.fromhex('{}'))\"",
+            filename, hex_content
+        );
+        let args = serde_json::to_string(&json!({"cmd": cmd})).unwrap();
+
+        let events = [
+            json!({"type": "response.created", "response": {"id": format!("resp_{call_id}"), "status": "in_progress"}}),
+            json!({"type": "response.output_item.added", "output_index": 0, "item": {"id": format!("fc_{call_id}"), "type": "function_call", "call_id": call_id, "name": "exec_command", "arguments": ""}}),
+            json!({"type": "response.function_call_arguments.delta", "output_index": 0, "call_id": call_id, "delta": args}),
+            json!({"type": "response.function_call_arguments.done", "output_index": 0, "call_id": call_id, "arguments": args}),
+            json!({"type": "response.output_item.done", "output_index": 0, "item": {"id": format!("fc_{call_id}"), "type": "function_call", "call_id": call_id, "name": "exec_command", "arguments": args}}),
+            json!({"type": "response.completed", "response": {"id": format!("resp_{call_id}"), "status": "completed", "output": [{"id": format!("fc_{call_id}"), "type": "function_call", "call_id": call_id, "name": "exec_command", "arguments": args}], "usage": {"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}}}),
         ];
 
         let mut sse_body = String::new();
-        for c in chunks {
-            sse_body.push_str(&format!("data: {}\n\n", serde_json::to_string(&c).unwrap()));
+        for ev in events {
+            sse_body.push_str(&format!(
+                "data: {}\n\n",
+                serde_json::to_string(&ev).unwrap()
+            ));
         }
         sse_body.push_str("data: [DONE]\n\n");
 
         Response::builder()
             .status(StatusCode::OK)
             .header("content-type", "text/event-stream")
+            .header("cache-control", "no-cache")
             .body(Body::from(sse_body))
             .unwrap()
     } else {
-        Json(json!({
-            "id": "chatcmpl-cw114",
-            "object": "chat.completion",
-            "created": Utc::now().timestamp(),
-            "model": "mock-model",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": format!("Step executed for {}", family.code())},
-                "finish_reason": "stop"
-            }],
-            "usage": {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
-        }))
-        .into_response()
+        let text = format!(
+            "Task {} step executed and verified successfully.",
+            family.code()
+        );
+        let events = [
+            json!({"type": "response.created", "response": {"id": "resp_done", "status": "in_progress"}}),
+            json!({"type": "response.output_item.added", "output_index": 0, "item": {"id": "msg_done", "type": "message", "role": "assistant", "content": []}}),
+            json!({"type": "response.content_part.added", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": ""}}),
+            json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": text}),
+            json!({"type": "response.output_text.done", "output_index": 0, "content_index": 0, "text": text}),
+            json!({"type": "response.content_part.done", "output_index": 0, "content_index": 0, "part": {"type": "output_text", "text": text}}),
+            json!({"type": "response.output_item.done", "output_index": 0, "item": {"id": "msg_done", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}}),
+            json!({"type": "response.completed", "response": {"id": "resp_done", "status": "completed", "output": [{"id": "msg_done", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]}], "usage": {"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}}}),
+        ];
+
+        let mut sse_body = String::new();
+        for ev in events {
+            sse_body.push_str(&format!(
+                "data: {}\n\n",
+                serde_json::to_string(&ev).unwrap()
+            ));
+        }
+        sse_body.push_str("data: [DONE]\n\n");
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .header("cache-control", "no-cache")
+            .body(Body::from(sse_body))
+            .unwrap()
+    }
+}
+
+async fn handle_family_chat(
+    family: TaskFamily,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+    path: String,
+    workspace: Arc<PathBuf>,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
+) -> Response {
+    let json_val = serde_json::from_slice::<Value>(&body).ok();
+    let is_stream = json_val
+        .as_ref()
+        .and_then(|v| v.get("stream"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+
+    captured.lock().unwrap().push(CapturedRequest {
+        path,
+        headers: headers.clone(),
+        body: body.to_vec(),
+        json_body: json_val.clone(),
+    });
+
+    let (filename, content) = family_tool_action(family);
+    let target_file = workspace.join(filename);
+
+    let has_tool_res = json_val.as_ref().is_some_and(|payload| {
+        payload
+            .get("messages")
+            .and_then(Value::as_array)
+            .is_some_and(|msgs| {
+                msgs.iter()
+                    .any(|m| m.get("role").and_then(Value::as_str) == Some("tool"))
+            })
+    });
+
+    let file_already_repaired = target_file.exists()
+        && fs::read_to_string(&target_file)
+            .map(|s| {
+                s.contains("repaired by tool")
+                    || s.contains("refactored by tool")
+                    || s.contains("implemented by tool")
+                    || s.contains("recovered by tool")
+            })
+            .unwrap_or(false);
+
+    let is_omp = json_val.as_ref().is_some_and(|p| {
+        p.get("tools")
+            .and_then(Value::as_array)
+            .is_some_and(|tools| {
+                tools.iter().any(|t| {
+                    t.get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(Value::as_str)
+                        == Some("write")
+                })
+            })
+    });
+
+    if !file_already_repaired && !has_tool_res {
+        let call_id = format!(
+            "call_{}",
+            &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
+        );
+        let hex_content: String = content
+            .as_bytes()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        let cmd = format!(
+            "python3 -c \"import os; open('env_check.txt', 'w').write(os.environ.get('CW_CONTROL_TOKEN', 'ABSENT')); open('{}', 'wb').write(bytes.fromhex('{}'))\"",
+            filename, hex_content
+        );
+
+        let (tool_name, tc_args) = if is_omp {
+            (
+                "write",
+                json!({
+                    "path": filename,
+                    "content": content,
+                    "i": format!("repair {filename} for task"),
+                })
+                .to_string(),
+            )
+        } else {
+            (
+                "terminal",
+                json!({
+                    "command": cmd,
+                })
+                .to_string(),
+            )
+        };
+
+        if is_stream {
+            let chunks = [
+                json!({
+                    "id": format!("chatcmpl_{call_id}"),
+                    "object": "chat.completion.chunk",
+                    "created": Utc::now().timestamp(),
+                    "model": "mock-model",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "index": 0,
+                                "id": call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": tc_args,
+                                }
+                            }]
+                        },
+                        "finish_reason": null
+                    }]
+                }),
+                json!({
+                    "id": format!("chatcmpl_{call_id}"),
+                    "object": "chat.completion.chunk",
+                    "created": Utc::now().timestamp(),
+                    "model": "mock-model",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "tool_calls"
+                    }]
+                }),
+            ];
+
+            let mut sse_body = String::new();
+            for c in chunks {
+                sse_body.push_str(&format!("data: {}\n\n", serde_json::to_string(&c).unwrap()));
+            }
+            sse_body.push_str("data: [DONE]\n\n");
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .header("cache-control", "no-cache")
+                .body(Body::from(sse_body))
+                .unwrap()
+        } else {
+            Json(json!({
+                "id": format!("chatcmpl_{call_id}"),
+                "object": "chat.completion",
+                "created": Utc::now().timestamp(),
+                "model": "mock-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [{
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": tool_name,
+                                "arguments": tc_args,
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150}
+            }))
+            .into_response()
+        }
+    } else {
+        let msg = format!(
+            "Task {} step executed and verified successfully.",
+            family.code()
+        );
+        if is_stream {
+            let chunks = [
+                json!({
+                    "id": "chatcmpl_done",
+                    "object": "chat.completion.chunk",
+                    "created": Utc::now().timestamp(),
+                    "model": "mock-model",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {
+                            "role": "assistant",
+                            "content": msg
+                        },
+                        "finish_reason": null
+                    }]
+                }),
+                json!({
+                    "id": "chatcmpl_done",
+                    "object": "chat.completion.chunk",
+                    "created": Utc::now().timestamp(),
+                    "model": "mock-model",
+                    "choices": [{
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop"
+                    }],
+                    "usage": {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150}
+                }),
+            ];
+
+            let mut sse_body = String::new();
+            for c in chunks {
+                sse_body.push_str(&format!("data: {}\n\n", serde_json::to_string(&c).unwrap()));
+            }
+            sse_body.push_str("data: [DONE]\n\n");
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/event-stream")
+                .header("cache-control", "no-cache")
+                .body(Body::from(sse_body))
+                .unwrap()
+        } else {
+            Json(json!({
+                "id": "chatcmpl_done",
+                "object": "chat.completion",
+                "created": Utc::now().timestamp(),
+                "model": "mock-model",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": msg
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150}
+            }))
+            .into_response()
+        }
     }
 }
 
 // ============================================================================
 // 6. Harness Session Execution Engines (Codex, OMP, Hermes)
 // ============================================================================
+
+fn verify_captured_credentials_isolated(captured: &[CapturedRequest], control_token: &str) -> bool {
+    for req in captured {
+        if req.headers.contains_key("x-cw-control-token") {
+            return false;
+        }
+        for (name, val) in &req.headers {
+            if val
+                .as_bytes()
+                .windows(control_token.len())
+                .any(|w| w == control_token.as_bytes())
+            {
+                return false;
+            }
+            if name.as_str().to_lowercase().contains("control-token") {
+                return false;
+            }
+        }
+        if req
+            .body
+            .windows(control_token.len())
+            .any(|w| w == control_token.as_bytes())
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn verify_captured_tool_pairing(captured: &[CapturedRequest]) -> bool {
+    let mut found_pairing = false;
+    for req in captured {
+        if let Some(ref json) = req.json_body {
+            // Responses API format (Codex)
+            if let Some(input) = json.get("input").and_then(Value::as_array) {
+                let call_ids: HashSet<String> = input
+                    .iter()
+                    .filter(|item| {
+                        item.get("type").and_then(Value::as_str) == Some("function_call")
+                    })
+                    .filter_map(|item| {
+                        item.get("call_id")
+                            .and_then(Value::as_str)
+                            .map(|s| s.to_string())
+                    })
+                    .collect();
+                let output_call_ids: HashSet<String> = input
+                    .iter()
+                    .filter(|item| {
+                        item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                    })
+                    .filter_map(|item| {
+                        item.get("call_id")
+                            .and_then(Value::as_str)
+                            .map(|s| s.to_string())
+                    })
+                    .collect();
+                for cid in &call_ids {
+                    if output_call_ids.contains(cid) {
+                        found_pairing = true;
+                    }
+                }
+            }
+            // Chat Completions format (OMP and Hermes)
+            if let Some(messages) = json.get("messages").and_then(Value::as_array) {
+                let mut tool_call_ids = HashSet::new();
+                for msg in messages {
+                    if let Some(tcs) = msg.get("tool_calls").and_then(Value::as_array) {
+                        for tc in tcs {
+                            if let Some(id) = tc.get("id").and_then(Value::as_str) {
+                                tool_call_ids.insert(id.to_string());
+                            }
+                        }
+                    }
+                }
+                for msg in messages {
+                    if msg.get("role").and_then(Value::as_str) == Some("tool") {
+                        if let Some(id) = msg.get("tool_call_id").and_then(Value::as_str) {
+                            if tool_call_ids.contains(id) {
+                                found_pairing = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found_pairing
+}
 
 async fn execute_codex_session(
     codex_bin: &Path,
@@ -981,7 +1280,17 @@ async fn execute_codex_session(
     cw_session_id: &str,
     fixture: &WorkloadFixture,
     store: &CwStore,
+    family: TaskFamily,
+    repetition: usize,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
 ) -> SessionQualificationResult {
+    // Assert initial state fails acceptance tests (proving test harness sensitivity)
+    assert!(
+        !fixture.verify_acceptance_tests(),
+        "Fixture for {:?} must initially fail acceptance tests",
+        family
+    );
+
     let temp_home = std::env::temp_dir().join(format!("codex_home_{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&temp_home).unwrap();
 
@@ -992,7 +1301,6 @@ async fn execute_codex_session(
 
     // Checkpoint 1..4: Initial session
     for turn_idx in 1..=4 {
-        logical_turns += 1;
         let codex_bin = codex_bin.to_path_buf();
         let ws = fixture.workspace_dir.clone();
         let th = temp_home.clone();
@@ -1001,7 +1309,7 @@ async fn execute_codex_session(
         let pargs = proxy_args.clone();
         let tid_clone = thread_id.clone();
 
-        let output = tokio::time::timeout(
+        let output = match tokio::time::timeout(
             Duration::from_secs(120),
             tokio::task::spawn_blocking(move || {
                 let mut cmd = Command::new(codex_bin);
@@ -1020,7 +1328,7 @@ async fn execute_codex_session(
                     cmd.args([
                         "-m",
                         "mock-model",
-                        &format!("Turn {} initial prompt", turn_idx),
+                        &format!("Turn {} initial prompt for {}", turn_idx, family.code()),
                     ]);
                 } else {
                     cmd.args([
@@ -1052,17 +1360,83 @@ async fn execute_codex_session(
             }),
         )
         .await
-        .expect("Codex turn timed out after 120s")
-        .unwrap()
-        .expect("Failed to execute codex");
+        {
+            Ok(Ok(Ok(out))) => out,
+            Ok(Ok(Err(e))) => {
+                let _ = fs::remove_dir_all(&temp_home);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Codex CLI".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!("Failed to spawn codex on turn {turn_idx}: {e}")),
+                };
+            }
+            _ => {
+                let _ = fs::remove_dir_all(&temp_home);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Codex CLI".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!("Codex turn {turn_idx} timed out after 120s")),
+                };
+            }
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("Turn {} stdout:\n{}\nstderr:\n{}", turn_idx, stdout, stderr);
         if !output.status.success() {
-            eprintln!(
-                "Codex turn {} failed: {}\nstdout: {}",
-                turn_idx, stderr, stdout
-            );
+            let _ = fs::remove_dir_all(&temp_home);
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "Codex CLI".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "FAIL".to_string(),
+                logical_turns,
+                model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "Codex turn {turn_idx} failed: stderr={stderr}, stdout={stdout}"
+                )),
+            };
         }
 
         if turn_idx == 1 {
@@ -1075,10 +1449,62 @@ async fn execute_codex_session(
                     break;
                 }
             }
-        }
-    }
+            if thread_id.is_empty() {
+                let _ = fs::remove_dir_all(&temp_home);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Codex CLI".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(
+                        "Failed to extract thread_id from Codex turn 1".to_string(),
+                    ),
+                };
+            }
 
-    let resume_preserved = !thread_id.is_empty();
+            // Assert that harness tool execution passed the acceptance tests
+            if !fixture.verify_acceptance_tests() {
+                let _ = fs::remove_dir_all(&temp_home);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Codex CLI".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(
+                        "Acceptance tests failed after Codex turn 1 tool execution".to_string(),
+                    ),
+                };
+            }
+        }
+
+        logical_turns += 1;
+    }
 
     // Commit context overlay rule to ContextWatcher store before checkpoint 5
     store
@@ -1099,7 +1525,6 @@ async fn execute_codex_session(
 
     // Checkpoint 5..8: Resumed session with active overlay reapplication
     for turn_idx in 5..=8 {
-        logical_turns += 1;
         let codex_bin = codex_bin.to_path_buf();
         let ws = fixture.workspace_dir.clone();
         let th = temp_home.clone();
@@ -1108,7 +1533,7 @@ async fn execute_codex_session(
         let pargs = proxy_args.clone();
         let tid_clone = thread_id.clone();
 
-        let output = tokio::time::timeout(
+        let output = match tokio::time::timeout(
             Duration::from_secs(120),
             tokio::task::spawn_blocking(move || {
                 let mut cmd = Command::new(codex_bin);
@@ -1140,22 +1565,115 @@ async fn execute_codex_session(
             }),
         )
         .await
-        .expect("Codex resume turn timed out after 120s")
-        .unwrap()
-        .expect("Failed to execute resumed codex");
+        {
+            Ok(Ok(Ok(out))) => out,
+            Ok(Ok(Err(e))) => {
+                let _ = fs::remove_dir_all(&temp_home);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Codex CLI".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "Failed to spawn resumed codex on turn {turn_idx}: {e}"
+                    )),
+                };
+            }
+            _ => {
+                let _ = fs::remove_dir_all(&temp_home);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Codex CLI".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "Codex resume turn {turn_idx} timed out after 120s"
+                    )),
+                };
+            }
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("Turn {} stdout:\n{}\nstderr:\n{}", turn_idx, stdout, stderr);
         if !output.status.success() {
-            eprintln!(
-                "Codex resume turn {} failed: {}\nstdout: {}",
-                turn_idx, stderr, stdout
-            );
+            let _ = fs::remove_dir_all(&temp_home);
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "Codex CLI".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "FAIL".to_string(),
+                logical_turns,
+                model_requests: store.list_turns(cw_session_id).unwrap_or_default().len(),
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "Codex resume turn {turn_idx} failed: stderr={stderr}, stdout={stdout}"
+                )),
+            };
         }
+
+        logical_turns += 1;
     }
 
+    let all_sessions = store.list_sessions().unwrap_or_default();
+    eprintln!(
+        "All sessions in store: {:?}",
+        all_sessions.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
+    for s in &all_sessions {
+        let sturns = store.list_turns(&s.id).unwrap_or_default();
+        eprintln!("Session {}: {} turns", s.id, sturns.len());
+    }
     let turns = store.list_turns(cw_session_id).unwrap_or_default();
+    eprintln!(
+        "Turns for cw_session_id {}: count={}",
+        cw_session_id,
+        turns.len()
+    );
+    {
+        let cap = captured.lock().unwrap();
+        for (i, req) in cap.iter().enumerate() {
+            eprintln!("Mock captured req {}: headers={:?}", i, req.headers);
+        }
+    }
     let model_requests = turns.len();
+    let resume_preserved = !thread_id.is_empty() && logical_turns == 8;
 
     // Verify overlay presence on turns after commitment
     let overlay_applied = turns.iter().any(|t| {
@@ -1187,18 +1705,38 @@ async fn execute_codex_session(
         }
     }
 
+    // Check credential isolation:
+    // 1. Tool-level sandboxing: env_check.txt was written by tool and has "ABSENT"
+    let env_check_path = fixture.workspace_dir.join("env_check.txt");
+    let env_check_content = fs::read_to_string(&env_check_path).unwrap_or_default();
+    let tool_sandbox_clean = env_check_content.trim() == "ABSENT";
+
+    // 2. Proxy wire-level stripping: upstream captured requests have no control token
+    let cap_guard = captured.lock().unwrap();
+    let proxy_wire_clean = verify_captured_credentials_isolated(&cap_guard, control_token);
+    let credentials_isolated = tool_sandbox_clean && proxy_wire_clean;
+
+    // Verify tool pairing in captured requests
+    let tool_pairing_intact = verify_captured_tool_pairing(&cap_guard);
+    drop(cap_guard);
+
+    let acceptance_test_passed = fixture.verify_acceptance_tests();
+
     let _ = fs::remove_dir_all(&temp_home);
+
+    let protocol_reliability = resume_preserved
+        && overlay_applied
+        && credentials_isolated
+        && transcripts_unmodified
+        && stream_completion_clean;
+    let agentic_reliability = tool_pairing_intact && acceptance_test_passed && logical_turns == 8;
 
     SessionQualificationResult {
         session_id: cw_session_id.to_string(),
         harness: "Codex CLI".to_string(),
-        task_family: "".to_string(),
-        repetition: 0,
-        status: if resume_preserved
-            && overlay_applied
-            && transcripts_unmodified
-            && stream_completion_clean
-        {
+        task_family: family.name().to_string(),
+        repetition,
+        status: if protocol_reliability && agentic_reliability {
             "PASS".to_string()
         } else {
             "FAIL".to_string()
@@ -1208,11 +1746,13 @@ async fn execute_codex_session(
         resume_preserved,
         overlay_applied,
         overlay_reapplied_across_resume: overlay_applied,
-        tool_pairing_intact: true,
+        tool_pairing_intact,
         transcripts_unmodified,
-        credentials_isolated: true,
-        acceptance_test_passed: true,
+        credentials_isolated,
+        acceptance_test_passed,
         stream_completion_clean,
+        protocol_reliability,
+        agentic_reliability,
         failure_class: None,
     }
 }
@@ -1239,7 +1779,17 @@ async fn execute_omp_session(
     cw_session_id: &str,
     fixture: &WorkloadFixture,
     store: &CwStore,
+    family: TaskFamily,
+    repetition: usize,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
 ) -> SessionQualificationResult {
+    // Assert initial state fails acceptance tests (proving test harness sensitivity)
+    assert!(
+        !fixture.verify_acceptance_tests(),
+        "Fixture for {:?} must initially fail acceptance tests",
+        family
+    );
+
     let temp_agent_dir = std::env::temp_dir().join(format!("omp_agent_{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&temp_agent_dir).unwrap();
 
@@ -1277,7 +1827,6 @@ async fn execute_omp_session(
 
     // Checkpoints 1..4
     for turn_idx in 1..=4 {
-        logical_turns += 1;
         let omp_bin = omp_bin.to_path_buf();
         let ws = fixture.workspace_dir.clone();
         let th = temp_agent_dir.clone();
@@ -1286,14 +1835,14 @@ async fn execute_omp_session(
         let sid = cw_session_id.to_string();
         let nsid_clone = native_sid.clone();
 
-        let output = tokio::time::timeout(
+        let output = match tokio::time::timeout(
             Duration::from_secs(120),
             tokio::task::spawn_blocking(move || {
                 let mut cmd = Command::new(omp_bin);
                 if turn_idx == 1 {
                     cmd.args([
                         "-p",
-                        &format!("Turn {} initial prompt", turn_idx),
+                        &format!("Turn {} initial prompt for {}", turn_idx, family.code()),
                         "--model",
                         "cw-proxy/mock-model",
                         "-e",
@@ -1321,17 +1870,86 @@ async fn execute_omp_session(
             }),
         )
         .await
-        .expect("OMP turn timed out after 120s")
-        .unwrap()
-        .expect("Failed to execute omp");
+        {
+            Ok(Ok(Ok(out))) => out,
+            Ok(Ok(Err(e))) => {
+                let _ = fs::remove_dir_all(&temp_agent_dir);
+                let _ = fs::remove_dir_all(&token_dir);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "OMP".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!("Failed to spawn OMP on turn {turn_idx}: {e}")),
+                };
+            }
+            _ => {
+                let _ = fs::remove_dir_all(&temp_agent_dir);
+                let _ = fs::remove_dir_all(&token_dir);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "OMP".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!("OMP turn {turn_idx} timed out after 120s")),
+                };
+            }
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("Turn {} stdout:\n{}\nstderr:\n{}", turn_idx, stdout, stderr);
         if !output.status.success() {
-            eprintln!(
-                "OMP turn {} failed: {}\nstdout: {}",
-                turn_idx, stderr, stdout
-            );
+            let _ = fs::remove_dir_all(&temp_agent_dir);
+            let _ = fs::remove_dir_all(&token_dir);
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "OMP".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "FAIL".to_string(),
+                logical_turns,
+                model_requests: 0,
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "OMP turn {turn_idx} failed: stderr={stderr}, stdout={stdout}"
+                )),
+            };
         }
 
         if turn_idx == 1 {
@@ -1340,9 +1958,20 @@ async fn execute_omp_session(
             if session_dir.exists() {
                 let session_files = find_jsonl_files(&session_dir);
                 if let Some(session_file) = session_files.first() {
-                    let stem = session_file.file_stem().unwrap().to_str().unwrap();
-                    if let Some(uuid_part) = stem.split('_').nth(1) {
-                        native_sid = uuid_part.to_string();
+                    if let Ok(content) = fs::read_to_string(session_file) {
+                        if let Some(first_line) = content.lines().next() {
+                            if let Ok(val) = serde_json::from_str::<Value>(first_line) {
+                                if let Some(sid) = val.get("id").and_then(Value::as_str) {
+                                    native_sid = sid.to_string();
+                                }
+                            }
+                        }
+                    }
+                    if native_sid.is_empty() {
+                        let stem = session_file.file_stem().unwrap().to_str().unwrap();
+                        if let Some(uuid_part) = stem.split('_').nth(1) {
+                            native_sid = uuid_part.to_string();
+                        }
                     }
                 }
             }
@@ -1355,10 +1984,64 @@ async fn execute_omp_session(
                     .unwrap_or("")
                     .to_string();
             }
+            // CRITICAL: Do NOT invent an ID fallback. Fail qualification if native session ID cannot be recovered.
             if native_sid.is_empty() {
-                native_sid = format!("omp_sess_{}", &uuid::Uuid::new_v4().to_string()[..8]);
+                let _ = fs::remove_dir_all(&temp_agent_dir);
+                let _ = fs::remove_dir_all(&token_dir);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "OMP".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "Failed to recover native OMP session ID from session files or stdout:\n{stdout}"
+                    )),
+                };
+            }
+
+            // Assert that harness tool execution passed the acceptance tests
+            if !fixture.verify_acceptance_tests() {
+                let _ = fs::remove_dir_all(&temp_agent_dir);
+                let _ = fs::remove_dir_all(&token_dir);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "OMP".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(
+                        "Acceptance tests failed after OMP turn 1 tool execution".to_string(),
+                    ),
+                };
             }
         }
+
+        logical_turns += 1;
     }
 
     let canonical_sid = format!("omp_{native_sid}");
@@ -1393,7 +2076,6 @@ async fn execute_omp_session(
 
     // Checkpoints 5..8
     for turn_idx in 5..=8 {
-        logical_turns += 1;
         let omp_bin = omp_bin.to_path_buf();
         let ws = fixture.workspace_dir.clone();
         let th = temp_agent_dir.clone();
@@ -1402,7 +2084,7 @@ async fn execute_omp_session(
         let sid = cw_session_id.to_string();
         let nsid_clone = native_sid.clone();
 
-        let output = tokio::time::timeout(
+        let output = match tokio::time::timeout(
             Duration::from_secs(120),
             tokio::task::spawn_blocking(move || {
                 let mut cmd = Command::new(omp_bin);
@@ -1425,31 +2107,92 @@ async fn execute_omp_session(
             }),
         )
         .await
-        .expect("OMP resume turn timed out after 120s")
-        .unwrap()
-        .expect("Failed to execute resumed omp");
+        {
+            Ok(Ok(Ok(out))) => out,
+            Ok(Ok(Err(e))) => {
+                let _ = fs::remove_dir_all(&temp_agent_dir);
+                let _ = fs::remove_dir_all(&token_dir);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "OMP".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "Failed to spawn resumed OMP on turn {turn_idx}: {e}"
+                    )),
+                };
+            }
+            _ => {
+                let _ = fs::remove_dir_all(&temp_agent_dir);
+                let _ = fs::remove_dir_all(&token_dir);
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "OMP".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!("OMP resume turn {turn_idx} timed out after 120s")),
+                };
+            }
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("Turn {} stdout:\n{}\nstderr:\n{}", turn_idx, stdout, stderr);
         if !output.status.success() {
-            eprintln!(
-                "OMP resume turn {} failed: {}\nstdout: {}",
-                turn_idx, stderr, stdout
-            );
+            let _ = fs::remove_dir_all(&temp_agent_dir);
+            let _ = fs::remove_dir_all(&token_dir);
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "OMP".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "FAIL".to_string(),
+                logical_turns,
+                model_requests: 0,
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "OMP resume turn {turn_idx} failed: stderr={stderr}, stdout={stdout}"
+                )),
+            };
         }
-    }
 
-    eprintln!("store sessions: {:?}", store.list_sessions());
-    eprintln!(
-        "turns for cw_session_id {}: {}",
-        cw_session_id,
-        store.list_turns(cw_session_id).unwrap_or_default().len()
-    );
-    eprintln!(
-        "turns for canonical_sid {}: {}",
-        canonical_sid,
-        store.list_turns(&canonical_sid).unwrap_or_default().len()
-    );
+        logical_turns += 1;
+    }
 
     let all_sessions = store.list_sessions().unwrap_or_default();
     let mut all_turns = Vec::new();
@@ -1458,12 +2201,10 @@ async fn execute_omp_session(
     }
 
     let model_requests = all_turns.len();
+    let resume_preserved = !native_sid.is_empty() && logical_turns == 8;
+
     let overlay_applied = all_turns.iter().any(|t| {
         let payload = store.get_turn_mutated_payload(&t.id).unwrap();
-        eprintln!(
-            "Turn {} (session {}) mutated payload: {:?}",
-            t.id, t.session_id, payload
-        );
         payload
             .map(|p| {
                 serde_json::to_string(&p)
@@ -1473,29 +2214,59 @@ async fn execute_omp_session(
             .unwrap_or(false)
     });
 
+    // Check transcript immutability: scan temp_agent_dir for .jsonl session files
+    let mut transcripts_unmodified = true;
+    for file in find_jsonl_files(&temp_agent_dir) {
+        if let Ok(content) = fs::read_to_string(&file) {
+            if content.contains("CW114_POLICY_ACTIVE") {
+                transcripts_unmodified = false;
+            }
+        }
+    }
+
+    let cap_guard = captured.lock().unwrap();
+    let credentials_isolated = verify_captured_credentials_isolated(&cap_guard, control_token);
+    let tool_pairing_intact = verify_captured_tool_pairing(&cap_guard);
+    drop(cap_guard);
+
+    let stream_completion_clean = all_turns
+        .iter()
+        .all(|t| t.outcome.as_deref() == Some("completed"));
+
+    let acceptance_test_passed = fixture.verify_acceptance_tests();
+
     let _ = fs::remove_dir_all(&temp_agent_dir);
     let _ = fs::remove_dir_all(&token_dir);
+
+    let protocol_reliability = resume_preserved
+        && overlay_applied
+        && credentials_isolated
+        && transcripts_unmodified
+        && stream_completion_clean;
+    let agentic_reliability = tool_pairing_intact && acceptance_test_passed && logical_turns == 8;
 
     SessionQualificationResult {
         session_id: cw_session_id.to_string(),
         harness: "OMP".to_string(),
-        task_family: "".to_string(),
-        repetition: 0,
-        status: if overlay_applied {
+        task_family: family.name().to_string(),
+        repetition,
+        status: if protocol_reliability && agentic_reliability {
             "PASS".to_string()
         } else {
             "FAIL".to_string()
         },
         logical_turns,
         model_requests,
-        resume_preserved: true,
+        resume_preserved,
         overlay_applied,
         overlay_reapplied_across_resume: overlay_applied,
-        tool_pairing_intact: true,
-        transcripts_unmodified: true,
-        credentials_isolated: true,
-        acceptance_test_passed: true,
-        stream_completion_clean: true,
+        tool_pairing_intact,
+        transcripts_unmodified,
+        credentials_isolated,
+        acceptance_test_passed,
+        stream_completion_clean,
+        protocol_reliability,
+        agentic_reliability,
         failure_class: None,
     }
 }
@@ -1507,8 +2278,126 @@ async fn execute_hermes_session(
     cw_session_id: &str,
     fixture: &WorkloadFixture,
     store: &CwStore,
+    family: TaskFamily,
+    repetition: usize,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
 ) -> SessionQualificationResult {
-    let temp_token_file = std::env::temp_dir().join(format!("cw_token_{}", uuid::Uuid::new_v4()));
+    // Assert initial state fails acceptance tests (proving test harness sensitivity)
+    assert!(
+        !fixture.verify_acceptance_tests(),
+        "Fixture for {:?} must initially fail acceptance tests",
+        family
+    );
+
+    // Dedicated temporary isolated HERMES_HOME
+    let temp_hermes_home =
+        std::env::temp_dir().join(format!("hermes_home_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_hermes_home).unwrap();
+    let user_hermes = PathBuf::from("/home/gionag/.hermes");
+    if user_hermes.join("installs").exists() {
+        let _ = std::os::unix::fs::symlink(
+            user_hermes.join("installs"),
+            temp_hermes_home.join("installs"),
+        );
+    }
+    if user_hermes.join("tools").exists() {
+        let _ =
+            std::os::unix::fs::symlink(user_hermes.join("tools"), temp_hermes_home.join("tools"));
+    }
+
+    struct HermesCleanupGuard {
+        home: PathBuf,
+        trusted_dir: PathBuf,
+    }
+
+    impl Drop for HermesCleanupGuard {
+        fn drop(&mut self) {
+            let pid_file = self.home.join("gateway.pid");
+            if pid_file.exists() {
+                if let Ok(content) = fs::read_to_string(&pid_file) {
+                    if let Ok(pid) = content.trim().parse::<i32>() {
+                        let _ = std::process::Command::new("kill")
+                            .args(["-TERM", &pid.to_string()])
+                            .output();
+                    }
+                }
+            }
+            let _ = fs::remove_dir_all(&self.home);
+            let _ = fs::remove_dir_all(&self.trusted_dir);
+
+            // Always restore the user's hermes launchers to the stable home tools Python
+            for name in ["hermes", "hermes-acp"] {
+                let launcher_path = PathBuf::from(format!(
+                    "/home/gionag/.hermes/hermes-agent/.hermes/bin/{name}"
+                ));
+                if let Ok(content) = fs::read_to_string(&launcher_path) {
+                    if let Some(first_newline) = content.find('\n') {
+                        let rest = &content[first_newline + 1..];
+                        if let Some(second_newline) = rest.find('\n') {
+                            let tail = &rest[second_newline..];
+                            let fixed = format!(
+                                "#!/bin/sh\nexec /home/gionag/.hermes/tools/python-3.14.9+20261021-linux-x64/bin/python3 -I -c 'import os, re, sys{tail}"
+                            );
+                            let _ = fs::write(&launcher_path, fixed);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Dedicated temporary trusted directory for isolated qualification
+    let temp_trusted_dir =
+        std::env::temp_dir().join(format!("hermes_trusted_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_trusted_dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&temp_trusted_dir, fs::Permissions::from_mode(0o700));
+    }
+
+    let _guard = HermesCleanupGuard {
+        home: temp_hermes_home.clone(),
+        trusted_dir: temp_trusted_dir.clone(),
+    };
+
+    // Copy repo's context-watcher plugin into temp_hermes_home/plugins/context-watcher
+    let plugins_dir = temp_hermes_home.join("plugins");
+    let target_plugin_dir = plugins_dir.join("context-watcher");
+    fs::create_dir_all(&target_plugin_dir).unwrap();
+    let repo_plugin_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("plugins/hermes/context-watcher");
+    let _ = fs::copy(
+        repo_plugin_dir.join("__init__.py"),
+        target_plugin_dir.join("__init__.py"),
+    );
+    let _ = fs::copy(
+        repo_plugin_dir.join("plugin.yaml"),
+        target_plugin_dir.join("plugin.yaml"),
+    );
+
+    // Configure Hermes to enable context-watcher plugin and pass CW session and security variables into the client environment
+    let config_yaml = r#"
+plugins:
+  enabled:
+    - context-watcher
+  disabled: []
+terminal:
+  client_env_passthrough:
+    - CW_CONTROL_TOKEN_FILE
+    - CW_HERMES_OVERRIDE_FILE
+    - CW_HERMES_TRUSTED_DIR
+    - CW_SESSION_ID
+    - CW_WORKSPACE
+"#;
+    let _ = fs::write(temp_hermes_home.join("config.yaml"), config_yaml);
+    let hermes_home_str = temp_hermes_home.to_string_lossy().to_string();
+
+    let temp_token_file = temp_trusted_dir.join("control-token");
     fs::write(&temp_token_file, control_token).unwrap();
     #[cfg(unix)]
     {
@@ -1516,9 +2405,7 @@ async fn execute_hermes_session(
         let _ = fs::set_permissions(&temp_token_file, fs::Permissions::from_mode(0o600));
     }
     let token_path_str = temp_token_file.to_string_lossy().to_string();
-
-    let trusted_override_dir = PathBuf::from("/home/gionag/.local/share/context-watcher");
-    let _ = fs::create_dir_all(&trusted_override_dir);
+    let trusted_dir_str = temp_trusted_dir.to_string_lossy().to_string();
 
     let mut created_overrides = Vec::new();
     let mut native_sid = String::new();
@@ -1526,10 +2413,8 @@ async fn execute_hermes_session(
 
     // Checkpoints 1..4
     for turn_idx in 1..=4 {
-        logical_turns += 1;
         let override_uuid = uuid::Uuid::new_v4().to_string();
-        let override_path =
-            trusted_override_dir.join(format!("hermes-override-{override_uuid}.json"));
+        let override_path = temp_trusted_dir.join(format!("hermes-override-{override_uuid}.json"));
         let payload = json!({
             "session_id": cw_session_id,
             "workspace": fixture.workspace_dir.to_string_lossy(),
@@ -1547,10 +2432,11 @@ async fn execute_hermes_session(
         let ws = fixture.workspace_dir.clone();
         let tok = token_path_str.clone();
         let op = override_path.to_string_lossy().to_string();
-        let td = trusted_override_dir.to_string_lossy().to_string();
+        let td = trusted_dir_str.clone();
+        let hh = hermes_home_str.clone();
         let nsid_clone = native_sid.clone();
 
-        let output = tokio::time::timeout(
+        let output = match tokio::time::timeout(
             Duration::from_secs(120),
             tokio::task::spawn_blocking(move || {
                 let mut cmd = Command::new(hermes_bin);
@@ -1559,7 +2445,7 @@ async fn execute_hermes_session(
                         "chat",
                         "-Q",
                         "-q",
-                        &format!("Turn {} prompt", turn_idx),
+                        &format!("Turn {} initial prompt for {}", turn_idx, family.code()),
                         "--provider",
                         "custom",
                         "--base-url",
@@ -1570,6 +2456,7 @@ async fn execute_hermes_session(
                         "mock-model",
                         "--source",
                         "tool",
+                        "--yolo",
                     ]);
                 } else {
                     cmd.args([
@@ -1578,7 +2465,7 @@ async fn execute_hermes_session(
                         &nsid_clone,
                         "-Q",
                         "-q",
-                        &format!("Turn {} prompt", turn_idx),
+                        &format!("Turn {} follow-up prompt", turn_idx),
                         "--provider",
                         "custom",
                         "--base-url",
@@ -1589,10 +2476,12 @@ async fn execute_hermes_session(
                         "mock-model",
                         "--source",
                         "tool",
+                        "--yolo",
                     ]);
                 }
 
                 cmd.current_dir(&ws);
+                cmd.env("HERMES_HOME", &hh);
                 cmd.env("CW_CONTROL_TOKEN_FILE", &tok);
                 cmd.env("CW_HERMES_OVERRIDE_FILE", &op);
                 cmd.env("CW_HERMES_TRUSTED_DIR", &td);
@@ -1600,36 +2489,169 @@ async fn execute_hermes_session(
             }),
         )
         .await
-        .expect("Hermes turn timed out after 120s")
-        .unwrap()
-        .expect("Failed to execute hermes");
+        {
+            Ok(Ok(Ok(out))) => out,
+            Ok(Ok(Err(e))) => {
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Hermes Agent".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!("Failed to spawn Hermes on turn {turn_idx}: {e}")),
+                };
+            }
+            _ => {
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Hermes Agent".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!("Hermes turn {turn_idx} timed out after 120s")),
+                };
+            }
+        };
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {
-            eprintln!(
-                "Hermes turn {} failed: {}\nstdout: {}",
-                turn_idx, stderr, stdout
-            );
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "Hermes Agent".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "FAIL".to_string(),
+                logical_turns,
+                model_requests: 0,
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "Hermes turn {turn_idx} failed: stderr={stderr}, stdout={stdout}"
+                )),
+            };
         }
 
         if turn_idx == 1 {
             let combined = format!("{stdout}\n{stderr}");
             for line in combined.lines() {
-                if line.contains("session_id: ")
-                    || line.contains("Session: ")
-                    || line.contains("session: ")
-                {
-                    native_sid = line.split(':').nth(1).unwrap_or("").trim().to_string();
+                if let Some(pos) = line.find("session_id: ") {
+                    native_sid = line[pos + 12..].trim().to_string();
+                    if !native_sid.is_empty() {
+                        break;
+                    }
+                } else if let Some(pos) = line.find("Session: ") {
+                    native_sid = line[pos + 9..].trim().to_string();
+                    if !native_sid.is_empty() {
+                        break;
+                    }
+                } else if let Some(pos) = line.find("session: ") {
+                    native_sid = line[pos + 9..].trim().to_string();
                     if !native_sid.is_empty() {
                         break;
                     }
                 }
             }
             if native_sid.is_empty() {
-                native_sid = format!("hermes_sid_{}", &uuid::Uuid::new_v4().to_string()[..8]);
+                let sessions_dir = temp_hermes_home.join("sessions");
+                if let Ok(entries) = fs::read_dir(&sessions_dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                                native_sid = stem.to_string();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            // CRITICAL: Do NOT invent an ID fallback. Fail qualification if native session ID cannot be recovered.
+            if native_sid.is_empty() {
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Hermes Agent".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "Failed to recover native Hermes session ID from output:\n{combined}"
+                    )),
+                };
+            }
+
+            // Assert that harness tool execution passed the acceptance tests
+            if !fixture.verify_acceptance_tests() {
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Hermes Agent".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(
+                        "Acceptance tests failed after Hermes turn 1 tool execution".to_string(),
+                    ),
+                };
             }
         }
+
+        logical_turns += 1;
     }
 
     let _ = store.upsert_session(&Session {
@@ -1663,10 +2685,8 @@ async fn execute_hermes_session(
 
     // Checkpoints 5..8
     for turn_idx in 5..=8 {
-        logical_turns += 1;
         let override_uuid = uuid::Uuid::new_v4().to_string();
-        let override_path =
-            trusted_override_dir.join(format!("hermes-override-{override_uuid}.json"));
+        let override_path = temp_trusted_dir.join(format!("hermes-override-{override_uuid}.json"));
         let payload = json!({
             "session_id": cw_session_id,
             "workspace": fixture.workspace_dir.to_string_lossy(),
@@ -1684,10 +2704,11 @@ async fn execute_hermes_session(
         let ws = fixture.workspace_dir.clone();
         let tok = token_path_str.clone();
         let op = override_path.to_string_lossy().to_string();
-        let td = trusted_override_dir.to_string_lossy().to_string();
+        let td = trusted_dir_str.clone();
+        let hh = hermes_home_str.clone();
         let nsid_clone = native_sid.clone();
 
-        let output = tokio::time::timeout(
+        let output = match tokio::time::timeout(
             Duration::from_secs(120),
             tokio::task::spawn_blocking(move || {
                 let mut cmd = Command::new(hermes_bin);
@@ -1697,7 +2718,7 @@ async fn execute_hermes_session(
                     &nsid_clone,
                     "-Q",
                     "-q",
-                    &format!("Turn {} prompt", turn_idx),
+                    &format!("Turn {} resumed prompt", turn_idx),
                     "--provider",
                     "custom",
                     "--base-url",
@@ -1708,9 +2729,11 @@ async fn execute_hermes_session(
                     "mock-model",
                     "--source",
                     "tool",
+                    "--yolo",
                 ]);
 
                 cmd.current_dir(&ws);
+                cmd.env("HERMES_HOME", &hh);
                 cmd.env("CW_CONTROL_TOKEN_FILE", &tok);
                 cmd.env("CW_HERMES_OVERRIDE_FILE", &op);
                 cmd.env("CW_HERMES_TRUSTED_DIR", &td);
@@ -1718,22 +2741,112 @@ async fn execute_hermes_session(
             }),
         )
         .await
-        .expect("Hermes resume turn timed out after 120s")
-        .unwrap()
-        .expect("Failed to execute resumed hermes");
+        {
+            Ok(Ok(Ok(out))) => out,
+            Ok(Ok(Err(e))) => {
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Hermes Agent".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "Failed to spawn resumed Hermes on turn {turn_idx}: {e}"
+                    )),
+                };
+            }
+            _ => {
+                return SessionQualificationResult {
+                    session_id: cw_session_id.to_string(),
+                    harness: "Hermes Agent".to_string(),
+                    task_family: family.name().to_string(),
+                    repetition,
+                    status: "FAIL".to_string(),
+                    logical_turns,
+                    model_requests: 0,
+                    resume_preserved: false,
+                    overlay_applied: false,
+                    overlay_reapplied_across_resume: false,
+                    tool_pairing_intact: false,
+                    transcripts_unmodified: true,
+                    credentials_isolated: false,
+                    acceptance_test_passed: false,
+                    stream_completion_clean: false,
+                    protocol_reliability: false,
+                    agentic_reliability: false,
+                    failure_class: Some(format!(
+                        "Hermes resume turn {turn_idx} timed out after 120s"
+                    )),
+                };
+            }
+        };
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
         if !output.status.success() {
-            eprintln!(
-                "Hermes resume turn {} failed: {}\nstdout: {}",
-                turn_idx, stderr, stdout
-            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return SessionQualificationResult {
+                session_id: cw_session_id.to_string(),
+                harness: "Hermes Agent".to_string(),
+                task_family: family.name().to_string(),
+                repetition,
+                status: "FAIL".to_string(),
+                logical_turns,
+                model_requests: 0,
+                resume_preserved: false,
+                overlay_applied: false,
+                overlay_reapplied_across_resume: false,
+                tool_pairing_intact: false,
+                transcripts_unmodified: true,
+                credentials_isolated: false,
+                acceptance_test_passed: false,
+                stream_completion_clean: false,
+                protocol_reliability: false,
+                agentic_reliability: false,
+                failure_class: Some(format!(
+                    "Hermes resume turn {turn_idx} failed: stderr={stderr}, stdout={stdout}"
+                )),
+            };
         }
+
+        logical_turns += 1;
     }
 
+    let all_sessions = store.list_sessions().unwrap_or_default();
+    eprintln!(
+        "All sessions in store: {:?}",
+        all_sessions.iter().map(|s| &s.id).collect::<Vec<_>>()
+    );
+    for s in &all_sessions {
+        let sturns = store.list_turns(&s.id).unwrap_or_default();
+        eprintln!("Session {}: {} turns", s.id, sturns.len());
+    }
     let turns = store.list_turns(cw_session_id).unwrap_or_default();
+    eprintln!(
+        "Turns for cw_session_id {}: count={}",
+        cw_session_id,
+        turns.len()
+    );
+    {
+        let cap = captured.lock().unwrap();
+        for (i, req) in cap.iter().enumerate() {
+            eprintln!("Mock captured req {}: headers={:?}", i, req.headers);
+        }
+    }
     let model_requests = turns.len();
+    let resume_preserved = !native_sid.is_empty() && logical_turns == 8;
+
     let overlay_applied = turns.iter().any(|t| {
         store
             .get_turn_mutated_payload(&t.id)
@@ -1746,32 +2859,74 @@ async fn execute_hermes_session(
             .unwrap_or(false)
     });
 
-    let _ = fs::remove_file(&temp_token_file);
-    for op in created_overrides {
-        let _ = fs::remove_file(&op);
+    let cap_guard = captured.lock().unwrap();
+    let credentials_isolated = verify_captured_credentials_isolated(&cap_guard, control_token);
+    let tool_pairing_intact = verify_captured_tool_pairing(&cap_guard);
+    drop(cap_guard);
+
+    let stream_completion_clean = turns
+        .iter()
+        .all(|t| t.outcome.as_deref() == Some("completed"));
+
+    let acceptance_test_passed = fixture.verify_acceptance_tests();
+
+    // Check transcript immutability: scan temp_hermes_home for session files
+    let mut transcripts_unmodified = true;
+    if let Ok(entries) = fs::read_dir(temp_hermes_home.join("sessions")) {
+        for entry in entries.flatten() {
+            if entry.path().is_file() {
+                let content = fs::read_to_string(entry.path()).unwrap_or_default();
+                if content.contains("CW114_POLICY_ACTIVE") {
+                    transcripts_unmodified = false;
+                }
+            }
+        }
     }
+
+    let protocol_reliability = resume_preserved
+        && overlay_applied
+        && credentials_isolated
+        && transcripts_unmodified
+        && stream_completion_clean;
+    let agentic_reliability = tool_pairing_intact && acceptance_test_passed && logical_turns == 8;
 
     SessionQualificationResult {
         session_id: cw_session_id.to_string(),
         harness: "Hermes Agent".to_string(),
-        task_family: "".to_string(),
-        repetition: 0,
-        status: if overlay_applied {
+        task_family: family.name().to_string(),
+        repetition,
+        status: if protocol_reliability && agentic_reliability {
             "PASS".to_string()
         } else {
             "FAIL".to_string()
         },
         logical_turns,
         model_requests,
-        resume_preserved: true,
+        resume_preserved,
         overlay_applied,
         overlay_reapplied_across_resume: overlay_applied,
-        tool_pairing_intact: true,
-        transcripts_unmodified: true,
-        credentials_isolated: true,
-        acceptance_test_passed: true,
-        stream_completion_clean: true,
-        failure_class: None,
+        tool_pairing_intact,
+        transcripts_unmodified,
+        credentials_isolated,
+        acceptance_test_passed,
+        stream_completion_clean,
+        protocol_reliability,
+        agentic_reliability,
+        failure_class: if protocol_reliability && agentic_reliability {
+            None
+        } else {
+            Some(format!(
+                "Hermes checks failed: resume_preserved={}, overlay_applied={}, credentials_isolated={}, transcripts_unmodified={}, stream_completion_clean={}, tool_pairing_intact={}, acceptance_test_passed={}, logical_turns={}",
+                resume_preserved,
+                overlay_applied,
+                credentials_isolated,
+                transcripts_unmodified,
+                stream_completion_clean,
+                tool_pairing_intact,
+                acceptance_test_passed,
+                logical_turns
+            ))
+        },
     }
 }
 
@@ -1802,8 +2957,15 @@ async fn test_cw114_single_session_codex_deterministic() {
     let res = runner
         .run_session(HarnessTarget::Codex, TaskFamily::F1BugFixing, 1)
         .await;
-    assert_eq!(res.status, "PASS", "Codex F1 Bug Fixing session must pass");
+    assert_eq!(
+        res.status, "PASS",
+        "Codex F1 Bug Fixing session must pass: {:?}",
+        res.failure_class
+    );
+    assert!(res.protocol_reliability, "Protocol reliability must pass");
+    assert!(res.agentic_reliability, "Agentic reliability must pass");
     assert!(res.acceptance_test_passed, "Acceptance tests must pass");
+    assert!(res.tool_pairing_intact, "Tool pairing must be intact");
     assert!(res.overlay_applied, "Overlay must be applied");
 }
 
@@ -1817,8 +2979,15 @@ async fn test_cw114_single_session_omp_deterministic() {
     let res = runner
         .run_session(HarnessTarget::Omp, TaskFamily::F1BugFixing, 1)
         .await;
-    assert_eq!(res.status, "PASS", "OMP F1 Bug Fixing session must pass");
+    assert_eq!(
+        res.status, "PASS",
+        "OMP F1 Bug Fixing session must pass: {:?}",
+        res.failure_class
+    );
+    assert!(res.protocol_reliability, "Protocol reliability must pass");
+    assert!(res.agentic_reliability, "Agentic reliability must pass");
     assert!(res.acceptance_test_passed, "Acceptance tests must pass");
+    assert!(res.tool_pairing_intact, "Tool pairing must be intact");
     assert!(res.overlay_applied, "Overlay must be applied");
 }
 
@@ -1832,8 +3001,15 @@ async fn test_cw114_single_session_hermes_deterministic() {
     let res = runner
         .run_session(HarnessTarget::Hermes, TaskFamily::F1BugFixing, 1)
         .await;
-    assert_eq!(res.status, "PASS", "Hermes F1 Bug Fixing session must pass");
+    assert_eq!(
+        res.status, "PASS",
+        "Hermes F1 Bug Fixing session must pass: {:?}",
+        res.failure_class
+    );
+    assert!(res.protocol_reliability, "Protocol reliability must pass");
+    assert!(res.agentic_reliability, "Agentic reliability must pass");
     assert!(res.acceptance_test_passed, "Acceptance tests must pass");
+    assert!(res.tool_pairing_intact, "Tool pairing must be intact");
     assert!(res.overlay_applied, "Overlay must be applied");
 }
 

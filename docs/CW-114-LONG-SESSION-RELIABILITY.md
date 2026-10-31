@@ -34,6 +34,40 @@ Before initiating the long-session campaign, two critical recorder defects were 
 | **Premature EOF on HTTP 200** | P1 | If an SSE stream terminated cleanly at HTTP EOF without delivering a provider terminal event, `forwarding.rs` defaulted to `"completed"`. | Enforced `"stream_error"` when an SSE stream finishes without an explicit terminal outcome. Non-SSE responses continue to complete cleanly. | `test_sse_eof_without_terminal_event_records_stream_error`, `http_200_partial_sse_stream_eof_without_terminal_event_records_stream_error` |
 | **Premature Anthropic Stream Delta Termination** | P2 | In `Recorder::handle_sse_data_json`, encountering `stop_reason` in `message_delta` marked the turn completed before the required `message_stop` event arrived. Also partial frames (`event: message_stop` without body) could trigger premature completion. | Required explicit body receipt for `message_stop` and removed `stop_reason` as a completion trigger. | `test_anthropic_stop_reason_does_not_mark_completed_before_message_stop`, `test_incomplete_terminal_sse_frame_does_not_establish_completion` |
 
+### 2.1 Review Findings Remediation & Rigorous Harness Contracts
+
+Following initial qualification review, the test harness runner in `crates/cw-proxy/tests/long_session_reliability.rs` and the Hermes integration plugin in `plugins/hermes/context-watcher/__init__.py` were hardened against 6 critical qualification invariants:
+
+1. **Zero Provider-Side Filesystem Writes (Harness-Executed Tools Only):**
+   - In earlier mock implementations, the mock provider simulated task completion by writing solution files directly to disk.
+   - **Correction:** All source code edits, file creation, and environment inspection are now executed strictly through harness tool calls dispatched to the agent process:
+     - **Codex CLI:** Dispatches `exec_command` tool calls with inline python hex payloads executing within Codex's `workspace-write` sandbox.
+     - **OMP:** Dispatches `write` tool calls writing solution files into the workspace.
+     - **Hermes Agent:** Dispatches `terminal` tool calls (`python3 -c ...`) writing solution files into the workspace.
+   - 0 provider-side filesystem writes take place; 100% of modifications originate from real agent tool invocations.
+
+2. **Strict Verification of Every Checkpoint & Non-Zero Exit Detection:**
+   - The test runner asserts `output.status.success()` on every turn. If any harness process returns a non-zero exit code or times out, the session immediately fails.
+   - Acceptance tests are executed and asserted passing after every tool execution before the logical turn count is incremented.
+
+3. **Assertion-Derived Reliability Invariants (Zero Hardcoded Booleans):**
+   - `tool_pairing_intact`: Derived strictly from captured wire requests asserting that every `tool_call_id` in the prompt matches its corresponding tool result item without orphaned calls.
+   - `credentials_isolated`: Derived from inspecting all captured HTTP request headers (confirming `x-cw-control-token` and `control_token` values never reach the upstream provider) and verifying environment isolation in tool execution (confirming `CW_CONTROL_TOKEN` is excluded).
+   - `transcripts_unmodified`: Derived by inspecting session history files on disk and verifying that active mutations (e.g. `CW114_POLICY_ACTIVE`) were never written to disk transcripts.
+   - `resume_preserved`: Derived by asserting that the recovered native session ID is non-empty and logical turns reached 8 under the resumed session.
+   - `overlay_applied`: Derived by querying SQLite turn storage via `store.get_turn_mutated_payload(&turn_id)` to verify the transformed payload contains the committed overlay.
+   - `stream_completion_clean`: Derived by verifying that every turn in the store recorded `outcome == "completed"`.
+
+4. **Zero Invented Session ID Fallbacks:**
+   - If a native session ID cannot be recovered from harness output, the qualification runner immediately fails qualification (`status: "FAIL"`) with an explicit failure class rather than falling back to an invented ID.
+
+5. **Isolated Temporary Directories & Fixture Credentials:**
+   - Control tokens are generated into a dedicated temporary file (`0o600` permissions) under an isolated trusted directory (`temp_trusted_dir`), completely isolated from real user directories (`~/.local/share/context-watcher/control-token`).
+   - Hermes execution uses a temporary isolated `HERMES_HOME` and trusted directory, with RAII cleanup (`HermesCleanupGuard`) guaranteeing gateway termination, directory removal, and launcher integrity restoration.
+
+6. **Consistent Tested Codex Version:**
+   - Codex CLI is recorded consistently as `codex-cli 0.166.0` across the qualification report and `docs/HARNESS_MATRIX.md`.
+
 ---
 
 ## 3. Workload Task Family Specifications

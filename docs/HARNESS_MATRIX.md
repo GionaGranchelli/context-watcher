@@ -21,7 +21,7 @@ Every harness integration is categorized according to four qualification tiers:
 
 | Harness | Core Proxy Verified | Harness Binary Verified | Real-Provider Verified | Live Optimization Status | Active Blocker / Target |
 |---|:---:|:---:|:---:|:---:|---|
-| **Codex CLI (`0.165.0`)** | 🟢 Verified | 🟢 Verified (3-Turn Native Resume & Overlays) | 🟢 Verified (`gpt-4o-mini` multi-turn live continuation) | 🟢 Supported (Responses API) | Qualified in CW-112 & CW-114 |
+| **Codex CLI (`0.166.0`)** | 🟢 Verified | 🟢 Verified (3-Turn Native Resume & Overlays) | 🟢 Verified (`gpt-4o-mini` multi-turn live continuation) | 🟢 Supported (Responses API) | Qualified in CW-112 & CW-114 |
 | **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume & concurrency hardened) | 🟡 Opt-in Suite C | 🟢 Supported (OpenAI / DeepSeek middleware) | Qualified in CW-113 & CW-114 |
 | **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | Qualified in CW-111B & CW-114 |
 
@@ -29,7 +29,7 @@ Every harness integration is categorized according to four qualification tiers:
 
 ## 3. The 10 Acceptance Criteria Matrix
 
-| # | Acceptance Criterion | Required Invariant | Codex CLI (`0.165.0`) | Hermes Agent (`0.22.5`) | OMP / Oh My Pi (`18.12.6`) |
+| # | Acceptance Criterion | Required Invariant | Codex CLI (`0.166.0`) | Hermes Agent (`0.22.5`) | OMP / Oh My Pi (`18.12.6`) |
 |---|---|---|:---:|:---:|:---:|
 | **AC1** | **Session Identity & Binding** | Correct session bound across multi-turn and resume without crossover | 🟢 **Harness Binary Verified**<br>`x-cw-session-id` header via custom model provider | 🟢 **Harness Binary Verified (Concurrency Hardened)**<br>Native `local-...` session bound across turn 1 and `--resume` turn 2; concurrent launches isolated via UUID-scoped handoff files (`CW_HERMES_OVERRIDE_FILE`) and per-session gateway tracking (CW-113) | 🟢 **Harness Binary Verified**<br>Session identity bound via `CW_SESSION_ID` / `sessionManager.getSessionId()`; control token read from 0600 file |
 | **AC2** | **Committed Overlay Reapplication** | Overlays committed on turn $N$ apply to outbound model payload on turn $N+1$ | 🟢 **Harness Binary Verified**<br>Multi-turn test confirms `PinContext` applied to turn 2 Responses `input` array | 🟢 **Harness Binary Verified**<br>Turn 2 `--resume` outbound Chat Completions payload contains committed `PinContext` policy | 🟢 **Harness Binary Verified**<br>Native `context` hook intercepts in-memory messages, queries `/transform`, and injects committed overlays into outbound prompt |
@@ -46,7 +46,7 @@ Every harness integration is categorized according to four qualification tiers:
 
 ## 4. Per-Harness Architecture & Verified Baselines
 
-### 4.1 Codex CLI (`0.165.0`) — Reference Implementation
+### 4.1 Codex CLI (`0.166.0`) — Reference Implementation
 * **Status:** **Harness Binary Verified (3-Turn Native Resume & Overlays Qualified)** · Completed in CW-112 (see [CW-112-CODEX-QUALIFICATION.md](CW-112-CODEX-QUALIFICATION.md)).
 * **Wire Protocol:** OpenAI Responses API (`/openai/v1/responses`) with streaming Server-Sent Events (`text/event-stream`).
 * **Session Transport:** Native provider config arguments:

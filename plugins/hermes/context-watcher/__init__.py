@@ -37,11 +37,6 @@ def _data_dir():
 
 def _trusted_override_dirs():
     dirs = []
-    try:
-        dirs.append(_data_dir().resolve())
-    except Exception:
-        dirs.append(_data_dir())
-
     # Allow explicitly configured trusted test directories for isolated qualification
     test_dirs = os.environ.get("CW_HERMES_TRUSTED_DIR") or os.environ.get("CW_TEST_OVERRIDE_DIR")
     if test_dirs:
@@ -51,6 +46,11 @@ def _trusted_override_dirs():
                     dirs.append(Path(p.strip()).resolve())
                 except Exception:
                     pass
+
+    try:
+        dirs.append(_data_dir().resolve())
+    except Exception:
+        dirs.append(_data_dir())
     return dirs
 
 
@@ -261,18 +261,98 @@ def on_session_terminated(**kwargs):
     """Lifecycle hook: clear cached binding when a Hermes session terminates or resets."""
     sid = kwargs.get("session_id") or kwargs.get("old_session_id")
     if sid:
-        _SESSION_OVERRIDES.pop(str(sid), None)
+        sid_str = str(sid)
+        _SESSION_OVERRIDES.pop(sid_str, None)
+        for trusted_dir in _trusted_override_dirs():
+            binding_path = trusted_dir / f"hermes-binding-{sid_str}.json"
+            try:
+                if binding_path.exists():
+                    os.unlink(str(binding_path))
+            except OSError:
+                pass
+
+
+def _session_binding_path(hermes_sid):
+    if not _valid_session_id(hermes_sid):
+        return None
+    trusted_dirs = _trusted_override_dirs()
+    if not trusted_dirs:
+        return None
+    return trusted_dirs[0] / f"hermes-binding-{hermes_sid}.json"
+
+
+def _save_persisted_session_override(hermes_sid, cw_sid, workspace):
+    path = _session_binding_path(hermes_sid)
+    if path is None:
+        return
+    payload = json.dumps({"session_id": cw_sid, "workspace": workspace, "ts": time.time()})
+    path_str = str(path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path_str, flags, 0o600)
+    except OSError:
+        return
+    try:
+        os.write(fd, payload.encode("utf-8"))
+    finally:
+        os.close(fd)
+
+
+def _load_persisted_session_override(hermes_sid):
+    if not _valid_session_id(hermes_sid):
+        return None
+    for trusted_dir in _trusted_override_dirs():
+        path = trusted_dir / f"hermes-binding-{hermes_sid}.json"
+        if not path.exists():
+            continue
+        path_str = str(path)
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            fd = os.open(path_str, flags)
+        except OSError:
+            continue
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            if hasattr(os, "getuid") and st.st_uid != os.getuid():
+                continue
+            if os.name == "posix" and (st.st_mode & 0o077):
+                continue
+            if st.st_size == 0 or st.st_size > 65536:
+                continue
+            raw_bytes = os.read(fd, 65536)
+        finally:
+            os.close(fd)
+        try:
+            data = json.loads(raw_bytes.decode("utf-8"))
+            if isinstance(data, dict):
+                sid = data.get("session_id")
+                ws = data.get("workspace")
+                if _valid_session_id(sid):
+                    return (sid, ws if isinstance(ws, str) and ws else None)
+        except Exception:
+            pass
+    return None
 
 
 def _resolve_session_and_workspace(kwargs):
     hermes_sid = kwargs.get("session_id") or ""
     client_env = kwargs.get("client_env")
 
-    # If an override was already bound for this native session, reuse it
-    if hermes_sid and hermes_sid in _SESSION_OVERRIDES:
-        override = _SESSION_OVERRIDES[hermes_sid]
-        client_ws = _get_env_var("CW_WORKSPACE", client_env)
-        return override[0], override[1] or client_ws or os.getcwd()
+    # If an override was already bound for this native session in-memory or on disk, reuse it
+    if hermes_sid:
+        if hermes_sid not in _SESSION_OVERRIDES:
+            persisted = _load_persisted_session_override(hermes_sid)
+            if persisted is not None:
+                _prune_session_overrides()
+                _SESSION_OVERRIDES[hermes_sid] = (persisted[0], persisted[1], time.time())
+        if hermes_sid in _SESSION_OVERRIDES:
+            override = _SESSION_OVERRIDES[hermes_sid]
+            client_ws = _get_env_var("CW_WORKSPACE", client_env)
+            return override[0], override[1] or client_ws or os.getcwd()
 
     override_env = _get_env_var("CW_HERMES_OVERRIDE_FILE", client_env)
     env_sid = _get_env_var("CW_SESSION_ID", client_env)
@@ -295,6 +375,7 @@ def _resolve_session_and_workspace(kwargs):
             if hermes_sid:
                 _prune_session_overrides()
                 _SESSION_OVERRIDES[hermes_sid] = (sid, final_ws, time.time())
+                _save_persisted_session_override(hermes_sid, sid, final_ws)
             return sid, final_ws
         # Fail safe: An explicit override was configured but was invalid, missing, stale, or symlink.
         # Do NOT silently bind to an unrelated session!
@@ -346,7 +427,7 @@ def _request_headers(**kwargs):
 
 def register(ctx):
     ctx.register_middleware("llm_request", _request_headers)
-    for hook_name in ("on_session_reset", "on_session_end", "on_session_finalize"):
+    for hook_name in ("on_session_reset", "on_session_delete"):
         try:
             if hasattr(ctx, "register_hook"):
                 ctx.register_hook(hook_name, on_session_terminated)

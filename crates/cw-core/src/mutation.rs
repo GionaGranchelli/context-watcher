@@ -756,7 +756,7 @@ fn strip_dynamic_time_in_system(payload: &mut Value) -> bool {
     changed
 }
 
-fn is_protected_tool_result(
+pub fn is_protected_tool_result(
     node: &ContextNode,
     node_idx: usize,
     total_nodes: usize,

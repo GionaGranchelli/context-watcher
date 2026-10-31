@@ -7,6 +7,7 @@ pub mod local_llm;
 pub mod mutation;
 pub mod normalizer;
 pub mod optimizer;
+pub mod policy;
 pub mod radix;
 pub mod repository;
 pub mod slot_bridge;

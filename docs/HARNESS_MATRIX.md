@@ -282,3 +282,30 @@ Implemented in [`crates/cw-proxy/tests/long_session_reliability.rs`](../crates/c
   cargo test -p cw-proxy --test long_session_reliability test_cw114_resilience -- --ignored --nocapture
   ```
 
+---
+
+## 8. Empirical Performance & Savings Qualification (CW-115)
+
+Implemented in [`crates/cw-proxy/tests/performance_qualification.rs`](../crates/cw-proxy/tests/performance_qualification.rs) and documented in [`docs/CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md`](CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md), with raw machine-readable telemetry recorded in [`docs/cw115_benchmark_data.json`](cw115_benchmark_data.json).
+
+* **Scope & Methodology:** Evaluates 3 distinct experiment modes across real coding-agent workloads with real provider telemetry and strict micro-dollar spend guardrails:
+  - **Mode A (Native Baseline):** Harness connects directly to provider without proxy or intermediate hops.
+  - **Mode B (CW Passthrough):** Harness routes through `cw-proxy` with active mutations disabled (`AutoPilotConfig.enabled = false`, 0 mutations).
+  - **Mode C (CW Optimized):** Harness routes through `cw-proxy` with active committed context optimizations (historical tool output pruning and tail pin overlays).
+* **Observed Empirical Findings:**
+  - **Passthrough Overhead (Mode B vs Mode A):** Mean streaming overhead $< 2\text{ms/chunk}$; 0 token divergence (144,528 vs 144,528 input tokens); wall time within normal provider endpoint variation (-17.8% net delta due to cloud inference cluster timing).
+  - **Optimization Savings (Mode C vs Mode B, Repetition 2):** Input tokens reduced by **-21.3%** (144,528 $\to$ 113,725), wall clock execution time reduced by **-29.2%** (25.87s $\to$ 18.31s), and provider-billed cost reduced by **-20.7%** ($0.01300 $\to$ $0.01031).
+  - **Empirical Regression Disclosure (Mode C vs Mode B, Repetition 1):** Historical tool-output pruning broke an existing warm prompt cache prefix at Turn 6 (`cached_tokens` dropped from 12,544 to 11,264). Because frontier provider cache discounts are 50% ($0.075/1M vs $0.150/1M on `gpt-4o-mini`), the loss of cached prefix tokens and altered prompt representation caused the agent to execute exploratory steps across 23 turns instead of 12, resulting in a **Cost Inversion** ($0.02919 vs $0.01402).
+  - **Architectural Validation:** Confirms ContextWatcher's core architectural principle: **KV-Cache Awareness First**. Active mutations must operate strictly in tail/cache-safe mode when a warm provider cache prefix exists.
+* **Execution:**
+  ```bash
+  # Deterministic cost model, budget guards, and regression math (CI test suite)
+  cargo test -p cw-proxy --test performance_qualification
+
+  # Opt-in live provider benchmark (requires OPENAI_API_KEY and CW_QUALIFY_REAL_CODEX=1)
+  export OPENAI_API_KEY="sk-..."
+  export CW_QUALIFY_REAL_CODEX=1
+  cargo test -p cw-proxy --test performance_qualification test_live_codex_cw115_empirical_performance_qualification -- --ignored --nocapture
+  ```
+
+

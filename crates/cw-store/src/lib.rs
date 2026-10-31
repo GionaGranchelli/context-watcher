@@ -221,11 +221,12 @@ impl CwStore {
                 provider TEXT NOT NULL,
                 model TEXT NOT NULL,
                 cache_state TEXT NOT NULL,
-                decision TEXT NOT NULL,
-                reason_code TEXT NOT NULL,
-                estimated_saved_tokens INTEGER NOT NULL,
-                estimated_kv_break_tokens INTEGER NOT NULL,
-                predicted_net_benefit_usd REAL NOT NULL,
+                policy_evaluation_status TEXT NOT NULL,
+                decision TEXT,
+                reason_code TEXT,
+                estimated_saved_tokens INTEGER,
+                estimated_kv_break_tokens INTEGER,
+                predicted_net_benefit_usd REAL,
                 evidence_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );")?;
@@ -987,12 +988,14 @@ impl CwStore {
     ) -> Result<(), StoreError> {
         let json_str = serde_json::to_string(record)?;
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let decision_str = record.decision.as_ref().map(|d| format!("{:?}", d));
+        let reason_str = record.reason_code.as_ref().map(|r| format!("{:?}", r));
         conn.execute(
             "INSERT OR REPLACE INTO shadow_decision_evidence (
                 record_id, session_id, request_index, turn_index, provider, model,
-                cache_state, decision, reason_code, estimated_saved_tokens,
+                cache_state, policy_evaluation_status, decision, reason_code, estimated_saved_tokens,
                 estimated_kv_break_tokens, predicted_net_benefit_usd, evidence_json, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 record.record_id,
                 record.session_id,
@@ -1001,8 +1004,9 @@ impl CwStore {
                 record.provider.as_str(),
                 record.model,
                 format!("{:?}", record.cache_state),
-                format!("{:?}", record.decision),
-                format!("{:?}", record.reason_code),
+                format!("{:?}", record.policy_evaluation_status),
+                decision_str,
+                reason_str,
                 record.estimated_saved_tokens,
                 record.estimated_kv_break_tokens,
                 record.predicted_net_benefit_usd,

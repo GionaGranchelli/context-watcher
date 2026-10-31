@@ -89,20 +89,25 @@ pub fn handle_calibrate(
             println!("    • {:<16} : {} requests", state, count);
         }
         println!(
-            "  State Consistency Rate  : {:.2}%",
-            rep.cache_agreement.overall_state_consistency_pct
+            "  Transition Analysis (Eligible non-terminal transitions: {} | Excluded terminal: {}):",
+            rep.cache_agreement.total_eligible_transitions,
+            rep.cache_agreement.terminal_requests_excluded
         );
         println!(
-            "    - WarmVerified hits retained : {}",
-            rep.cache_agreement.warm_verified_retained_cache
+            "    - Warm Cache Retention Rate : {:.2}% ({}/{} transitions retained hits)",
+            rep.cache_agreement.warm_retention_pct,
+            rep.cache_agreement.warm_to_warm_retained,
+            rep.cache_agreement.warm_verified_transitions
         );
         println!(
-            "    - WarmVerified drops to 0    : {}",
-            rep.cache_agreement.warm_verified_cache_drops
+            "    - Warm Cache Drops to 0     : {} requests",
+            rep.cache_agreement.warm_to_cold_drops
         );
         println!(
-            "    - ColdLikely initialization  : {}",
-            rep.cache_agreement.cold_likely_subsequent_warm
+            "    - Cold Priming Rate         : {:.2}% ({}/{} initialized warm hits)",
+            rep.cache_agreement.cold_primed_pct,
+            rep.cache_agreement.cold_to_warm_primed,
+            rep.cache_agreement.cold_likely_transitions
         );
         println!();
         println!("  Economic Reconciliation (Model Pricing Profile vs Dataset Wire Cost):");
@@ -131,7 +136,11 @@ pub fn handle_calibrate(
         println!("  Policy Decisions & Explanation Breakdown:");
         println!(
             "    - Total Evaluated Decisions  : {}",
-            rep.policy_decisions.total_decisions
+            rep.policy_decisions.total_evaluated_decisions
+        );
+        println!(
+            "    - Omitted (Missing Candidates): {}",
+            rep.policy_decisions.not_evaluated_missing_candidates_count
         );
         println!(
             "    - Defer (Preserve warm cache): {}",
@@ -148,10 +157,6 @@ pub fn handle_calibrate(
         for (reason, count) in &rep.policy_decisions.reasons_breakdown {
             println!("      * {:<32} : {}", reason, count);
         }
-        println!(
-            "    - Unverifiable Counterfactuals: {} (Hypothetical cold savings labeled unexecuted)",
-            rep.policy_decisions.unverifiable_counterfactual_count
-        );
 
         if !rep.discrepancies.is_empty() {
             println!();

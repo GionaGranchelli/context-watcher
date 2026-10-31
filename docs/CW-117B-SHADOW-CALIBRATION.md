@@ -19,9 +19,12 @@ ContextWatcher's CW-117 Phase 1 policy engine introduced explainable, cache-awar
 
 CW-117B closes the loop from **modeled expectations** to **measurable empirical calibration**. By replaying the immutable historical traces recorded during the CW-115 benchmarks through the policy evaluator, this calibration campaign measures:
 1. **Economic Model Fidelity:** The pricing profile for `gpt-4o-mini` reconciles against actual provider wire costs across all 130 requests with **$0.0000000000 variance** (100.0% coverage).
-2. **Cache State Consistency:** Evaluated cache-state classifications (`ColdLikely`, `WarmVerified`) agree with subsequent provider cache outcomes in **89.83%** (`cw115_benchmark_data.json`) and **87.32%** (`cw115_four_mode_benchmark_data.json`) of requests.
-3. **Prefix Invalidation Validation:** Empirical traces from Mode 2 historical pruning prove the exact failure mode predicted by CW-117: applying 4 pruning mutations on Request 6 reduced input tokens by 169 tokens, but triggered an immediate loss of 1,280 cached tokens and a surge in uncached tokens (+1,111 tokens), driving single-request costs up. CW-117's policy correctly emitted `DEFER` (`CachePrefixAtRisk`) on this request.
-4. **Distinction of Counterfactuals:** Pure passthrough traces evaluate hypothetical cold-cache cuts as `Apply` on Turn 1, but explicitly tag them as `unverifiable_counterfactuals` because alternative prompts were never executed upstream.
+2. **Descriptive Transition Analysis:** Across all 120 eligible non-terminal transitions (excluding the 10 terminal requests that lack subsequent turns):
+   - **Warm Cache Retention:** **100.0%** (49/49 retained) in `cw115_benchmark_data.json` and **98.41%** (62/63 retained, 1 transient drop) in `cw115_four_mode_benchmark_data.json`.
+   - **Cold Priming Success:** **100.0%** (4/4 in each dataset) of initial cold prompts successfully established a prefix that was reused as cached tokens on the immediate next turn.
+3. **Prefix Invalidation Validation:** Empirical traces from Mode 2 historical pruning prove the exact risk identified by CW-117: applying 4 pruning mutations on Request 6 reduced input tokens by 169 tokens, but was accompanied by an immediate loss of 1,280 cached tokens and a surge in uncached tokens (+1,111 tokens), driving single-request costs up. CW-117's policy explicitly identifies this danger as `DEFER` (`CachePrefixAtRisk`).
+4. **Separation of Pure Tail from Combined Mutations:** Case 7 tail-steering analysis is strictly isolated to pure tail pin operations (`has_pin && !has_prune`, Mode 1 Request 6), while combined prune-and-pin runs (Mode 3 Request 6) are classified under Case 3 as combined mutations consistent with prefix break rather than conflated with cache-safe tail operations.
+5. **Trace Evidence Integrity:** Historical replay strictly avoids manufacturing synthetic optimization decisions or simulated dollar savings (`policy_evaluation_status = NotEvaluatedMissingCandidates`, `decision = None`, `estimated_saved_tokens = None`, `predicted_net_benefit_usd = None`). Retrospective request accounting is explicitly labeled `CorrelationStatus::RetrospectiveObservation`, reserving `MatchedImmediate` for live pre-dispatch proxy evaluations.
 
 ---
 
@@ -42,13 +45,16 @@ Located in `crates/cw-core/src/calibration.rs`, the evidence record links policy
 │ provenance                  : ObservedProvider | LocalEstimate | None  │
 │ prefix_fingerprint          : Option<String> (SHA-256 hash only)       │
 │ candidate_id / plan_id      : Option<String> (structural IDs)          │
-│ decision                    : Apply | Defer | Reject | NoOp            │
-│ reason_code                 : Typed DecisionReasonCode                 │
-│ estimated_saved_tokens      : i32 (before - after)                     │
-│ estimated_kv_break_tokens   : u32 (historical prefix at risk)          │
-│ predicted_baseline_cost_usd : f64 (projected over horizon H)           │
-│ predicted_optimized_cost_usd: f64 (projected over horizon H)           │
-│ predicted_net_benefit_usd   : f64 (projected savings)                  │
+│ policy_evaluation_status    : EvaluatedPreDispatch |                   │
+│                               EvaluatedSimulatedFixture |              │
+│                               NotEvaluatedMissingCandidates            │
+│ decision                    : Option<OptimizationDecision>             │
+│ reason_code                 : Option<DecisionReasonCode>               │
+│ estimated_saved_tokens      : Option<i32> (before - after)             │
+│ estimated_kv_break_tokens   : Option<u32> (prefix tokens at risk)      │
+│ predicted_baseline_cost_usd : Option<f64> (projected baseline)         │
+│ predicted_optimized_cost_usd: Option<f64> (projected optimized)        │
+│ predicted_net_benefit_usd   : Option<f64> (projected net benefit)      │
 │ forecast_horizon_turns      : u32 (continuation horizon, default: 3)   │
 │ policy_version              : "0.2.4-cw117b"                           │
 │ decision_timestamp          : DateTime<Utc>                            │
@@ -57,7 +63,7 @@ Located in `crates/cw-core/src/calibration.rs`, the evidence record links policy
 
 ### Strict Privacy & Storage Invariants
 - **Zero Prompt Storage:** Evidence records contain zero prompt text, user messages, code snippets, or raw tool stdout.
-- **SQLite Persistence:** Stored locally in `shadow_decision_evidence` table in `cw-store`.
+- **SQLite Persistence:** Stored locally in `shadow_decision_evidence` table in `cw-store`. When shadow policy is enabled in `cw-proxy`, live pre-dispatch decisions are automatically recorded to SQLite with `PolicyEvaluationStatus::EvaluatedPreDispatch`.
 - **Zero-Network Invariant:** Offline replay is strictly local, reads immutable JSON files, and contacts zero inference providers.
 
 ---
@@ -66,19 +72,17 @@ Located in `crates/cw-core/src/calibration.rs`, the evidence record links policy
 
 ### Datasets Analyzed
 
-| Dataset Source | Git Commit | Sessions | Total Requests | Total Wire Spend ($) | Harness & Task |
-|:---|:---:|:---:|:---:|:---:|:---|
-| `docs/cw115_benchmark_data.json` | `e9b1b43b` | 6 | 59 | $0.109464 | Codex CLI 0.166.0 (F1 Bug Fixing, Reps 1 & 2) |
-| `docs/cw115_four_mode_benchmark_data.json` | `72bec0d7` | 4 | 71 | $0.092237 | Codex CLI 0.166.0 (F1 Bug Fixing, Modes 0–3) |
-| **Total Qualified** | — | **10** | **130** | **$0.201701** | **Codex CLI on `gpt-4o-mini`** |
+| Dataset Source | Git Commit | Sessions | Total Requests | Eligible Transitions | Excluded Terminal | Spend ($) | Harness & Task |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---|
+| `docs/cw115_benchmark_data.json` | `e9b1b43b` | 6 | 59 | 53 | 6 | $0.109464 | Codex CLI 0.166.0 (F1 Bug Fixing, Reps 1 & 2) |
+| `docs/cw115_four_mode_benchmark_data.json` | `72bec0d7` | 4 | 71 | 67 | 4 | $0.092237 | Codex CLI 0.166.0 (F1 Bug Fixing, Modes 0–3) |
+| **Total Qualified** | — | **10** | **130** | **120** | **10** | **$0.201701** | **Codex CLI on `gpt-4o-mini`** |
 
-### Execution Pipeline per Request
-1. Parse request telemetry: `input_tokens`, `cached_tokens`, `uncached_tokens`, `output_tokens`, `raw_provider_usage`.
-2. Reconstruct `CacheObservation` using CW-117 evidence rules.
-3. Query `find_pricing_profile(OpenAI, "gpt-4o-mini")`.
-4. Reconcile cost: evaluate theoretical cost using formula:
-   $$\text{Cost} = \frac{C_{\text{cached}} \cdot 0.075 + T_{\text{uncached}} \cdot 0.15 + O_{\text{output}} \cdot 0.60}{10^6}$$
-5. Record policy decision outcome and correlate with subsequent request outcomes.
+### Transition Accounting Model
+A session of $N$ requests contains $N-1$ state transitions. The terminal request ($N-1$) has no subsequent provider outcome in the trace and is therefore excluded from transition denominators.
+- **Eligible Transitions:** $R - S = 130 - 10 = 120$.
+- **Warm Retention Rate:** $\frac{\text{Warm-to-Warm Retained}}{\text{Warm Verified Transitions}} = \frac{49+62}{49+63} = \frac{111}{112} = 99.11\%$.
+- **Cold Priming Rate:** $\frac{\text{Cold-to-Warm Primed}}{\text{Cold Likely Transitions}} = \frac{4+4}{4+4} = \frac{8}{8} = 100.0\%$.
 
 ---
 
@@ -91,26 +95,37 @@ Located in `crates/cw-core/src/calibration.rs`, the evidence record links policy
 | Total Reported Wire Cost | $0.109464 | $0.092237 | **$0.201701** |
 | Total Model Profile Recalculated Cost | $0.109464 | $0.092237 | **$0.201701** |
 | Absolute Total Variance | $0.0000000000 | $0.0000000000 | **$0.0000000000** |
-| Max Single-Request Error | $0.0000000000 | $0.0000000000 | **$0.0000000000** |
+| Max Single-Request Error | $< 10^{-18}$ | $< 10^{-18}$ | **$< 10^{-18}$** |
 | Pricing Profile Coverage | 100.0% | 100.0% | **100.0%** |
 
-### B. Cache-State Classification & Agreement
+### B. Transition Analysis (Eligible Non-Terminal Requests)
+
+| Metric | Benchmark Data | Four-Mode Data | Aggregate |
+|:---|:---:|:---:|:---:|
+| Total Requests | 59 | 71 | 130 |
+| Excluded Terminal Requests | 6 | 4 | 10 |
+| Total Eligible Transitions | 53 | 67 | 120 |
+| `WarmVerified` Transitions | 49 | 63 | 112 |
+| - Warm Hits Retained (>0 hits) | 49 | 62 | 111 |
+| - Warm Hits Dropped to 0 | 0 | 1 | 1 |
+| **Warm Cache Retention Rate** | **100.0%** | **98.41%** | **99.11%** |
+| `ColdLikely` Transitions | 4 | 4 | 8 |
+| - Cold Primed Warm (>0 hits) | 4 | 4 | 8 |
+| - Cold Retained Zero | 0 | 0 | 0 |
+| **Cold Priming Rate** | **100.0%** | **100.0%** | **100.0%** |
+
+### C. Policy Evaluation Accounting (Zero Synthetic Savings)
 
 | Metric | Benchmark Data | Four-Mode Data | Notes |
 |:---|:---:|:---:|:---|
-| `WarmVerified` Observations | 55 (93.2%) | 67 (94.4%) | Observed subsequent prompt reuse |
-| `ColdLikely` Observations | 4 (6.8%) | 4 (5.6%) | Initial turn prompts ($\ge 1,024$ tokens) |
-| `Unknown` Observations | 0 (0.0%) | 0 (0.0%) | All requests provided wire usage details |
-| Warm Cache Hits Retained | 49 / 49 | 59 / 60 | Cache hit maintained across turn sequence |
-| Transient Cache Drops to 0 | 0 | 1 | Observed at Mode 0 Req #9 (provider cache eviction) |
-| Cold Initialization Agreement | 4 / 4 | 4 / 4 | Turn 1 cold prompt established prefix for Turn 2 |
-| **Overall State Consistency** | **89.83%** | **87.32%** | High empirical agreement |
+| Total Evaluated Pre-Dispatch Decisions | 0 | 0 | Unmutated historical traces lack pre-dispatch candidate snapshots |
+| Not Evaluated (Missing Candidates) | 59 | 71 | Explicitly recorded to prevent synthetic decision fabrication |
+| Manufactured Dollar Savings ($) | $0.00 | $0.00 | No simulated savings are claimed without real pre-dispatch candidates |
+| Correlation Status | `retrospective_observation` | `retrospective_observation` | Distinguishes historical accounting from prospective pairing |
 
 ---
 
 ## 5. Investigation of Policy Weaknesses & Edge Cases
-
-The replay evaluated the 8 policy edge cases specified in the CW-117B charter:
 
 ### Case 1: Warm Cache Dropped to 0 Hits on Subsequent Request
 - **Location:** `cw115_m0_passthrough_f1_rep1` (Request #8 $\to$ Request #9).
@@ -126,7 +141,7 @@ The replay evaluated the 8 policy edge cases specified in the CW-117B charter:
 ### Case 3: Applied Historical Pruning Incurred Massive Prefix Break Penalty
 - **Location:** `cw115_m2_prune_f1_rep1` (Request #6) and `cw115_optimized_f1_rep1` (Request #6).
 - **Phenomenon:** In Mode 2 Request #6, 4 pruning mutations were applied (`opt_prune_node_4_15`, `opt_prune_node_5_17`, etc.). Total input tokens decreased from 12,856 to 12,687 (-169 tokens). However, cached tokens collapsed from 12,544 to 11,264 (-1,280 cached tokens), causing uncached tokens to jump from 312 to 1,423 (+1,111 uncached tokens).
-- **Policy Validation:** CW-117's rule correctly evaluated this on a warm cache as `DEFER` (`CachePrefixAtRisk`). The empirical benchmark proves that applying this candidate increased total costs rather than saving money.
+- **Policy Validation:** CW-117's rule correctly evaluated this on a warm cache as `DEFER` (`CachePrefixAtRisk`). The empirical benchmark shows uncached token surges consistent with prefix break risk, confirming that prefix-modifying mutations on an active warm prefix incur substantial re-caching charges.
 
 ### Case 4: Candidate-Level vs Plan-Level Consistency
 - **Evaluation:** Evaluated candidate deferrals for active tool results vs aggregate plan savings.
@@ -142,10 +157,10 @@ The replay evaluated the 8 policy edge cases specified in the CW-117B charter:
 - **Policy Implication:** When a historical prefix break occurs early in a 20-turn session, the model continues reading uncached tokens on subsequent turns if the prefix changes again. In long sessions, the cost penalty of breaking an active cache is even higher than modeled by $H=3$.
 - **Recommendation:** Allow continuation horizon $H$ to scale dynamically based on session trajectory in Phase 2.
 
-### Case 7: One-Time Tail Steering Directive Alters Agent Trajectory
+### Case 7: Pure Tail Steering Directive Alters Agent Trajectory (Mode 1 Only)
 - **Location:** `cw115_m1_tail_f1_rep1` (Request #6).
-- **Phenomenon:** Mode 1 injected a tail-only `PinContext` reminder on Request #6. Cached tokens remained completely intact (12,544 cached tokens at Request #6, 12,544 cached tokens at Request #7). The directive was not re-injected, yet the agent converged in 17 requests instead of 23.
-- **Policy Validation:** CW-117 classifies tail pin operations as `NoOp` (`TailAppendPreservesPrefixNoDirectSaving`), conservatively valuing standalone direct savings at $0 USD while preserving 100% of the KV cache prefix.
+- **Phenomenon:** Mode 1 injected a tail-only `PinContext` reminder on Request #6 without any historical pruning mutations. Cached tokens remained completely intact (12,544 cached tokens at Request #6, 12,544 cached tokens at Request #7). The directive was not re-injected, yet the agent converged in 17 requests instead of 23.
+- **Policy Validation:** CW-117 classifies tail pin operations as preserving cached prefixes (0 KV break) while direct token savings are conservatively modeled at $0 USD. Mode 3 (which combined pruning and pinning) is excluded from Case 7 and correctly classified under Case 3.
 
 ### Case 8: Missing or Ambiguous Telemetry Handling
 - **Location:** `cw115_benchmark_data.json` (Mode A native sessions).
@@ -157,7 +172,7 @@ The replay evaluated the 8 policy edge cases specified in the CW-117B charter:
 ## 6. Known Limitations in Historical Evidence
 
 1. **Absence of Raw Prompt Text:** Committed datasets contain token usage counts, latencies, and mutation lists, but deliberately omit raw prompt messages to prevent repo bloat and protect test secrets. Consequently, historical replay cannot compute fresh BLAKE3 prefix fingerprints on historical runs; fingerprints are recorded as `None`.
-2. **Unverifiable Counterfactuals:** In passthrough sessions (Mode B and Mode 0), Turn 1 was cold and theoretical optimization plans would have yielded positive modeled savings (`Apply`). However, because these alternative prompts were never executed upstream, these savings remain counterfactual estimates and are explicitly tagged `unverifiable_counterfactuals`.
+2. **Missing Pre-Dispatch Candidate Snapshots:** Historical traces do not contain the unmutated AST / ContextNode trees present at pre-dispatch decision time. Replay strictly treats these records as `NotEvaluatedMissingCandidates` rather than manufacturing synthetic decisions or counterfactual savings.
 
 ---
 

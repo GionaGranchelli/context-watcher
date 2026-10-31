@@ -7,7 +7,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::ir::ProviderKind;
@@ -19,13 +19,25 @@ use crate::policy::{
 /// Policy engine version evaluated for calibration evidence.
 pub const POLICY_CALIBRATION_VERSION: &str = "0.2.4-cw117b";
 
+/// Status of policy evaluation for an evidence record.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyEvaluationStatus {
+    /// Evaluated pre-dispatch on an active request with concrete optimization candidates.
+    EvaluatedPreDispatch,
+    /// Evaluated in a simulated test fixture with synthesized candidate nodes.
+    EvaluatedSimulatedFixture,
+    /// Replayed from a historical trace that lacks pre-dispatch candidate snapshots and unmutated prompt trees.
+    NotEvaluatedMissingCandidates,
+}
+
 /// Durable, privacy-preserving record of a shadow policy evaluation.
 ///
 /// Contains zero prompt text, raw secrets, or uncompacted tool outputs.
 /// Stores only structural metrics, token spans, classifications, and modeled projections.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShadowDecisionEvidence {
-    /// Unique identifier for this evidence record (e.g. `sde_<uuid>`)
+    /// Unique identifier for this evidence record (e.g. `sde_<session>_<req>`)
     pub record_id: String,
     /// Session identifier
     pub session_id: String,
@@ -50,22 +62,31 @@ pub struct ShadowDecisionEvidence {
     /// Strategy plan identifier, if plan-level
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_id: Option<String>,
-    /// Explainable policy decision outcome
-    pub decision: OptimizationDecision,
-    /// Typed decision reason code
-    pub reason_code: DecisionReasonCode,
+    /// Policy evaluation qualification status
+    pub policy_evaluation_status: PolicyEvaluationStatus,
+    /// Explainable policy decision outcome (None if not evaluated)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision: Option<OptimizationDecision>,
+    /// Typed decision reason code (None if not evaluated)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason_code: Option<DecisionReasonCode>,
     /// Detailed diagnostic explanation
     pub explanation: String,
     /// Structural token reduction estimate (tokens saved before minus after; signed)
-    pub estimated_saved_tokens: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_saved_tokens: Option<i32>,
     /// Estimated KV-break tokens (number of historical cached prefix tokens invalidated)
-    pub estimated_kv_break_tokens: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_kv_break_tokens: Option<u32>,
     /// Predicted baseline cost over the configured horizon (USD)
-    pub predicted_baseline_cost_usd: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicted_baseline_cost_usd: Option<f64>,
     /// Predicted optimized cost over the configured horizon (USD)
-    pub predicted_optimized_cost_usd: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicted_optimized_cost_usd: Option<f64>,
     /// Predicted net financial benefit over the configured horizon (USD)
-    pub predicted_net_benefit_usd: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub predicted_net_benefit_usd: Option<f64>,
     /// Multi-turn forecast horizon in turns
     pub forecast_horizon_turns: u32,
     /// Modeling assumptions used during policy evaluation
@@ -82,7 +103,7 @@ pub struct ShadowDecisionEvidence {
 }
 
 impl ShadowDecisionEvidence {
-    /// Construct a durable evidence record from a policy decision and cache observation.
+    /// Construct a durable evidence record from a live pre-dispatch policy decision and cache observation.
     pub fn from_policy_decision(
         decision: &PolicyDecision,
         cache_obs: &CacheObservation,
@@ -93,11 +114,11 @@ impl ShadowDecisionEvidence {
     ) -> Self {
         let (baseline_cost, opt_cost, net_benefit) = match &decision.economic_evaluation {
             Some(econ) => (
-                econ.baseline_cost_usd,
-                econ.optimized_cost_usd,
-                econ.net_benefit_usd,
+                Some(econ.baseline_cost_usd),
+                Some(econ.optimized_cost_usd),
+                Some(econ.net_benefit_usd),
             ),
-            None => (0.0, 0.0, 0.0),
+            None => (None, None, None),
         };
 
         let assumptions = format!(
@@ -121,11 +142,12 @@ impl ShadowDecisionEvidence {
             prefix_fingerprint: cache_obs.prefix_fingerprint.clone(),
             candidate_id: decision.candidate_id.clone(),
             plan_id: decision.plan_id.clone(),
-            decision: decision.decision,
-            reason_code: decision.reason_code.clone(),
+            policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+            decision: Some(decision.decision),
+            reason_code: Some(decision.reason_code.clone()),
             explanation: decision.explanation.clone(),
-            estimated_saved_tokens: decision.net_token_delta,
-            estimated_kv_break_tokens: decision.estimated_kv_break_tokens,
+            estimated_saved_tokens: Some(decision.net_token_delta),
+            estimated_kv_break_tokens: Some(decision.estimated_kv_break_tokens),
             predicted_baseline_cost_usd: baseline_cost,
             predicted_optimized_cost_usd: opt_cost,
             predicted_net_benefit_usd: net_benefit,
@@ -135,6 +157,51 @@ impl ShadowDecisionEvidence {
             pricing_version: "2026-10-pricing-v1".to_string(),
             policy_version: POLICY_CALIBRATION_VERSION.to_string(),
             decision_timestamp: decision.timestamp,
+        }
+    }
+
+    /// Construct a durable evidence record from a historical observation trace without fabricating decisions or savings.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_historical_observation(
+        req: &HistoricalRequestRecord,
+        session_id: &str,
+        provider: ProviderKind,
+        cache_obs: &CacheObservation,
+        pricing: Option<&ModelPricingProfile>,
+        horizon_turns: u32,
+        dataset_name: &str,
+        decision_timestamp: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            record_id: format!("sde_{}_{}", session_id, req.request_index),
+            session_id: session_id.to_string(),
+            request_index: req.request_index,
+            turn_index: req.turn_index.unwrap_or(req.request_index),
+            provider,
+            model: req.model.clone(),
+            cache_state: cache_obs.state,
+            provenance: cache_obs.provenance,
+            prefix_fingerprint: None,
+            candidate_id: None,
+            plan_id: None,
+            policy_evaluation_status: PolicyEvaluationStatus::NotEvaluatedMissingCandidates,
+            decision: None,
+            reason_code: None,
+            explanation: "Historical trace replay: pre-dispatch candidates and unmutated prompt trees were not captured at proxy time; policy evaluation omitted to prevent synthetic bias.".to_string(),
+            estimated_saved_tokens: None,
+            estimated_kv_break_tokens: None,
+            predicted_baseline_cost_usd: None,
+            predicted_optimized_cost_usd: None,
+            predicted_net_benefit_usd: None,
+            forecast_horizon_turns: horizon_turns,
+            forecast_assumptions: format!(
+                "replayed_trace={}, H={}, prospective_evaluation=false",
+                dataset_name, horizon_turns
+            ),
+            pricing_model_pattern: pricing.map(|p| p.model_pattern.clone()),
+            pricing_version: "2026-10-pricing-v1".to_string(),
+            policy_version: POLICY_CALIBRATION_VERSION.to_string(),
+            decision_timestamp,
         }
     }
 }
@@ -163,21 +230,23 @@ pub struct ObservedProviderOutcome {
     pub observed_timestamp: DateTime<Utc>,
 }
 
-/// Status of correlation between a shadow policy decision and subsequent provider telemetry.
+/// Status of correlation between a shadow policy decision and provider telemetry.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CorrelationStatus {
-    /// Exact 1-to-1 match with the request executed immediately after policy evaluation.
+    /// Pre-dispatch shadow policy decision paired with the request executed immediately after evaluation.
     MatchedImmediate,
-    /// Correlated with a subsequent request within the continuation horizon.
+    /// Pre-dispatch shadow policy decision paired with a subsequent continuation request within the horizon.
     MatchedContinuation,
+    /// Retrospective observation record from historical benchmark replay (not a prospective decision).
+    RetrospectiveObservation,
     /// No subsequent provider telemetry available (e.g. terminal request or trace end).
     UncorrelatedMissingOutcome,
     /// Telemetry ambiguous, session diverged, or provider credentials mismatched.
     UncorrelatedAmbiguous,
 }
 
-/// Pair linking a shadow policy decision with its corresponding observed provider outcome.
+/// Pair linking a shadow policy decision or retrospective observation with provider outcome telemetry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CorrelatedDecisionOutcome {
     pub correlation_id: String,
@@ -190,7 +259,7 @@ pub struct CorrelatedDecisionOutcome {
     /// Difference between single-turn predicted baseline cost and actual executed cost.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub single_turn_cost_delta_usd: Option<f64>,
-    /// Whether observed cache hit matched the predicted cache state (e.g. Warm -> hits > 0; Cold -> hits == 0).
+    /// Whether observed cache hit matched the predicted cache state on subsequent request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_state_consistent: Option<bool>,
     pub notes: Vec<String>,
@@ -291,15 +360,15 @@ pub struct CalibrationMetricsReport {
     pub git_commit: Option<String>,
     pub total_sessions: usize,
     pub total_requests: usize,
-    /// Cache state classification breakdown across replayed turns
-    pub cache_state_distribution: HashMap<String, usize>,
-    /// Agreement metrics between cache state predictions and subsequent provider outcomes
+    /// Cache state classification breakdown across replayed turns (sorted by key for determinism)
+    pub cache_state_distribution: BTreeMap<String, usize>,
+    /// Agreement metrics between cache state predictions and subsequent eligible provider transitions
     pub cache_agreement: CacheAgreementMetrics,
     /// Economic reconciliation comparing dataset costs to applicable pricing profile
     pub economic_reconciliation: EconomicReconciliationMetrics,
     /// Continuation horizon statistics
     pub horizon_metrics: HorizonMetrics,
-    /// Policy decision frequency and distribution
+    /// Policy decision frequency and qualification distribution
     pub policy_decisions: PolicyDecisionMetrics,
     /// Explicit list of empirical discrepancies and weaknesses discovered
     pub discrepancies: Vec<PolicyDiscrepancy>,
@@ -308,17 +377,33 @@ pub struct CalibrationMetricsReport {
     pub generated_at: DateTime<Utc>,
 }
 
+/// Descriptive transition metrics across eligible next-request turns.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct CacheAgreementMetrics {
-    pub warm_verified_count: usize,
-    pub warm_verified_retained_cache: usize,
-    pub warm_verified_cache_drops: usize,
-    pub cold_likely_count: usize,
-    pub cold_likely_retained_zero: usize,
-    pub cold_likely_subsequent_warm: usize,
-    pub unknown_count: usize,
-    pub rebuilding_count: usize,
-    pub overall_state_consistency_pct: f64,
+    /// Total eligible next-request transitions (total_requests minus total_sessions)
+    pub total_eligible_transitions: usize,
+    /// Terminal requests excluded from transition evaluation because no subsequent request exists in the session
+    pub terminal_requests_excluded: usize,
+    /// Number of eligible transitions where current request was classified WarmVerified
+    pub warm_verified_transitions: usize,
+    /// Eligible WarmVerified transitions where subsequent request retained cached tokens (> 0)
+    pub warm_to_warm_retained: usize,
+    /// Eligible WarmVerified transitions where subsequent request dropped to 0 cached tokens
+    pub warm_to_cold_drops: usize,
+    /// Warm cache retention percentage: warm_to_warm_retained / warm_verified_transitions * 100.0
+    pub warm_retention_pct: f64,
+    /// Number of eligible transitions where current request was classified ColdLikely
+    pub cold_likely_transitions: usize,
+    /// Eligible ColdLikely transitions where subsequent request remained at 0 cached tokens
+    pub cold_to_cold_retained_zero: usize,
+    /// Eligible ColdLikely transitions where subsequent request was primed into warm (> 0 cached tokens)
+    pub cold_to_warm_primed: usize,
+    /// Cold priming rate: cold_to_warm_primed / cold_likely_transitions * 100.0
+    pub cold_primed_pct: f64,
+    /// Number of eligible transitions where current request was classified Unknown
+    pub unknown_transitions: usize,
+    /// Number of eligible transitions where current request was classified Rebuilding
+    pub rebuilding_transitions: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -341,12 +426,15 @@ pub struct HorizonMetrics {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct PolicyDecisionMetrics {
-    pub total_decisions: usize,
+    /// Total prospective decisions evaluated pre-dispatch
+    pub total_evaluated_decisions: usize,
+    /// Requests where policy evaluation was omitted due to missing pre-dispatch candidates
+    pub not_evaluated_missing_candidates_count: usize,
     pub apply_count: usize,
     pub defer_count: usize,
     pub reject_count: usize,
     pub no_op_count: usize,
-    pub reasons_breakdown: HashMap<String, usize>,
+    pub reasons_breakdown: BTreeMap<String, usize>,
     pub unverifiable_counterfactual_count: usize,
 }
 
@@ -371,30 +459,25 @@ pub fn reconcile_request_cost(
 /// producing durable correlated evidence records and calibration metrics.
 ///
 /// Guaranteed zero-network, immutable replay: makes 0 HTTP requests and does not modify the dataset.
+/// Does not fabricate prospective optimization decisions or synthetic dollar savings for unmutated traces.
 pub fn replay_historical_dataset(
     dataset: &HistoricalSessionDataset,
     dataset_name: &str,
     horizon_turns: u32,
 ) -> (CalibrationMetricsReport, Vec<CorrelatedDecisionOutcome>) {
     let mut correlated_records = Vec::new();
-    let mut cache_distribution: HashMap<String, usize> = HashMap::new();
-    let mut decision_reasons: HashMap<String, usize> = HashMap::new();
+    let mut cache_distribution: BTreeMap<String, usize> = BTreeMap::new();
     let mut discrepancies = Vec::new();
 
-    let mut warm_verified_count = 0;
-    let mut warm_verified_retained = 0;
-    let mut warm_verified_drops = 0;
-    let mut cold_likely_count = 0;
-    let mut cold_likely_retained_zero = 0;
-    let mut cold_likely_subsequent_warm = 0;
-    let mut unknown_count = 0;
-    let mut rebuilding_count = 0;
-
-    let mut apply_count = 0;
-    let mut defer_count = 0;
-    let mut reject_count = 0;
-    let mut no_op_count = 0;
-    let mut unverifiable_counterfactuals = 0;
+    let mut warm_verified_transitions = 0;
+    let mut warm_to_warm_retained = 0;
+    let mut warm_to_cold_drops = 0;
+    let mut cold_likely_transitions = 0;
+    let mut cold_to_cold_retained_zero = 0;
+    let mut cold_to_warm_primed = 0;
+    let mut unknown_transitions = 0;
+    let mut rebuilding_transitions = 0;
+    let mut terminal_requests_excluded = 0;
 
     let mut total_dataset_cost = 0.0;
     let mut total_recalculated_cost = 0.0;
@@ -407,7 +490,8 @@ pub fn replay_historical_dataset(
 
     let data_limitations = vec![
         "Historical dataset omits raw prompt bodies; prefix fingerprints are unavailable (None).".to_string(),
-        "Per-node mutation candidate snapshots for unmutated passthrough traces were not captured at proxy time.".to_string(),
+        "Pre-dispatch mutation candidate snapshots and unmutated prompt trees were not captured at proxy time.".to_string(),
+        "Historical replay does not manufacture synthetic optimization decisions or savings (policy_evaluation_status = NotEvaluatedMissingCandidates).".to_string(),
         "Mode A native Codex traces aggregate multi-turn tool loops into fewer coarse requests.".to_string(),
         "Counterfactual savings on passthrough traces cannot be treated as realized costs without an active execution trial.".to_string(),
     ];
@@ -462,19 +546,19 @@ pub fn replay_historical_dataset(
             let state_str = format!("{:?}", cache_obs.state);
             *cache_distribution.entry(state_str).or_insert(0) += 1;
 
-            // Check agreement with subsequent request in session
+            // Transition accounting: check next request in session if non-terminal
             let next_req = session.requests.get(idx + 1);
             let mut cache_consistent = None;
 
-            match cache_obs.state {
-                CacheState::WarmVerified => {
-                    warm_verified_count += 1;
-                    if let Some(next) = next_req {
+            if let Some(next) = next_req {
+                match cache_obs.state {
+                    CacheState::WarmVerified => {
+                        warm_verified_transitions += 1;
                         if next.cached_tokens > 0 {
-                            warm_verified_retained += 1;
+                            warm_to_warm_retained += 1;
                             cache_consistent = Some(true);
                         } else {
-                            warm_verified_drops += 1;
+                            warm_to_cold_drops += 1;
                             cache_consistent = Some(false);
                             // Weakness Case 1: Warm cache dropped to zero
                             discrepancies.push(PolicyDiscrepancy {
@@ -492,17 +576,14 @@ pub fn replay_historical_dataset(
                             });
                         }
                     }
-                }
-                CacheState::ColdLikely => {
-                    cold_likely_count += 1;
-                    if let Some(next) = next_req {
+                    CacheState::ColdLikely => {
+                        cold_likely_transitions += 1;
                         if next.cached_tokens == 0 {
-                            cold_likely_retained_zero += 1;
+                            cold_to_cold_retained_zero += 1;
                             cache_consistent = Some(true);
                         } else {
-                            cold_likely_subsequent_warm += 1;
-                            cache_consistent = Some(true); // Normal cold initialization: Turn 1 cold prompt caching, Turn 2 reuse
-                            // Weakness Case 2: Cold cache successfully primed
+                            cold_to_warm_primed += 1;
+                            cache_consistent = Some(true); // Normal cold initialization: Turn 1 establishes prefix, Turn 2 reuses
                             if idx == 0 {
                                 discrepancies.push(PolicyDiscrepancy {
                                     case_number: 2,
@@ -520,27 +601,33 @@ pub fn replay_historical_dataset(
                             }
                         }
                     }
+                    CacheState::Unknown => {
+                        unknown_transitions += 1;
+                    }
+                    CacheState::Rebuilding => {
+                        rebuilding_transitions += 1;
+                    }
                 }
-                CacheState::Unknown => {
-                    unknown_count += 1;
-                }
-                CacheState::Rebuilding => {
-                    rebuilding_count += 1;
-                }
+            } else {
+                terminal_requests_excluded += 1;
             }
 
-            // Check Weakness Case 3: Applied historical pruning with prefix break
-            if !req.applied_mutation_ids.is_empty()
-                && req
-                    .applied_mutation_ids
-                    .iter()
-                    .any(|id| id.contains("prune"))
-                && req.uncached_tokens > 1000
-                && req.cached_tokens > 0
-            {
+            let has_pin = req.applied_mutation_ids.iter().any(|id| id.contains("pin"));
+            let has_prune = req
+                .applied_mutation_ids
+                .iter()
+                .any(|id| id.contains("prune"));
+
+            // Check Weakness Case 3: Applied historical pruning (or combined pruning+pinning) with uncached token surge
+            if has_prune && req.uncached_tokens > 1000 && req.cached_tokens > 0 {
+                let context_mode = if has_pin {
+                    "Combined historical pruning and tail pinning (Mode 3)"
+                } else {
+                    "Historical pruning (Mode 2)"
+                };
                 discrepancies.push(PolicyDiscrepancy {
                     case_number: 3,
-                    title: "Applied historical pruning caused prefix break and surge in uncached tokens".to_string(),
+                    title: format!("{}: uncached token surge consistent with prefix break", context_mode),
                     session_id: session.session_id.clone(),
                     request_index: req.request_index,
                     severity: "High".to_string(),
@@ -548,16 +635,16 @@ pub fn replay_historical_dataset(
                         "Request #{} applied mutations {:?}; uncached tokens surged to {} despite {} cached tokens.",
                         req.request_index, req.applied_mutation_ids, req.uncached_tokens, req.cached_tokens
                     ),
-                    policy_implication: "Blind historical pruning on an active prefix incurs high invalidation penalty. CW-117 policy correctly defers this on WarmVerified cache.".to_string(),
+                    policy_implication: "Prefix-modifying mutations on an established cache prefix incur substantial re-caching charges. Policy correctly identifies this risk, though causal attribution requires controlled isolated AB trials.".to_string(),
                     recommendation: "Enforce CachePrefixAtRisk deferral when cache is WarmVerified unless net multi-turn benefit overcomes break penalty.".to_string(),
                 });
             }
 
-            // Check Weakness Case 7: One-time tail directive alters trajectory
-            if req.applied_mutation_ids.iter().any(|id| id.contains("pin")) {
+            // Check Weakness Case 7: Pure one-time tail steering directive (Mode 1: pin only, no prune)
+            if has_pin && !has_prune {
                 discrepancies.push(PolicyDiscrepancy {
                     case_number: 7,
-                    title: "One-time tail steering directive applied without prefix invalidation".to_string(),
+                    title: "Pure tail steering directive applied without prefix invalidation (Mode 1)".to_string(),
                     session_id: session.session_id.clone(),
                     request_index: req.request_index,
                     severity: "Info".to_string(),
@@ -565,93 +652,41 @@ pub fn replay_historical_dataset(
                         "Request #{} applied PinContext directive ({:?}); cached tokens remained intact on subsequent turns.",
                         req.request_index, req.applied_mutation_ids
                     ),
-                    policy_implication: "Tail pin preserves cached prefix (0 KV break) while behaviorally guiding the agent to complete in fewer total requests.".to_string(),
+                    policy_implication: "Pure tail pin preserves cached prefix (0 KV break) while behaviorally guiding the agent to complete in fewer total requests.".to_string(),
                     recommendation: "Conservatively model direct token cut as 0 USD while acknowledging behavioral request reduction in empirical reports.".to_string(),
                 });
             }
 
-            // Construct policy decision for this request's observation
-            let (decision_outcome, reason_code, explanation, net_benefit, saved_toks, break_toks) =
-                if cache_obs.state == CacheState::WarmVerified {
-                    // On WarmVerified, historical candidate would be deferred to preserve cache
-                    (
-                        OptimizationDecision::Defer,
-                        DecisionReasonCode::CachePrefixAtRisk,
-                        "Warm cache prefix protected from historical invalidation.".to_string(),
-                        0.0,
-                        0,
-                        req.cached_tokens,
-                    )
-                } else if cache_obs.state == CacheState::ColdLikely {
-                    // On ColdLikely, a beneficial candidate would apply
-                    (
-                        OptimizationDecision::Apply,
-                        DecisionReasonCode::ModeledEconomicBenefitPositive,
-                        "Cold cache verified: initial compaction carries zero cache penalty."
-                            .to_string(),
-                        0.001,
-                        500,
-                        0,
-                    )
-                } else {
-                    (
-                        OptimizationDecision::Defer,
-                        DecisionReasonCode::CacheTelemetryUnknown,
-                        "Telemetry unknown or unverified.".to_string(),
-                        0.0,
-                        0,
-                        0,
-                    )
-                };
+            // Parse request timestamp deterministically
+            let decision_ts = req
+                .timestamp
+                .as_deref()
+                .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+                .map(|dt| dt.with_timezone(&Utc))
+                .or_else(|| {
+                    dataset
+                        .date
+                        .as_deref()
+                        .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+                        .map(|dt| dt.with_timezone(&Utc))
+                })
+                .unwrap_or_else(|| {
+                    DateTime::parse_from_rfc3339("2026-10-31T20:25:00Z")
+                        .unwrap()
+                        .with_timezone(&Utc)
+                });
 
-            let reason_str = format!("{:?}", reason_code);
-            *decision_reasons.entry(reason_str).or_insert(0) += 1;
-
-            match decision_outcome {
-                OptimizationDecision::Apply => apply_count += 1,
-                OptimizationDecision::Defer => defer_count += 1,
-                OptimizationDecision::Reject => reject_count += 1,
-                OptimizationDecision::NoOp => no_op_count += 1,
-            }
-
-            if decision_outcome == OptimizationDecision::Apply {
-                unverifiable_counterfactuals += 1;
-            }
-
-            let evidence_record = ShadowDecisionEvidence {
-                record_id: format!("sde_{}_{}", session.session_id, req.request_index),
-                session_id: session.session_id.clone(),
-                request_index: req.request_index,
-                turn_index: req.turn_index.unwrap_or(req.request_index),
+            // Construct durable historical evidence record WITHOUT fabricating decisions or savings
+            let evidence_record = ShadowDecisionEvidence::from_historical_observation(
+                req,
+                &session.session_id,
                 provider,
-                model: req.model.clone(),
-                cache_state: cache_obs.state,
-                provenance: cache_obs.provenance,
-                prefix_fingerprint: None,
-                candidate_id: None,
-                plan_id: None,
-                decision: decision_outcome,
-                reason_code,
-                explanation,
-                estimated_saved_tokens: saved_toks,
-                estimated_kv_break_tokens: break_toks,
-                predicted_baseline_cost_usd: req.cost_usd,
-                predicted_optimized_cost_usd: req.cost_usd - net_benefit,
-                predicted_net_benefit_usd: net_benefit,
-                forecast_horizon_turns: horizon_turns,
-                forecast_assumptions: format!(
-                    "replayed_trace={}, H={}",
-                    dataset_name, horizon_turns
-                ),
-                pricing_model_pattern: pricing.as_ref().map(|p| p.model_pattern.clone()),
-                pricing_version: "2026-10-pricing-v1".to_string(),
-                policy_version: POLICY_CALIBRATION_VERSION.to_string(),
-                decision_timestamp: req
-                    .timestamp
-                    .as_deref()
-                    .and_then(|t| t.parse().ok())
-                    .unwrap_or_else(Utc::now),
-            };
+                &cache_obs,
+                pricing.as_ref(),
+                horizon_turns,
+                dataset_name,
+                decision_ts,
+            );
 
             let observed_outcome = ObservedProviderOutcome {
                 request_index: req.request_index,
@@ -669,7 +704,7 @@ pub fn replay_historical_dataset(
                 request_latency_ms: req.request_latency_ms,
                 cache_telemetry_available: true,
                 applied_mutations: req.applied_mutation_ids.clone(),
-                observed_timestamp: evidence_record.decision_timestamp,
+                observed_timestamp: decision_ts,
             };
 
             let remaining_in_session = session.requests.len().saturating_sub(idx + 1);
@@ -683,8 +718,8 @@ pub fn replay_historical_dataset(
                 request_index: req.request_index,
                 decision: evidence_record,
                 outcome: Some(observed_outcome),
-                correlation_status: CorrelationStatus::MatchedImmediate,
-                single_turn_cost_delta_usd: Some(0.0), // Reconciled exact baseline match
+                correlation_status: CorrelationStatus::RetrospectiveObservation,
+                single_turn_cost_delta_usd: None, // No predicted baseline in retrospective replay
                 cache_state_consistent: cache_consistent,
                 notes: if remaining_in_session < horizon_turns as usize {
                     vec![format!(
@@ -709,11 +744,14 @@ pub fn replay_historical_dataset(
     let min_len = session_lengths.iter().copied().min().unwrap_or(0);
     let max_len = session_lengths.iter().copied().max().unwrap_or(0);
 
-    let total_state_checks = warm_verified_count + cold_likely_count;
-    let consistent_state_checks =
-        warm_verified_retained + cold_likely_retained_zero + cold_likely_subsequent_warm;
-    let state_consistency_pct = if total_state_checks > 0 {
-        (consistent_state_checks as f64 / total_state_checks as f64) * 100.0
+    let warm_retention_pct = if warm_verified_transitions > 0 {
+        (warm_to_warm_retained as f64 / warm_verified_transitions as f64) * 100.0
+    } else {
+        100.0
+    };
+
+    let cold_primed_pct = if cold_likely_transitions > 0 {
+        (cold_to_warm_primed as f64 / cold_likely_transitions as f64) * 100.0
     } else {
         100.0
     };
@@ -741,6 +779,18 @@ pub fn replay_historical_dataset(
         });
     }
 
+    // Deterministic generated_at timestamp derived from dataset date or fallback
+    let generated_at = dataset
+        .date
+        .as_deref()
+        .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|| {
+            DateTime::parse_from_rfc3339("2026-10-31T20:25:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
+        });
+
     let report = CalibrationMetricsReport {
         dataset_source: dataset_name.to_string(),
         git_commit: dataset.git_commit.clone(),
@@ -748,15 +798,18 @@ pub fn replay_historical_dataset(
         total_requests: total_requests_count,
         cache_state_distribution: cache_distribution,
         cache_agreement: CacheAgreementMetrics {
-            warm_verified_count,
-            warm_verified_retained_cache: warm_verified_retained,
-            warm_verified_cache_drops: warm_verified_drops,
-            cold_likely_count,
-            cold_likely_retained_zero,
-            cold_likely_subsequent_warm,
-            unknown_count,
-            rebuilding_count,
-            overall_state_consistency_pct: state_consistency_pct,
+            total_eligible_transitions: total_requests_count.saturating_sub(dataset.sessions.len()),
+            terminal_requests_excluded,
+            warm_verified_transitions,
+            warm_to_warm_retained,
+            warm_to_cold_drops,
+            warm_retention_pct,
+            cold_likely_transitions,
+            cold_to_cold_retained_zero,
+            cold_to_warm_primed,
+            cold_primed_pct,
+            unknown_transitions,
+            rebuilding_transitions,
         },
         economic_reconciliation: EconomicReconciliationMetrics {
             total_dataset_reported_cost_usd: total_dataset_cost,
@@ -773,17 +826,18 @@ pub fn replay_historical_dataset(
             horizon_truncation_count: horizon_truncations,
         },
         policy_decisions: PolicyDecisionMetrics {
-            total_decisions: total_requests_count,
-            apply_count,
-            defer_count,
-            reject_count,
-            no_op_count,
-            reasons_breakdown: decision_reasons,
-            unverifiable_counterfactual_count: unverifiable_counterfactuals,
+            total_evaluated_decisions: 0,
+            not_evaluated_missing_candidates_count: total_requests_count,
+            apply_count: 0,
+            defer_count: 0,
+            reject_count: 0,
+            no_op_count: 0,
+            reasons_breakdown: BTreeMap::new(),
+            unverifiable_counterfactual_count: 0,
         },
         discrepancies,
         data_limitations,
-        generated_at: Utc::now(),
+        generated_at,
     };
 
     (report, correlated_records)

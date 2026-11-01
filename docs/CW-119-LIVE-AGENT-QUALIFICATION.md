@@ -1,72 +1,76 @@
 # CW-119 — Controlled Live-Agent Product Value Qualification Report
 
-**Milestone:** CW-119 (Controlled Live-Agent Product Value Qualification)  
-**Campaign Status:** 🟢 **LIVE PILOT QUALIFIED**  
-**Execution Date:** 2026-11-01T20:54:39.984063519+00:00  
-**Target Harness:** Codex CLI 0.166.0  
-**Model & Pricing Profile:** `gpt-4o-mini` ($0.150 / 1M uncached input, $0.075 / 1M cached input, $0.600 / 1M output)  
-**Total Campaign Spend:** **$0.05332 USD** (SpendGuard Envelope: $0.25 USD)  
-**Workload Task:** F1 Bug Fixing (`math_ops.py` / `test_math_ops.py`)  
-**Functional Correctness Pass Rate:** **100%** (3/3 sessions passing independent acceptance tests)  
+**Milestone:** CW-119 (Controlled Live-Agent Product Value Qualification)
+**Campaign Status:** 🟡 **IN PROGRESS: harness and safeguards repaired; product value NOT EVALUATED**
+**Pilot 1 (diagnostic, preserved):** 2026-11-01T20:54:39Z, Codex CLI 0.166.0, OpenAI `gpt-4o-mini`, F1 bug-fix workload
+**Pilot 1 spend:** $0.05332 USD (reconciled from Codex-reported token usage)
 
 ---
 
-## 1. Executive Summary
+## 1. Conclusion so far
 
-Milestone **CW-119** establishes the first empirical qualification of ContextWatcher (`cw`) driving **real, autonomous coding agents against live cloud model providers (`gpt-4o-mini`)** under strict, fail-closed budget safeguards.
+> Three Codex runs completed successfully. The intended M2 intervention was not verified, and no reliable economic benefit has been demonstrated.
 
-Building upon the Gate A offline engineering infrastructure (CW-118), CW-119 activates the live qualification pathway through three interlocking gates:
-1. **Harness Readiness & Sandboxing:** Automatic verification that installed harness binaries (Codex CLI, OMP, Hermes) operate in isolated temporary directories and strictly sanitize internal tokens (`CW_CONTROL_TOKEN` stripped from model tools).
-2. **SpendGuard Admission Control:** Pre-session reservations ($0.08 / session), hard per-session ceilings ($0.15), request iteration caps (25 requests), and real-time usage reconciliation that prevent runaway cloud spend.
-3. **Controlled 3-Mode Live Pilot:** Empirical execution of Mode M0 (Native Baseline), Mode M1 (Passthrough Control), and Mode M2 (Cache-Safe Optimization with `PinContext`) on live OpenAI Responses API.
+What Pilot 1 **does** show:
+- Codex completed both turns in all three modes. The independent acceptance suite (`python3 -m unittest test_math_ops.py`) passed in all three workspaces.
+- Codex ran through the M1 proxy across a multi-turn Responses session with resume and no protocol failure.
+- The reported costs reconcile with the captured token counts under the `gpt-4o-mini` pricing profile.
 
----
+What Pilot 1 **does not** show:
+- **Whether M2 had any treatment effect.** The `PinContext` rule was committed, but AutoPilot was left disabled. The proxy only applies mutations when `cfg.enabled` is true, so the directive most likely never reached the provider. No wire-egress assertion was made. **M2 is labeled `treatment_unverified`**, and its numbers are effectively a second passthrough sample.
+- **Any economic effect, positive or negative.** With n=1 per mode and an unverified treatment, the M2-vs-M1 cost difference (+32%) can't be attributed to ContextWatcher. One cheaper M2 run wouldn't have proven a benefit either.
+- **Proxy overhead.** The M1-vs-M0 wall-time difference (−7.9 s) comes from provider latency and agent stochasticity (different numbers of tool iterations). It is not a measurement of proxy overhead and is no longer reported as one.
+- **In-flight spend enforcement.** In Pilot 1, SpendGuard reconciled costs only after each agent finished. A session reservation can't stop an autonomous agent from issuing extra billable requests before that reconciliation happens.
 
-## 2. Empirical Benchmark Scoreboard
+## 2. Pilot 1 raw data (diagnostic only)
 
-All metrics originate directly from raw OpenAI response telemetry (`usage.input_tokens`, `usage.cached_input_tokens`, `usage.output_tokens`), real TCP socket timers, and independent acceptance test runs (`python3 -m unittest test_math_ops.py`):
+Source: [`cw119_pilot_benchmark_data.json`](cw119_pilot_benchmark_data.json) (unchanged).
 
-| Metric | M0 (Native Baseline) | M1 (Passthrough Control) | M2 (Cache-Safe Optimized) | Comparative Analysis |
-|:---|:---:|:---:|:---:|:---|
-| **Execution Path** | Direct to OpenAI | Intercepted via `cw` proxy | Intercepted + `PinContext` | M1 = Control, M2 = Treatment |
-| **Total Input Tokens** | 194,493 | 163,875 | 211,489 | **M2 vs M1:** +47614 (+29.06%) |
-| **Cached Input Tokens** | 165,760 | 136,320 | 182,272 | Real provider prompt cache reuse |
-| **Prompt Cache Hit Ratio** | 85.23% | 83.19% | 86.19% | Preserved across all modes |
-| **Total Output Tokens** | 2,377 | 1,318 | 3,248 | Generated code + reasoning |
-| **Provider Cost (USD)** | **$0.01817** | **$0.01515** | **$0.02000** | **M2 vs M1:** +0.00485 USD (+32.04%) |
-| **Session Wall Time** | 24,154 ms | 16,204 ms | 31,846 ms | **Proxy Overhead (M1 vs M0):** -7950 ms (-32.9%) |
-| **Acceptance Tests** | **PASS (2/2)** | **PASS (2/2)** | **PASS (2/2)** | Independent unit test suite |
-| **Active Overlay Rule** | None | None | `PinContext` (Recency) | `estimated_kv_break = 0` |
+| Metric | M0 Native | M1 Passthrough | M2 (treatment unverified) |
+|:---|:---:|:---:|:---:|
+| Input tokens | 194,493 | 163,875 | 211,489 |
+| Cached input tokens | 165,760 | 136,320 | 182,272 |
+| Output tokens | 2,377 | 1,318 | 3,248 |
+| Cost (USD, reconciled) | $0.01817 | $0.01515 | $0.02000 |
+| Session wall time (incl. provider latency) | 24.2 s | 16.2 s | 31.8 s |
+| Acceptance suite | pass | pass | pass |
 
----
+## 3. Corrections implemented after review 5730603003
 
-## 3. Key Empirical Findings
+| Priority | Finding | Correction |
+|---|---|---|
+| P0 | M2 rule committed while AutoPilot was disabled | The live runner enables AutoPilot for M2 with every auto-generation rule turned off, so only the explicitly committed `PinContext` applies. `verify_m2_treatment` checks every Turn-2 request: (a) the rule is recorded as applied, (b) the captured **wire egress** contains the directive, (c) all original `input` items before the tail item are identical and in the same order as the raw inbound payload, and (d) no pre-commit request carried the directive. The test fails if any check fails. |
+| P0 | A missing `CW_LIVE_AUTH_USD` silently defaulted to $0.50 | `spend_guard::parse_authorization` has no default. A missing value returns `SpendNotAuthorized`. Malformed, zero, negative, NaN or infinite values return `InvalidAuthorization`. Both are rejected before any paid request. `SpendGuard::from_env` and `cw readiness` use the same parser. |
+| P1 | Spend was only accounted after the agent finished | `SpendGuard::admit_request` runs in the proxy **before each provider request is dispatched**. It enforces the killswitch, the per-session request cap, the per-session cost ceiling, and a per-request reservation against the global budget. A rejected request gets HTTP 429 and never reaches the provider. Each request is settled incrementally from the provider-reported usage. Non-GET requests that can't be metered are refused. Harness subprocesses are killed after 300 s. |
+| P1 | Missing telemetry handling | If usage is missing or incomplete (no input or output count, or cached > input), if pricing is unverified, or if a permit is dropped without settlement (e.g. an aborted stream), the full reservation is charged and the killswitch trips. |
+| P1 | READY was based on binary detection | The readiness ladder is now `Unavailable < Detected < Installed < Configured < FunctionallyVerified`. Static checks can reach `Configured` at most, and only for harnesses with a generated isolated proxy config (Codex, OMP). `FunctionallyVerified` requires observed evidence via `mark_functionally_verified`; the live runner records it after a successful proxied M1 session. Credential isolation is reported as *declared*, not verified. Hermes is reported as `Installed`. |
+| P2 | Missing usage fields defaulted to zero | Codex `turn.completed` parsing requires `input_tokens`, `cached_input_tokens` and `output_tokens`, sums every `turn.completed` event, and errors on missing fields. |
+| P2 | Duration labeled as proxy overhead | Removed. Reports note that wall time includes provider latency. |
 
-### Finding 1: Zero Functional Correctness Regression
-Across all three execution modes (M0, M1, M2), Codex successfully resolved both Turn 1 (zero-division error repair and empty list handling) and Turn 2 (adding PEP 484 type annotations and docstrings). The independent acceptance test suite (`python3 -m unittest test_math_ops.py`) verified 100% pass rate in every workspace.
+### Residual limitation (M0)
 
-### Finding 2: Cache Prefix Preservation & Non-Regression
-In Mode M2, `PinContext` injected the recency directive at the Turn 2 boundary. Prompt caching remained intact with zero unexpected cache drops (`estimated_kv_break_tokens == 0`), directly validating ContextWatcher's KV-cache-first architectural guarantee.
+M0 bypasses the proxy by design, so its requests can't be metered while they run. M0 reserves the full session ceiling up front, is bounded by the subprocess timeout, and is reconciled afterwards (`spend_enforcement: post_hoc_reconciliation_with_upfront_ceiling_reservation_and_timeout`). This is recorded in every run's output.
 
-### Finding 3: Streaming Proxy Transparency
-Comparing Mode M1 (Passthrough Control) against Mode M0 (Native Baseline) demonstrates that the in-process Axum proxy introduces negligible streaming chunk overhead. The agent executed its full multi-turn trajectory and native resume without protocol interruption.
+## 4. Verification status
 
-### Finding 4: Bounded & Enforced SpendGuard Budget
-The entire 3-mode live pilot consumed **$0.05332 USD**, comfortably within the authorized $0.25 USD budget envelope. Every session completed under SpendGuard admission reservation and reconciliation, with zero unbudgeted or unauthorized API calls.
+| Test | Kind | Status |
+|---|---|---|
+| `cw-core` `spend_guard::tests` (12) | default CI | pass |
+| `cw-harnesses` `qualification::tests` (6) | default CI | pass |
+| `test_cw119_proxy_spend_guard_blocks_requests_before_dispatch` (real proxy and mock upstream: request 3 → 429, upstream sees 2) | default CI | pass |
+| `test_cw119_proxy_spend_guard_fails_closed_without_usage` | default CI | pass |
+| `test_cw119_controlled_live_pilot_codex_m0_m1_m2` (repaired runner) | opt-in, paid | **not yet run** |
 
----
+## 5. Next experiment (requires authorization)
 
-## 4. Reproducibility & Commands
+The repaired runner gives one replicate per mode with verified treatment. A product-value claim would also need repeated matched workloads (multiple replicates per mode, randomized order) and a pre-registered decision rule. Until then the product hypothesis stays **NOT EVALUATED**.
 
 ```bash
-# 1. Run harness readiness check
 cargo run -p cw-cli -- readiness
-
-# 2. Run deterministic unit & integration tests
 cargo test -p cw-core spend_guard
 cargo test -p cw-harnesses qualification
 cargo test -p cw-proxy --test live_pilot_test
-
-# 3. Run opt-in live agent pilot (requires authorized budget and OPENAI_API_KEY)
-CW_QUALIFY_LIVE_PILOT=1 CW_LIVE_AUTH_USD=0.50 cargo test -p cw-proxy --test live_pilot_test test_cw119_controlled_live_pilot_codex_m0_m1_m2 -- --ignored --nocapture
+# Paid, opt-in. Output goes to target/cw119_pilot_run.json (override with CW119_PILOT_OUT).
+CW_QUALIFY_LIVE_PILOT=1 CW_LIVE_AUTH_USD=<explicit amount> \
+  cargo test -p cw-proxy --test live_pilot_test test_cw119_controlled_live_pilot_codex_m0_m1_m2 -- --ignored --nocapture
 ```

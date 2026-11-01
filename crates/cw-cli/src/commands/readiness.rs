@@ -28,10 +28,13 @@ pub fn run_readiness(harness: String, json_mode: bool) -> Result<()> {
         }
     };
 
-    let budget = std::env::var("CW_LIVE_AUTH_USD")
-        .or_else(|_| std::env::var("CW_BUDGET_LIMIT_USD"))
-        .ok()
-        .and_then(|v| v.trim().parse::<f64>().ok());
+    let budget = cw_core::spend_guard::parse_authorization(
+        std::env::var("CW_LIVE_AUTH_USD")
+            .or_else(|_| std::env::var("CW_BUDGET_LIMIT_USD"))
+            .ok()
+            .as_deref(),
+    )
+    .ok();
 
     if json_mode {
         let summary = ReadinessSummary {
@@ -55,8 +58,10 @@ pub fn run_readiness(harness: String, json_mode: bool) -> Result<()> {
 
     for r in &reports {
         let status_badge = match r.status {
-            HarnessReadinessStatus::Ready => "🟢 READY",
-            HarnessReadinessStatus::Warning => "🟡 WARNING",
+            HarnessReadinessStatus::FunctionallyVerified => "🟢 FUNCTIONALLY VERIFIED",
+            HarnessReadinessStatus::Configured => "🟡 CONFIGURED (not functionally verified)",
+            HarnessReadinessStatus::Installed => "🟡 INSTALLED (no isolated proxy config)",
+            HarnessReadinessStatus::Detected => "🟠 DETECTED (binary does not run)",
             HarnessReadinessStatus::Unavailable => "🔴 UNAVAILABLE",
         };
         let ver = r.version.as_deref().unwrap_or("unknown");
@@ -71,18 +76,18 @@ pub fn run_readiness(harness: String, json_mode: bool) -> Result<()> {
         println!("    Version      : {ver}");
         println!(
             "    Credentials  : {}",
-            if r.credential_isolation_supported {
-                "Verified sandboxed (CW_CONTROL_TOKEN stripped from tools)"
+            if r.credential_isolation_declared {
+                "Declared by adapter (CW_CONTROL_TOKEN env filter); not verified"
             } else {
-                "Unverified"
+                "Not declared"
             }
         );
         println!(
             "    Proxy Route  : {}",
-            if r.proxy_routing_supported {
-                "Verified"
+            if r.proxy_config_available {
+                "Isolated config available; not verified"
             } else {
-                "Unsupported"
+                "No generated config"
             }
         );
         for n in &r.notes {

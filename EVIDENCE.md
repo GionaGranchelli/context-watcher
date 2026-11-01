@@ -55,10 +55,9 @@ This document establishes the empirical justification, real-world benchmark data
    * *Gate B Live Authorization Invariant:* Zero unauthorized paid API spend. Live execution is strictly opt-in and blocked with status `BLOCKED_SPEND_AUTHORIZATION` until an explicit spend authorization envelope is granted. Documented in `docs/CW-118-PRODUCT-VALUE-QUALIFICATION.md` and `docs/CW-118-EXPERIMENT-PROTOCOL.md`.
 
 6. **Controlled Live-Agent Product Value Qualification (CW-119): Empirical Pilot on Live Autonomous Agents**
-   * *Multi-Harness Readiness:* Automated readiness audit (`cw readiness`) verifying Codex CLI (`0.166.0`), OMP (`18.12.6`), and Hermes Agent (`v0.22.5`) installation, loopback proxy routing, and tool credential sandboxing (`CW_CONTROL_TOKEN` stripped from model tools).
-   * *SpendGuard Budget Safeguard:* Production admission control enforcing pre-session reservations ($0.08 USD), hard per-session ceilings ($0.15 USD), iteration caps (25 requests), real-time usage accounting, and fail-closed spend authorization.
-   * *Controlled 3-Mode Live Pilot:* Empirical qualification driving installed Codex CLI against OpenAI `gpt-4o-mini` across Mode M0 (Native Baseline), Mode M1 (Passthrough Control), and Mode M2 (Cache-Safe Optimization with `PinContext`).
-   * *Measured Live Telemetry:* Total campaign spend of **$0.05332 USD** under authorized $0.25 USD envelope; **100% functional acceptance pass rate** across independent unit tests (`python3 -m unittest test_math_ops.py`); high prompt cache retention (85.23% M0, 83.19% M1, 86.19% M2); documented in `docs/CW-119-LIVE-AGENT-QUALIFICATION.md` and `docs/cw119_pilot_benchmark_data.json`.
+   * *Harness readiness:* `cw readiness` reports a ladder (`Unavailable < Detected < Installed < Configured < FunctionallyVerified`). Static checks never claim functional verification, and credential isolation is reported as declared, not verified.
+   * *SpendGuard:* explicit authorization is required (no default). Each request is admitted in the proxy before dispatch, enforcing request caps, the session cost ceiling and the global budget, then settled incrementally from provider usage. Missing telemetry, unverified pricing or an unsettled permit trips the killswitch. Covered by default-CI tests with the real proxy and a mock upstream.
+   * *Pilot 1 (diagnostic):* three Codex runs on `gpt-4o-mini` completed and passed acceptance ($0.05332 reconciled). **The M2 intervention was not verified** (AutoPilot was disabled), so no economic benefit or harm has been demonstrated. The repaired runner, which checks treatment from wire egress, has not been run yet. Details: `docs/CW-119-LIVE-AGENT-QUALIFICATION.md`.
 
 ---
 

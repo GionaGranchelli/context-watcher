@@ -56,11 +56,21 @@ pub fn omp_proxy_models_config(proxy_port: u16, model_id: &str) -> serde_json::V
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Readiness is a ladder; each rung requires evidence beyond the previous one.
+/// Static inspection can reach at most `Configured`; `FunctionallyVerified` is only
+/// granted via [`mark_functionally_verified`] after an observed proxied request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum HarnessReadinessStatus {
-    Ready,
-    Warning,
+    /// Binary not found on PATH.
     Unavailable,
+    /// Binary found but `--version` did not run successfully.
+    Detected,
+    /// Binary found and executes (`--version` succeeded).
+    Installed,
+    /// Installed, and contextWatcher can generate an isolated proxy configuration for it.
+    Configured,
+    /// Configured, and a proxied request through contextWatcher was actually observed.
+    FunctionallyVerified,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,10 +80,29 @@ pub struct HarnessReadinessReport {
     pub binary_path: Option<PathBuf>,
     pub version: Option<String>,
     pub is_installed: bool,
-    pub credential_isolation_supported: bool,
-    pub proxy_routing_supported: bool,
+    /// The adapter *declares* credential isolation (e.g. env filters). Declared, not verified.
+    pub credential_isolation_declared: bool,
+    /// contextWatcher can generate an isolated proxy-routing config for this harness.
+    pub proxy_config_available: bool,
+    pub functionally_verified: bool,
+    pub verification_evidence: Option<String>,
     pub status: HarnessReadinessStatus,
     pub notes: Vec<String>,
+}
+
+/// Promote a `Configured` report to `FunctionallyVerified` given observed evidence
+/// (e.g. a session id whose requests were recorded by the proxy). Refuses otherwise.
+pub fn mark_functionally_verified(
+    report: &mut HarnessReadinessReport,
+    evidence: impl Into<String>,
+) -> bool {
+    if report.status != HarnessReadinessStatus::Configured {
+        return false;
+    }
+    report.functionally_verified = true;
+    report.verification_evidence = Some(evidence.into());
+    report.status = HarnessReadinessStatus::FunctionallyVerified;
+    true
 }
 
 /// Discovers a binary by name across standard PATH directories.
@@ -128,60 +157,47 @@ pub fn check_harness_readiness(harness: HarnessKind) -> HarnessReadinessReport {
 
     let bin_path = find_binary(binary_name);
     let mut notes = Vec::new();
+    let version = bin_path.as_deref().and_then(extract_binary_version);
+    // Only adapters with a generated, isolated proxy config count as configurable.
+    let (cred_declared, proxy_config) = match harness {
+        HarnessKind::Codex => (true, true), // codex_proxy_config_args + env filter
+        HarnessKind::Omp | HarnessKind::OpenCode => (false, true), // omp_proxy_models_config
+        _ => (false, false),
+    };
 
-    let (is_installed, version, status, cred_supported, proxy_supported) = match &bin_path {
-        Some(path) => {
-            let ver = extract_binary_version(path);
-            notes.push(format!("Found {} at {}", binary_name, path.display()));
-            if let Some(ref v) = ver {
-                notes.push(format!("Reported version: {v}"));
-            }
-
-            match harness {
-                HarnessKind::Codex => (
-                    true,
-                    ver,
-                    HarnessReadinessStatus::Ready,
-                    true, // Codex supports shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"
-                    true, // Responses API proxy routing fully qualified
-                ),
-                HarnessKind::Omp | HarnessKind::OpenCode => (
-                    true,
-                    ver,
-                    HarnessReadinessStatus::Ready,
-                    true, // OMP native runtime supports environment sanitization
-                    true, // Completions API proxy routing qualified
-                ),
-                HarnessKind::Hermes => (
-                    true,
-                    ver,
-                    HarnessReadinessStatus::Ready,
-                    true, // Hermes trusted override supports mode 0600 and atomic unlink
-                    true, // Plugin proxy routing qualified
-                ),
-                _ => (true, ver, HarnessReadinessStatus::Warning, false, true),
-            }
-        }
-        None => {
+    let status = match (&bin_path, &version) {
+        (None, _) => {
             notes.push(format!("Binary '{binary_name}' not found in PATH"));
-            (
-                false,
-                None,
-                HarnessReadinessStatus::Unavailable,
-                false,
-                false,
-            )
+            HarnessReadinessStatus::Unavailable
+        }
+        (Some(path), None) => {
+            notes.push(format!("Found {} but `--version` failed", path.display()));
+            HarnessReadinessStatus::Detected
+        }
+        (Some(path), Some(v)) => {
+            notes.push(format!("Found {} ({v})", path.display()));
+            if proxy_config {
+                HarnessReadinessStatus::Configured
+            } else {
+                notes.push("No generated isolated proxy config for this harness".into());
+                HarnessReadinessStatus::Installed
+            }
         }
     };
+    if status >= HarnessReadinessStatus::Configured {
+        notes.push("Not functionally verified: no proxied request observed".into());
+    }
 
     HarnessReadinessReport {
         harness,
         binary_name: binary_name.to_string(),
+        is_installed: version.is_some(),
         binary_path: bin_path,
         version,
-        is_installed,
-        credential_isolation_supported: cred_supported,
-        proxy_routing_supported: proxy_supported,
+        credential_isolation_declared: cred_declared && status >= HarnessReadinessStatus::Installed,
+        proxy_config_available: proxy_config,
+        functionally_verified: false,
+        verification_evidence: None,
         status,
         notes,
     }
@@ -252,14 +268,27 @@ mod tests {
 
     #[test]
     fn test_check_harness_readiness_on_system() {
-        let codex_report = check_harness_readiness(HarnessKind::Codex);
-        if codex_report.is_installed {
-            assert_eq!(codex_report.status, HarnessReadinessStatus::Ready);
-            assert!(codex_report.credential_isolation_supported);
-            assert!(codex_report.proxy_routing_supported);
+        let mut r = check_harness_readiness(HarnessKind::Codex);
+        // Static checks never claim functional verification.
+        assert!(!r.functionally_verified);
+        assert_ne!(r.status, HarnessReadinessStatus::FunctionallyVerified);
+        if r.is_installed {
+            assert_eq!(r.status, HarnessReadinessStatus::Configured);
+            assert!(mark_functionally_verified(
+                &mut r,
+                "session sess_x observed"
+            ));
+            assert_eq!(r.status, HarnessReadinessStatus::FunctionallyVerified);
         } else {
-            assert_eq!(codex_report.status, HarnessReadinessStatus::Unavailable);
-            assert!(!codex_report.credential_isolation_supported);
+            assert!(r.status < HarnessReadinessStatus::Installed);
+            assert!(!mark_functionally_verified(&mut r, "x"));
         }
+    }
+
+    #[test]
+    fn test_unconfigurable_harness_never_reaches_configured() {
+        let mut r = check_harness_readiness(HarnessKind::Hermes);
+        assert!(r.status <= HarnessReadinessStatus::Installed);
+        assert!(!mark_functionally_verified(&mut r, "x"));
     }
 }

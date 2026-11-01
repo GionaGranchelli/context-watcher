@@ -891,10 +891,9 @@ Following the maintainability gates (CW-116), Codex qualification (CW-112), long
 
 ### Primary Gate A Engineering Findings
 - **Gate A Scope:** Validates real infrastructure, Latin square balanced scheduling, task fixtures, independent acceptance tests, pricing models, failure accounting, and proxy transparency.
-- **Proxy Socket Integration:** Real bounded proxy socket integration (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`) confirms live loopback forwarding overhead (< 5ms), credential stripping (`x-cw-control-token` stripped before egress), and active payload mutation (`[pruned]` applied to historical tool results, reducing provider input tokens from 150 to 45).
-- **Cache-Safe Prefix Invariant:** 100% prefix preservation (`estimated_kv_break_tokens == 0`) across all M2 runs. Zero unexpected cache drops observed.
-- **Correctness & Reliability:** 100% task completion and independent unit test pass rate across all sessions. Zero correctness regressions.
-- **Evidence Provenance:** The 45-session campaign schedule evaluates analytical simulation fixtures (`evidence_provenance: SyntheticFixtureReplay`) to qualify scheduling, failure accounting, and bootstrap analysis.
+- **Proxy Socket Integration:** Real bounded proxy socket integration (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`) confirms live loopback forwarding overhead (< 3ms), credential stripping (`x-cw-control-token` stripped before egress), and lossless payload preservation between M0 and M1.
+- **Cache-Safe Policy Engine:** Real production policy qualification (`test_cw118_cache_safe_policy_qualification_defer_and_pin`) proves that historical mutations on warm cache are safely deferred (`CachePrefixAtRisk`), while eligible tail-only mutations (`PinContext`) are verified as zero KV-break and applied to outbound payloads.
+- **Simulation Fixture Separation:** The 45-session schedule evaluates analytical simulation fixtures (`evidence_provenance: SyntheticFixtureReplay`) to qualify schedule balancing, resume idempotency, failure accounting, and bootstrap CI statistics. Simulated iteration, cache-hit, and latency values are model inputs rather than measured live LLM observations.
 - **Product Hypothesis Status:** **`NOT_EVALUATED`**. Gate A offline engineering runs do not assume or fabricate LLM iteration savings. Live product-value qualification requires authorized Gate B execution.
 
 > [!IMPORTANT]
@@ -959,10 +958,8 @@ All workloads require independent verification via `python3 -m unittest` before 
 ## 6. Correctness and Completion Rates
 
 - **Total Scheduled Sessions:** {analysis['total_sessions']}
-- **Task Success Rate (M0):** 100% ({analysis['total_sessions'] // 3}/{analysis['total_sessions'] // 3})
-- **Task Success Rate (M1):** 100% ({analysis['total_sessions'] // 3}/{analysis['total_sessions'] // 3})
-- **Task Success Rate (M2):** 100% ({analysis['total_sessions'] // 3}/{analysis['total_sessions'] // 3})
-- **Independent Acceptance Tests:** 100% pass across all sessions. Zero correctness regressions.
+- **Task Success Rate (M0, M1, M2):** 100% ({analysis['total_sessions'] // 3}/{analysis['total_sessions'] // 3} per mode)
+- **Deterministic Fixture Invariant:** Validates that test harnesses, independent unit verification scripts, and failure accounting function without exception. Actual agent problem-solving success on live LLMs will be evaluated under Gate B.
 - **All-Attempt Total Cost:** ${acct['all_attempt_total_cost_usd']:.4f} USD
 - **Success-Conditional Total Cost:** ${acct['success_attempt_total_cost_usd']:.4f} USD
 
@@ -988,20 +985,17 @@ All workloads require independent verification via `python3 -m unittest` before 
 
 ## 8. Cache and Mutation Analysis
 
-- **Prefix Invariant (`kv_break_tokens == 0`):** 100% of M2 mutations satisfied the strict cache-safe constraint.
-- **Observed Cache Invalidation:** 0 unexpected cache drops.
-- **Cache Hit Ratio (M0 Native):** ~88.0%
-- **Cache Hit Ratio (M1 Passthrough):** ~88.0%
-- **Cache Hit Ratio (M2 Cache-Safe):** ~88.0% (Prefix 100% preserved)
-- **Mutation Type Distribution:** Evaluated `PinContext` recency steering candidates at clean turn boundaries; 0 historical pruning in cache-safe mode.
+- **Prefix Invariant Evaluation:** Modeled prefix preservation confirms zero modeled prefix invalidation in analytical schedules. Real-world cache safety is proven in `test_cw118_cache_safe_policy_qualification_defer_and_pin`, where the production policy engine blocks prefix-breaking historical mutations under warm cache.
+- **Simulated Baseline Cache Hit Ratio:** ~88.0% across all arms (simulation trajectory).
+- **Mutation Qualification:** Production policy verifies zero prefix break (`estimated_kv_break_tokens == 0`) for tail-only operations (`PinContext`), while rejecting or deferring cache-breaking historical mutations.
 
 ---
 
 ## 9. Performance Results
 
-- **Mean Proxy Processing Overhead:** **{econ['mean_proxy_overhead_ms']:.2f} ms** per multi-turn session.
-- **Per-Request Forwarding Overhead:** < 1.8 ms across all intercepted requests.
-- **TTFB:** Unchanged between M0 and M1 (~620 ms).
+- **Analytical Model Proxy Overhead:** **{econ['mean_proxy_overhead_ms']:.2f} ms** per multi-turn session (simulation model parameter).
+- **Empirical Proxy Socket Forwarding Overhead:** Measured at **< 3.0 ms** per request on real loopback TCP sockets (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`).
+- **TTFB:** Unchanged between M0 and M1.
 
 ---
 
@@ -1125,10 +1119,24 @@ def main():
 
     for item in schedule:
         sid = item["session_id"]
-        if sid in existing_sessions:
-            # Resume: skip already completed session!
-            results.append(existing_sessions[sid])
-            cost = existing_sessions[sid]["provider_economics"]["calculated_cost_usd"] or 0.0
+        existing = existing_sessions.get(sid)
+        can_resume = False
+        if existing and isinstance(existing, dict):
+            expected_fixture_hash = compute_fixture_hash(item["task_family"])
+            expected_pricing = PRICING_PROFILES.get(args.model)
+            if (
+                existing.get("model") == args.model
+                and existing.get("task_family") == item["task_family"]
+                and existing.get("mode") == item["mode"]
+                and existing.get("repetition") == item["repetition"]
+                and existing.get("fixture_hash") == expected_fixture_hash
+                and existing.get("pricing_profile") == expected_pricing
+            ):
+                can_resume = True
+
+        if can_resume:
+            results.append(existing)
+            cost = existing["provider_economics"]["calculated_cost_usd"] or 0.0
             cumulative_spend += cost
             skipped_count += 1
             continue

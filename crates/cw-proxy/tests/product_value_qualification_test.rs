@@ -5,7 +5,7 @@
 // Rigorous deterministic tests exercising REAL production components:
 //   1. Randomized balanced scheduling (Latin square mode-order rotation across 45 sessions)
 //   2. Identical initial fixture hashes across modes (independent acceptance verification)
-//   3. Result persistence and resume idempotency
+//   3. Result persistence, configuration validation, and resume idempotency
 //   4. Missing/incompatible provider usage handling (fail-closed on unknown model pricing)
 //   5. Correct cached vs uncached billing accuracy (real ModelPricingProfile)
 //   6. Failed-task cost accounting (production analyze_campaign_results all-attempt vs success-conditional)
@@ -17,13 +17,14 @@
 //  12. Payload, signature, transcript and tool-lifecycle preservation (real normalizer & policy)
 //  13. Stable regenerated report output (identical report generation)
 //  14. Bounded real mock-provider proxy execution (M0 native vs M1 passthrough vs M2 active mutation)
+//  15. Cache-safe policy engine qualification (defer on warm cache vs tail-only PinContext application)
 
 use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -350,6 +351,42 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
         stdout3.contains("6 resumed"),
         "Runner must resume all 6 sessions idempotently"
     );
+
+    let content3 = fs::read_to_string(&result_file).unwrap();
+    let json3: serde_json::Value = serde_json::from_str(&content3).unwrap();
+    assert_eq!(json3["sessions"].as_array().unwrap().len(), 6);
+
+    // Run 4: re-run on same output file but with differing model configuration (--model gpt-4o)
+    // Configuration validation must detect model incompatibility and reject reuse!
+    let output4 = Command::new("python3")
+        .current_dir(&root)
+        .args([
+            "benchmark/cw118_product_value.py",
+            "--task",
+            "f1,f2",
+            "--repetitions",
+            "1",
+            "--model",
+            "gpt-4o",
+            "--output",
+            result_file.to_str().unwrap(),
+            "--doc-output",
+            doc_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to execute python runner");
+    assert!(output4.status.success());
+    let stdout4 = String::from_utf8_lossy(&output4.stdout);
+    assert!(
+        stdout4.contains("0 resumed"),
+        "Runner must reject cached sessions when model configuration changes"
+    );
+
+    let content4 = fs::read_to_string(&result_file).unwrap();
+    let json4: serde_json::Value = serde_json::from_str(&content4).unwrap();
+    let sessions4 = json4["sessions"].as_array().unwrap();
+    assert_eq!(sessions4.len(), 6);
+    assert_eq!(sessions4[0]["model"], "gpt-4o");
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
@@ -836,17 +873,29 @@ fn test_cw118_stable_regenerated_report_output() {
 // 14. Bounded Real Mock-Provider Proxy Integration (M0 vs M1 vs M2)
 // ============================================================================
 
-async fn spawn_mock_openai_upstream() -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+async fn spawn_mock_openai_upstream() -> (
+    String,
+    Arc<AtomicUsize>,
+    Arc<Mutex<Vec<(axum::http::HeaderMap, serde_json::Value)>>>,
+    tokio::task::JoinHandle<()>,
+) {
     let call_count = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(Mutex::new(Vec::new()));
     let count_clone = call_count.clone();
+    let requests_clone = requests.clone();
 
     let app = Router::new().route(
         "/v1/chat/completions",
         post(
             move |headers: axum::http::HeaderMap, AxumJson(payload): AxumJson<serde_json::Value>| {
                 let count = count_clone.clone();
+                let req_store = requests_clone.clone();
                 async move {
                     count.fetch_add(1, Ordering::SeqCst);
+                    req_store
+                        .lock()
+                        .unwrap()
+                        .push((headers.clone(), payload.clone()));
 
                     // Production Invariant: proxy must strip internal control credentials before forwarding
                     assert!(
@@ -891,7 +940,7 @@ async fn spawn_mock_openai_upstream() -> (String, Arc<AtomicUsize>, tokio::task:
         axum::serve(listener, app).await.unwrap();
     });
 
-    (format!("http://{addr}"), call_count, handle)
+    (format!("http://{addr}"), call_count, requests, handle)
 }
 
 async fn spawn_real_cw_proxy(
@@ -915,7 +964,7 @@ async fn spawn_real_cw_proxy(
 
 #[tokio::test]
 async fn test_cw118_real_mock_provider_proxy_execution_m0_m1_m2() {
-    let (mock_url, mock_calls, _mock_task) = spawn_mock_openai_upstream().await;
+    let (mock_url, mock_calls, received_reqs, _mock_task) = spawn_mock_openai_upstream().await;
     let store = CwStore::open_in_memory().unwrap();
     let (proxy_url, control_token, _proxy_task) =
         spawn_real_cw_proxy(store.clone(), mock_url.clone()).await;
@@ -997,6 +1046,34 @@ async fn test_cw118_real_mock_provider_proxy_execution_m0_m1_m2() {
     // In M1 observation mode, no mutation is applied; upstream saw full 150 prompt tokens
     assert_eq!(m1_data["usage"]["prompt_tokens"], 150);
     assert_eq!(mock_calls.load(Ordering::SeqCst), 2);
+
+    // Verify lossless payload preservation between M0 and M1 (P2 finding):
+    {
+        let captured = received_reqs.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        let (m0_headers, m0_payload) = &captured[0];
+        let (m1_headers, m1_payload) = &captured[1];
+
+        // M0 and M1 payloads forwarded to mock upstream are identical
+        assert_eq!(
+            m0_payload, m1_payload,
+            "Forwarded payload in M1 must be identical to native M0 request"
+        );
+
+        // Header differences: internal credentials stripped in M1
+        assert!(
+            m0_headers.get("x-cw-control-token").is_none(),
+            "M0 has no cw headers"
+        );
+        assert!(
+            m1_headers.get("x-cw-control-token").is_none(),
+            "M1 forwarded request must strip internal control token before egress"
+        );
+        assert!(
+            m1_headers.get("x-cw-session-id").is_none(),
+            "M1 forwarded request must strip internal session ID before egress"
+        );
+    }
 
     // Verify SQLite recorded the turn, sequence, model, and provider
     let m1_turn = store
@@ -1101,4 +1178,214 @@ async fn test_cw118_real_mock_provider_proxy_execution_m0_m1_m2() {
         "M2 Real Active Optimization: Latency={:?}, Observed Prompt Tokens={}",
         m2_elapsed, m2_data["usage"]["prompt_tokens"]
     );
+}
+
+// ============================================================================
+// 15. Cache-Safe Policy Qualification (Defer on Warm Cache vs PinContext)
+// ============================================================================
+
+#[tokio::test]
+async fn test_cw118_cache_safe_policy_qualification_defer_and_pin() {
+    // ------------------------------------------------------------------------
+    // Part A: Historical pruning on warm cache is rejected/deferred by production policy
+    // ------------------------------------------------------------------------
+    let raw_payload = json!({
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Perform task F1"
+            },
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": "call_hist_1",
+                        "type": "function",
+                        "function": {
+                            "name": "exec_command",
+                            "arguments": "{\"command\": \"cargo test\"}"
+                        }
+                    }
+                ]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_hist_1",
+                "content": "RAW HISTORICAL TOOL LOG CONTENT THAT CONSUMES TOKENS 12345"
+            },
+            {
+                "role": "assistant",
+                "content": "Read completed."
+            },
+            {
+                "role": "user",
+                "content": "Next step."
+            }
+        ]
+    });
+
+    let (mut turn, _) = analyze_turn_from_payload(
+        "turn_cs_1".into(),
+        "sess_cs_1".into(),
+        None,
+        1,
+        &raw_payload,
+        ProviderKind::OpenAI,
+        None,
+        Some(200),
+        None,
+    )
+    .expect("failed to analyze turn");
+
+    // Establish genuine observed provider cache hits on prefix
+    turn.kv_cache_report.telemetry_available = true;
+    turn.kv_cache_report.hit_tokens = 120;
+
+    let prefix_fp = compute_prefix_fingerprint(&turn.nodes);
+
+    // Warm verified cache state (reported cache hits on prefix, no intentional rebuild)
+    let warm_cache_obs = classify_cache_state(
+        &turn.session_id,
+        ProviderKind::OpenAI,
+        "gpt-4o-mini",
+        turn.sequence_number,
+        Some(&prefix_fp),
+        None,
+        Some(&turn.kv_cache_report),
+        false,
+    );
+    assert_eq!(warm_cache_obs.state, CacheState::WarmVerified);
+
+    let pricing = find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini");
+
+    // Candidate 1: Historical PruneOrStub targeting call_hist_1
+    let op_prune = MutationOp::PruneOrStub {
+        target_fingerprint: None,
+        target_call_id: Some("call_hist_1".to_string()),
+        target_json_pointer: None,
+        stub_text: "[pruned]".to_string(),
+    };
+
+    let decision_prune = evaluate_decision(
+        Some("cand_prune_warm"),
+        None,
+        &op_prune,
+        &turn,
+        &warm_cache_obs,
+        pricing.as_ref(),
+        3,
+    );
+
+    // Production policy MUST safely defer historical pruning on warm cache to avoid invalidating the cache prefix!
+    assert_eq!(decision_prune.decision, OptimizationDecision::Defer);
+    assert_eq!(
+        decision_prune.reason_code,
+        DecisionReasonCode::CachePrefixAtRisk
+    );
+    assert!(
+        decision_prune.estimated_kv_break_tokens > 0,
+        "Historical pruning on warm cache must report estimated KV break tokens > 0"
+    );
+
+    // ------------------------------------------------------------------------
+    // Part B: Eligible tail-only PinContext is verified cache-safe (0 KV break) and applied
+    // ------------------------------------------------------------------------
+    let op_pin = MutationOp::PinContext {
+        label: "RULE".to_string(),
+        content: "CRITICAL REPO RULE PRESERVED".to_string(),
+        source_node_id: None,
+    };
+
+    let decision_pin = evaluate_decision(
+        Some("cand_pin_tail"),
+        None,
+        &op_pin,
+        &turn,
+        &warm_cache_obs,
+        pricing.as_ref(),
+        3,
+    );
+
+    // Production policy verifies that tail append operation has zero KV break tokens
+    assert_eq!(decision_pin.estimated_kv_break_tokens, 0);
+    assert!(decision_pin.evidence.is_append_only);
+    assert_eq!(
+        decision_pin.reason_code,
+        DecisionReasonCode::TailAppendPreservesPrefixNoDirectSaving
+    );
+
+    // End-to-end socket verification of PinContext application through cw-proxy
+    let (mock_url, _mock_calls, received_reqs, _mock_task) = spawn_mock_openai_upstream().await;
+    let store = CwStore::open_in_memory().unwrap();
+    let (proxy_url, control_token, _proxy_task) =
+        spawn_real_cw_proxy(store.clone(), mock_url.clone()).await;
+
+    let pin_session_id = "sess_cs_pin_test";
+    store
+        .upsert_session(&Session {
+            id: pin_session_id.to_string(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "gpt-4o-mini".to_string(),
+            provider: ProviderKind::OpenAI,
+            title: Some("CW-118 Pin Test Session".to_string()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+        .unwrap();
+
+    let mut ap_cfg = store.get_autopilot_config().unwrap_or_default();
+    ap_cfg.enabled = true;
+    store.set_autopilot_config(&ap_cfg).unwrap();
+
+    let pin_rule = MutationRule {
+        id: "mut_pin_rule_1".to_string(),
+        session_id: pin_session_id.to_string(),
+        op: op_pin,
+        status: MutationStatus::Committed,
+        estimated_saved_tokens: 0,
+        estimated_kv_break_tokens: 0,
+        created_at: Utc::now(),
+    };
+    store.save_mutation(&pin_rule).unwrap();
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{proxy_url}/openai/v1/chat/completions"))
+        .header("x-cw-session-id", pin_session_id)
+        .header("x-cw-control-token", &control_token)
+        .json(&raw_payload)
+        .send()
+        .await
+        .expect("Proxy request with pinned context failed");
+
+    assert_eq!(resp.status(), 200);
+
+    // Inspect the outbound request captured at the mock upstream
+    let reqs = received_reqs.lock().unwrap();
+    assert_eq!(reqs.len(), 1);
+    let (_headers, payload_received) = &reqs[0];
+    let payload_str = serde_json::to_string(payload_received).unwrap();
+
+    // Verify pinned context was injected at the tail
+    assert!(
+        payload_str.contains("<cw_pinned_context>"),
+        "Outbound request must contain injected <cw_pinned_context> block"
+    );
+    assert!(
+        payload_str.contains("CRITICAL REPO RULE PRESERVED"),
+        "Outbound request must contain the pinned rule text"
+    );
+
+    // Verify wire egress in SQLite contains the pinned context
+    let turn_rec = store
+        .get_latest_turn(pin_session_id)
+        .unwrap()
+        .expect("Turn must be recorded");
+    let egress_bytes = store.get_wire_egress(&turn_rec.id).unwrap().unwrap();
+    let egress_str = String::from_utf8_lossy(&egress_bytes);
+    assert!(egress_str.contains("<cw_pinned_context>"));
 }

@@ -252,6 +252,11 @@ impl CwStore {
                 observed_cache_retention_ratio REAL,
                 record_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS session_terminations (
+                session_id TEXT PRIMARY KEY,
+                terminated_at TEXT NOT NULL,
+                reason TEXT
             );")?;
 
         // Ensure any sessions originating from ~/.omp/ are properly categorized as OMP
@@ -1125,6 +1130,27 @@ impl CwStore {
     ) -> Result<(), StoreError> {
         let json_str = serde_json::to_string(record)?;
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+
+        // Lifecycle monotonicity: Once a horizon reaches a finalized terminal state
+        // (TruncatedEarly or FullyObserved), ordinary updates must not silently revert it to PendingContinuation.
+        let existing_status: Option<String> = conn
+            .query_row(
+                "SELECT tracking_status FROM prospective_horizon_observations WHERE horizon_id = ?1",
+                params![record.horizon_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(status) = existing_status {
+            let is_terminal = status == "truncatedearly" || status == "fullyobserved";
+            if is_terminal
+                && record.tracking_status
+                    == cw_core::calibration::HorizonTrackingStatus::PendingContinuation
+            {
+                // Monotonicity: preserve finalized terminal status against reversal to pending
+                return Ok(());
+            }
+        }
+
         let complete_int = if record.horizon_complete { 1 } else { 0 };
         let tracking_status_str = format!("{:?}", record.tracking_status).to_lowercase();
         conn.execute(
@@ -1149,6 +1175,30 @@ impl CwStore {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn mark_session_terminated(
+        &self,
+        session_id: &str,
+        reason: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO session_terminations (session_id, terminated_at, reason)
+             VALUES (?1, ?2, ?3)",
+            params![session_id, chrono::Utc::now().to_rfc3339(), reason],
+        )?;
+        Ok(())
+    }
+
+    pub fn is_session_terminated(&self, session_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let count: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM session_terminations WHERE session_id = ?1",
+            params![session_id],
+            |r| r.get(0),
+        )?;
+        Ok(count > 0)
     }
 
     pub fn list_prospective_horizon_observations(

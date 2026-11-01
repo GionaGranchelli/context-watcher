@@ -440,6 +440,8 @@ pub struct ContextTurn {
     #[serde(default)]
     pub normalization_provider: Option<ProviderKind>,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub observed_usage: Option<Value>,
     #[serde(default)]
     pub outcome: Option<String>,

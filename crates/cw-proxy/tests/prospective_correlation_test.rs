@@ -1450,8 +1450,46 @@ async fn test_prospective_correlation_sc15_session_end_signals() {
             Some("session_ended_before_horizon")
         );
     }
+    assert!(store.is_session_terminated(session_id).unwrap());
 
-    // 2. Test explicit POST /api/v1/sessions/:id/end API endpoint
+    // 2. Verify that a subsequent request cannot revert TruncatedEarly to PendingContinuation
+    let raw2 = json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [{"role": "user", "content": "Another turn after session end"}]
+    })
+    .to_string();
+
+    let req2 = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .header("x-cw-session-id", session_id)
+        .header("x-cw-control-token", &token)
+        .body(Body::from(raw2))
+        .unwrap();
+
+    let res2 = build_proxy_router(state.clone())
+        .oneshot(req2)
+        .await
+        .unwrap();
+    assert_eq!(res2.status(), StatusCode::OK);
+    to_bytes(res2.into_body(), 10000).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let horizons_after = store
+        .list_prospective_horizon_observations(Some(session_id))
+        .unwrap();
+    assert_eq!(
+        horizons_after[0].tracking_status,
+        HorizonTrackingStatus::TruncatedEarly
+    );
+    assert_eq!(
+        horizons_after[0].truncation_reason.as_deref(),
+        Some("session_ended_before_horizon")
+    );
+
+    // 3. Test explicit POST /api/v1/sessions/:id/end API endpoint
     let api_app = build_api_router(state.clone());
     let end_req = Request::builder()
         .method("POST")
@@ -1467,4 +1505,189 @@ async fn test_prospective_correlation_sc15_session_end_signals() {
     let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(body_json["status"], "terminated");
     assert_eq!(body_json["session_id"], session_id);
+}
+
+// -------------------------------------------------------------------------------------------------
+// Scenario 16: Per-turn model identity & applicable pricing preservation across model switches
+// -------------------------------------------------------------------------------------------------
+#[tokio::test]
+async fn test_prospective_correlation_sc16_per_turn_model_identity_preserved() {
+    let captured_models = Arc::new(Mutex::new(Vec::new()));
+    let cm = captured_models.clone();
+
+    let (url, _task) = mock(Router::new().route(
+        "/v1/messages",
+        post(move |body: axum::body::Bytes| {
+            let cm = cm.clone();
+            async move {
+                let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                let m = v
+                    .get("model")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                cm.lock().unwrap().push(m);
+                Json(json!({
+                    "id": "msg_sc16",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "OK"}],
+                    "usage": {
+                        "input_tokens": 1000,
+                        "cache_read_input_tokens": 500,
+                        "output_tokens": 50
+                    }
+                }))
+            }
+        }),
+    ))
+    .await;
+
+    let store = CwStore::open_in_memory().unwrap();
+    let session_id = "sess_sc16_modelswitch";
+    store
+        .upsert_session(&Session {
+            id: session_id.to_string(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            provider: ProviderKind::Anthropic,
+            title: Some("Scenario 16 Model Switch".to_string()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+        .unwrap();
+
+    let mut state = DaemonState::new(store.clone());
+    state.anthropic_upstream = url;
+    let token = state.control_token.clone();
+
+    // Turn 1: Sonnet
+    let raw1 = json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [{"role": "user", "content": "Turn 1 Sonnet"}]
+    })
+    .to_string();
+    let res1 = build_proxy_router(state.clone())
+        .oneshot(anthropic_request(&raw1, Some(session_id), &token))
+        .await
+        .unwrap();
+    assert_eq!(res1.status(), StatusCode::OK);
+    to_bytes(res1.into_body(), 10000).await.unwrap();
+
+    // Turn 2: Haiku
+    let raw2 = json!({
+        "model": "claude-3-haiku-20240307",
+        "messages": [{"role": "user", "content": "Turn 2 Haiku"}]
+    })
+    .to_string();
+    let res2 = build_proxy_router(state.clone())
+        .oneshot(anthropic_request(&raw2, Some(session_id), &token))
+        .await
+        .unwrap();
+    assert_eq!(res2.status(), StatusCode::OK);
+    to_bytes(res2.into_body(), 10000).await.unwrap();
+
+    // Turn 3: Sonnet
+    let raw3 = json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [{"role": "user", "content": "Turn 3 Sonnet"}]
+    })
+    .to_string();
+    let res3 = build_proxy_router(state.clone())
+        .oneshot(anthropic_request(&raw3, Some(session_id), &token))
+        .await
+        .unwrap();
+    assert_eq!(res3.status(), StatusCode::OK);
+    to_bytes(res3.into_body(), 10000).await.unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    // Verify each ContextTurn preserved its actual request model
+    let turns = store.list_turns(session_id).unwrap();
+    assert_eq!(turns.len(), 3);
+    assert_eq!(
+        turns[0].model.as_deref(),
+        Some("claude-3-5-sonnet-20241022")
+    );
+    assert_eq!(turns[1].model.as_deref(), Some("claude-3-haiku-20240307"));
+    assert_eq!(
+        turns[2].model.as_deref(),
+        Some("claude-3-5-sonnet-20241022")
+    );
+
+    // Verify pricing applied to Turn 2 uses Haiku rate ($0.25/MTok cached read, $1.25/MTok output)
+    // whereas Turn 1 uses Sonnet rate ($0.30/MTok cached read, $15.00/MTok output)
+    let outcome1 = ObservedProviderOutcome::from_completed_turn(
+        &turns[0],
+        turns[0].normalization_provider.unwrap(),
+        turns[0].model.as_deref().unwrap(),
+        cw_core::policy::find_pricing_profile(
+            ProviderKind::Anthropic,
+            turns[0].model.as_deref().unwrap(),
+        )
+        .as_ref(),
+        turns[0].created_at,
+    );
+    let outcome2 = ObservedProviderOutcome::from_completed_turn(
+        &turns[1],
+        turns[1].normalization_provider.unwrap(),
+        turns[1].model.as_deref().unwrap(),
+        cw_core::policy::find_pricing_profile(
+            ProviderKind::Anthropic,
+            turns[1].model.as_deref().unwrap(),
+        )
+        .as_ref(),
+        turns[1].created_at,
+    );
+
+    assert_eq!(outcome1.model, "claude-3-5-sonnet-20241022");
+    assert_eq!(outcome2.model, "claude-3-haiku-20240307");
+    // Haiku cost is significantly less than Sonnet for same tokens:
+    assert!(outcome2.calculated_cost_usd.unwrap() < outcome1.calculated_cost_usd.unwrap());
+
+    // When evaluating horizon for a Turn 1 Sonnet decision, Turn 2 is flagged as incompatible
+    let dec = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_1_cand_test", session_id),
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: None,
+        payload_fingerprint: None,
+        candidate_id: Some("cand_01".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Apply),
+        reason_code: Some(DecisionReasonCode::ModeledEconomicBenefitPositive),
+        explanation: "Test model switch".to_string(),
+        estimated_saved_tokens: Some(100),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.009),
+        predicted_optimized_cost_usd: Some(0.0075),
+        predicted_net_benefit_usd: Some(0.0015),
+        forecast_horizon_turns: 3,
+        forecast_assumptions: "3-turn horizon".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: Utc::now(),
+    };
+
+    let pho = evaluate_prospective_horizon(
+        &dec,
+        Some(&outcome1),
+        std::slice::from_ref(&outcome2),
+        3,
+        false,
+    );
+    // Turn 2 model mismatch prevents consecutive verification
+    assert!(!pho.horizon_complete);
+    assert_eq!(
+        pho.tracking_status,
+        HorizonTrackingStatus::PendingContinuation
+    );
 }

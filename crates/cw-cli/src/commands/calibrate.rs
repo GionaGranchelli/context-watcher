@@ -66,15 +66,17 @@ pub fn handle_calibrate(
         let (provider, model) = session_info
             .map(|s| (s.provider, s.model))
             .unwrap_or((cw_core::ir::ProviderKind::Anthropic, "unknown".to_string()));
-        let pricing = cw_core::policy::find_pricing_profile(provider, &model);
         let mut outcomes = Vec::new();
         for t in &turns {
+            let t_provider = t.normalization_provider.unwrap_or(provider);
+            let t_model = t.model.as_deref().unwrap_or(&model);
+            let t_pricing = cw_core::policy::find_pricing_profile(t_provider, t_model);
             outcomes.push(
                 cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
                     t,
-                    provider,
-                    &model,
-                    pricing.as_ref(),
+                    t_provider,
+                    t_model,
+                    t_pricing.as_ref(),
                     t.created_at,
                 ),
             );

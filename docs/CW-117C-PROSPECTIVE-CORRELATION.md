@@ -5,7 +5,7 @@
 **Status:** Completed & Deterministically Qualified  
 **Branch:** `feat/cw-117c-prospective-correlation`  
 **Crates Affected:** `cw-core`, `cw-store`, `cw-proxy`, `cw-cli`  
-**Qualification Test Suite:** `crates/cw-proxy/tests/prospective_correlation_test.rs` (15/15 passed), `crates/cw-store/tests/calibration_evidence_test.rs` (4/4 passed)  
+**Qualification Test Suite:** `crates/cw-proxy/tests/prospective_correlation_test.rs` (16/16 passed), `crates/cw-store/tests/calibration_evidence_test.rs` (5/5 passed)  
 **Evidence Artifact:** [`docs/cw117c_synthetic_calibration_report.json`](cw117c_synthetic_calibration_report.json)  
 **Operating Mode:** Strictly Observation-Only / Strict Shadow Mode (Zero mutations committed or applied to outbound requests)
 
@@ -168,9 +168,9 @@ The prospective calibration report strictly isolates measured evidence from mode
 
 ---
 
-## 5. Qualification Test Suite (15 Deterministic Scenarios)
+## 5. Qualification Test Suite (16 Deterministic Scenarios)
 
-All 15 qualification scenarios are implemented in `crates/cw-proxy/tests/prospective_correlation_test.rs` and executed with mock providers (0 paid API calls, 100% offline):
+All 16 qualification scenarios are implemented in `crates/cw-proxy/tests/prospective_correlation_test.rs` and executed with mock providers (0 paid API calls, 100% offline):
 
 | Scenario | Qualification Test | Verified Invariant | Status |
 |:---|:---|:---|:---:|
@@ -188,7 +188,8 @@ All 15 qualification scenarios are implemented in `crates/cw-proxy/tests/prospec
 | **SC-12** | `test_prospective_correlation_sc12_provider_model_mismatch_rejected` | Decisions paired with mismatched provider or model are rejected as `UncorrelatedAmbiguous` with diagnostic notes. | **PASS** |
 | **SC-13** | `test_prospective_correlation_sc13_explicit_output_tokens_required` | Wire usage lacking explicit output tokens is rejected across Anthropic, OpenAI, and Gemini to prevent cost undercounting. | **PASS** |
 | **SC-14** | `test_prospective_correlation_sc14_horizon_consecutive_verification_and_unknown_baseline` | Horizon tracking requires $H$ consecutive verified turns for `FullyObserved`; unknown base telemetry yields unverified baseline. | **PASS** |
-| **SC-15** | `test_prospective_correlation_sc15_session_end_signals` | Explicit session end via `x-cw-session-end` header or `POST /api/v1/sessions/:id/end` transitions horizons to `TruncatedEarly`. | **PASS** |
+| **SC-15** | `test_prospective_correlation_sc15_session_end_signals` | Explicit session end via `x-cw-session-end` header or `POST /api/v1/sessions/:id/end` persists termination and prevents reopening; lifecycle monotonicity preserves `TruncatedEarly`. | **PASS** |
+| **SC-16** | `test_prospective_correlation_sc16_per_turn_model_identity_preserved` | Reconstructed historical turns retain per-request model and pricing rather than adopting session's latest model. | **PASS** |
 
 ---
 

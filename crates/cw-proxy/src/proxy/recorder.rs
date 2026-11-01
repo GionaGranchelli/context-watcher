@@ -249,7 +249,11 @@ impl Recorder {
             .min(u32::MAX as u64) as u32;
         let state = self.state.clone();
         let provider = self.provider;
-        let is_session_ended = self.session_terminated;
+        let is_session_ended = self.session_terminated
+            || state
+                .store
+                .is_session_terminated(&turn.session_id)
+                .unwrap_or(false);
         Some(tokio::task::spawn_blocking(move || {
             if let Err(error) = state.store.save_turn(&turn, None, None, None) {
                 tracing::error!(%error,"Unable to finalize provider attempt");
@@ -272,17 +276,19 @@ impl Recorder {
 
             // CW-117C: Correlate observed provider outcome with pre-dispatch shadow decisions
             let session_res = state.store.get_session(&turn.session_id);
-            let model = session_res
+            let session_model = session_res
                 .as_ref()
                 .ok()
                 .and_then(|s| s.as_ref())
                 .map(|s| s.model.clone())
                 .unwrap_or_else(|| "unknown".to_string());
-            let pricing = cw_core::policy::find_pricing_profile(provider, &model);
+            let turn_provider = turn.normalization_provider.unwrap_or(provider);
+            let turn_model = turn.model.as_deref().unwrap_or(&session_model);
+            let pricing = cw_core::policy::find_pricing_profile(turn_provider, turn_model);
             let outcome = cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
                 &turn,
-                provider,
-                &model,
+                turn_provider,
+                turn_model,
                 pricing.as_ref(),
                 Utc::now(),
             );
@@ -317,12 +323,16 @@ impl Recorder {
                     if let Ok(turns) = state.store.list_turns(&turn.session_id) {
                         let mut all_outcomes = Vec::new();
                         for t in &turns {
+                            let t_provider = t.normalization_provider.unwrap_or(provider);
+                            let t_model = t.model.as_deref().unwrap_or(&session_model);
+                            let t_pricing =
+                                cw_core::policy::find_pricing_profile(t_provider, t_model);
                             let o =
                                 cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
                                     t,
-                                    provider,
-                                    &model,
-                                    pricing.as_ref(),
+                                    t_provider,
+                                    t_model,
+                                    t_pricing.as_ref(),
                                     t.created_at,
                                 );
                             all_outcomes.push(o);

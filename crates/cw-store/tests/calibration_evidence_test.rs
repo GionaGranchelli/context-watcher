@@ -318,3 +318,64 @@ fn test_prospective_correlation_and_horizon_store_persistence() {
     assert_eq!(loaded_horizons[0].horizon_id, horizons[0].horizon_id);
     assert_eq!(loaded_horizons[0].horizon_declared, 3);
 }
+
+#[test]
+fn test_horizon_lifecycle_monotonicity_prevents_reversal_to_pending() {
+    let store = CwStore::open_in_memory().unwrap();
+    let session_id = "sess_mono";
+
+    // 1. Mark session terminated
+    assert!(!store.is_session_terminated(session_id).unwrap());
+    store
+        .mark_session_terminated(session_id, Some("test_termination"))
+        .unwrap();
+    assert!(store.is_session_terminated(session_id).unwrap());
+
+    // 2. Save a horizon observation with TruncatedEarly
+    let mut pho = cw_core::calibration::ProspectiveHorizonObservation {
+        horizon_id: "pho_test_mono_1".to_string(),
+        decision_id: "dec_mono_1".to_string(),
+        session_id: session_id.to_string(),
+        base_request_index: 1,
+        horizon_declared: 3,
+        horizon_observed: 1,
+        horizon_complete: false,
+        tracking_status: cw_core::calibration::HorizonTrackingStatus::TruncatedEarly,
+        truncation_reason: Some("session_ended_before_horizon".to_string()),
+        transitions: vec![],
+        cumulative_observed_cost_usd: Some(0.002),
+        cumulative_predicted_baseline_cost_usd: 0.006,
+        cumulative_modeled_optimized_cost_usd: 0.005,
+        horizon_cost_delta_usd: None,
+        observed_cache_retention_ratio: 1.0,
+        notes: vec![],
+    };
+    store.save_prospective_horizon_observation(&pho).unwrap();
+
+    let loaded = store
+        .list_prospective_horizon_observations(Some(session_id))
+        .unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(
+        loaded[0].tracking_status,
+        cw_core::calibration::HorizonTrackingStatus::TruncatedEarly
+    );
+
+    // 3. Attempt to overwrite with PendingContinuation (reversal)
+    pho.tracking_status = cw_core::calibration::HorizonTrackingStatus::PendingContinuation;
+    pho.truncation_reason = None;
+    store.save_prospective_horizon_observation(&pho).unwrap();
+
+    // 4. Verify terminal status was preserved and NOT reverted to PendingContinuation
+    let loaded_after = store
+        .list_prospective_horizon_observations(Some(session_id))
+        .unwrap();
+    assert_eq!(
+        loaded_after[0].tracking_status,
+        cw_core::calibration::HorizonTrackingStatus::TruncatedEarly
+    );
+    assert_eq!(
+        loaded_after[0].truncation_reason.as_deref(),
+        Some("session_ended_before_horizon")
+    );
+}

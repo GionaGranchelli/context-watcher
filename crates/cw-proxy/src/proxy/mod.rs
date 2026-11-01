@@ -422,6 +422,11 @@ pub async fn handle_proxy_request(
                     .and_then(|v| v.to_str().ok())
                     .map(|v| v == "true" || v == "1")
                     .unwrap_or(false);
+                if session_terminated {
+                    let _ = state
+                        .store
+                        .mark_session_terminated(&session_id, Some("proxy_header_end"));
+                }
                 let mut rec =
                     Recorder::new(state.clone(), Some(turn), provider, previous_nodes, started);
                 rec.session_terminated = session_terminated;

@@ -439,7 +439,14 @@ pub async fn api_end_session(
         return (StatusCode::NOT_FOUND, "Session not found").into_response();
     };
 
-    let pricing = cw_core::policy::find_pricing_profile(session.provider, &session.model);
+    // Durably persist session termination in the store to prevent reopening or horizon reversion
+    if let Err(error) = state
+        .store
+        .mark_session_terminated(&id, Some("api_explicit_end"))
+    {
+        return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+    }
+
     let Ok(turns) = state.store.list_turns(&id) else {
         return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch turns").into_response();
     };
@@ -453,11 +460,14 @@ pub async fn api_end_session(
 
     let mut all_outcomes = Vec::new();
     for t in &turns {
+        let t_provider = t.normalization_provider.unwrap_or(session.provider);
+        let t_model = t.model.as_deref().unwrap_or(&session.model);
+        let t_pricing = cw_core::policy::find_pricing_profile(t_provider, t_model);
         let o = cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
             t,
-            session.provider,
-            &session.model,
-            pricing.as_ref(),
+            t_provider,
+            t_model,
+            t_pricing.as_ref(),
             t.created_at,
         );
         all_outcomes.push(o);

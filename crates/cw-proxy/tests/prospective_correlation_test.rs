@@ -155,8 +155,8 @@ async fn test_prospective_correlation_sc2_successful_response_immediate_match() 
         predicted_baseline_cost_usd: Some(0.005),
         predicted_optimized_cost_usd: Some(0.0045),
         predicted_net_benefit_usd: Some(0.0005),
-        forecast_horizon_turns: 3,
-        forecast_assumptions: "Linear continuation".to_string(),
+        forecast_horizon_turns: 1,
+        forecast_assumptions: "Single turn matching".to_string(),
         pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
         pricing_version: "2026-10-v1".to_string(),
         policy_version: "0.2.4-cw117c".to_string(),
@@ -228,6 +228,18 @@ async fn test_prospective_correlation_sc2_successful_response_immediate_match() 
     );
     assert_eq!(corrs[0].cache_state_consistent, Some(true));
     assert!(corrs[0].single_turn_cost_delta_usd.is_some());
+
+    // Verify multi-turn forecast (H=3) omits single-turn cost delta to prevent apples-to-oranges comparison
+    let mut dec_multi = decision.clone();
+    dec_multi.forecast_horizon_turns = 3;
+    let corr_multi = correlate_decision_with_outcome(&dec_multi, corrs[0].outcome.as_ref());
+    assert!(corr_multi.single_turn_cost_delta_usd.is_none());
+    assert!(
+        corr_multi
+            .notes
+            .iter()
+            .any(|n| n.contains("Decision forecast covers 3-turn horizon"))
+    );
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -360,12 +372,51 @@ async fn test_prospective_correlation_sc4_missing_or_zero_usage_tokens() {
         Utc::now(),
     );
     assert!(!outcome.cache_telemetry_available);
+    assert!(outcome.calculated_cost_usd.is_none());
     assert!(
         outcome
             .missing_data_reasons
             .iter()
             .any(|r| r.contains("observed_usage_missing"))
     );
+
+    let dec = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_1_cand_test", session_id),
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: None,
+        payload_fingerprint: None,
+        candidate_id: Some("cand_01".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Apply),
+        reason_code: Some(DecisionReasonCode::ModeledEconomicBenefitPositive),
+        explanation: "Test missing usage correlation".to_string(),
+        estimated_saved_tokens: Some(100),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.003),
+        predicted_optimized_cost_usd: Some(0.0028),
+        predicted_net_benefit_usd: Some(0.0002),
+        forecast_horizon_turns: 1,
+        forecast_assumptions: "1-turn".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: Utc::now(),
+    };
+
+    let corr = correlate_decision_with_outcome(&dec, Some(&outcome));
+    assert_eq!(
+        corr.correlation_status,
+        CorrelationStatus::PairedMissingTelemetry
+    );
+    assert!(corr.single_turn_cost_delta_usd.is_none());
+    assert!(corr.cache_state_consistent.is_none());
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -422,6 +473,53 @@ async fn test_prospective_correlation_sc5_client_cancellation_recorded() {
     assert_eq!(turns.len(), 1);
     assert_eq!(turns[0].outcome.as_deref(), Some("cancelled"));
     assert!(turns[0].first_body_byte_ms.is_some());
+
+    let outcome = ObservedProviderOutcome::from_completed_turn(
+        &turns[0],
+        ProviderKind::OpenAI,
+        "gpt-4o",
+        None,
+        Utc::now(),
+    );
+    assert_eq!(outcome.execution_outcome, "cancelled");
+
+    let dec = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_1_cand_cancel", session_id),
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::OpenAI,
+        model: "gpt-4o".to_string(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: None,
+        payload_fingerprint: None,
+        candidate_id: Some("cand_cancel".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Apply),
+        reason_code: Some(DecisionReasonCode::ModeledEconomicBenefitPositive),
+        explanation: "Test cancel correlation".to_string(),
+        estimated_saved_tokens: Some(100),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.003),
+        predicted_optimized_cost_usd: Some(0.0028),
+        predicted_net_benefit_usd: Some(0.0002),
+        forecast_horizon_turns: 1,
+        forecast_assumptions: "1-turn".to_string(),
+        pricing_model_pattern: None,
+        pricing_version: "2026-10-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: Utc::now(),
+    };
+
+    let corr = correlate_decision_with_outcome(&dec, Some(&outcome));
+    assert_eq!(
+        corr.correlation_status,
+        CorrelationStatus::PairedIncompleteExecution
+    );
+    assert!(corr.single_turn_cost_delta_usd.is_none());
+    assert!(corr.cache_state_consistent.is_none());
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -560,9 +658,9 @@ async fn test_prospective_correlation_sc7_repeated_responses_on_sequence() {
         actual_uncached_tokens: 500,
         actual_cache_write_tokens: None,
         actual_output_tokens: 50,
-        calculated_cost_usd: 0.0025,
+        calculated_cost_usd: Some(0.0025),
         reported_cost_usd: None,
-        observed_cache_hit_ratio: 0.75,
+        observed_cache_hit_ratio: Some(0.75),
         ttfb_ms: Some(200),
         request_latency_ms: Some(600),
         cache_telemetry_available: true,
@@ -578,7 +676,7 @@ async fn test_prospective_correlation_sc7_repeated_responses_on_sequence() {
     // Second outcome replaces / updates the first
     let mut outcome2 = outcome1.clone();
     outcome2.actual_cached_tokens = 1800;
-    outcome2.observed_cache_hit_ratio = 0.90;
+    outcome2.observed_cache_hit_ratio = Some(0.90);
     let corr2 = correlate_decision_with_outcome(&dec, Some(&outcome2));
     store.save_correlated_decision_outcome(&corr2).unwrap();
 
@@ -723,9 +821,9 @@ async fn test_prospective_correlation_sc9_unexpected_cache_miss_inconsistency() 
         actual_uncached_tokens: 5000,
         actual_cache_write_tokens: Some(5000),
         actual_output_tokens: 100,
-        calculated_cost_usd: 0.035,
+        calculated_cost_usd: Some(0.035),
         reported_cost_usd: None,
-        observed_cache_hit_ratio: 0.0,
+        observed_cache_hit_ratio: Some(0.0),
         ttfb_ms: Some(400),
         request_latency_ms: Some(1000),
         cache_telemetry_available: true,
@@ -793,9 +891,9 @@ async fn test_prospective_correlation_sc10_horizon_truncation_on_session_end() {
         actual_uncached_tokens: 200,
         actual_cache_write_tokens: None,
         actual_output_tokens: 80,
-        calculated_cost_usd: 0.005,
+        calculated_cost_usd: Some(0.005),
         reported_cost_usd: None,
-        observed_cache_hit_ratio: 5000.0 / 5200.0,
+        observed_cache_hit_ratio: Some(5000.0 / 5200.0),
         ttfb_ms: Some(200),
         request_latency_ms: Some(600),
         cache_telemetry_available: true,
@@ -805,14 +903,34 @@ async fn test_prospective_correlation_sc10_horizon_truncation_on_session_end() {
         observed_timestamp: Utc::now(),
     }];
 
-    let pho = evaluate_prospective_horizon(&dec, &outcomes, dec.forecast_horizon_turns);
-    assert_eq!(pho.horizon_declared, 3);
-    assert_eq!(pho.horizon_observed, 1);
-    assert!(!pho.horizon_complete);
+    // When session is explicitly terminated (session_terminated = true)
+    let pho_ended =
+        evaluate_prospective_horizon(&dec, None, &outcomes, dec.forecast_horizon_turns, true);
+    assert_eq!(pho_ended.horizon_declared, 3);
+    assert_eq!(pho_ended.horizon_observed, 1);
+    assert!(!pho_ended.horizon_complete);
     assert_eq!(
-        pho.truncation_reason.as_deref(),
+        pho_ended.tracking_status,
+        HorizonTrackingStatus::TruncatedEarly
+    );
+    assert_eq!(
+        pho_ended.truncation_reason.as_deref(),
         Some("session_ended_before_horizon")
     );
+    assert!(pho_ended.horizon_cost_delta_usd.is_none());
+
+    // When session is still active (session_terminated = false)
+    let pho_active =
+        evaluate_prospective_horizon(&dec, None, &outcomes, dec.forecast_horizon_turns, false);
+    assert_eq!(pho_active.horizon_declared, 3);
+    assert_eq!(pho_active.horizon_observed, 1);
+    assert!(!pho_active.horizon_complete);
+    assert_eq!(
+        pho_active.tracking_status,
+        HorizonTrackingStatus::PendingContinuation
+    );
+    assert!(pho_active.truncation_reason.is_none());
+    assert!(pho_active.horizon_cost_delta_usd.is_none());
 }
 
 // -------------------------------------------------------------------------------------------------

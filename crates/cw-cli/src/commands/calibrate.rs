@@ -246,8 +246,8 @@ fn render_prospective_report(rep: &ProspectiveCalibrationReport) {
     println!("  Generated At: {}", rep.generated_at.to_rfc3339());
     println!("  ────────────────────────────────────────────────────────────────────────────");
     println!(
-        "  [1] Measured Provider Telemetry (Observed Requests: {}):",
-        rep.measured.total_requests_observed
+        "  [1] Measured Provider Telemetry (Observed Requests: {}, Valid Telemetry: {}):",
+        rep.measured.total_requests_observed, rep.measured.valid_telemetry_requests
     );
     println!(
         "    - Total Measured Cost        : ${:.6}",
@@ -324,6 +324,14 @@ fn render_prospective_report(rep: &ProspectiveCalibrationReport) {
         rep.correlation.matched_immediate
     );
     println!(
+        "    - Paired Incomplete Execution  : {}",
+        rep.correlation.paired_incomplete
+    );
+    println!(
+        "    - Paired Missing Telemetry     : {}",
+        rep.correlation.paired_missing_telemetry
+    );
+    println!(
         "    - Cache State Consistent       : {} requests",
         rep.correlation.cache_state_consistent_count
     );
@@ -343,6 +351,10 @@ fn render_prospective_report(rep: &ProspectiveCalibrationReport) {
     println!(
         "    - Fully Observed Horizons      : {}",
         rep.horizon.fully_observed_horizons
+    );
+    println!(
+        "    - Pending Continuation         : {}",
+        rep.horizon.pending_horizons
     );
     println!(
         "    - Truncated (Session End)      : {}",

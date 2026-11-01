@@ -325,10 +325,15 @@ impl Recorder {
                             all_outcomes.push(o);
                         }
                         for dec in prior_decisions {
+                            let base_outcome = all_outcomes
+                                .iter()
+                                .find(|o| o.request_index == dec.request_index);
                             let pho = cw_core::calibration::evaluate_prospective_horizon(
                                 dec,
+                                base_outcome,
                                 &all_outcomes,
                                 dec.forecast_horizon_turns,
+                                false,
                             );
                             if let Err(err) = state.store.save_prospective_horizon_observation(&pho)
                             {

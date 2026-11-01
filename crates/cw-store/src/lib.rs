@@ -248,6 +248,7 @@ impl CwStore {
                 horizon_declared INTEGER NOT NULL,
                 horizon_observed INTEGER NOT NULL,
                 horizon_complete INTEGER NOT NULL,
+                tracking_status TEXT NOT NULL DEFAULT 'pending_continuation',
                 observed_cache_retention_ratio REAL,
                 record_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
@@ -1125,12 +1126,14 @@ impl CwStore {
         let json_str = serde_json::to_string(record)?;
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         let complete_int = if record.horizon_complete { 1 } else { 0 };
+        let tracking_status_str = format!("{:?}", record.tracking_status).to_lowercase();
         conn.execute(
             "INSERT OR REPLACE INTO prospective_horizon_observations (
                 horizon_id, decision_id, session_id, base_request_index,
                 horizon_declared, horizon_observed, horizon_complete,
+                tracking_status,
                 observed_cache_retention_ratio, record_json, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 record.horizon_id,
                 record.decision_id,
@@ -1139,6 +1142,7 @@ impl CwStore {
                 record.horizon_declared,
                 record.horizon_observed,
                 complete_int,
+                tracking_status_str,
                 record.observed_cache_retention_ratio,
                 json_str,
                 chrono::Utc::now().to_rfc3339()

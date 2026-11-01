@@ -4,10 +4,11 @@
   "git_commit": "git_commit_cw117c",
   "measured": {
     "total_requests_observed": 6,
-    "total_measured_cost_usd": 0.06855,
+    "valid_telemetry_requests": 6,
+    "total_measured_cost_usd": 0.048075,
     "total_measured_input_tokens": 34800,
     "total_measured_cached_tokens": 28500,
-    "total_measured_uncached_tokens": 6300,
+    "total_measured_uncached_tokens": 0,
     "total_measured_output_tokens": 1060,
     "overall_measured_cache_hit_ratio": 0.8189655172413793,
     "mean_ttfb_ms": 228.33333333333334,
@@ -15,20 +16,19 @@
   },
   "modeled": {
     "total_evaluations": 5,
-    "decisions_apply": 3,
+    "decisions_apply": 2,
     "decisions_defer": 1,
     "decisions_reject": 1,
-    "decisions_ignore": 0,
+    "decisions_ignore": 1,
     "reasons_breakdown": {
       "ActiveToolLifecycleProtection": 1,
-      "ModeledEconomicBenefitPositive": 1,
-      "NoDemonstrableBenefit": 1,
+      "ModeledEconomicBenefitPositive": 2,
       "SafetyViolation": 1,
       "TailAppendPreservesPrefixNoDirectSaving": 1
     },
-    "modeled_baseline_cost_usd": 0.0472,
-    "modeled_optimized_cost_usd": 0.045775,
-    "projected_gross_savings_usd": 0.0014249999999999957
+    "modeled_baseline_cost_usd": 0.04464,
+    "modeled_optimized_cost_usd": 0.043214999999999996,
+    "projected_gross_savings_usd": 0.0014250000000000027
   },
   "unverifiable": {
     "deferred_candidates_count": 1,
@@ -43,15 +43,18 @@
     "total_decisions": 5,
     "matched_immediate": 5,
     "matched_continuation": 0,
+    "paired_incomplete": 0,
+    "paired_missing_telemetry": 0,
     "uncorrelated_missing": 0,
     "uncorrelated_ambiguous": 0,
     "cache_state_consistent_count": 5,
     "cache_state_inconsistent_count": 0,
-    "mean_cost_delta_usd": -0.0033099999999999996
+    "mean_cost_delta_usd": 0.0
   },
   "horizon": {
     "total_horizons_tracked": 5,
     "fully_observed_horizons": 3,
+    "pending_horizons": 0,
     "truncated_horizons": 2,
     "mean_horizon_observed_turns": 2.4,
     "overall_cache_retention_ratio": 1.0,

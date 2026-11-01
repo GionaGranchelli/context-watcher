@@ -6,7 +6,7 @@
 **Branch:** `feat/cw-117c-prospective-correlation`  
 **Crates Affected:** `cw-core`, `cw-store`, `cw-proxy`, `cw-cli`  
 **Qualification Test Suite:** `crates/cw-proxy/tests/prospective_correlation_test.rs` (11/11 passed), `crates/cw-store/tests/calibration_evidence_test.rs` (4/4 passed)  
-**Evidence Artifact:** [`docs/cw117c_synthetic_calibration_report.json`](file:///home/gionag/Development/contextWatcher/docs/cw117c_synthetic_calibration_report.json)  
+**Evidence Artifact:** [`docs/cw117c_synthetic_calibration_report.json`](cw117c_synthetic_calibration_report.json)  
 **Operating Mode:** Strictly Observation-Only / Strict Shadow Mode (Zero mutations committed or applied to outbound requests)
 
 ---
@@ -67,20 +67,25 @@ Client Harness Request (Unmutated Source Payload)
 - `pricing_version` & `policy_version`: Auditable capability and algorithm versions.
 
 ### 3.2. Observed Provider Outcome (`ObservedProviderOutcome`)
-- Derived directly from finalized `ContextTurn` and provider usage headers:
+- Derived directly from finalized `ContextTurn` and provider usage headers via `extract_normalized_provider_usage`:
   - `actual_input_tokens`, `actual_cached_tokens`, `actual_uncached_tokens`, `actual_cache_write_tokens`, `actual_output_tokens`
-  - `calculated_cost_usd`: Recalculated from verified `ModelPricingProfile`
-  - `observed_cache_hit_ratio`: $\frac{\text{cached\_tokens}}{\text{input\_tokens}}$
+  - Normalized across provider wire formats: Anthropic disjoint buckets (cache write tokens are NOT added to uncached tokens, preventing double billing), OpenAI, and Gemini.
+  - `calculated_cost_usd`: Recalculated from verified `ModelPricingProfile`. When essential usage telemetry is missing or incomplete, cost calculation is strictly prevented (`None`).
+  - `observed_cache_hit_ratio`: $\frac{\text{cached\_tokens}}{\text{total\_input\_tokens}}$ (`None` when telemetry is missing).
   - `ttfb_ms` and `request_latency_ms`
   - `execution_outcome`: `"completed"`, `"stream_error"`, `"cancelled"`, etc.
   - `missing_data_reasons`: Explicit tracking for missing usage headers or unmeasured TTFB.
 
 ### 3.3. Decision-to-Outcome Correlation (`CorrelatedDecisionOutcome`)
 - `correlation_status`:
-  - `MatchedImmediate`: Pre-dispatch decision paired with immediate outbound request.
+  - `MatchedImmediate`: Pre-dispatch decision paired with completed, telemetry-valid immediate outbound request.
+  - `PairedIncompleteExecution`: Pre-dispatch decision paired with an execution that failed, errored, or was cancelled before completion. Single-turn cost delta and cache consistency remain `None`.
+  - `PairedMissingTelemetry`: Pre-dispatch decision paired with an execution whose provider usage telemetry was missing or incomplete. Cost delta and cache consistency remain `None`.
   - `UncorrelatedMissingOutcome`: Request failed or timed out before completion.
   - `UncorrelatedAmbiguous`: Session or request sequence mismatch.
-- `single_turn_cost_delta_usd`: Difference between predicted single-turn baseline and actual executed cost.
+- `single_turn_cost_delta_usd`:
+  - Computed when `forecast_horizon_turns == 1` matching the 1-turn baseline.
+  - When $H > 1$, single-turn cost delta is `None` with an explanatory note to avoid apples-to-oranges comparisons (multi-turn comparisons are tracked in `ProspectiveHorizonObservation`).
 - `cache_state_consistent`:
   - `WarmVerified` $\rightarrow$ Consistent if observed cache hit ratio $> 5\%$.
   - `ColdLikely` $\rightarrow$ Consistent if observed cache hit ratio $< 5\%$.
@@ -89,10 +94,15 @@ Client Harness Request (Unmutated Source Payload)
 ### 3.4. Continuation Horizon Observation (`ProspectiveHorizonObservation`)
 - `horizon_id`: Unique identifier `pho_{decision_record_id}`.
 - `horizon_declared` vs `horizon_observed`: Declared turns $H$ vs actual turns executed before session termination.
+- `tracking_status`:
+  - `FullyObserved`: Full declared horizon $H$ observed with verified provider continuation requests.
+  - `PendingContinuation`: Session is active; waiting for subsequent continuation turns to reach horizon $H$ (no premature truncation labeling).
+  - `TruncatedEarly`: Session explicitly terminated before reaching declared horizon $H$.
 - `horizon_complete`: `true` if $\text{observed} \ge \text{declared}$, `false` otherwise.
-- `truncation_reason`: Populated with `"session_ended_before_horizon"` when a session completes before $H$ turns.
-- `transitions`: Detailed list of transitions per turn (`WarmPreserved`, `WarmDrop`, `ColdWrite`, `ColdContinued`).
+- `truncation_reason`: Populated with `"session_ended_before_horizon"` only when a session explicitly completes before $H$ turns.
+- `transitions`: Detailed list of transitions per turn (`WarmPreserved`, `WarmDrop`, `ColdWrite`, `ColdContinued`) with `is_verified` flag. Initial base cache hit ratio is drawn directly from `base_outcome.observed_cache_hit_ratio` without hardcoded assumptions.
 - `observed_cache_retention_ratio`: Fraction of warm cache transitions that retained hits $> 50\%$.
+- `horizon_cost_delta_usd`: Compared when `FullyObserved` against cumulative verified continuation costs.
 
 ---
 
@@ -105,21 +115,24 @@ The prospective calibration report strictly isolates measured evidence from mode
 │ contextWatcher — CW-117C Prospective Shadow Calibration                      │
 └──────────────────────────────────────────────────────────────────────────────┘
 
-  [1] Measured Provider Telemetry (Observed Requests: 6):
-    - Total Measured Cost        : $0.068550
-    - Total Measured Tokens      : 28500 cached / 6300 uncached (34800 total input)
+  Report Title: ContextWatcher CW-117C Prospective Shadow Calibration Report
+  Git Commit  : git_commit_cw117c
+  Generated At: 2026-11-01T08:01:00+00:00
+  ────────────────────────────────────────────────────────────────────────────
+  [1] Measured Provider Telemetry (Observed Requests: 6, Valid Telemetry: 6):
+    - Total Measured Cost        : $0.048075
+    - Total Measured Tokens      : 28500 cached / 0 uncached (34800 total input)
     - Overall Measured Hit Ratio : 81.90%
     - Mean TTFB                  : 228.3 ms
     - Mean Request Latency       : 781.7 ms
 
   [2] Modeled Policy Projections (Total Evaluations: 5):
-    - Decisions                  : 3 Apply | 1 Defer | 1 Reject | 0 Ignore
-    - Modeled Baseline Cost      : $0.047200
-    - Modeled Optimized Cost     : $0.045775
+    - Decisions                  : 2 Apply | 1 Defer | 1 Reject | 1 Ignore
+    - Modeled Baseline Cost      : $0.044640
+    - Modeled Optimized Cost     : $0.043215
     - Projected Gross Savings    : $0.001425
       * ActiveToolLifecycleProtection        : 1
-      * ModeledEconomicBenefitPositive       : 1
-      * NoDemonstrableBenefit                : 1
+      * ModeledEconomicBenefitPositive       : 2
       * SafetyViolation                      : 1
       * TailAppendPreservesPrefixNoDirectSaving : 1
 
@@ -133,12 +146,15 @@ The prospective calibration report strictly isolates measured evidence from mode
   [4] Decision-to-Outcome Correlation:
     - Total Pre-Dispatch Decisions : 5
     - Matched Immediate Outbound   : 5
+    - Paired Incomplete Execution  : 0
+    - Paired Missing Telemetry     : 0
     - Cache State Consistent       : 5 requests
     - Cache State Inconsistent     : 0 requests
-    - Mean Single-Turn Cost Delta  : $-0.003310
+    - Mean Single-Turn Cost Delta  : $0.000000
 
   [5] Multi-Turn Horizon Tracking (Horizons: 5):
     - Fully Observed Horizons      : 3
+    - Pending Continuation         : 0
     - Truncated (Session End)      : 2
     - Mean Observed Turns          : 2.4
     - Observed Cache Retention     : 100.00%

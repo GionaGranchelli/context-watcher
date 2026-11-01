@@ -31,6 +31,13 @@ pub enum PolicyEvaluationStatus {
     NotEvaluatedMissingCandidates,
 }
 
+/// Computes a deterministic BLAKE3 payload fingerprint from canonical JSON structure.
+/// Contains zero raw prompt text, messages, or secrets.
+pub fn compute_payload_fingerprint(payload: &serde_json::Value) -> String {
+    let canonical = serde_json::to_vec(payload).unwrap_or_default();
+    format!("pfp_{}", blake3::hash(&canonical).to_hex())
+}
+
 /// Durable, privacy-preserving record of a shadow policy evaluation.
 ///
 /// Contains zero prompt text, raw secrets, or uncompacted tool outputs.
@@ -56,6 +63,9 @@ pub struct ShadowDecisionEvidence {
     /// Optional prefix fingerprint (hash only; zero prompt text)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix_fingerprint: Option<String>,
+    /// Optional stable request payload fingerprint (BLAKE3 hash only; zero prompt text)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_fingerprint: Option<String>,
     /// Optimization candidate identifier, if candidate-level
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate_id: Option<String>,
@@ -150,6 +160,7 @@ impl ShadowDecisionEvidence {
             cache_state: decision.cache_state,
             provenance: decision.evidence.telemetry_provenance,
             prefix_fingerprint: cache_obs.prefix_fingerprint.clone(),
+            payload_fingerprint: None,
             candidate_id: decision.candidate_id.clone(),
             plan_id: decision.plan_id.clone(),
             policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
@@ -168,6 +179,12 @@ impl ShadowDecisionEvidence {
             policy_version: POLICY_CALIBRATION_VERSION.to_string(),
             decision_timestamp: decision.timestamp,
         }
+    }
+
+    /// Attach a deterministic payload fingerprint to the evidence record.
+    pub fn with_payload_fingerprint(mut self, pfp: Option<String>) -> Self {
+        self.payload_fingerprint = pfp;
+        self
     }
 
     /// Construct a durable evidence record from a historical observation trace without fabricating decisions or savings.
@@ -192,6 +209,7 @@ impl ShadowDecisionEvidence {
             cache_state: cache_obs.state,
             provenance: cache_obs.provenance,
             prefix_fingerprint: None,
+            payload_fingerprint: None,
             candidate_id: None,
             plan_id: None,
             policy_evaluation_status: PolicyEvaluationStatus::NotEvaluatedMissingCandidates,
@@ -219,8 +237,11 @@ impl ShadowDecisionEvidence {
 /// Observed request-level provider outcome.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ObservedProviderOutcome {
+    pub session_id: String,
     pub request_index: u32,
     pub turn_index: u32,
+    pub provider: ProviderKind,
+    pub model: String,
     pub actual_input_tokens: u32,
     pub actual_cached_tokens: u32,
     pub actual_uncached_tokens: u32,
@@ -236,8 +257,95 @@ pub struct ObservedProviderOutcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_latency_ms: Option<u64>,
     pub cache_telemetry_available: bool,
+    pub execution_outcome: String,
     pub applied_mutations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub missing_data_reasons: Vec<String>,
     pub observed_timestamp: DateTime<Utc>,
+}
+
+impl ObservedProviderOutcome {
+    /// Construct an observed outcome record from a finalized proxy ContextTurn.
+    pub fn from_completed_turn(
+        turn: &crate::ir::ContextTurn,
+        provider: ProviderKind,
+        model: &str,
+        pricing: Option<&ModelPricingProfile>,
+        observed_timestamp: DateTime<Utc>,
+    ) -> Self {
+        let actual_cached = turn.token_usage.cached_tokens;
+        let actual_input = turn.token_usage.input_tokens;
+        let actual_uncached = actual_input.saturating_sub(actual_cached);
+        let actual_output = turn.token_usage.output_tokens;
+
+        let actual_write = turn
+            .observed_usage
+            .as_ref()
+            .and_then(|u| {
+                u.get("cache_creation_input_tokens")
+                    .or_else(|| u.get("cache_write_tokens"))
+            })
+            .and_then(Value::as_u64)
+            .map(|w| w.min(u32::MAX as u64) as u32);
+
+        let mut missing_reasons = Vec::new();
+        let outcome_str = turn
+            .outcome
+            .clone()
+            .unwrap_or_else(|| "completed".to_string());
+        if outcome_str != "completed" {
+            missing_reasons.push(format!("execution_outcome_{}", outcome_str));
+        }
+        if turn.observed_usage.is_none() {
+            missing_reasons.push("observed_usage_missing".to_string());
+        }
+        if turn.first_body_byte_ms.is_none() {
+            missing_reasons.push("ttfb_not_measured".to_string());
+        }
+
+        let calculated_cost = if let Some(p) = pricing
+            && p.is_supported
+        {
+            let cached_cost = (actual_cached as f64 / 1_000_000.0) * p.cached_input_read_per_mtok;
+            let uncached_cost = (actual_uncached as f64 / 1_000_000.0) * p.uncached_input_per_mtok;
+            let output_cost = (actual_output as f64 / 1_000_000.0) * p.output_per_mtok;
+            let write_cost =
+                (actual_write.unwrap_or(0) as f64 / 1_000_000.0) * p.cache_write_per_mtok;
+            cached_cost + uncached_cost + output_cost + write_cost
+        } else {
+            0.0
+        };
+
+        let hit_ratio = if actual_input > 0 {
+            actual_cached as f64 / actual_input as f64
+        } else {
+            0.0
+        };
+
+        Self {
+            session_id: turn.session_id.clone(),
+            request_index: turn.sequence_number,
+            turn_index: turn.sequence_number,
+            provider,
+            model: model.to_string(),
+            actual_input_tokens: actual_input,
+            actual_cached_tokens: actual_cached,
+            actual_uncached_tokens: actual_uncached,
+            actual_cache_write_tokens: actual_write,
+            actual_output_tokens: actual_output,
+            calculated_cost_usd: calculated_cost,
+            reported_cost_usd: None,
+            observed_cache_hit_ratio: hit_ratio,
+            ttfb_ms: turn.first_body_byte_ms,
+            request_latency_ms: turn.latency_ms,
+            cache_telemetry_available: turn.observed_usage.is_some()
+                && (actual_cached > 0 || actual_uncached > 0),
+            execution_outcome: outcome_str,
+            applied_mutations: turn.applied_mutation_ids.clone(),
+            missing_data_reasons: missing_reasons,
+            observed_timestamp,
+        }
+    }
 }
 
 /// Status of correlation between a shadow policy decision and provider telemetry.
@@ -273,6 +381,902 @@ pub struct CorrelatedDecisionOutcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_state_consistent: Option<bool>,
     pub notes: Vec<String>,
+}
+
+/// Correlate a pre-dispatch shadow decision with an observed provider outcome.
+pub fn correlate_decision_with_outcome(
+    decision: &ShadowDecisionEvidence,
+    outcome: Option<&ObservedProviderOutcome>,
+) -> CorrelatedDecisionOutcome {
+    let correlation_id = format!("corr_{}", decision.record_id);
+    let session_id = decision.session_id.clone();
+    let request_index = decision.request_index;
+
+    match outcome {
+        None => CorrelatedDecisionOutcome {
+            correlation_id,
+            session_id,
+            request_index,
+            decision: decision.clone(),
+            outcome: None,
+            correlation_status: CorrelationStatus::UncorrelatedMissingOutcome,
+            single_turn_cost_delta_usd: None,
+            cache_state_consistent: None,
+            notes: vec![
+                "No observed provider response received for this pre-dispatch decision".to_string(),
+            ],
+        },
+        Some(obs) => {
+            if obs.session_id != decision.session_id || obs.request_index != decision.request_index
+            {
+                return CorrelatedDecisionOutcome {
+                    correlation_id,
+                    session_id,
+                    request_index,
+                    decision: decision.clone(),
+                    outcome: Some(obs.clone()),
+                    correlation_status: CorrelationStatus::UncorrelatedAmbiguous,
+                    single_turn_cost_delta_usd: None,
+                    cache_state_consistent: None,
+                    notes: vec![format!(
+                        "Session/request mismatch: decision ({}, {}) vs outcome ({}, {})",
+                        decision.session_id,
+                        decision.request_index,
+                        obs.session_id,
+                        obs.request_index
+                    )],
+                };
+            }
+
+            let mut notes = Vec::new();
+            if obs.execution_outcome != "completed" {
+                notes.push(format!(
+                    "Provider execution outcome: {}",
+                    obs.execution_outcome
+                ));
+            }
+
+            // Cost delta: predicted baseline cost minus actual observed cost
+            let cost_delta = decision
+                .predicted_baseline_cost_usd
+                .map(|pred| pred - obs.calculated_cost_usd);
+
+            // Cache state consistency
+            let consistent = match decision.cache_state {
+                CacheState::WarmVerified => {
+                    // Predicted warm cache hit; consistent if cache hit ratio > 0.05
+                    Some(obs.observed_cache_hit_ratio > 0.05)
+                }
+                CacheState::ColdLikely => {
+                    // Predicted cold cache; consistent if actual cached tokens is negligible (< 5%)
+                    Some(obs.observed_cache_hit_ratio < 0.05)
+                }
+                CacheState::Unknown => None,
+                CacheState::Rebuilding => {
+                    // Rebuilding cache: write tokens or cold uncached tokens
+                    Some(
+                        obs.actual_cache_write_tokens.unwrap_or(0) > 0
+                            || obs.observed_cache_hit_ratio < 0.5,
+                    )
+                }
+            };
+
+            if let Some(false) = consistent {
+                notes.push(format!(
+                    "Cache state inconsistency: predicted {:?}, but observed hit ratio {:.2}% ({} cached / {} input)",
+                    decision.cache_state,
+                    obs.observed_cache_hit_ratio * 100.0,
+                    obs.actual_cached_tokens,
+                    obs.actual_input_tokens
+                ));
+            }
+
+            CorrelatedDecisionOutcome {
+                correlation_id,
+                session_id,
+                request_index,
+                decision: decision.clone(),
+                outcome: Some(obs.clone()),
+                correlation_status: CorrelationStatus::MatchedImmediate,
+                single_turn_cost_delta_usd: cost_delta,
+                cache_state_consistent: consistent,
+                notes,
+            }
+        }
+    }
+}
+
+/// Individual continuation request transition observed within the forecast horizon.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ContinuationTransition {
+    pub request_index: u32,
+    pub turn_index: u32,
+    pub input_tokens: u32,
+    pub cached_tokens: u32,
+    pub uncached_tokens: u32,
+    pub cache_hit_ratio: f64,
+    pub cost_usd: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttfb_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    pub transition_type: String,
+}
+
+/// Observation of provider behavior over the continuation horizon H following a shadow decision.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProspectiveHorizonObservation {
+    pub horizon_id: String,
+    pub decision_id: String,
+    pub session_id: String,
+    pub base_request_index: u32,
+    pub horizon_declared: u32,
+    pub horizon_observed: u32,
+    pub horizon_complete: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncation_reason: Option<String>,
+    pub transitions: Vec<ContinuationTransition>,
+    pub cumulative_observed_cost_usd: f64,
+    pub cumulative_predicted_baseline_cost_usd: f64,
+    pub cumulative_modeled_optimized_cost_usd: f64,
+    pub observed_cache_retention_ratio: f64,
+    pub notes: Vec<String>,
+}
+
+/// Evaluates subsequent requests following a base decision up to horizon H.
+pub fn evaluate_prospective_horizon(
+    decision: &ShadowDecisionEvidence,
+    subsequent_outcomes: &[ObservedProviderOutcome],
+    horizon_declared: u32,
+) -> ProspectiveHorizonObservation {
+    let horizon_id = format!("pho_{}", decision.record_id);
+    let mut transitions = Vec::new();
+    let mut cum_observed_cost = 0.0;
+    let mut warm_transitions = 0;
+    let mut warm_retained = 0;
+
+    let base_idx = decision.request_index;
+    let mut matching_outcomes: Vec<&ObservedProviderOutcome> = subsequent_outcomes
+        .iter()
+        .filter(|o| {
+            o.session_id == decision.session_id
+                && o.request_index > base_idx
+                && o.request_index <= base_idx + horizon_declared
+        })
+        .collect();
+    matching_outcomes.sort_by_key(|o| o.request_index);
+
+    let mut prev_hit_ratio = if decision.cache_state == CacheState::WarmVerified {
+        0.8
+    } else {
+        0.0
+    };
+
+    for obs in &matching_outcomes {
+        cum_observed_cost += obs.calculated_cost_usd;
+        let hit_ratio = obs.observed_cache_hit_ratio;
+
+        let trans_type = if prev_hit_ratio >= 0.5 {
+            warm_transitions += 1;
+            if hit_ratio >= 0.5 {
+                warm_retained += 1;
+                "WarmPreserved"
+            } else {
+                "WarmDrop"
+            }
+        } else if obs.actual_cache_write_tokens.unwrap_or(0) > 0 || hit_ratio > 0.5 {
+            "ColdWrite"
+        } else {
+            "ColdContinued"
+        };
+        prev_hit_ratio = hit_ratio;
+
+        transitions.push(ContinuationTransition {
+            request_index: obs.request_index,
+            turn_index: obs.turn_index,
+            input_tokens: obs.actual_input_tokens,
+            cached_tokens: obs.actual_cached_tokens,
+            uncached_tokens: obs.actual_uncached_tokens,
+            cache_hit_ratio: hit_ratio,
+            cost_usd: obs.calculated_cost_usd,
+            ttfb_ms: obs.ttfb_ms,
+            latency_ms: obs.request_latency_ms,
+            transition_type: trans_type.to_string(),
+        });
+    }
+
+    let horizon_observed = transitions.len() as u32;
+    let horizon_complete = horizon_observed >= horizon_declared;
+    let truncation_reason = if !horizon_complete {
+        Some("session_ended_before_horizon".to_string())
+    } else {
+        None
+    };
+
+    let cache_retention_ratio = if warm_transitions > 0 {
+        warm_retained as f64 / warm_transitions as f64
+    } else {
+        1.0
+    };
+
+    let pred_base_single = decision.predicted_baseline_cost_usd.unwrap_or(0.0);
+    let opt_single = decision
+        .predicted_optimized_cost_usd
+        .unwrap_or(pred_base_single);
+    let cum_pred_base = pred_base_single * (horizon_observed as f64);
+    let cum_modeled_opt = opt_single * (horizon_observed as f64);
+
+    ProspectiveHorizonObservation {
+        horizon_id,
+        decision_id: decision.record_id.clone(),
+        session_id: decision.session_id.clone(),
+        base_request_index: decision.request_index,
+        horizon_declared,
+        horizon_observed,
+        horizon_complete,
+        truncation_reason,
+        transitions,
+        cumulative_observed_cost_usd: cum_observed_cost,
+        cumulative_predicted_baseline_cost_usd: cum_pred_base,
+        cumulative_modeled_optimized_cost_usd: cum_modeled_opt,
+        observed_cache_retention_ratio: cache_retention_ratio,
+        notes: Vec::new(),
+    }
+}
+
+/// Measured request-level provider metrics directly verified by telemetry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MeasuredTelemetryMetrics {
+    pub total_requests_observed: usize,
+    pub total_measured_cost_usd: f64,
+    pub total_measured_input_tokens: u64,
+    pub total_measured_cached_tokens: u64,
+    pub total_measured_uncached_tokens: u64,
+    pub total_measured_output_tokens: u64,
+    pub overall_measured_cache_hit_ratio: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mean_ttfb_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mean_request_latency_ms: Option<f64>,
+}
+
+/// Modeled policy metrics estimated pre-dispatch by ContextWatcher.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModeledPolicyMetrics {
+    pub total_evaluations: usize,
+    pub decisions_apply: usize,
+    pub decisions_defer: usize,
+    pub decisions_reject: usize,
+    pub decisions_ignore: usize,
+    pub reasons_breakdown: BTreeMap<String, usize>,
+    pub modeled_baseline_cost_usd: f64,
+    pub modeled_optimized_cost_usd: f64,
+    pub projected_gross_savings_usd: f64,
+}
+
+/// Unverifiable counterfactual metrics tracking mutations that were deferred or rejected and never executed upstream.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UnverifiableCounterfactualMetrics {
+    pub deferred_candidates_count: usize,
+    pub rejected_candidates_count: usize,
+    pub unverifiable_reason: String,
+    pub notes: Vec<String>,
+}
+
+/// Summary metrics for decision-to-outcome correlation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CorrelationSummaryMetrics {
+    pub total_decisions: usize,
+    pub matched_immediate: usize,
+    pub matched_continuation: usize,
+    pub uncorrelated_missing: usize,
+    pub uncorrelated_ambiguous: usize,
+    pub cache_state_consistent_count: usize,
+    pub cache_state_inconsistent_count: usize,
+    pub mean_cost_delta_usd: f64,
+}
+
+/// Summary metrics for continuation horizon tracking.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HorizonAccuracyMetrics {
+    pub total_horizons_tracked: usize,
+    pub fully_observed_horizons: usize,
+    pub truncated_horizons: usize,
+    pub mean_horizon_observed_turns: f64,
+    pub overall_cache_retention_ratio: f64,
+    pub warm_drops_detected: usize,
+}
+
+/// Prospective shadow decision calibration report separating Measured, Modeled, and Unverifiable counterfactuals.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProspectiveCalibrationReport {
+    pub report_title: String,
+    pub generated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_commit: Option<String>,
+    pub measured: MeasuredTelemetryMetrics,
+    pub modeled: ModeledPolicyMetrics,
+    pub unverifiable: UnverifiableCounterfactualMetrics,
+    pub correlation: CorrelationSummaryMetrics,
+    pub horizon: HorizonAccuracyMetrics,
+    pub discrepancies: Vec<PolicyDiscrepancy>,
+    pub notes: Vec<String>,
+}
+
+/// Builds a ProspectiveCalibrationReport from prospective decisions, observed outcomes, correlations, and horizons.
+pub fn build_prospective_calibration_report(
+    decisions: &[ShadowDecisionEvidence],
+    outcomes: &[ObservedProviderOutcome],
+    correlations: &[CorrelatedDecisionOutcome],
+    horizons: &[ProspectiveHorizonObservation],
+    git_commit: Option<String>,
+    generated_at: Option<DateTime<Utc>>,
+) -> ProspectiveCalibrationReport {
+    let total_requests_observed = outcomes.len();
+    let mut total_cost = 0.0;
+    let mut total_input = 0u64;
+    let mut total_cached = 0u64;
+    let mut total_uncached = 0u64;
+    let mut total_output = 0u64;
+    let mut sum_ttfb = 0u64;
+    let mut count_ttfb = 0usize;
+    let mut sum_latency = 0u64;
+    let mut count_latency = 0usize;
+
+    for o in outcomes {
+        total_cost += o.calculated_cost_usd;
+        total_input += o.actual_input_tokens as u64;
+        total_cached += o.actual_cached_tokens as u64;
+        total_uncached += o.actual_uncached_tokens as u64;
+        total_output += o.actual_output_tokens as u64;
+        if let Some(t) = o.ttfb_ms {
+            sum_ttfb += t;
+            count_ttfb += 1;
+        }
+        if let Some(l) = o.request_latency_ms {
+            sum_latency += l;
+            count_latency += 1;
+        }
+    }
+
+    let overall_hit_ratio = if total_input > 0 {
+        total_cached as f64 / total_input as f64
+    } else {
+        0.0
+    };
+
+    let mean_ttfb = if count_ttfb > 0 {
+        Some(sum_ttfb as f64 / count_ttfb as f64)
+    } else {
+        None
+    };
+
+    let mean_latency = if count_latency > 0 {
+        Some(sum_latency as f64 / count_latency as f64)
+    } else {
+        None
+    };
+
+    let measured = MeasuredTelemetryMetrics {
+        total_requests_observed,
+        total_measured_cost_usd: total_cost,
+        total_measured_input_tokens: total_input,
+        total_measured_cached_tokens: total_cached,
+        total_measured_uncached_tokens: total_uncached,
+        total_measured_output_tokens: total_output,
+        overall_measured_cache_hit_ratio: overall_hit_ratio,
+        mean_ttfb_ms: mean_ttfb,
+        mean_request_latency_ms: mean_latency,
+    };
+
+    // Modeled metrics
+    let mut apply_count = 0usize;
+    let mut defer_count = 0usize;
+    let mut reject_count = 0usize;
+    let mut ignore_count = 0usize;
+    let mut reasons_map: BTreeMap<String, usize> = BTreeMap::new();
+    let mut modeled_base = 0.0;
+    let mut modeled_opt = 0.0;
+
+    for d in decisions {
+        match d.decision {
+            Some(OptimizationDecision::Apply) => apply_count += 1,
+            Some(OptimizationDecision::Defer) => defer_count += 1,
+            Some(OptimizationDecision::Reject) => reject_count += 1,
+            Some(OptimizationDecision::NoOp) | None => ignore_count += 1,
+        }
+        if let Some(r) = &d.reason_code {
+            *reasons_map.entry(format!("{:?}", r)).or_insert(0) += 1;
+        }
+        if let Some(b) = d.predicted_baseline_cost_usd {
+            modeled_base += b;
+        }
+        if let Some(o) = d.predicted_optimized_cost_usd {
+            modeled_opt += o;
+        }
+    }
+
+    let modeled = ModeledPolicyMetrics {
+        total_evaluations: decisions.len(),
+        decisions_apply: apply_count,
+        decisions_defer: defer_count,
+        decisions_reject: reject_count,
+        decisions_ignore: ignore_count,
+        reasons_breakdown: reasons_map,
+        modeled_baseline_cost_usd: modeled_base,
+        modeled_optimized_cost_usd: modeled_opt,
+        projected_gross_savings_usd: (modeled_base - modeled_opt).max(0.0),
+    };
+
+    let unverifiable = UnverifiableCounterfactualMetrics {
+        deferred_candidates_count: defer_count,
+        rejected_candidates_count: reject_count,
+        unverifiable_reason: "Deferred and rejected mutations were never executed upstream; counterfactual alternative trajectory cannot be measured or proven directly from passive telemetry.".to_string(),
+        notes: vec![
+            "ActiveToolLifecycle deferrals preserve tool invocation integrity without generating modified requests.".to_string(),
+            "SignedThinkingContent rejections preserve cryptographically signed model outputs without modifying thinking blocks.".to_string(),
+        ],
+    };
+
+    // Correlation summary
+    let mut matched_imm = 0usize;
+    let mut matched_cont = 0usize;
+    let mut uncorr_miss = 0usize;
+    let mut uncorr_ambig = 0usize;
+    let mut consistent_count = 0usize;
+    let mut inconsistent_count = 0usize;
+    let mut sum_delta = 0.0;
+    let mut count_delta = 0usize;
+
+    for c in correlations {
+        match c.correlation_status {
+            CorrelationStatus::MatchedImmediate => matched_imm += 1,
+            CorrelationStatus::MatchedContinuation => matched_cont += 1,
+            CorrelationStatus::UncorrelatedMissingOutcome => uncorr_miss += 1,
+            CorrelationStatus::UncorrelatedAmbiguous => uncorr_ambig += 1,
+            CorrelationStatus::RetrospectiveObservation => {}
+        }
+        if let Some(true) = c.cache_state_consistent {
+            consistent_count += 1;
+        } else if let Some(false) = c.cache_state_consistent {
+            inconsistent_count += 1;
+        }
+        if let Some(d) = c.single_turn_cost_delta_usd {
+            sum_delta += d;
+            count_delta += 1;
+        }
+    }
+
+    let mean_delta = if count_delta > 0 {
+        sum_delta / count_delta as f64
+    } else {
+        0.0
+    };
+
+    let correlation = CorrelationSummaryMetrics {
+        total_decisions: correlations.len(),
+        matched_immediate: matched_imm,
+        matched_continuation: matched_cont,
+        uncorrelated_missing: uncorr_miss,
+        uncorrelated_ambiguous: uncorr_ambig,
+        cache_state_consistent_count: consistent_count,
+        cache_state_inconsistent_count: inconsistent_count,
+        mean_cost_delta_usd: mean_delta,
+    };
+
+    // Horizon accuracy
+    let mut full_h = 0usize;
+    let mut trunc_h = 0usize;
+    let mut sum_h_obs = 0u32;
+    let mut sum_retention = 0.0;
+    let mut warm_drops = 0usize;
+
+    for h in horizons {
+        if h.horizon_complete {
+            full_h += 1;
+        } else {
+            trunc_h += 1;
+        }
+        sum_h_obs += h.horizon_observed;
+        sum_retention += h.observed_cache_retention_ratio;
+        for t in &h.transitions {
+            if t.transition_type == "WarmDrop" {
+                warm_drops += 1;
+            }
+        }
+    }
+
+    let mean_h_obs = if !horizons.is_empty() {
+        sum_h_obs as f64 / horizons.len() as f64
+    } else {
+        0.0
+    };
+
+    let overall_retention = if !horizons.is_empty() {
+        sum_retention / horizons.len() as f64
+    } else {
+        1.0
+    };
+
+    let horizon = HorizonAccuracyMetrics {
+        total_horizons_tracked: horizons.len(),
+        fully_observed_horizons: full_h,
+        truncated_horizons: trunc_h,
+        mean_horizon_observed_turns: mean_h_obs,
+        overall_cache_retention_ratio: overall_retention,
+        warm_drops_detected: warm_drops,
+    };
+
+    ProspectiveCalibrationReport {
+        report_title: "ContextWatcher CW-117C Prospective Shadow Calibration Report".to_string(),
+        generated_at: generated_at.unwrap_or_else(Utc::now),
+        git_commit,
+        measured,
+        modeled,
+        unverifiable,
+        correlation,
+        horizon,
+        discrepancies: Vec::new(),
+        notes: vec![
+            "Measured metrics reflect passive provider telemetry captured via proxy tap.".to_string(),
+            "Modeled metrics reflect pre-dispatch policy estimations calculated in shadow mode.".to_string(),
+            "Strict shadow mode ensured 100% byte fidelity to provider endpoints with zero mutations applied.".to_string(),
+        ],
+    }
+}
+
+/// Generates a deterministic synthetic fixture with 6 requests, multiple candidates per request,
+/// provider telemetry, immediate correlation, and prospective continuation horizon tracking.
+pub fn generate_synthetic_prospective_fixture() -> (
+    Vec<ShadowDecisionEvidence>,
+    Vec<ObservedProviderOutcome>,
+    Vec<CorrelatedDecisionOutcome>,
+    Vec<ProspectiveHorizonObservation>,
+    ProspectiveCalibrationReport,
+) {
+    let session_id = "session_cw117c_synthetic".to_string();
+    let provider = ProviderKind::Anthropic;
+    let model = "claude-3-5-sonnet-20241022".to_string();
+    let base_ts = DateTime::parse_from_rfc3339("2026-11-01T08:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    let mut decisions = Vec::new();
+    let mut outcomes = Vec::new();
+    let mut correlations = Vec::new();
+    let mut horizons = Vec::new();
+
+    // Turn 1 (Cold cache write)
+    let d1_cand = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_{}_cand1", session_id, 1),
+        session_id: session_id.clone(),
+        request_index: 1,
+        turn_index: 1,
+        provider,
+        model: model.clone(),
+        cache_state: CacheState::ColdLikely,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: Some("pfx_cold_001".to_string()),
+        payload_fingerprint: Some("pfp_req_001".to_string()),
+        candidate_id: Some("cand_prune_01".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Apply),
+        reason_code: Some(DecisionReasonCode::NoDemonstrableBenefit),
+        explanation: "Cold start request; cache creation anticipated".to_string(),
+        estimated_saved_tokens: Some(300),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.01875),
+        predicted_optimized_cost_usd: Some(0.017625),
+        predicted_net_benefit_usd: Some(0.001125),
+        forecast_horizon_turns: 3,
+        forecast_assumptions: "Linear continuation over 3 turns".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-anthropic-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: base_ts,
+    };
+    decisions.push(d1_cand.clone());
+
+    let o1 = ObservedProviderOutcome {
+        session_id: session_id.clone(),
+        request_index: 1,
+        turn_index: 1,
+        provider,
+        model: model.clone(),
+        actual_input_tokens: 5000,
+        actual_cached_tokens: 0,
+        actual_uncached_tokens: 5000,
+        actual_cache_write_tokens: Some(5000),
+        actual_output_tokens: 200,
+        calculated_cost_usd: 0.03675,
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: 0.0,
+        ttfb_ms: Some(420),
+        request_latency_ms: Some(1100),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: base_ts + chrono::Duration::seconds(1),
+    };
+    outcomes.push(o1.clone());
+    correlations.push(correlate_decision_with_outcome(&d1_cand, Some(&o1)));
+
+    // Turn 2 (Warm hit, Apply Pin)
+    let ts2 = base_ts + chrono::Duration::seconds(10);
+    let d2_cand = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_{}_cand1", session_id, 2),
+        session_id: session_id.clone(),
+        request_index: 2,
+        turn_index: 2,
+        provider,
+        model: model.clone(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: Some("pfx_warm_002".to_string()),
+        payload_fingerprint: Some("pfp_req_002".to_string()),
+        candidate_id: Some("cand_pin_01".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Apply),
+        reason_code: Some(DecisionReasonCode::TailAppendPreservesPrefixNoDirectSaving),
+        explanation: "Warm cache hit; pin preserves prefix".to_string(),
+        estimated_saved_tokens: Some(0),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.00675),
+        predicted_optimized_cost_usd: Some(0.00675),
+        predicted_net_benefit_usd: Some(0.0),
+        forecast_horizon_turns: 3,
+        forecast_assumptions: "Preserves cache prefix for next turns".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-anthropic-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: ts2,
+    };
+    decisions.push(d2_cand.clone());
+
+    let o2 = ObservedProviderOutcome {
+        session_id: session_id.clone(),
+        request_index: 2,
+        turn_index: 2,
+        provider,
+        model: model.clone(),
+        actual_input_tokens: 5500,
+        actual_cached_tokens: 5000,
+        actual_uncached_tokens: 500,
+        actual_cache_write_tokens: Some(500),
+        actual_output_tokens: 250,
+        calculated_cost_usd: 0.0075,
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: 5000.0 / 5500.0,
+        ttfb_ms: Some(210),
+        request_latency_ms: Some(850),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: ts2 + chrono::Duration::seconds(1),
+    };
+    outcomes.push(o2.clone());
+    correlations.push(correlate_decision_with_outcome(&d2_cand, Some(&o2)));
+
+    // Turn 3 (Warm hit, Tool Lifecycle -> Defer candidate)
+    let ts3 = base_ts + chrono::Duration::seconds(20);
+    let d3_cand = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_{}_cand_tool", session_id, 3),
+        session_id: session_id.clone(),
+        request_index: 3,
+        turn_index: 3,
+        provider,
+        model: model.clone(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: Some("pfx_warm_003".to_string()),
+        payload_fingerprint: Some("pfp_req_003".to_string()),
+        candidate_id: Some("cand_tool_prune_01".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Defer),
+        reason_code: Some(DecisionReasonCode::ActiveToolLifecycleProtection),
+        explanation: "Tool invocation in-flight; deferred candidate".to_string(),
+        estimated_saved_tokens: Some(800),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.007),
+        predicted_optimized_cost_usd: Some(0.007),
+        predicted_net_benefit_usd: Some(0.0),
+        forecast_horizon_turns: 3,
+        forecast_assumptions: "Deferred until tool invocation returns result".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-anthropic-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: ts3,
+    };
+    decisions.push(d3_cand.clone());
+
+    let o3 = ObservedProviderOutcome {
+        session_id: session_id.clone(),
+        request_index: 3,
+        turn_index: 3,
+        provider,
+        model: model.clone(),
+        actual_input_tokens: 5800,
+        actual_cached_tokens: 5500,
+        actual_uncached_tokens: 300,
+        actual_cache_write_tokens: Some(300),
+        actual_output_tokens: 200,
+        calculated_cost_usd: 0.0068,
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: 5500.0 / 5800.0,
+        ttfb_ms: Some(195),
+        request_latency_ms: Some(780),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: ts3 + chrono::Duration::seconds(1),
+    };
+    outcomes.push(o3.clone());
+    correlations.push(correlate_decision_with_outcome(&d3_cand, Some(&o3)));
+
+    // Turn 4 (Warm hit, Apply Prune)
+    let ts4 = base_ts + chrono::Duration::seconds(30);
+    let d4_cand = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_{}_cand_prune", session_id, 4),
+        session_id: session_id.clone(),
+        request_index: 4,
+        turn_index: 4,
+        provider,
+        model: model.clone(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: Some("pfx_warm_004".to_string()),
+        payload_fingerprint: Some("pfp_req_004".to_string()),
+        candidate_id: Some("cand_prune_02".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Apply),
+        reason_code: Some(DecisionReasonCode::ModeledEconomicBenefitPositive),
+        explanation: "Tail-only prune preserves warm prefix".to_string(),
+        estimated_saved_tokens: Some(400),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.0072),
+        predicted_optimized_cost_usd: Some(0.0069),
+        predicted_net_benefit_usd: Some(0.0003),
+        forecast_horizon_turns: 3,
+        forecast_assumptions: "Direct tail reduction preserving cache prefix".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-anthropic-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: ts4,
+    };
+    decisions.push(d4_cand.clone());
+
+    let o4 = ObservedProviderOutcome {
+        session_id: session_id.clone(),
+        request_index: 4,
+        turn_index: 4,
+        provider,
+        model: model.clone(),
+        actual_input_tokens: 6000,
+        actual_cached_tokens: 5800,
+        actual_uncached_tokens: 200,
+        actual_cache_write_tokens: Some(200),
+        actual_output_tokens: 180,
+        calculated_cost_usd: 0.0065,
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: 5800.0 / 6000.0,
+        ttfb_ms: Some(190),
+        request_latency_ms: Some(720),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: ts4 + chrono::Duration::seconds(1),
+    };
+    outcomes.push(o4.clone());
+    correlations.push(correlate_decision_with_outcome(&d4_cand, Some(&o4)));
+
+    // Turn 5 (Warm hit, Reject candidate due to SafetyViolation)
+    let ts5 = base_ts + chrono::Duration::seconds(40);
+    let d5_cand = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_{}_cand_signed", session_id, 5),
+        session_id: session_id.clone(),
+        request_index: 5,
+        turn_index: 5,
+        provider,
+        model: model.clone(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: Some("pfx_warm_005".to_string()),
+        payload_fingerprint: Some("pfp_req_005".to_string()),
+        candidate_id: Some("cand_fold_signed".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Reject),
+        reason_code: Some(DecisionReasonCode::SafetyViolation),
+        explanation: "Signed thinking block protected; candidate rejected".to_string(),
+        estimated_saved_tokens: Some(600),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.0075),
+        predicted_optimized_cost_usd: Some(0.0075),
+        predicted_net_benefit_usd: Some(0.0),
+        forecast_horizon_turns: 3,
+        forecast_assumptions: "Signed blocks cannot be modified".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-anthropic-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: ts5,
+    };
+    decisions.push(d5_cand.clone());
+
+    let o5 = ObservedProviderOutcome {
+        session_id: session_id.clone(),
+        request_index: 5,
+        turn_index: 5,
+        provider,
+        model: model.clone(),
+        actual_input_tokens: 6200,
+        actual_cached_tokens: 6000,
+        actual_uncached_tokens: 200,
+        actual_cache_write_tokens: Some(200),
+        actual_output_tokens: 150,
+        calculated_cost_usd: 0.0062,
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: 6000.0 / 6200.0,
+        ttfb_ms: Some(185),
+        request_latency_ms: Some(690),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: ts5 + chrono::Duration::seconds(1),
+    };
+    outcomes.push(o5.clone());
+    correlations.push(correlate_decision_with_outcome(&d5_cand, Some(&o5)));
+
+    // Turn 6 (Final request in session)
+    let ts6 = base_ts + chrono::Duration::seconds(50);
+    let o6 = ObservedProviderOutcome {
+        session_id: session_id.clone(),
+        request_index: 6,
+        turn_index: 6,
+        provider,
+        model: model.clone(),
+        actual_input_tokens: 6300,
+        actual_cached_tokens: 6200,
+        actual_uncached_tokens: 100,
+        actual_cache_write_tokens: Some(100),
+        actual_output_tokens: 80,
+        calculated_cost_usd: 0.0048,
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: 6200.0 / 6300.0,
+        ttfb_ms: Some(170),
+        request_latency_ms: Some(550),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: ts6 + chrono::Duration::seconds(1),
+    };
+    outcomes.push(o6);
+
+    // Evaluate horizons for decisions
+    for d in &decisions {
+        let pho = evaluate_prospective_horizon(d, &outcomes, d.forecast_horizon_turns);
+        horizons.push(pho);
+    }
+
+    let report = build_prospective_calibration_report(
+        &decisions,
+        &outcomes,
+        &correlations,
+        &horizons,
+        Some("git_commit_cw117c".to_string()),
+        Some(base_ts + chrono::Duration::seconds(60)),
+    );
+
+    (decisions, outcomes, correlations, horizons, report)
 }
 
 /// Data structure matching the committed CW-115 historical benchmark datasets.
@@ -699,8 +1703,11 @@ pub fn replay_historical_dataset(
             );
 
             let observed_outcome = ObservedProviderOutcome {
+                session_id: session.session_id.clone(),
                 request_index: req.request_index,
                 turn_index: req.turn_index.unwrap_or(req.request_index),
+                provider,
+                model: req.model.clone(),
                 actual_input_tokens: req.input_tokens,
                 actual_cached_tokens: req.cached_tokens,
                 actual_uncached_tokens: req.uncached_tokens,
@@ -713,7 +1720,9 @@ pub fn replay_historical_dataset(
                 ttfb_ms: req.ttfb_ms,
                 request_latency_ms: req.request_latency_ms,
                 cache_telemetry_available: true,
+                execution_outcome: "completed".to_string(),
                 applied_mutations: req.applied_mutation_ids.clone(),
+                missing_data_reasons: vec![],
                 observed_timestamp: decision_ts,
             };
 

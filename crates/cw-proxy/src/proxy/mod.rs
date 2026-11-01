@@ -258,7 +258,7 @@ pub async fn handle_proxy_request(
                         let pricing =
                             cw_core::policy::find_pricing_profile(provider, &session.model);
                         for dec in &report.shadow_decisions {
-                            let evidence =
+                            let mut evidence =
                                 cw_core::calibration::ShadowDecisionEvidence::from_policy_decision(
                                     dec,
                                     &cache_obs,
@@ -267,6 +267,8 @@ pub async fn handle_proxy_request(
                                     seq,
                                     seq,
                                 );
+                            let pfp = cw_core::calibration::compute_payload_fingerprint(&outbound);
+                            evidence = evidence.with_payload_fingerprint(Some(pfp));
                             if let Err(error) = state.store.save_shadow_decision_evidence(&evidence)
                             {
                                 tracing::warn!(%error, "Failed to persist shadow decision evidence");

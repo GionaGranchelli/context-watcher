@@ -262,7 +262,7 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Replay historical benchmark traces and calibrate shadow policy predictions (CW-117B)
+    /// Replay historical benchmark traces and calibrate shadow policy predictions (CW-117B/CW-117C)
     Calibrate {
         /// Optional path to historical benchmark dataset (defaults to committed cw115 datasets)
         #[arg(long)]
@@ -270,6 +270,12 @@ enum Commands {
         /// Continuation horizon in turns (default: 3)
         #[arg(long, default_value_t = 3)]
         horizon: u32,
+        /// Generate deterministic prospective synthetic qualification report (CW-117C)
+        #[arg(long)]
+        synthetic: bool,
+        /// Correlate prospective decisions and outcomes from database session
+        #[arg(long)]
+        session: Option<String>,
         /// Output machine-readable JSON calibration report
         #[arg(long)]
         json: bool,
@@ -617,9 +623,13 @@ async fn main() -> Result<()> {
         Commands::Calibrate {
             dataset,
             horizon,
+            synthetic,
+            session,
             json,
         } => {
-            commands::calibrate::handle_calibrate(dataset, horizon, json)?;
+            commands::calibrate::handle_calibrate(
+                dataset, horizon, synthetic, session, json, &db_path,
+            )?;
         }
         Commands::Init { dry_run, no_start } => {
             commands::init::run_init_installer(dry_run, !no_start)?;

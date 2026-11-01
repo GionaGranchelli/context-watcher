@@ -246,6 +246,7 @@ impl Recorder {
             .unwrap_or(0)
             .min(u32::MAX as u64) as u32;
         let state = self.state.clone();
+        let provider = self.provider;
         Some(tokio::task::spawn_blocking(move || {
             if let Err(error) = state.store.save_turn(&turn, None, None, None) {
                 tracing::error!(%error,"Unable to finalize provider attempt");
@@ -265,6 +266,79 @@ impl Recorder {
                     tracing::error!(%error,"Unable to record mutation evidence");
                 }
             }
+
+            // CW-117C: Correlate observed provider outcome with pre-dispatch shadow decisions
+            let session_res = state.store.get_session(&turn.session_id);
+            let model = session_res
+                .as_ref()
+                .ok()
+                .and_then(|s| s.as_ref())
+                .map(|s| s.model.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            let pricing = cw_core::policy::find_pricing_profile(provider, &model);
+            let outcome = cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
+                &turn,
+                provider,
+                &model,
+                pricing.as_ref(),
+                Utc::now(),
+            );
+
+            if let Ok(decisions) = state
+                .store
+                .list_shadow_decision_evidence(Some(&turn.session_id))
+            {
+                // 1. Immediate correlation for decisions on this exact request
+                for dec in decisions
+                    .iter()
+                    .filter(|d| d.request_index == turn.sequence_number)
+                {
+                    let corr =
+                        cw_core::calibration::correlate_decision_with_outcome(dec, Some(&outcome));
+                    if let Err(err) = state.store.save_correlated_decision_outcome(&corr) {
+                        tracing::warn!(%err, "Failed to persist correlated decision outcome");
+                    }
+                }
+
+                // 2. Horizon continuation tracking for previous decisions within their horizon
+                let prior_decisions: Vec<_> = decisions
+                    .iter()
+                    .filter(|d| {
+                        d.request_index < turn.sequence_number
+                            && turn.sequence_number <= d.request_index + d.forecast_horizon_turns
+                    })
+                    .collect();
+
+                if !prior_decisions.is_empty() {
+                    // Fetch existing turns to construct full continuation sequence
+                    if let Ok(turns) = state.store.list_turns(&turn.session_id) {
+                        let mut all_outcomes = Vec::new();
+                        for t in &turns {
+                            let o =
+                                cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
+                                    t,
+                                    provider,
+                                    &model,
+                                    pricing.as_ref(),
+                                    t.created_at,
+                                );
+                            all_outcomes.push(o);
+                        }
+                        for dec in prior_decisions {
+                            let pho = cw_core::calibration::evaluate_prospective_horizon(
+                                dec,
+                                &all_outcomes,
+                                dec.forecast_horizon_turns,
+                            );
+                            if let Err(err) = state.store.save_prospective_horizon_observation(&pho)
+                            {
+                                tracing::warn!(%err, "Failed to persist prospective horizon observation");
+                            }
+                        }
+                    }
+                }
+            }
+
             state.broadcast(WsEvent::TurnCompleted {
                 session_id: turn.session_id.clone(),
                 turn: Box::new(turn),

@@ -20,6 +20,7 @@ fn test_calibration_cw_store_persistence_roundtrip() {
         cache_state: CacheState::ColdLikely,
         provenance: TelemetryProvenance::ObservedProvider,
         prefix_fingerprint: None,
+        payload_fingerprint: None,
         candidate_id: Some("cand_1".to_string()),
         plan_id: Some("plan_1".to_string()),
         policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
@@ -78,6 +79,7 @@ fn test_calibration_cw_store_persistence_retrospective_nulls_roundtrip() {
         cache_state: CacheState::WarmVerified,
         provenance: TelemetryProvenance::ObservedProvider,
         prefix_fingerprint: None,
+        payload_fingerprint: None,
         candidate_id: None,
         plan_id: None,
         policy_evaluation_status: PolicyEvaluationStatus::NotEvaluatedMissingCandidates,
@@ -271,4 +273,48 @@ fn test_calibration_multiple_decisions_single_request_independently_retrievable(
         .find(|d| d.candidate_id.as_deref() == Some("cand_prune_tool_2"))
         .unwrap();
     assert_eq!(c2_rec.estimated_saved_tokens, Some(250));
+}
+
+#[test]
+fn test_prospective_correlation_and_horizon_store_persistence() {
+    let store = CwStore::open_in_memory().unwrap();
+    let (decisions, _outcomes, correlations, horizons, _report) =
+        cw_core::calibration::generate_synthetic_prospective_fixture();
+
+    assert!(!decisions.is_empty());
+    assert!(!correlations.is_empty());
+    assert!(!horizons.is_empty());
+
+    // Save all correlated decision outcomes
+    for corr in &correlations {
+        store
+            .save_correlated_decision_outcome(corr)
+            .expect("Save correlated outcome");
+    }
+
+    // Save all prospective horizon observations
+    for h in &horizons {
+        store
+            .save_prospective_horizon_observation(h)
+            .expect("Save horizon observation");
+    }
+
+    // List correlated outcomes
+    let loaded_corrs = store
+        .list_correlated_decision_outcomes(Some(&decisions[0].session_id))
+        .expect("List correlated outcomes by session");
+    assert_eq!(loaded_corrs.len(), correlations.len());
+    assert_eq!(
+        loaded_corrs[0].correlation_id,
+        correlations[0].correlation_id
+    );
+    assert!(loaded_corrs[0].outcome.is_some());
+
+    // List horizons
+    let loaded_horizons = store
+        .list_prospective_horizon_observations(Some(&decisions[0].session_id))
+        .expect("List horizon observations by session");
+    assert_eq!(loaded_horizons.len(), horizons.len());
+    assert_eq!(loaded_horizons[0].horizon_id, horizons[0].horizon_id);
+    assert_eq!(loaded_horizons[0].horizon_declared, 3);
 }

@@ -229,6 +229,28 @@ impl CwStore {
                 predicted_net_benefit_usd REAL,
                 evidence_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS correlated_decision_outcomes (
+                correlation_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                request_index INTEGER NOT NULL,
+                correlation_status TEXT NOT NULL,
+                single_turn_cost_delta_usd REAL,
+                cache_state_consistent INTEGER,
+                record_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS prospective_horizon_observations (
+                horizon_id TEXT PRIMARY KEY,
+                decision_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                base_request_index INTEGER NOT NULL,
+                horizon_declared INTEGER NOT NULL,
+                horizon_observed INTEGER NOT NULL,
+                horizon_complete INTEGER NOT NULL,
+                observed_cache_retention_ratio REAL,
+                record_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );")?;
 
         // Ensure any sessions originating from ~/.omp/ are properly categorized as OMP
@@ -1034,6 +1056,114 @@ impl CwStore {
         } else {
             let mut stmt = conn.prepare(
                 "SELECT evidence_json FROM shadow_decision_evidence ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn save_correlated_decision_outcome(
+        &self,
+        record: &cw_core::calibration::CorrelatedDecisionOutcome,
+    ) -> Result<(), StoreError> {
+        let json_str = serde_json::to_string(record)?;
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let status_str = format!("{:?}", record.correlation_status);
+        let consistent_int = record.cache_state_consistent.map(|b| if b { 1 } else { 0 });
+        conn.execute(
+            "INSERT OR REPLACE INTO correlated_decision_outcomes (
+                correlation_id, session_id, request_index, correlation_status,
+                single_turn_cost_delta_usd, cache_state_consistent, record_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                record.correlation_id,
+                record.session_id,
+                record.request_index,
+                status_str,
+                record.single_turn_cost_delta_usd,
+                consistent_int,
+                json_str,
+                record.decision.decision_timestamp.to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_correlated_decision_outcomes(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Vec<cw_core::calibration::CorrelatedDecisionOutcome>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut out = Vec::new();
+        if let Some(sid) = session_id {
+            let mut stmt = conn.prepare(
+                "SELECT record_json FROM correlated_decision_outcomes WHERE session_id = ?1 ORDER BY request_index ASC",
+            )?;
+            let rows = stmt.query_map(params![sid], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT record_json FROM correlated_decision_outcomes ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn save_prospective_horizon_observation(
+        &self,
+        record: &cw_core::calibration::ProspectiveHorizonObservation,
+    ) -> Result<(), StoreError> {
+        let json_str = serde_json::to_string(record)?;
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let complete_int = if record.horizon_complete { 1 } else { 0 };
+        conn.execute(
+            "INSERT OR REPLACE INTO prospective_horizon_observations (
+                horizon_id, decision_id, session_id, base_request_index,
+                horizon_declared, horizon_observed, horizon_complete,
+                observed_cache_retention_ratio, record_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                record.horizon_id,
+                record.decision_id,
+                record.session_id,
+                record.base_request_index,
+                record.horizon_declared,
+                record.horizon_observed,
+                complete_int,
+                record.observed_cache_retention_ratio,
+                json_str,
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_prospective_horizon_observations(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Vec<cw_core::calibration::ProspectiveHorizonObservation>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut out = Vec::new();
+        if let Some(sid) = session_id {
+            let mut stmt = conn.prepare(
+                "SELECT record_json FROM prospective_horizon_observations WHERE session_id = ?1 ORDER BY base_request_index ASC",
+            )?;
+            let rows = stmt.query_map(params![sid], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT record_json FROM prospective_horizon_observations ORDER BY created_at DESC",
             )?;
             let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
             for row in rows {

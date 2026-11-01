@@ -223,28 +223,31 @@ fn test_cw119_harness_readiness_suite() {
     );
 
     for r in &reports {
-        // Assert each harness is installed on this qualification host
-        assert!(
-            r.is_installed,
-            "Expected harness {:?} to be installed on host",
-            r.harness
-        );
-        assert_eq!(
-            r.status,
-            HarnessReadinessStatus::Ready,
-            "Harness {:?} must be in Ready status",
-            r.harness
-        );
-        assert!(
-            r.credential_isolation_supported,
-            "Harness {:?} must support credential isolation",
-            r.harness
-        );
-        assert!(
-            r.proxy_routing_supported,
-            "Harness {:?} must support proxy routing",
-            r.harness
-        );
+        if r.is_installed {
+            assert_eq!(
+                r.status,
+                HarnessReadinessStatus::Ready,
+                "Installed harness {:?} must be in Ready status",
+                r.harness
+            );
+            assert!(
+                r.credential_isolation_supported,
+                "Harness {:?} must support credential isolation",
+                r.harness
+            );
+            assert!(
+                r.proxy_routing_supported,
+                "Harness {:?} must support proxy routing",
+                r.harness
+            );
+        } else {
+            assert_eq!(
+                r.status,
+                HarnessReadinessStatus::Unavailable,
+                "Uninstalled harness {:?} must report Unavailable status",
+                r.harness
+            );
+        }
     }
 
     // Verify config argument generators

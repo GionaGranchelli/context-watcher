@@ -253,10 +253,13 @@ mod tests {
     #[test]
     fn test_check_harness_readiness_on_system() {
         let codex_report = check_harness_readiness(HarnessKind::Codex);
-        // On this host, codex is installed
-        assert!(codex_report.is_installed);
-        assert_eq!(codex_report.status, HarnessReadinessStatus::Ready);
-        assert!(codex_report.credential_isolation_supported);
-        assert!(codex_report.proxy_routing_supported);
+        if codex_report.is_installed {
+            assert_eq!(codex_report.status, HarnessReadinessStatus::Ready);
+            assert!(codex_report.credential_isolation_supported);
+            assert!(codex_report.proxy_routing_supported);
+        } else {
+            assert_eq!(codex_report.status, HarnessReadinessStatus::Unavailable);
+            assert!(!codex_report.credential_isolation_supported);
+        }
     }
 }

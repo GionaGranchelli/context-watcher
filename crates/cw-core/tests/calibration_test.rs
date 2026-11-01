@@ -88,6 +88,10 @@ fn test_calibration_evidence_creation_and_privacy_guarantee() {
     assert_eq!(evidence.session_id, "sess_privacy_test");
     assert_eq!(evidence.request_index, 6);
     assert_eq!(
+        evidence.record_id,
+        "sde_sess_privacy_test_6_plan_aggressive_cand_prune_1"
+    );
+    assert_eq!(
         evidence.policy_evaluation_status,
         PolicyEvaluationStatus::EvaluatedPreDispatch
     );

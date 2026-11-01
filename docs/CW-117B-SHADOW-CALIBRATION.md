@@ -37,7 +37,7 @@ Located in `crates/cw-core/src/calibration.rs`, the evidence record links policy
 ┌────────────────────────────────────────────────────────────────────────┐
 │ ShadowDecisionEvidence                                                 │
 ├────────────────────────────────────────────────────────────────────────┤
-│ record_id                   : sde_<session_id>_<request_index>         │
+│ record_id                   : sde_<session_id>_<request_index>_<scope> │
 │ session_id                  : String (harness session identifier)      │
 │ request_index / turn_index  : u32 (monotonic sequence)                 │
 │ provider / model            : ProviderKind / Model identifier          │

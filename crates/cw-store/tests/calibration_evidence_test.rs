@@ -115,3 +115,160 @@ fn test_calibration_cw_store_persistence_retrospective_nulls_roundtrip() {
     assert_eq!(list[0].estimated_saved_tokens, None);
     assert_eq!(list[0].predicted_net_benefit_usd, None);
 }
+
+#[test]
+fn test_calibration_multiple_decisions_single_request_independently_retrievable() {
+    let store = CwStore::open_in_memory().unwrap();
+
+    let cache_obs = cw_core::policy::CacheObservation {
+        state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        observed_cached_tokens: Some(10000),
+        reported_input_tokens: Some(12000),
+        provider: ProviderKind::OpenAI,
+        model: "gpt-4o-mini".to_string(),
+        session_id: "sess_multi".to_string(),
+        prefix_fingerprint: Some("fp_sha256_mock".to_string()),
+        observed_at: Utc::now(),
+        turn_seq: 4,
+        notes: vec![],
+    };
+
+    let pricing = cw_core::policy::find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini");
+
+    // Plan decision (plan_id set, candidate_id None)
+    let plan_decision = cw_core::policy::PolicyDecision {
+        decision: OptimizationDecision::Defer,
+        reason_code: DecisionReasonCode::CachePrefixAtRisk,
+        explanation: "Plan deferred: active warm prefix at risk.".to_string(),
+        candidate_id: None,
+        plan_id: Some("surgical_log_diet".to_string()),
+        cache_state: CacheState::WarmVerified,
+        estimated_kv_break_tokens: 10000,
+        net_token_delta: 600,
+        economic_evaluation: None,
+        evidence: cw_core::policy::DecisionEvidence {
+            session_id: "sess_multi".to_string(),
+            turn_seq: 4,
+            provider: ProviderKind::OpenAI,
+            model: "gpt-4o-mini".to_string(),
+            telemetry_provenance: TelemetryProvenance::ObservedProvider,
+            reported_cached_tokens: Some(10000),
+            is_append_only: false,
+            lifecycle_safe: true,
+            analysis_complete: true,
+        },
+        timestamp: Utc::now(),
+    };
+
+    // Candidate 1 decision (plan_id set, candidate_id set)
+    let cand1_decision = cw_core::policy::PolicyDecision {
+        decision: OptimizationDecision::Defer,
+        reason_code: DecisionReasonCode::CachePrefixAtRisk,
+        explanation: "Candidate 1 deferred.".to_string(),
+        candidate_id: Some("cand_prune_tool_1".to_string()),
+        plan_id: Some("surgical_log_diet".to_string()),
+        cache_state: CacheState::WarmVerified,
+        estimated_kv_break_tokens: 10000,
+        net_token_delta: 350,
+        economic_evaluation: None,
+        evidence: cw_core::policy::DecisionEvidence {
+            session_id: "sess_multi".to_string(),
+            turn_seq: 4,
+            provider: ProviderKind::OpenAI,
+            model: "gpt-4o-mini".to_string(),
+            telemetry_provenance: TelemetryProvenance::ObservedProvider,
+            reported_cached_tokens: Some(10000),
+            is_append_only: false,
+            lifecycle_safe: true,
+            analysis_complete: true,
+        },
+        timestamp: Utc::now(),
+    };
+
+    // Candidate 2 decision (plan_id set, candidate_id set)
+    let cand2_decision = cw_core::policy::PolicyDecision {
+        decision: OptimizationDecision::Defer,
+        reason_code: DecisionReasonCode::CachePrefixAtRisk,
+        explanation: "Candidate 2 deferred.".to_string(),
+        candidate_id: Some("cand_prune_tool_2".to_string()),
+        plan_id: Some("surgical_log_diet".to_string()),
+        cache_state: CacheState::WarmVerified,
+        estimated_kv_break_tokens: 10000,
+        net_token_delta: 250,
+        economic_evaluation: None,
+        evidence: cw_core::policy::DecisionEvidence {
+            session_id: "sess_multi".to_string(),
+            turn_seq: 4,
+            provider: ProviderKind::OpenAI,
+            model: "gpt-4o-mini".to_string(),
+            telemetry_provenance: TelemetryProvenance::ObservedProvider,
+            reported_cached_tokens: Some(10000),
+            is_append_only: false,
+            lifecycle_safe: true,
+            analysis_complete: true,
+        },
+        timestamp: Utc::now(),
+    };
+
+    let ev_plan = ShadowDecisionEvidence::from_policy_decision(
+        &plan_decision,
+        &cache_obs,
+        pricing.as_ref(),
+        3,
+        4,
+        4,
+    );
+    let ev_cand1 = ShadowDecisionEvidence::from_policy_decision(
+        &cand1_decision,
+        &cache_obs,
+        pricing.as_ref(),
+        3,
+        4,
+        4,
+    );
+    let ev_cand2 = ShadowDecisionEvidence::from_policy_decision(
+        &cand2_decision,
+        &cache_obs,
+        pricing.as_ref(),
+        3,
+        4,
+        4,
+    );
+
+    // Verify all 3 have distinct record_id keys
+    assert_ne!(ev_plan.record_id, ev_cand1.record_id);
+    assert_ne!(ev_plan.record_id, ev_cand2.record_id);
+    assert_ne!(ev_cand1.record_id, ev_cand2.record_id);
+
+    // Save all three to SQLite store for the exact same request
+    store.save_shadow_decision_evidence(&ev_plan).unwrap();
+    store.save_shadow_decision_evidence(&ev_cand1).unwrap();
+    store.save_shadow_decision_evidence(&ev_cand2).unwrap();
+
+    // Query back from SQLite: all 3 must remain independently retrievable (no overwriting)
+    let list = store
+        .list_shadow_decision_evidence(Some("sess_multi"))
+        .expect("Query multi-decision session");
+    assert_eq!(
+        list.len(),
+        3,
+        "All 3 decisions from Request #4 must persist without overwriting"
+    );
+
+    let plan_rec = list.iter().find(|d| d.candidate_id.is_none()).unwrap();
+    assert_eq!(plan_rec.plan_id.as_deref(), Some("surgical_log_diet"));
+    assert_eq!(plan_rec.estimated_saved_tokens, Some(600));
+
+    let c1_rec = list
+        .iter()
+        .find(|d| d.candidate_id.as_deref() == Some("cand_prune_tool_1"))
+        .unwrap();
+    assert_eq!(c1_rec.estimated_saved_tokens, Some(350));
+
+    let c2_rec = list
+        .iter()
+        .find(|d| d.candidate_id.as_deref() == Some("cand_prune_tool_2"))
+        .unwrap();
+    assert_eq!(c2_rec.estimated_saved_tokens, Some(250));
+}

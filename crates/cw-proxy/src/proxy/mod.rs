@@ -156,8 +156,12 @@ pub async fn handle_proxy_request(
                 updated_at: Utc::now(),
             };
             let cfg = state.store.get_autopilot_config().unwrap_or_default();
-            let mutation_requested =
-                cfg.enabled && explicit.is_some() && authorized && !has_signed_content(&raw);
+            let strict_shadow = cfg.shadow_policy.enabled && cfg.shadow_policy.strict_shadow_only;
+            let mutation_requested = !strict_shadow
+                && cfg.enabled
+                && explicit.is_some()
+                && authorized
+                && !has_signed_content(&raw);
             if let Err(error) = state.store.upsert_session(&session) {
                 if mutation_requested || headers.contains_key("x-cw-dry-run") {
                     return (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response();
@@ -178,7 +182,8 @@ pub async fn handle_proxy_request(
             };
             let previous = state.store.get_latest_turn(&session_id).ok().flatten();
             let previous_nodes = previous.as_ref().map(|t| t.nodes.clone());
-            let active = mutation_requested
+            let active = !strict_shadow
+                && mutation_requested
                 && cw_core::normalizer::supports_mutation_payload(&raw, provider);
             let mut outbound = raw.clone();
             let mut applied = Vec::new();

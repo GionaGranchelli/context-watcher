@@ -37,7 +37,7 @@ pub enum PolicyEvaluationStatus {
 /// Stores only structural metrics, token spans, classifications, and modeled projections.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ShadowDecisionEvidence {
-    /// Unique identifier for this evidence record (e.g. `sde_<session>_<req>`)
+    /// Unique identifier for this evidence record (e.g. `sde_<session>_<req>_<scope>`)
     pub record_id: String,
     /// Session identifier
     pub session_id: String,
@@ -130,8 +130,18 @@ impl ShadowDecisionEvidence {
                 .unwrap_or(false)
         );
 
+        let scope_key = match (&decision.candidate_id, &decision.plan_id) {
+            (Some(cand), Some(plan)) => format!("{}_{}", plan, cand),
+            (Some(cand), None) => format!("cand_{}", cand),
+            (None, Some(plan)) => format!("plan_{}", plan),
+            (None, None) => "decision".to_string(),
+        };
+
         Self {
-            record_id: format!("sde_{}_{}", decision.evidence.session_id, request_index),
+            record_id: format!(
+                "sde_{}_{}_{}",
+                decision.evidence.session_id, request_index, scope_key
+            ),
             session_id: decision.evidence.session_id.clone(),
             request_index,
             turn_index,

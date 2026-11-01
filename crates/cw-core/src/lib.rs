@@ -1,4 +1,5 @@
 pub mod autopilot;
+pub mod calibration;
 pub mod control;
 pub mod hud;
 pub mod ir;

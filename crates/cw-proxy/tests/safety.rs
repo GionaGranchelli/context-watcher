@@ -718,3 +718,97 @@ async fn http_200_partial_sse_stream_eof_without_terminal_event_records_stream_e
     );
     task.abort();
 }
+
+#[tokio::test]
+async fn strict_shadow_mode_prevents_committed_mutations_and_forwards_original_payload() {
+    let captured = Arc::new(Mutex::new(None));
+    let copy = captured.clone();
+    let (url, task) = mock(Router::new().route(
+        "/v1/responses",
+        post(move |body: axum::body::Bytes| {
+            let copy = copy.clone();
+            async move {
+                *copy.lock().unwrap() = Some(body.to_vec());
+                Json(json!({"id":"resp_fixture","output":[],"usage":{"input_tokens":100,"output_tokens":10}}))
+            }
+        }),
+    ))
+    .await;
+    let store = CwStore::open_in_memory().unwrap();
+    // Autopilot enabled, but strict_shadow_only = true
+    store
+        .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
+            enabled: true,
+            shadow_policy: cw_core::policy::ShadowPolicyConfig {
+                enabled: true,
+                strict_shadow_only: true,
+                horizon_turns: 3,
+                record_diagnostics: true,
+            },
+            ..Default::default()
+        })
+        .unwrap();
+    let now = Utc::now();
+    let session_id = "strict_shadow_proxy_session";
+    store
+        .upsert_session(&Session {
+            id: session_id.into(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "gpt-4o-mini".into(),
+            provider: ProviderKind::OpenAI,
+            title: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+    // Save committed mutation rule in store
+    store
+        .save_mutation(&MutationRule {
+            id: "pin_strict_shadow".into(),
+            session_id: session_id.into(),
+            op: MutationOp::PinContext {
+                label: "Strict shadow pin".into(),
+                content: "SHOULD_NEVER_BE_MUTATED_INTO_PAYLOAD".into(),
+                source_node_id: None,
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: now,
+        })
+        .unwrap();
+    let mut state = DaemonState::new(store.clone());
+    state.openai_upstream = url;
+    let token = state.control_token.clone();
+    let original_raw_body = r#"{"model":"gpt-4o-mini","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello world"}]}]}"#;
+    let request = Request::builder()
+        .method("POST")
+        .uri("/openai/v1/responses")
+        .header("content-type", "application/json")
+        .header("x-cw-session-id", session_id)
+        .header("x-cw-control-token", token)
+        .body(Body::from(original_raw_body))
+        .unwrap();
+
+    let response = build_proxy_router(state).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    to_bytes(response.into_body(), 10000).await.unwrap();
+
+    let forwarded_body = captured.lock().unwrap().clone().unwrap();
+    let forwarded_str = String::from_utf8(forwarded_body).unwrap();
+
+    // Verify committed mutation was NOT applied to forwarded payload
+    assert!(
+        !forwarded_str.contains("SHOULD_NEVER_BE_MUTATED_INTO_PAYLOAD"),
+        "Strict shadow mode must NOT apply committed mutations to outbound wire payload"
+    );
+
+    // Verify forwarded payload matches original JSON
+    let original_val: serde_json::Value = serde_json::from_str(original_raw_body).unwrap();
+    let forwarded_val: serde_json::Value = serde_json::from_str(&forwarded_str).unwrap();
+    assert_eq!(forwarded_val, original_val);
+
+    task.abort();
+}

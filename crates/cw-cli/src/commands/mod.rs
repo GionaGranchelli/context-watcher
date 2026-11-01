@@ -1,3 +1,4 @@
+pub mod calibrate;
 pub mod daemon;
 pub mod init;
 pub mod reports;

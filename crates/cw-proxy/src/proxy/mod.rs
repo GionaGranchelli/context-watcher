@@ -156,8 +156,12 @@ pub async fn handle_proxy_request(
                 updated_at: Utc::now(),
             };
             let cfg = state.store.get_autopilot_config().unwrap_or_default();
-            let mutation_requested =
-                cfg.enabled && explicit.is_some() && authorized && !has_signed_content(&raw);
+            let strict_shadow = cfg.shadow_policy.enabled && cfg.shadow_policy.strict_shadow_only;
+            let mutation_requested = !strict_shadow
+                && cfg.enabled
+                && explicit.is_some()
+                && authorized
+                && !has_signed_content(&raw);
             if let Err(error) = state.store.upsert_session(&session) {
                 if mutation_requested || headers.contains_key("x-cw-dry-run") {
                     return (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response();
@@ -178,7 +182,8 @@ pub async fn handle_proxy_request(
             };
             let previous = state.store.get_latest_turn(&session_id).ok().flatten();
             let previous_nodes = previous.as_ref().map(|t| t.nodes.clone());
-            let active = mutation_requested
+            let active = !strict_shadow
+                && mutation_requested
                 && cw_core::normalizer::supports_mutation_payload(&raw, provider);
             let mut outbound = raw.clone();
             let mut applied = Vec::new();
@@ -214,7 +219,8 @@ pub async fn handle_proxy_request(
             })
             .await;
             if let Ok(Ok((mut turn, _))) = analyzed {
-                if active {
+                if active || cfg.shadow_policy.enabled {
+                    let mut eval_payload = outbound.clone();
                     let report = evaluate_autopilot_policies(
                         &cfg,
                         &session_id,
@@ -223,14 +229,49 @@ pub async fn handle_proxy_request(
                         seq,
                         &turn.nodes,
                         Some(&turn),
-                        &mut outbound,
+                        if active {
+                            &mut outbound
+                        } else {
+                            &mut eval_payload
+                        },
                     );
-                    for rule in report.generated_mutations {
-                        if let Err(error) = state.store.save_mutation(&rule) {
-                            return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
-                                .into_response();
+                    if active {
+                        for rule in report.generated_mutations {
+                            if let Err(error) = state.store.save_mutation(&rule) {
+                                return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
+                                    .into_response();
+                            }
+                            applied.push(rule.id);
                         }
-                        applied.push(rule.id);
+                    }
+                    if !report.shadow_decisions.is_empty() {
+                        let cache_obs = cw_core::policy::classify_cache_state(
+                            &session_id,
+                            provider,
+                            &session.model,
+                            seq,
+                            None,
+                            None,
+                            Some(&turn.kv_cache_report),
+                            false,
+                        );
+                        let pricing =
+                            cw_core::policy::find_pricing_profile(provider, &session.model);
+                        for dec in &report.shadow_decisions {
+                            let evidence =
+                                cw_core::calibration::ShadowDecisionEvidence::from_policy_decision(
+                                    dec,
+                                    &cache_obs,
+                                    pricing.as_ref(),
+                                    cfg.shadow_policy.horizon_turns,
+                                    seq,
+                                    seq,
+                                );
+                            if let Err(error) = state.store.save_shadow_decision_evidence(&evidence)
+                            {
+                                tracing::warn!(%error, "Failed to persist shadow decision evidence");
+                            }
+                        }
                     }
                 }
                 let rules = match state.store.list_firewall_rules(Some(&session_id)) {

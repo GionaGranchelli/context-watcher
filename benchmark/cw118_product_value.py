@@ -891,8 +891,9 @@ Following the maintainability gates (CW-116), Codex qualification (CW-112), long
 
 ### Primary Gate A Engineering Findings
 - **Gate A Scope:** Validates real infrastructure, Latin square balanced scheduling, task fixtures, independent acceptance tests, pricing models, failure accounting, and proxy transparency.
-- **Proxy Socket Integration:** Real bounded proxy socket integration (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`) confirms live loopback forwarding overhead (< 3ms), credential stripping (`x-cw-control-token` stripped before egress), and lossless payload preservation between M0 and M1.
-- **Cache-Safe Policy Engine:** Real production policy qualification (`test_cw118_cache_safe_policy_qualification_defer_and_pin`) proves that historical mutations on warm cache are safely deferred (`CachePrefixAtRisk`), while eligible tail-only mutations (`PinContext`) are verified as zero KV-break and applied to outbound payloads.
+- **Proxy Socket Integration:** Real bounded proxy socket integration (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`) confirms live loopback forwarding overhead observed at ~1-3 ms (regression gate bounded at < 150 ms to account for CI runner jitter without asserting an unverified SLA), credential stripping (`x-cw-control-token` stripped before egress), and lossless payload preservation between M0 and M1.
+- **Cache-Safe Policy Engine:** Real production policy qualification (`test_cw118_cache_safe_policy_qualification_defer_and_pin`) proves that historical mutations on warm cache are safely deferred (`OptimizationDecision::Defer`, `CachePrefixAtRisk`), while eligible tail-only mutations (`PinContext`) are verified as zero KV-break, correctly classified by policy as `OptimizationDecision::NoOp` (acknowledging zero standalone economic reduction without separate authorization), and applied with 100% prefix structural preservation.
+- **Gate A Provider Spend:** Actual paid provider spend is **$0.00 USD** (zero paid provider calls executed). All token costs in Gate A reports represent modeled synthetic calculations (${acct['all_attempt_total_cost_usd']:.4f} USD model estimate across 45 simulation trajectories).
 - **Simulation Fixture Separation:** The 45-session schedule evaluates analytical simulation fixtures (`evidence_provenance: SyntheticFixtureReplay`) to qualify schedule balancing, resume idempotency, failure accounting, and bootstrap CI statistics. Simulated iteration, cache-hit, and latency values are model inputs rather than measured live LLM observations.
 - **Product Hypothesis Status:** **`NOT_EVALUATED`**. Gate A offline engineering runs do not assume or fabricate LLM iteration savings. Live product-value qualification requires authorized Gate B execution.
 
@@ -960,8 +961,9 @@ All workloads require independent verification via `python3 -m unittest` before 
 - **Total Scheduled Sessions:** {analysis['total_sessions']}
 - **Task Success Rate (M0, M1, M2):** 100% ({analysis['total_sessions'] // 3}/{analysis['total_sessions'] // 3} per mode)
 - **Deterministic Fixture Invariant:** Validates that test harnesses, independent unit verification scripts, and failure accounting function without exception. Actual agent problem-solving success on live LLMs will be evaluated under Gate B.
-- **All-Attempt Total Cost:** ${acct['all_attempt_total_cost_usd']:.4f} USD
-- **Success-Conditional Total Cost:** ${acct['success_attempt_total_cost_usd']:.4f} USD
+- **Modeled All-Attempt Total Cost:** ${acct['all_attempt_total_cost_usd']:.4f} USD (simulated model estimate)
+- **Modeled Success-Conditional Total Cost:** ${acct['success_attempt_total_cost_usd']:.4f} USD (simulated model estimate)
+- **Actual Paid Provider Spend:** $0.00 USD (zero paid provider calls executed during Gate A offline qualification)
 
 ---
 
@@ -994,7 +996,7 @@ All workloads require independent verification via `python3 -m unittest` before 
 ## 9. Performance Results
 
 - **Analytical Model Proxy Overhead:** **{econ['mean_proxy_overhead_ms']:.2f} ms** per multi-turn session (simulation model parameter).
-- **Empirical Proxy Socket Forwarding Overhead:** Measured at **< 3.0 ms** per request on real loopback TCP sockets (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`).
+- **Empirical Proxy Socket Forwarding Overhead:** Measured at **~1-3 ms** per request on real loopback TCP sockets (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`). The automated test bounds regression at < 150 ms to accommodate CI runner variance without asserting an unverified production SLA.
 - **TTFB:** Unchanged between M0 and M1.
 
 ---
@@ -1117,6 +1119,8 @@ def main():
     budget_exhausted = False
     skipped_count = 0
 
+    current_git_commit = get_git_commit()
+
     for item in schedule:
         sid = item["session_id"]
         existing = existing_sessions.get(sid)
@@ -1124,13 +1128,26 @@ def main():
         if existing and isinstance(existing, dict):
             expected_fixture_hash = compute_fixture_hash(item["task_family"])
             expected_pricing = PRICING_PROFILES.get(args.model)
+            outcome = existing.get("execution_outcome", {})
+            is_completed = (
+                outcome.get("task_success") is not None
+                and outcome.get("acceptance_test_passed") is not None
+            )
+            commit_matches = (
+                existing.get("git_commit") == current_git_commit
+                or existing.get("source_git_commit") == current_git_commit
+                or current_git_commit == "unversioned"
+            )
             if (
                 existing.get("model") == args.model
                 and existing.get("task_family") == item["task_family"]
                 and existing.get("mode") == item["mode"]
                 and existing.get("repetition") == item["repetition"]
+                and existing.get("randomization_seed") == args.seed
                 and existing.get("fixture_hash") == expected_fixture_hash
                 and existing.get("pricing_profile") == expected_pricing
+                and commit_matches
+                and is_completed
             ):
                 can_resume = True
 
@@ -1161,7 +1178,9 @@ def main():
         "gate_status": gate_status,
         "product_hypothesis_status": "NOT_EVALUATED",
         "product_decision": "NOT_EVALUATED",
-        "source_git_commit": get_git_commit(),
+        "actual_provider_spend_usd": 0.0,
+        "modeled_synthetic_cost_usd": analysis["accounting"]["all_attempt_total_cost_usd"],
+        "source_git_commit": current_git_commit,
         "artifact_generation_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "parameters": {
             "tasks": tasks,

@@ -388,6 +388,34 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
     assert_eq!(sessions4.len(), 6);
     assert_eq!(sessions4[0]["model"], "gpt-4o");
 
+    // Run 5: re-run with differing seed (--seed 99 vs 42)
+    // Configuration validation must detect seed incompatibility and reject reuse!
+    let output5 = Command::new("python3")
+        .current_dir(&root)
+        .args([
+            "benchmark/cw118_product_value.py",
+            "--task",
+            "f1,f2",
+            "--repetitions",
+            "1",
+            "--model",
+            "gpt-4o",
+            "--seed",
+            "99",
+            "--output",
+            result_file.to_str().unwrap(),
+            "--doc-output",
+            doc_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to execute python runner");
+    assert!(output5.status.success());
+    let stdout5 = String::from_utf8_lossy(&output5.stdout);
+    assert!(
+        stdout5.contains("0 resumed"),
+        "Runner must reject cached sessions when randomization seed changes"
+    );
+
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
@@ -1308,7 +1336,9 @@ async fn test_cw118_cache_safe_policy_qualification_defer_and_pin() {
         3,
     );
 
-    // Production policy verifies that tail append operation has zero KV break tokens
+    // Production policy explicitly returns NoOp for tail append operations:
+    // Tail-only context pinning preserves prefix (0 KV break) but yields no standalone token reduction.
+    assert_eq!(decision_pin.decision, OptimizationDecision::NoOp);
     assert_eq!(decision_pin.estimated_kv_break_tokens, 0);
     assert!(decision_pin.evidence.is_append_only);
     assert_eq!(
@@ -1378,6 +1408,36 @@ async fn test_cw118_cache_safe_policy_qualification_defer_and_pin() {
     assert!(
         payload_str.contains("CRITICAL REPO RULE PRESERVED"),
         "Outbound request must contain the pinned rule text"
+    );
+
+    // Structural prefix comparison: verify all original messages are structurally identical and in the exact same order before the appended tail!
+    let orig_msgs = raw_payload["messages"].as_array().unwrap();
+    let recv_msgs = payload_received["messages"]
+        .as_array()
+        .expect("messages array must exist");
+    assert_eq!(
+        orig_msgs.len(),
+        recv_msgs.len(),
+        "Number of messages must remain identical"
+    );
+
+    // All prefix messages before the tail must be structurally identical (100% prefix preservation):
+    for idx in 0..orig_msgs.len() - 1 {
+        assert_eq!(
+            &orig_msgs[idx], &recv_msgs[idx],
+            "Prefix message {idx} must be structurally identical to original"
+        );
+    }
+
+    // Tail message must preserve original role and prefix content:
+    let last_orig = orig_msgs.last().unwrap();
+    let last_recv = recv_msgs.last().unwrap();
+    assert_eq!(last_orig["role"], last_recv["role"]);
+    let orig_tail_text = last_orig["content"].as_str().unwrap();
+    let recv_tail_text = last_recv["content"].as_str().unwrap();
+    assert!(
+        recv_tail_text.starts_with(orig_tail_text),
+        "Tail message must preserve original text prefix"
     );
 
     // Verify wire egress in SQLite contains the pinned context

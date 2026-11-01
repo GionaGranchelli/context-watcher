@@ -460,13 +460,13 @@ pub async fn api_end_session(
 
     let mut all_outcomes = Vec::new();
     for t in &turns {
-        let t_provider = t.normalization_provider.unwrap_or(session.provider);
-        let t_model = t.model.as_deref().unwrap_or(&session.model);
-        let t_pricing = cw_core::policy::find_pricing_profile(t_provider, t_model);
+        let (t_provider, t_model, t_pricing, _verified) = state
+            .store
+            .resolve_turn_model_and_pricing(t, session.provider);
         let o = cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
             t,
             t_provider,
-            t_model,
+            &t_model,
             t_pricing.as_ref(),
             t.created_at,
         );

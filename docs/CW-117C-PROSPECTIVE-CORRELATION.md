@@ -5,7 +5,7 @@
 **Status:** Completed & Deterministically Qualified  
 **Branch:** `feat/cw-117c-prospective-correlation`  
 **Crates Affected:** `cw-core`, `cw-store`, `cw-proxy`, `cw-cli`  
-**Qualification Test Suite:** `crates/cw-proxy/tests/prospective_correlation_test.rs` (16/16 passed), `crates/cw-store/tests/calibration_evidence_test.rs` (5/5 passed)  
+**Qualification Test Suite:** `crates/cw-proxy/tests/prospective_correlation_test.rs` (16/16 passed), `crates/cw-store/tests/calibration_evidence_test.rs` (6/6 passed)  
 **Evidence Artifact:** [`docs/cw117c_synthetic_calibration_report.json`](cw117c_synthetic_calibration_report.json)  
 **Operating Mode:** Strictly Observation-Only / Strict Shadow Mode (Zero mutations committed or applied to outbound requests)
 
@@ -103,6 +103,8 @@ Client Harness Request (Unmutated Source Payload)
 - `transitions`: Detailed list of transitions per turn (`WarmPreserved`, `WarmDrop`, `ColdWrite`, `ColdContinued`) with `is_verified` flag. Initial base cache hit ratio is drawn directly from `base_outcome.observed_cache_hit_ratio` without hardcoded assumptions.
 - `observed_cache_retention_ratio`: Fraction of warm cache transitions that retained hits $> 50\%$.
 - `horizon_cost_delta_usd`: Compared when `FullyObserved` against cumulative verified continuation costs.
+- `lifecycle_monotonicity`: Once a horizon reaches a finalized terminal state (`TruncatedEarly` or `FullyObserved`), it is strictly immutable against late requests. Transitions such as `TruncatedEarly -> PendingContinuation` or `TruncatedEarly -> FullyObserved` are blocked to preserve authoritative historical evidence.
+- `historical_model_recovery`: When older turn records lack `model: Some(...)`, `resolve_turn_model_and_pricing` recovers the model from the stored raw request payload in SQLite (`get_turn_raw_payload`). If absent, it marks model and pricing unverified (`"unverified_unknown_model"`, `pricing: None`) rather than falling back to the session's latest model, preventing pricing corruption after model switches.
 
 ---
 

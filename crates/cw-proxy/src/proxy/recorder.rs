@@ -275,20 +275,12 @@ impl Recorder {
             }
 
             // CW-117C: Correlate observed provider outcome with pre-dispatch shadow decisions
-            let session_res = state.store.get_session(&turn.session_id);
-            let session_model = session_res
-                .as_ref()
-                .ok()
-                .and_then(|s| s.as_ref())
-                .map(|s| s.model.clone())
-                .unwrap_or_else(|| "unknown".to_string());
-            let turn_provider = turn.normalization_provider.unwrap_or(provider);
-            let turn_model = turn.model.as_deref().unwrap_or(&session_model);
-            let pricing = cw_core::policy::find_pricing_profile(turn_provider, turn_model);
+            let (turn_provider, turn_model, pricing, _is_verified) =
+                state.store.resolve_turn_model_and_pricing(&turn, provider);
             let outcome = cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
                 &turn,
                 turn_provider,
-                turn_model,
+                &turn_model,
                 pricing.as_ref(),
                 Utc::now(),
             );
@@ -323,15 +315,13 @@ impl Recorder {
                     if let Ok(turns) = state.store.list_turns(&turn.session_id) {
                         let mut all_outcomes = Vec::new();
                         for t in &turns {
-                            let t_provider = t.normalization_provider.unwrap_or(provider);
-                            let t_model = t.model.as_deref().unwrap_or(&session_model);
-                            let t_pricing =
-                                cw_core::policy::find_pricing_profile(t_provider, t_model);
+                            let (t_provider, t_model, t_pricing, _verified) =
+                                state.store.resolve_turn_model_and_pricing(t, provider);
                             let o =
                                 cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
                                     t,
                                     t_provider,
-                                    t_model,
+                                    &t_model,
                                     t_pricing.as_ref(),
                                     t.created_at,
                                 );

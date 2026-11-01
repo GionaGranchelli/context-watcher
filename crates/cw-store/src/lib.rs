@@ -1132,7 +1132,7 @@ impl CwStore {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
 
         // Lifecycle monotonicity: Once a horizon reaches a finalized terminal state
-        // (TruncatedEarly or FullyObserved), ordinary updates must not silently revert it to PendingContinuation.
+        // (TruncatedEarly or FullyObserved), ordinary updates must not overwrite or reclassify it.
         let existing_status: Option<String> = conn
             .query_row(
                 "SELECT tracking_status FROM prospective_horizon_observations WHERE horizon_id = ?1",
@@ -1142,11 +1142,9 @@ impl CwStore {
             .optional()?;
         if let Some(status) = existing_status {
             let is_terminal = status == "truncatedearly" || status == "fullyobserved";
-            if is_terminal
-                && record.tracking_status
-                    == cw_core::calibration::HorizonTrackingStatus::PendingContinuation
-            {
-                // Monotonicity: preserve finalized terminal status against reversal to pending
+            if is_terminal {
+                // Monotonicity & immutability: once a horizon is finalized as TruncatedEarly or FullyObserved,
+                // late subsequent requests or evaluations cannot overwrite or reclassify it.
                 return Ok(());
             }
         }
@@ -1225,6 +1223,60 @@ impl CwStore {
             }
         }
         Ok(out)
+    }
+
+    pub fn get_prospective_horizon_observation(
+        &self,
+        horizon_id: &str,
+    ) -> Result<Option<cw_core::calibration::ProspectiveHorizonObservation>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let row: Option<String> = conn
+            .query_row(
+                "SELECT record_json FROM prospective_horizon_observations WHERE horizon_id = ?1",
+                params![horizon_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match row {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn resolve_turn_model_and_pricing(
+        &self,
+        turn: &cw_core::ir::ContextTurn,
+        fallback_provider: cw_core::ir::ProviderKind,
+    ) -> (
+        cw_core::ir::ProviderKind,
+        String,
+        Option<cw_core::policy::ModelPricingProfile>,
+        bool,
+    ) {
+        let provider = turn.normalization_provider.unwrap_or(fallback_provider);
+        let recovered_model = turn.model.clone().or_else(|| {
+            self.get_turn_raw_payload(&turn.id)
+                .ok()
+                .flatten()
+                .and_then(|raw| {
+                    raw.get("model")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToString::to_string)
+                })
+        });
+
+        match recovered_model {
+            Some(m) => {
+                let pricing = cw_core::policy::find_pricing_profile(provider, &m);
+                (provider, m, pricing, true)
+            }
+            None => (
+                provider,
+                "unverified_unknown_model".to_string(),
+                None,
+                false,
+            ),
+        }
     }
 
     pub fn upsert_firewall_rule(&self, rule: &FirewallRule) -> Result<(), StoreError> {

@@ -1489,6 +1489,44 @@ async fn test_prospective_correlation_sc15_session_end_signals() {
         Some("session_ended_before_horizon")
     );
 
+    // Verify that subsequent requests completing the horizon (e.g. Turn 4 reaching H=3)
+    // CANNOT overwrite TruncatedEarly with FullyObserved (terminal-to-terminal reversal prevented)
+    let raw3 = json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [{"role": "user", "content": "Yet another turn after session end reaching H=3"}]
+    })
+    .to_string();
+
+    let req3 = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .header("x-cw-session-id", session_id)
+        .header("x-cw-control-token", &token)
+        .body(Body::from(raw3))
+        .unwrap();
+
+    let res3 = build_proxy_router(state.clone())
+        .oneshot(req3)
+        .await
+        .unwrap();
+    assert_eq!(res3.status(), StatusCode::OK);
+    to_bytes(res3.into_body(), 10000).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let horizons_after_completion = store
+        .list_prospective_horizon_observations(Some(session_id))
+        .unwrap();
+    assert_eq!(
+        horizons_after_completion[0].tracking_status,
+        HorizonTrackingStatus::TruncatedEarly
+    );
+    assert_eq!(
+        horizons_after_completion[0].truncation_reason.as_deref(),
+        Some("session_ended_before_horizon")
+    );
+
     // 3. Test explicit POST /api/v1/sessions/:id/end API endpoint
     let api_app = build_api_router(state.clone());
     let end_req = Request::builder()
@@ -1690,4 +1728,41 @@ async fn test_prospective_correlation_sc16_per_turn_model_identity_preserved() {
         pho.tracking_status,
         HorizonTrackingStatus::PendingContinuation
     );
+
+    // Verify legacy turn recovery logic:
+    // Turn with model: None but stored raw payload recovers original model
+    let legacy_turn_with_raw = ContextTurn {
+        id: "turn_legacy_with_raw".to_string(),
+        model: None,
+        sequence_number: 10,
+        ..turns[0].clone()
+    };
+    let raw_payload = json!({
+        "model": "claude-3-haiku-20240307",
+        "messages": [{"role": "user", "content": "hello"}]
+    });
+    store
+        .save_turn(&legacy_turn_with_raw, Some(&raw_payload), None, None)
+        .unwrap();
+
+    let (prov_rec, model_rec, pricing_rec, verified_rec) =
+        store.resolve_turn_model_and_pricing(&legacy_turn_with_raw, ProviderKind::Anthropic);
+    assert_eq!(prov_rec, ProviderKind::Anthropic);
+    assert_eq!(model_rec, "claude-3-haiku-20240307");
+    assert!(pricing_rec.is_some());
+    assert!(verified_rec);
+
+    // Turn with model: None and NO stored raw payload remains unverified
+    let legacy_turn_unverified = ContextTurn {
+        id: "turn_legacy_unverified".to_string(),
+        model: None,
+        sequence_number: 11,
+        ..turns[0].clone()
+    };
+    let (prov_unver, model_unver, pricing_unver, verified_unver) =
+        store.resolve_turn_model_and_pricing(&legacy_turn_unverified, ProviderKind::Anthropic);
+    assert_eq!(prov_unver, ProviderKind::Anthropic);
+    assert_eq!(model_unver, "unverified_unknown_model");
+    assert!(pricing_unver.is_none());
+    assert!(!verified_unver);
 }

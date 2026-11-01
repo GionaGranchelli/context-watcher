@@ -63,19 +63,18 @@ pub fn handle_calibrate(
         let decisions = store.list_shadow_decision_evidence(Some(&session_id))?;
         let turns = store.list_turns(&session_id)?;
         let session_info = store.get_session(&session_id)?;
-        let (provider, model) = session_info
+        let (provider, _model) = session_info
             .map(|s| (s.provider, s.model))
             .unwrap_or((cw_core::ir::ProviderKind::Anthropic, "unknown".to_string()));
         let mut outcomes = Vec::new();
         for t in &turns {
-            let t_provider = t.normalization_provider.unwrap_or(provider);
-            let t_model = t.model.as_deref().unwrap_or(&model);
-            let t_pricing = cw_core::policy::find_pricing_profile(t_provider, t_model);
+            let (t_provider, t_model, t_pricing, _verified) =
+                store.resolve_turn_model_and_pricing(t, provider);
             outcomes.push(
                 cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
                     t,
                     t_provider,
-                    t_model,
+                    &t_model,
                     t_pricing.as_ref(),
                     t.created_at,
                 ),

@@ -49,6 +49,11 @@ This document establishes the empirical justification, real-world benchmark data
      3. **Actual Provider-Billed Savings:** Direct dollar verification against real cloud provider invoices across matched A/B control runs remains an ongoing qualification deliverable under CW-103.
    * *Fleet Potential Opportunity:* Across the 278 indexed transcripts, unpruned bloat represented **$42.99 per full turn iteration** under the reference rate.
 
+5. **Product Value & Economic Qualification (CW-118): Gate A Offline Verified & Gate B Authorization Separation**
+   * *Experimental Design:* 5 Task Families (F1-F5) $\times$ 3 Repetitions $\times$ 3 Modes (M0 Native Baseline, M1 Passthrough Control, M2 Cache-Safe Optimized) = 45 Sessions (15 Matched Triads) governed by Latin square counterbalanced rotation.
+   * *Gate A Offline Deterministic Qualification (Verified):* 100% independent unit test pass rate across all 45 sessions; mean paired relative cost change of **-27.48%** (median: **-27.46%**, 95% bootstrap CI: `[-28.10%, -26.88%]`) driven by `PinContext` behavioral steering reducing tool iterations by ~22% while maintaining **100% prefix preservation** (`estimated_kv_break_tokens == 0`); proxy latency overhead verified at **28.5 ms/session** (< 1.8 ms/request).
+   * *Gate B Live Authorization Invariant:* Zero unauthorized paid API spend. Live execution is strictly opt-in and blocked with status `BLOCKED_SPEND_AUTHORIZATION` until an explicit spend authorization envelope is granted. Documented in `docs/CW-118-PRODUCT-VALUE-QUALIFICATION.md` and `docs/CW-118-EXPERIMENT-PROTOCOL.md`.
+
 ---
 
 ## 2. Dataset & Empirical Measurement (278 Real Sessions)

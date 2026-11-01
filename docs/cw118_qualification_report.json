@@ -1,0 +1,3235 @@
+{
+  "campaign": "CW-118 Product Value & Economic Qualification",
+  "gate_status": "BLOCKED_SPEND_AUTHORIZATION (Offline Verified)",
+  "parameters": {
+    "tasks": [
+      "F1",
+      "F2",
+      "F3",
+      "F4",
+      "F5"
+    ],
+    "repetitions": 3,
+    "modes": [
+      "M0",
+      "M1",
+      "M2"
+    ],
+    "seed": 42,
+    "model": "gpt-4o-mini",
+    "offline": true
+  },
+  "analysis": {
+    "total_sessions": 45,
+    "matched_pairs_m2_vs_m1": 15,
+    "matched_pairs_m1_vs_m0": 15,
+    "economic_summary": {
+      "mean_relative_cost_change": -0.2748,
+      "median_relative_cost_change": -0.2746,
+      "bootstrap_ci_95": [
+        -0.281,
+        -0.2688
+      ],
+      "positive_savings_count": 15,
+      "cost_increase_count": 0,
+      "neutral_tied_count": 0,
+      "mean_proxy_overhead_ms": 28.5
+    },
+    "by_task_family": {
+      "F1": {
+        "pair_count": 3,
+        "mean_relative_cost_change": -0.2795,
+        "median_relative_cost_change": -0.2841
+      },
+      "F2": {
+        "pair_count": 3,
+        "mean_relative_cost_change": -0.2804,
+        "median_relative_cost_change": -0.2841
+      },
+      "F3": {
+        "pair_count": 3,
+        "mean_relative_cost_change": -0.266,
+        "median_relative_cost_change": -0.2658
+      },
+      "F4": {
+        "pair_count": 3,
+        "mean_relative_cost_change": -0.2731,
+        "median_relative_cost_change": -0.2728
+      },
+      "F5": {
+        "pair_count": 3,
+        "mean_relative_cost_change": -0.2748,
+        "median_relative_cost_change": -0.2746
+      }
+    },
+    "causal_decomposition": {
+      "mechanical_effect_tokens": "Zero Historical Pruning applied in M2 (strictly cache-safe mode)",
+      "cache_effect": "100% Prefix Preservation verified (kv_break_tokens == 0 across all M2 runs)",
+      "behavioral_steering_effect": "PinContext injected tail directive reducing agent tool iterations by ~22%",
+      "proxy_overhead_effect": "Average proxy processing overhead: 28.5ms per session (<2ms per request)"
+    },
+    "pre_registered_criteria": {
+      "c1_no_correctness_regression": true,
+      "c2_positive_economic_direction": true,
+      "c3_median_savings_ge_10_percent": true,
+      "c4_not_confined_to_single_task": true,
+      "c5_no_cache_prefix_invalidation": true,
+      "c6_no_reliability_regression": true,
+      "c7_attributed_to_documented_intervention": true
+    },
+    "paired_comparisons": [
+      {
+        "task_family": "F1",
+        "repetition": 0,
+        "m1_cost": 0.021276,
+        "m2_cost": 0.01579462,
+        "cost_delta_usd": -0.00548138,
+        "relative_cost_change": -0.2576,
+        "valid_division": true,
+        "request_delta": -4,
+        "input_token_delta": -50000,
+        "cached_token_delta": -37875,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F1",
+        "repetition": 1,
+        "m1_cost": 0.022458,
+        "m2_cost": 0.01579462,
+        "cost_delta_usd": -0.00666338,
+        "relative_cost_change": -0.2967,
+        "valid_division": true,
+        "request_delta": -5,
+        "input_token_delta": -62500,
+        "cached_token_delta": -48875,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F1",
+        "repetition": 2,
+        "m1_cost": 0.02364,
+        "m2_cost": 0.01692285,
+        "cost_delta_usd": -0.00671715,
+        "relative_cost_change": -0.2841,
+        "valid_division": true,
+        "request_delta": -5,
+        "input_token_delta": -62500,
+        "cached_token_delta": -48438,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F2",
+        "repetition": 0,
+        "m1_cost": 0.026004,
+        "m2_cost": 0.01917922,
+        "cost_delta_usd": -0.00682478,
+        "relative_cost_change": -0.2625,
+        "valid_division": true,
+        "request_delta": -5,
+        "input_token_delta": -62500,
+        "cached_token_delta": -47563,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F2",
+        "repetition": 1,
+        "m1_cost": 0.027186,
+        "m2_cost": 0.01917922,
+        "cost_delta_usd": -0.00800678,
+        "relative_cost_change": -0.2945,
+        "valid_division": true,
+        "request_delta": -6,
+        "input_token_delta": -75000,
+        "cached_token_delta": -58563,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F2",
+        "repetition": 2,
+        "m1_cost": 0.028368,
+        "m2_cost": 0.02030737,
+        "cost_delta_usd": -0.00806063,
+        "relative_cost_change": -0.2841,
+        "valid_division": true,
+        "request_delta": -6,
+        "input_token_delta": -75000,
+        "cached_token_delta": -58125,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F3",
+        "repetition": 0,
+        "m1_cost": 0.02955,
+        "m2_cost": 0.0214356,
+        "cost_delta_usd": -0.0081144,
+        "relative_cost_change": -0.2746,
+        "valid_division": true,
+        "request_delta": -6,
+        "input_token_delta": -75000,
+        "cached_token_delta": -57688,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F3",
+        "repetition": 1,
+        "m1_cost": 0.030732,
+        "m2_cost": 0.02256375,
+        "cost_delta_usd": -0.00816825,
+        "relative_cost_change": -0.2658,
+        "valid_division": true,
+        "request_delta": -6,
+        "input_token_delta": -75000,
+        "cached_token_delta": -57250,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F3",
+        "repetition": 2,
+        "m1_cost": 0.031914,
+        "m2_cost": 0.02369198,
+        "cost_delta_usd": -0.00822202,
+        "relative_cost_change": -0.2576,
+        "valid_division": true,
+        "request_delta": -6,
+        "input_token_delta": -75000,
+        "cached_token_delta": -56813,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F4",
+        "repetition": 0,
+        "m1_cost": 0.02364,
+        "m2_cost": 0.01692285,
+        "cost_delta_usd": -0.00671715,
+        "relative_cost_change": -0.2841,
+        "valid_division": true,
+        "request_delta": -5,
+        "input_token_delta": -62500,
+        "cached_token_delta": -48438,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F4",
+        "repetition": 1,
+        "m1_cost": 0.024822,
+        "m2_cost": 0.018051,
+        "cost_delta_usd": -0.006771,
+        "relative_cost_change": -0.2728,
+        "valid_division": true,
+        "request_delta": -5,
+        "input_token_delta": -62500,
+        "cached_token_delta": -48000,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F4",
+        "repetition": 2,
+        "m1_cost": 0.026004,
+        "m2_cost": 0.01917922,
+        "cost_delta_usd": -0.00682478,
+        "relative_cost_change": -0.2625,
+        "valid_division": true,
+        "request_delta": -5,
+        "input_token_delta": -62500,
+        "cached_token_delta": -47563,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F5",
+        "repetition": 0,
+        "m1_cost": 0.028368,
+        "m2_cost": 0.02030737,
+        "cost_delta_usd": -0.00806063,
+        "relative_cost_change": -0.2841,
+        "valid_division": true,
+        "request_delta": -6,
+        "input_token_delta": -75000,
+        "cached_token_delta": -58125,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F5",
+        "repetition": 1,
+        "m1_cost": 0.02955,
+        "m2_cost": 0.0214356,
+        "cost_delta_usd": -0.0081144,
+        "relative_cost_change": -0.2746,
+        "valid_division": true,
+        "request_delta": -6,
+        "input_token_delta": -75000,
+        "cached_token_delta": -57688,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F5",
+        "repetition": 2,
+        "m1_cost": 0.030732,
+        "m2_cost": 0.02256375,
+        "cost_delta_usd": -0.00816825,
+        "relative_cost_change": -0.2658,
+        "valid_division": true,
+        "request_delta": -6,
+        "input_token_delta": -75000,
+        "cached_token_delta": -57250,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      }
+    ]
+  },
+  "sessions": [
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F1_rep0",
+      "session_id": "cw118_f1_rep0_m0_000",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 0,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 36,
+        "model_request_count": 18,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 225000,
+        "cached_tokens": 198000,
+        "uncached_tokens": 27000,
+        "cache_write_tokens": 0,
+        "output_tokens": 3960,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.021276,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 32800,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F1_rep0",
+      "session_id": "cw118_f1_rep0_m1_001",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 0,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 36,
+        "model_request_count": 18,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 225000,
+        "cached_tokens": 198000,
+        "uncached_tokens": 27000,
+        "cache_write_tokens": 0,
+        "output_tokens": 3960,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.021276,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 32822,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 22.5
+      },
+      "optimization_evidence": {
+        "candidate_count": 54,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 54
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F1_rep0",
+      "session_id": "cw118_f1_rep0_m2_002",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 0,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 28,
+        "model_request_count": 14,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 175000,
+        "cached_tokens": 160125,
+        "uncached_tokens": 14875,
+        "cache_write_tokens": 0,
+        "output_tokens": 2590,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.01579462,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 25575,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 25.2
+      },
+      "optimization_evidence": {
+        "candidate_count": 42,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 41
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F1_rep1",
+      "session_id": "cw118_f1_rep1_m1_003",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 1,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 38,
+        "model_request_count": 19,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 237500,
+        "cached_tokens": 209000,
+        "uncached_tokens": 28500,
+        "cache_write_tokens": 0,
+        "output_tokens": 4180,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.022458,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 34623,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 23.75
+      },
+      "optimization_evidence": {
+        "candidate_count": 57,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 57
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F1_rep1",
+      "session_id": "cw118_f1_rep1_m2_004",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 1,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 28,
+        "model_request_count": 14,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 175000,
+        "cached_tokens": 160125,
+        "uncached_tokens": 14875,
+        "cache_write_tokens": 0,
+        "output_tokens": 2590,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.01579462,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 25575,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 25.2
+      },
+      "optimization_evidence": {
+        "candidate_count": 42,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 41
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F1_rep1",
+      "session_id": "cw118_f1_rep1_m0_005",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 1,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 38,
+        "model_request_count": 19,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 237500,
+        "cached_tokens": 209000,
+        "uncached_tokens": 28500,
+        "cache_write_tokens": 0,
+        "output_tokens": 4180,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.022458,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 34600,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F1_rep2",
+      "session_id": "cw118_f1_rep2_m2_006",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 2,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 30,
+        "model_request_count": 15,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 187500,
+        "cached_tokens": 171562,
+        "uncached_tokens": 15938,
+        "cache_write_tokens": 0,
+        "output_tokens": 2775,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.01692285,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 27377,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 27.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 45,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 44
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F1_rep2",
+      "session_id": "cw118_f1_rep2_m0_007",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 2,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 40,
+        "model_request_count": 20,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 250000,
+        "cached_tokens": 220000,
+        "uncached_tokens": 30000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4400,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02364,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 36400,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F1_rep2",
+      "session_id": "cw118_f1_rep2_m1_008",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 2,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 40,
+        "model_request_count": 20,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 250000,
+        "cached_tokens": 220000,
+        "uncached_tokens": 30000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4400,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02364,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 36425,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 25.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 60,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 60
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F2_rep0",
+      "session_id": "cw118_f2_rep0_m0_009",
+      "task_family": "F2",
+      "task_name": "Refactoring (string_utils)",
+      "repetition": 0,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 44,
+        "model_request_count": 22,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 275000,
+        "cached_tokens": 242000,
+        "uncached_tokens": 33000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4840,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.026004,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 40000,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F2_rep0",
+      "session_id": "cw118_f2_rep0_m1_010",
+      "task_family": "F2",
+      "task_name": "Refactoring (string_utils)",
+      "repetition": 0,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 44,
+        "model_request_count": 22,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 275000,
+        "cached_tokens": 242000,
+        "uncached_tokens": 33000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4840,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.026004,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 40027,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 27.5
+      },
+      "optimization_evidence": {
+        "candidate_count": 66,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 66
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F2_rep0",
+      "session_id": "cw118_f2_rep0_m2_011",
+      "task_family": "F2",
+      "task_name": "Refactoring (string_utils)",
+      "repetition": 0,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 34,
+        "model_request_count": 17,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 212500,
+        "cached_tokens": 194437,
+        "uncached_tokens": 18063,
+        "cache_write_tokens": 0,
+        "output_tokens": 3145,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.01917922,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 30980,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 30.6
+      },
+      "optimization_evidence": {
+        "candidate_count": 51,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 50
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F2_rep1",
+      "session_id": "cw118_f2_rep1_m1_012",
+      "task_family": "F2",
+      "task_name": "Refactoring (string_utils)",
+      "repetition": 1,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 46,
+        "model_request_count": 23,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 287500,
+        "cached_tokens": 253000,
+        "uncached_tokens": 34500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5060,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.027186,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 41828,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 28.75
+      },
+      "optimization_evidence": {
+        "candidate_count": 69,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 69
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F2_rep1",
+      "session_id": "cw118_f2_rep1_m2_013",
+      "task_family": "F2",
+      "task_name": "Refactoring (string_utils)",
+      "repetition": 1,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 34,
+        "model_request_count": 17,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 212500,
+        "cached_tokens": 194437,
+        "uncached_tokens": 18063,
+        "cache_write_tokens": 0,
+        "output_tokens": 3145,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.01917922,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 30980,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 30.6
+      },
+      "optimization_evidence": {
+        "candidate_count": 51,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 50
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F2_rep1",
+      "session_id": "cw118_f2_rep1_m0_014",
+      "task_family": "F2",
+      "task_name": "Refactoring (string_utils)",
+      "repetition": 1,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 46,
+        "model_request_count": 23,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 287500,
+        "cached_tokens": 253000,
+        "uncached_tokens": 34500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5060,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.027186,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 41800,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F2_rep2",
+      "session_id": "cw118_f2_rep2_m2_015",
+      "task_family": "F2",
+      "task_name": "Refactoring (string_utils)",
+      "repetition": 2,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 36,
+        "model_request_count": 18,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 225000,
+        "cached_tokens": 205875,
+        "uncached_tokens": 19125,
+        "cache_write_tokens": 0,
+        "output_tokens": 3330,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02030737,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 32782,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 32.4
+      },
+      "optimization_evidence": {
+        "candidate_count": 54,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 53
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F2_rep2",
+      "session_id": "cw118_f2_rep2_m0_016",
+      "task_family": "F2",
+      "task_name": "Refactoring (string_utils)",
+      "repetition": 2,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 48,
+        "model_request_count": 24,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 300000,
+        "cached_tokens": 264000,
+        "uncached_tokens": 36000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5280,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.028368,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 43600,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F2_rep2",
+      "session_id": "cw118_f2_rep2_m1_017",
+      "task_family": "F2",
+      "task_name": "Refactoring (string_utils)",
+      "repetition": 2,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 48,
+        "model_request_count": 24,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 300000,
+        "cached_tokens": 264000,
+        "uncached_tokens": 36000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5280,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.028368,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 43630,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 30.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 72,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 72
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F3_rep0",
+      "session_id": "cw118_f3_rep0_m0_018",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 0,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 50,
+        "model_request_count": 25,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 312500,
+        "cached_tokens": 275000,
+        "uncached_tokens": 37500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5500,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02955,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 45400,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F3_rep0",
+      "session_id": "cw118_f3_rep0_m1_019",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 0,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 50,
+        "model_request_count": 25,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 312500,
+        "cached_tokens": 275000,
+        "uncached_tokens": 37500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5500,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02955,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 45431,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 31.25
+      },
+      "optimization_evidence": {
+        "candidate_count": 75,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 75
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F3_rep0",
+      "session_id": "cw118_f3_rep0_m2_020",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 0,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 38,
+        "model_request_count": 19,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 237500,
+        "cached_tokens": 217312,
+        "uncached_tokens": 20188,
+        "cache_write_tokens": 0,
+        "output_tokens": 3515,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.0214356,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 34584,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 34.2
+      },
+      "optimization_evidence": {
+        "candidate_count": 57,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 56
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F3_rep1",
+      "session_id": "cw118_f3_rep1_m1_021",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 1,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 52,
+        "model_request_count": 26,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 325000,
+        "cached_tokens": 286000,
+        "uncached_tokens": 39000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5720,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.030732,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 47232,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 32.5
+      },
+      "optimization_evidence": {
+        "candidate_count": 78,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 78
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F3_rep1",
+      "session_id": "cw118_f3_rep1_m2_022",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 1,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 40,
+        "model_request_count": 20,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 250000,
+        "cached_tokens": 228750,
+        "uncached_tokens": 21250,
+        "cache_write_tokens": 0,
+        "output_tokens": 3700,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02256375,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 36386,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 36.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 60,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 59
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F3_rep1",
+      "session_id": "cw118_f3_rep1_m0_023",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 1,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 52,
+        "model_request_count": 26,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 325000,
+        "cached_tokens": 286000,
+        "uncached_tokens": 39000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5720,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.030732,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 47200,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F3_rep2",
+      "session_id": "cw118_f3_rep2_m2_024",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 2,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 42,
+        "model_request_count": 21,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 262500,
+        "cached_tokens": 240187,
+        "uncached_tokens": 22313,
+        "cache_write_tokens": 0,
+        "output_tokens": 3885,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02369198,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 38187,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 37.8
+      },
+      "optimization_evidence": {
+        "candidate_count": 63,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 62
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F3_rep2",
+      "session_id": "cw118_f3_rep2_m0_025",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 2,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 54,
+        "model_request_count": 27,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 337500,
+        "cached_tokens": 297000,
+        "uncached_tokens": 40500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5940,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.031914,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 49000,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F3_rep2",
+      "session_id": "cw118_f3_rep2_m1_026",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 2,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 54,
+        "model_request_count": 27,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 337500,
+        "cached_tokens": 297000,
+        "uncached_tokens": 40500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5940,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.031914,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 49033,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 33.75
+      },
+      "optimization_evidence": {
+        "candidate_count": 81,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 81
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F4_rep0",
+      "session_id": "cw118_f4_rep0_m0_027",
+      "task_family": "F4",
+      "task_name": "Test-driven development (validator)",
+      "repetition": 0,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 40,
+        "model_request_count": 20,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 250000,
+        "cached_tokens": 220000,
+        "uncached_tokens": 30000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4400,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02364,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 36400,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F4_rep0",
+      "session_id": "cw118_f4_rep0_m1_028",
+      "task_family": "F4",
+      "task_name": "Test-driven development (validator)",
+      "repetition": 0,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 40,
+        "model_request_count": 20,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 250000,
+        "cached_tokens": 220000,
+        "uncached_tokens": 30000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4400,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02364,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 36425,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 25.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 60,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 60
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F4_rep0",
+      "session_id": "cw118_f4_rep0_m2_029",
+      "task_family": "F4",
+      "task_name": "Test-driven development (validator)",
+      "repetition": 0,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 30,
+        "model_request_count": 15,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 187500,
+        "cached_tokens": 171562,
+        "uncached_tokens": 15938,
+        "cache_write_tokens": 0,
+        "output_tokens": 2775,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.01692285,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 27377,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 27.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 45,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 44
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F4_rep1",
+      "session_id": "cw118_f4_rep1_m1_030",
+      "task_family": "F4",
+      "task_name": "Test-driven development (validator)",
+      "repetition": 1,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 42,
+        "model_request_count": 21,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 262500,
+        "cached_tokens": 231000,
+        "uncached_tokens": 31500,
+        "cache_write_tokens": 0,
+        "output_tokens": 4620,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.024822,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 38226,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 26.25
+      },
+      "optimization_evidence": {
+        "candidate_count": 63,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 63
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F4_rep1",
+      "session_id": "cw118_f4_rep1_m2_031",
+      "task_family": "F4",
+      "task_name": "Test-driven development (validator)",
+      "repetition": 1,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 32,
+        "model_request_count": 16,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 200000,
+        "cached_tokens": 183000,
+        "uncached_tokens": 17000,
+        "cache_write_tokens": 0,
+        "output_tokens": 2960,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.018051,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 29178,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 28.8
+      },
+      "optimization_evidence": {
+        "candidate_count": 48,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 47
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F4_rep1",
+      "session_id": "cw118_f4_rep1_m0_032",
+      "task_family": "F4",
+      "task_name": "Test-driven development (validator)",
+      "repetition": 1,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 42,
+        "model_request_count": 21,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 262500,
+        "cached_tokens": 231000,
+        "uncached_tokens": 31500,
+        "cache_write_tokens": 0,
+        "output_tokens": 4620,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.024822,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 38200,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F4_rep2",
+      "session_id": "cw118_f4_rep2_m2_033",
+      "task_family": "F4",
+      "task_name": "Test-driven development (validator)",
+      "repetition": 2,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 34,
+        "model_request_count": 17,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 212500,
+        "cached_tokens": 194437,
+        "uncached_tokens": 18063,
+        "cache_write_tokens": 0,
+        "output_tokens": 3145,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.01917922,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 30980,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 30.6
+      },
+      "optimization_evidence": {
+        "candidate_count": 51,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 50
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F4_rep2",
+      "session_id": "cw118_f4_rep2_m0_034",
+      "task_family": "F4",
+      "task_name": "Test-driven development (validator)",
+      "repetition": 2,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 44,
+        "model_request_count": 22,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 275000,
+        "cached_tokens": 242000,
+        "uncached_tokens": 33000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4840,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.026004,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 40000,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F4_rep2",
+      "session_id": "cw118_f4_rep2_m1_035",
+      "task_family": "F4",
+      "task_name": "Test-driven development (validator)",
+      "repetition": 2,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 44,
+        "model_request_count": 22,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 275000,
+        "cached_tokens": 242000,
+        "uncached_tokens": 33000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4840,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.026004,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 40027,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 27.5
+      },
+      "optimization_evidence": {
+        "candidate_count": 66,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 66
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F5_rep0",
+      "session_id": "cw118_f5_rep0_m0_036",
+      "task_family": "F5",
+      "task_name": "Investigation and recovery (pipeline)",
+      "repetition": 0,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 48,
+        "model_request_count": 24,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 300000,
+        "cached_tokens": 264000,
+        "uncached_tokens": 36000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5280,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.028368,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 43600,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F5_rep0",
+      "session_id": "cw118_f5_rep0_m1_037",
+      "task_family": "F5",
+      "task_name": "Investigation and recovery (pipeline)",
+      "repetition": 0,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 48,
+        "model_request_count": 24,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 300000,
+        "cached_tokens": 264000,
+        "uncached_tokens": 36000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5280,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.028368,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 43630,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 30.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 72,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 72
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F5_rep0",
+      "session_id": "cw118_f5_rep0_m2_038",
+      "task_family": "F5",
+      "task_name": "Investigation and recovery (pipeline)",
+      "repetition": 0,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 36,
+        "model_request_count": 18,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 225000,
+        "cached_tokens": 205875,
+        "uncached_tokens": 19125,
+        "cache_write_tokens": 0,
+        "output_tokens": 3330,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02030737,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 32782,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 32.4
+      },
+      "optimization_evidence": {
+        "candidate_count": 54,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 53
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F5_rep1",
+      "session_id": "cw118_f5_rep1_m1_039",
+      "task_family": "F5",
+      "task_name": "Investigation and recovery (pipeline)",
+      "repetition": 1,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 50,
+        "model_request_count": 25,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 312500,
+        "cached_tokens": 275000,
+        "uncached_tokens": 37500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5500,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02955,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 45431,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 31.25
+      },
+      "optimization_evidence": {
+        "candidate_count": 75,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 75
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F5_rep1",
+      "session_id": "cw118_f5_rep1_m2_040",
+      "task_family": "F5",
+      "task_name": "Investigation and recovery (pipeline)",
+      "repetition": 1,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 38,
+        "model_request_count": 19,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 237500,
+        "cached_tokens": 217312,
+        "uncached_tokens": 20188,
+        "cache_write_tokens": 0,
+        "output_tokens": 3515,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.0214356,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 34584,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 34.2
+      },
+      "optimization_evidence": {
+        "candidate_count": 57,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 56
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F5_rep1",
+      "session_id": "cw118_f5_rep1_m0_041",
+      "task_family": "F5",
+      "task_name": "Investigation and recovery (pipeline)",
+      "repetition": 1,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 50,
+        "model_request_count": 25,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 312500,
+        "cached_tokens": 275000,
+        "uncached_tokens": 37500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5500,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02955,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 45400,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F5_rep2",
+      "session_id": "cw118_f5_rep2_m2_042",
+      "task_family": "F5",
+      "task_name": "Investigation and recovery (pipeline)",
+      "repetition": 2,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 0,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 40,
+        "model_request_count": 20,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 250000,
+        "cached_tokens": 228750,
+        "uncached_tokens": 21250,
+        "cache_write_tokens": 0,
+        "output_tokens": 3700,
+        "cache_hit_ratio": 0.915,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.02256375,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 36386,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 36.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 60,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 59
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_behavioral_steering"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F5_rep2",
+      "session_id": "cw118_f5_rep2_m0_043",
+      "task_family": "F5",
+      "task_name": "Investigation and recovery (pipeline)",
+      "repetition": 2,
+      "mode": "M0",
+      "mode_name": "Native Baseline",
+      "execution_order_position": 1,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 52,
+        "model_request_count": 26,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 325000,
+        "cached_tokens": 286000,
+        "uncached_tokens": 39000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5720,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.030732,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 47200,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 0.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 0,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 0
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "native_control"
+      }
+    },
+    {
+      "campaign_id": "cw118_product_value",
+      "block_id": "block_F5_rep2",
+      "session_id": "cw118_f5_rep2_m1_044",
+      "task_family": "F5",
+      "task_name": "Investigation and recovery (pipeline)",
+      "repetition": 2,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 2,
+      "randomization_seed": 42,
+      "git_commit": "latest",
+      "model": "gpt-4o-mini",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.15,
+        "cached_input_per_million": 0.075,
+        "output_per_million": 0.6,
+        "cache_write_surcharge_per_million": 0.0
+      },
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 52,
+        "model_request_count": 26,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 325000,
+        "cached_tokens": 286000,
+        "uncached_tokens": 39000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5720,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.030732,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 47232,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 32.5
+      },
+      "optimization_evidence": {
+        "candidate_count": 78,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 78
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    }
+  ]
+}

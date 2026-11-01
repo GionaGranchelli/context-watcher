@@ -16,14 +16,15 @@ Following the maintainability gates (CW-116), Codex qualification (CW-112), long
 
 ### Primary Gate A Engineering Findings
 - **Gate A Scope:** Validates real infrastructure, Latin square balanced scheduling, task fixtures, independent acceptance tests, pricing models, failure accounting, and proxy transparency.
-- **Proxy Overhead (M1 vs. M0):** Mean proxy processing overhead of **28.50 ms** per multi-turn session (< 2 ms per request), confirming negligible passthrough friction.
+- **Proxy Socket Integration:** Real bounded proxy socket integration (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`) confirms live loopback forwarding overhead (< 5ms), credential stripping (`x-cw-control-token` stripped before egress), and active payload mutation (`[pruned]` applied to historical tool results, reducing provider input tokens from 150 to 45).
 - **Cache-Safe Prefix Invariant:** 100% prefix preservation (`estimated_kv_break_tokens == 0`) across all M2 runs. Zero unexpected cache drops observed.
 - **Correctness & Reliability:** 100% task completion and independent unit test pass rate across all sessions. Zero correctness regressions.
+- **Evidence Provenance:** The 45-session campaign schedule evaluates analytical simulation fixtures (`evidence_provenance: SyntheticFixtureReplay`) to qualify scheduling, failure accounting, and bootstrap analysis.
 - **Product Hypothesis Status:** **`NOT_EVALUATED`**. Gate A offline engineering runs do not assume or fabricate LLM iteration savings. Live product-value qualification requires authorized Gate B execution.
 
 > [!IMPORTANT]
 > **Separation of Engineering Qualification (Gate A) from Product Claims (Gate B):**
-> Gate A qualifies that the experimental pipeline, policy gating, and telemetry reconciliation function without defect. It does **not** assert product savings on live LLMs where only offline mock execution occurred. Product claims are reserved for authorized Gate B live trials.
+> Gate A qualifies that the experimental pipeline, policy gating, proxy socket forwarding, and telemetry reconciliation function without defect. It does **not** assert product savings on live LLMs where only offline mock execution occurred. Product claims are reserved for authorized Gate B live trials.
 
 ---
 

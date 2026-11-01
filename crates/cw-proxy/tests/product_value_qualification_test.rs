@@ -16,13 +16,20 @@
 //  11. Budget exhaustion and campaign cancellation (real runner --budget-limit)
 //  12. Payload, signature, transcript and tool-lifecycle preservation (real normalizer & policy)
 //  13. Stable regenerated report output (identical report generation)
+//  14. Bounded real mock-provider proxy execution (M0 native vs M1 passthrough vs M2 active mutation)
 
 use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
+use axum::{Router, extract::Json as AxumJson, routing::post};
+use chrono::Utc;
 use cw_core::{
     analyze_turn_from_payload,
     ir::*,
@@ -31,8 +38,11 @@ use cw_core::{
         compute_prefix_fingerprint, evaluate_decision, find_pricing_profile,
     },
 };
+use cw_proxy::{DaemonState, build_proxy_router};
+use cw_store::CwStore;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::net::TcpListener;
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -114,18 +124,31 @@ pub fn generate_schedule(
     let mut schedule = Vec::new();
     let mut index = 0;
 
-    for &task in tasks {
+    let mut ordered_tasks = tasks.to_vec();
+    // Deterministic shuffle driven by seed
+    let mut state = seed.wrapping_add(1442695040888963407);
+    for i in (1..ordered_tasks.len()).rev() {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let j = (state >> 33) as usize % (i + 1);
+        ordered_tasks.swap(i, j);
+    }
+
+    for &task in &ordered_tasks {
         for rep in 0..repetitions {
             let block_id = format!("block_{}_rep{}", task.code(), rep);
             let offset = rep % modes.len();
             for pos in 0..modes.len() {
                 let mode = modes[(pos + offset) % modes.len()];
+                let mode_str = match mode {
+                    ExecutionMode::M0 => "m0",
+                    ExecutionMode::M1 => "m1",
+                    ExecutionMode::M2 => "m2",
+                };
                 let session_id = format!(
-                    "cw118_{}_rep{}_{:?}_{:03}",
+                    "cw118_{}_rep{}_{}",
                     task.code().to_lowercase(),
                     rep,
-                    mode,
-                    index
+                    mode_str
                 );
                 schedule.push(ScheduledSession {
                     campaign_id: "cw118_product_value".to_string(),
@@ -182,6 +205,16 @@ fn test_cw118_randomized_balanced_schedule() {
             );
         }
     }
+
+    // Verify that seed actively permutes task block sequencing
+    let schedule2 = generate_schedule(tasks, reps, modes, 99);
+    assert_eq!(schedule2.len(), 45);
+    let order1: Vec<_> = schedule.iter().map(|s| s.task_family).collect();
+    let order2: Vec<_> = schedule2.iter().map(|s| s.task_family).collect();
+    assert_ne!(
+        order1, order2,
+        "Different seeds must produce different task block sequencing"
+    );
 }
 
 #[test]
@@ -242,7 +275,7 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
     let result_file = temp_dir.join("report.json");
     let doc_file = temp_dir.join("report.md");
 
-    // Run 1: generate 3 sessions
+    // Run 1: generate 3 sessions for task F1
     let output1 = Command::new("python3")
         .current_dir(&root)
         .args([
@@ -259,19 +292,21 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
         .output()
         .expect("Failed to execute python runner");
     assert!(output1.status.success());
+    let stdout1 = String::from_utf8_lossy(&output1.stdout);
+    assert!(stdout1.contains("0 resumed"));
 
     let content1 = fs::read_to_string(&result_file).unwrap();
     let json1: serde_json::Value = serde_json::from_str(&content1).unwrap();
     let sessions1 = json1["sessions"].as_array().unwrap();
     assert_eq!(sessions1.len(), 3);
 
-    // Run 2: repeat run with same output files
+    // Run 2: resume with task F1 and F2 (6 sessions total, 3 resumed from previous run)
     let output2 = Command::new("python3")
         .current_dir(&root)
         .args([
             "benchmark/cw118_product_value.py",
             "--task",
-            "f1",
+            "f1,f2",
             "--repetitions",
             "1",
             "--output",
@@ -282,12 +317,39 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
         .output()
         .expect("Failed to execute python runner");
     assert!(output2.status.success());
+    let stdout2 = String::from_utf8_lossy(&output2.stdout);
+    assert!(
+        stdout2.contains("3 resumed"),
+        "Runner must resume existing 3 sessions without re-executing"
+    );
 
     let content2 = fs::read_to_string(&result_file).unwrap();
     let json2: serde_json::Value = serde_json::from_str(&content2).unwrap();
     let sessions2 = json2["sessions"].as_array().unwrap();
+    assert_eq!(sessions2.len(), 6);
 
-    assert_eq!(sessions2.len(), 3);
+    // Run 3: repeat exact same schedule (all 6 resumed)
+    let output3 = Command::new("python3")
+        .current_dir(&root)
+        .args([
+            "benchmark/cw118_product_value.py",
+            "--task",
+            "f1,f2",
+            "--repetitions",
+            "1",
+            "--output",
+            result_file.to_str().unwrap(),
+            "--doc-output",
+            doc_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to execute python runner");
+    assert!(output3.status.success());
+    let stdout3 = String::from_utf8_lossy(&output3.stdout);
+    assert!(
+        stdout3.contains("6 resumed"),
+        "Runner must resume all 6 sessions idempotently"
+    );
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
@@ -768,4 +830,275 @@ fn test_cw118_stable_regenerated_report_output() {
     );
 
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+// ============================================================================
+// 14. Bounded Real Mock-Provider Proxy Integration (M0 vs M1 vs M2)
+// ============================================================================
+
+async fn spawn_mock_openai_upstream() -> (String, Arc<AtomicUsize>, tokio::task::JoinHandle<()>) {
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let count_clone = call_count.clone();
+
+    let app = Router::new().route(
+        "/v1/chat/completions",
+        post(
+            move |headers: axum::http::HeaderMap, AxumJson(payload): AxumJson<serde_json::Value>| {
+                let count = count_clone.clone();
+                async move {
+                    count.fetch_add(1, Ordering::SeqCst);
+
+                    // Production Invariant: proxy must strip internal control credentials before forwarding
+                    assert!(
+                        headers.get("x-cw-control-token").is_none(),
+                        "Proxy must strip internal control token before egress"
+                    );
+
+                    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
+                    let is_pruned = payload_str.contains("[pruned]");
+
+                    let prompt_tokens = if is_pruned { 45 } else { 150 };
+                    axum::Json(json!({
+                        "id": if is_pruned { "chatcmpl-mock-m2" } else { "chatcmpl-mock-base" },
+                        "object": "chat.completion",
+                        "created": 1700000000,
+                        "model": "gpt-4o-mini",
+                        "choices": [{
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": if is_pruned { "Mutated context processed" } else { "Baseline context processed" }
+                            },
+                            "finish_reason": "stop"
+                        }],
+                        "usage": {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": 15,
+                            "total_tokens": prompt_tokens + 15,
+                            "prompt_tokens_details": {
+                                "cached_tokens": 0
+                            }
+                        }
+                    }))
+                }
+            },
+        ),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    (format!("http://{addr}"), call_count, handle)
+}
+
+async fn spawn_real_cw_proxy(
+    store: CwStore,
+    upstream_url: String,
+) -> (String, String, tokio::task::JoinHandle<()>) {
+    let mut state = DaemonState::new(store);
+    state.openai_upstream = upstream_url;
+    state.capture_wire_egress = true;
+    let control_token = state.control_token.clone();
+
+    let router = build_proxy_router(state);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+
+    (format!("http://{addr}"), control_token, handle)
+}
+
+#[tokio::test]
+async fn test_cw118_real_mock_provider_proxy_execution_m0_m1_m2() {
+    let (mock_url, mock_calls, _mock_task) = spawn_mock_openai_upstream().await;
+    let store = CwStore::open_in_memory().unwrap();
+    let (proxy_url, control_token, _proxy_task) =
+        spawn_real_cw_proxy(store.clone(), mock_url.clone()).await;
+
+    let client = reqwest::Client::new();
+
+    // Standard conversation payload with user prompt, assistant tool call, tool result, and continuation
+    let raw_request_body = json!({
+        "model": "gpt-4o-mini",
+        "messages": [
+            {
+                "role": "user",
+                "content": "Perform task F1"
+            },
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": "call_mock_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_large_file",
+                            "arguments": "{\"path\": \"src/lib.rs\"}"
+                        }
+                    }
+                ]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_mock_1",
+                "content": "VERY LONG RAW TOOL LOG OUTPUT THAT EXPANDS TOKEN CONSUMPTION 1234567890 1234567890 1234567890"
+            },
+            {
+                "role": "assistant",
+                "content": "I reviewed the tool output."
+            },
+            {
+                "role": "user",
+                "content": "What is the final answer?"
+            }
+        ]
+    });
+
+    // ------------------------------------------------------------------------
+    // Mode M0: Native Baseline (Direct HTTP to mock provider, proxy bypassed)
+    // ------------------------------------------------------------------------
+    let t0_start = std::time::Instant::now();
+    let m0_resp = client
+        .post(format!("{mock_url}/v1/chat/completions"))
+        .json(&raw_request_body)
+        .send()
+        .await
+        .expect("M0 direct request failed");
+    let m0_elapsed = t0_start.elapsed();
+
+    assert_eq!(m0_resp.status(), 200);
+    let m0_data: serde_json::Value = m0_resp.json().await.unwrap();
+    assert_eq!(m0_data["usage"]["prompt_tokens"], 150);
+    assert_eq!(mock_calls.load(Ordering::SeqCst), 1);
+
+    // ------------------------------------------------------------------------
+    // Mode M1: ContextWatcher Passthrough (Observation-only via proxy socket)
+    // ------------------------------------------------------------------------
+    let m1_session_id = "cw118_m1_passthrough_session";
+    let t1_start = std::time::Instant::now();
+    let m1_resp = client
+        .post(format!("{proxy_url}/openai/v1/chat/completions"))
+        .header("x-cw-session-id", m1_session_id)
+        .header("x-cw-control-token", &control_token)
+        .json(&raw_request_body)
+        .send()
+        .await
+        .expect("M1 proxy request failed");
+    let m1_elapsed = t1_start.elapsed();
+
+    assert_eq!(m1_resp.status(), 200);
+    let m1_data: serde_json::Value = m1_resp.json().await.unwrap();
+    // In M1 observation mode, no mutation is applied; upstream saw full 150 prompt tokens
+    assert_eq!(m1_data["usage"]["prompt_tokens"], 150);
+    assert_eq!(mock_calls.load(Ordering::SeqCst), 2);
+
+    // Verify SQLite recorded the turn, sequence, model, and provider
+    let m1_turn = store
+        .get_latest_turn(m1_session_id)
+        .expect("store query failed")
+        .expect("M1 turn must be recorded in SQLite");
+    assert_eq!(m1_turn.model.as_deref(), Some("gpt-4o-mini"));
+    assert_eq!(m1_turn.sequence_number, 1);
+    assert_eq!(m1_turn.normalization_provider, Some(ProviderKind::OpenAI));
+
+    // Measured forwarding overhead (M1 - M0) is real and bounded (< 150ms on loopback)
+    println!(
+        "Observed Socket Latencies: M0={:?}, M1={:?}, Delta={:?}",
+        m0_elapsed,
+        m1_elapsed,
+        m1_elapsed.saturating_sub(m0_elapsed)
+    );
+    assert!(
+        m1_elapsed.saturating_sub(m0_elapsed) < std::time::Duration::from_millis(150),
+        "Proxy loopback forwarding overhead must remain under 150ms"
+    );
+
+    // ------------------------------------------------------------------------
+    // Mode M2: ContextWatcher Active Optimization (Mutations committed)
+    // ------------------------------------------------------------------------
+    let m2_session_id = "cw118_m2_optimized_session";
+
+    // Configure autopilot: enabled for active optimization
+    let mut ap_cfg = store.get_autopilot_config().unwrap_or_default();
+    ap_cfg.enabled = true;
+    store.set_autopilot_config(&ap_cfg).unwrap();
+
+    // Ensure session exists in SQLite before attaching mutations
+    store
+        .upsert_session(&Session {
+            id: m2_session_id.to_string(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "gpt-4o-mini".to_string(),
+            provider: ProviderKind::OpenAI,
+            title: Some("CW-118 M2 Session".to_string()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+        .unwrap();
+
+    // Register active mutation rule targeting the historical tool result call_mock_1
+    let rule = MutationRule {
+        id: "mut_cw118_m2_prune_1".to_string(),
+        session_id: m2_session_id.to_string(),
+        op: MutationOp::PruneOrStub {
+            target_fingerprint: None,
+            target_call_id: Some("call_mock_1".to_string()),
+            target_json_pointer: None,
+            stub_text: "[pruned]".to_string(),
+        },
+        status: MutationStatus::Committed,
+        estimated_saved_tokens: 105,
+        estimated_kv_break_tokens: 0,
+        created_at: Utc::now(),
+    };
+    store.save_mutation(&rule).unwrap();
+
+    let t2_start = std::time::Instant::now();
+    let m2_resp = client
+        .post(format!("{proxy_url}/openai/v1/chat/completions"))
+        .header("x-cw-session-id", m2_session_id)
+        .header("x-cw-control-token", &control_token)
+        .json(&raw_request_body)
+        .send()
+        .await
+        .expect("M2 proxy request failed");
+    let m2_elapsed = t2_start.elapsed();
+
+    assert_eq!(m2_resp.status(), 200);
+    let m2_data: serde_json::Value = m2_resp.json().await.unwrap();
+    // Upstream received the mutated payload with "[pruned]", so prompt tokens were reduced to 45!
+    assert_eq!(m2_data["usage"]["prompt_tokens"], 45);
+    assert_eq!(mock_calls.load(Ordering::SeqCst), 3);
+
+    // Verify SQLite recorded the mutated turn for M2
+    let m2_turn = store
+        .get_latest_turn(m2_session_id)
+        .expect("store query failed")
+        .expect("M2 turn must be recorded in SQLite");
+    assert_eq!(m2_turn.model.as_deref(), Some("gpt-4o-mini"));
+    assert_eq!(m2_turn.sequence_number, 1);
+
+    // Verify wire egress captured the mutated payload containing [pruned]
+    let egress_bytes = store
+        .get_wire_egress(&m2_turn.id)
+        .expect("store query failed")
+        .expect("Wire egress must be recorded for active mutation");
+    let egress_str = String::from_utf8_lossy(&egress_bytes);
+    assert!(
+        egress_str.contains("[pruned]"),
+        "Wire egress must reflect the applied mutation"
+    );
+
+    println!(
+        "M2 Real Active Optimization: Latency={:?}, Observed Prompt Tokens={}",
+        m2_elapsed, m2_data["usage"]["prompt_tokens"]
+    );
 }

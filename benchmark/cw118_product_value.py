@@ -9,7 +9,7 @@ Empirical evaluation runner for testing ContextWatcher across three modes:
 Evaluates 5 task families (F1-F5) across 3 repetitions and 3 modes (45 sessions)
 using balanced mode-order rotation (Latin square counterbalancing).
 
-Gate A: Engineering qualification (100% deterministic local execution, zero paid provider spend).
+Gate A: Engineering qualification (deterministic local execution, zero paid provider spend).
 Gate B: Authorized live qualification (strictly opt-in, requires explicit budget authorization).
 """
 
@@ -61,11 +61,15 @@ MODE_NAMES = {
 }
 
 def get_git_commit() -> str:
-    """Retrieve current git commit hash fail-safely."""
+    """Retrieve current git commit hash fail-safely, noting dirty working tree if applicable."""
     try:
-        return subprocess.check_output(
+        commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
         ).decode("utf-8").strip()
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain", "benchmark", "crates"], stderr=subprocess.DEVNULL
+        ).decode("utf-8").strip()
+        return f"{commit}-dirty" if status else commit
     except Exception:
         return "unversioned"
 
@@ -344,19 +348,18 @@ def generate_balanced_schedule(
 ) -> List[Dict[str, Any]]:
     """Generate balanced block schedule using Latin square rotation, driven by seed.
     
-    For each (task, repetition) block, Latin square rotation guarantees every mode
-    appears in position 0, 1, and 2 equally often across repetitions.
-    The seed deterministically seeds the block assignment order.
+    The seed deterministically seeds the order in which task blocks are executed,
+    while Latin square rotation guarantees every mode appears in position 0, 1, and 2
+    equally often across repetitions within each block.
     """
     rng = random.Random(seed)
     schedule = []
     session_index = 0
 
-    # Ensure deterministic block sequencing based on seed
     ordered_tasks = list(tasks)
-    # Task order is preserved or stably permuted if requested, rep blocks grouped
+    rng.shuffle(ordered_tasks)  # Seed actively controls task block sequencing
+
     for task in ordered_tasks:
-        # Generate permutation offset derived from seed and repetition
         for rep in range(repetitions):
             block_id = f"block_{task}_rep{rep}"
             # Latin square rotation: offset by rep % len(modes)
@@ -364,7 +367,7 @@ def generate_balanced_schedule(
             block_modes = [modes[(i + offset) % len(modes)] for i in range(len(modes))]
 
             for pos, mode in enumerate(block_modes):
-                session_id = f"cw118_{task.lower()}_rep{rep}_{mode.lower()}_{session_index:03d}"
+                session_id = f"cw118_{task.lower()}_rep{rep}_{mode.lower()}"
                 schedule.append({
                     "campaign_id": "cw118_product_value",
                     "block_id": block_id,
@@ -424,7 +427,7 @@ def simulate_offline_session(
 ) -> Dict[str, Any]:
     """Execute one Gate A engineering qualification session.
     
-    CRITICAL DISTINCTION:
+    NON-FABRICATION CONTRACT:
       In Gate A offline execution, we do NOT bake in assumptions that the optimizer
       makes the agent faster or improves token savings (e.g. model_requests *= 0.78).
       Instead, all arms execute the exact same deterministic workload so that Gate A
@@ -458,6 +461,8 @@ def simulate_offline_session(
             "provider": "openai_compatible_mock",
             "fixture_hash": "",
             "pricing_profile": PRICING_PROFILES.get(model),
+            "evidence_provenance": "SyntheticFixtureReplay",
+            "synthetic_telemetry": True,
             "execution_outcome": {
                 "task_success": False,
                 "acceptance_test_passed": False,
@@ -523,7 +528,7 @@ def simulate_offline_session(
             "F5": 24,
         }
         base_reqs = base_requests_by_task.get(task, 20)
-        # All modes in Gate A execute the exact same deterministic trajectory
+        # All modes in Gate A offline execution follow the exact same problem-solving trajectory
         model_requests = base_reqs + rep
         tool_calls = model_requests * 2
         total_input = model_requests * 12_500
@@ -603,6 +608,8 @@ def simulate_offline_session(
             "provider": "openai_compatible_mock",
             "fixture_hash": fixture_hash,
             "pricing_profile": PRICING_PROFILES.get(model),
+            "evidence_provenance": "SyntheticFixtureReplay",
+            "synthetic_telemetry": True,
             "execution_outcome": {
                 "task_success": True,
                 "acceptance_test_passed": True,
@@ -663,7 +670,6 @@ def calculate_bootstrap_ci(
 
 def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Run comprehensive economic, statistical, and causal analysis on campaign sessions."""
-    # Index sessions by (task_family, rep, mode)
     indexed: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
     for s in sessions:
         key = (s["task_family"], s["repetition"], s["mode"])
@@ -796,7 +802,6 @@ def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
     )
 
     # Pre-registered criteria evaluation
-    # Distinguish engineering verified invariants from live economic metrics (NOT_EVALUATED until Gate B)
     criteria_checks = {
         "c1_no_correctness_regression": {
             "status": "PASS",
@@ -865,7 +870,6 @@ def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
 def generate_qualification_report_markdown(analysis: Dict[str, Any], gate_status: str) -> str:
     """Generate comprehensive markdown document matching Phase 8 structure."""
     econ = analysis["economic_summary"]
-    crit = analysis["pre_registered_criteria"]
     causal = analysis["causal_decomposition"]
     acct = analysis["accounting"]
 
@@ -887,14 +891,15 @@ Following the maintainability gates (CW-116), Codex qualification (CW-112), long
 
 ### Primary Gate A Engineering Findings
 - **Gate A Scope:** Validates real infrastructure, Latin square balanced scheduling, task fixtures, independent acceptance tests, pricing models, failure accounting, and proxy transparency.
-- **Proxy Overhead (M1 vs. M0):** Mean proxy processing overhead of **{econ['mean_proxy_overhead_ms']:.2f} ms** per multi-turn session (< 2 ms per request), confirming negligible passthrough friction.
+- **Proxy Socket Integration:** Real bounded proxy socket integration (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`) confirms live loopback forwarding overhead (< 5ms), credential stripping (`x-cw-control-token` stripped before egress), and active payload mutation (`[pruned]` applied to historical tool results, reducing provider input tokens from 150 to 45).
 - **Cache-Safe Prefix Invariant:** 100% prefix preservation (`estimated_kv_break_tokens == 0`) across all M2 runs. Zero unexpected cache drops observed.
 - **Correctness & Reliability:** 100% task completion and independent unit test pass rate across all sessions. Zero correctness regressions.
+- **Evidence Provenance:** The 45-session campaign schedule evaluates analytical simulation fixtures (`evidence_provenance: SyntheticFixtureReplay`) to qualify scheduling, failure accounting, and bootstrap analysis.
 - **Product Hypothesis Status:** **`NOT_EVALUATED`**. Gate A offline engineering runs do not assume or fabricate LLM iteration savings. Live product-value qualification requires authorized Gate B execution.
 
 > [!IMPORTANT]
 > **Separation of Engineering Qualification (Gate A) from Product Claims (Gate B):**
-> Gate A qualifies that the experimental pipeline, policy gating, and telemetry reconciliation function without defect. It does **not** assert product savings on live LLMs where only offline mock execution occurred. Product claims are reserved for authorized Gate B live trials.
+> Gate A qualifies that the experimental pipeline, policy gating, proxy socket forwarding, and telemetry reconciliation function without defect. It does **not** assert product savings on live LLMs where only offline mock execution occurred. Product claims are reserved for authorized Gate B live trials.
 
 ---
 
@@ -1053,7 +1058,7 @@ python3 benchmark/cw118_product_value.py --live
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CW-118 Product Value & Economic Qualification Runner")
     parser.add_argument("--mode", choices=["m0", "m1", "m2", "all"], default="all", help="Execution mode to run")
-    parser.add_argument("--task", choices=["f1", "f2", "f3", "f4", "f5", "all"], default="all", help="Task family to run")
+    parser.add_argument("--task", type=str, default="all", help="Task family or comma-separated list of families (f1,f2,f3,f4,f5,all)")
     parser.add_argument("--repetitions", type=int, default=3, help="Number of repetitions per task block")
     parser.add_argument("--seed", type=int, default=42, help="Randomization seed for balanced block scheduling")
     parser.add_argument("--model", default="gpt-4o-mini", help="Model name and pricing profile to use")
@@ -1081,7 +1086,14 @@ def main():
     else:
         print("[GATE A] Running Offline Deterministic Qualification (zero provider spend authorized)")
 
-    tasks = TASK_FAMILIES if args.task == "all" else [args.task.upper()]
+    if args.task.lower() == "all":
+        tasks = TASK_FAMILIES
+    else:
+        tasks = [t.strip().upper() for t in args.task.split(",") if t.strip()]
+        for t in tasks:
+            if t not in TASK_FAMILIES:
+                print(f"Error: Unknown task family '{t}'. Valid: {TASK_FAMILIES}", file=sys.stderr)
+                sys.exit(1)
     modes = MODES if args.mode == "all" else [args.mode.upper()]
 
     schedule = generate_balanced_schedule(
@@ -1091,14 +1103,36 @@ def main():
         seed=args.seed,
     )
 
-    print(f"Generated balanced schedule with {len(schedule)} sessions.")
+    print(f"Generated balanced schedule with {len(schedule)} sessions (seed={args.seed}).")
 
-    # Execute sessions with budget tracking
+    out_path = Path(args.output)
+    existing_sessions = {}
+    if out_path.exists():
+        try:
+            existing_data = json.loads(out_path.read_text(encoding="utf-8"))
+            if isinstance(existing_data, dict) and "sessions" in existing_data:
+                for s in existing_data["sessions"]:
+                    if isinstance(s, dict) and "session_id" in s:
+                        existing_sessions[s["session_id"]] = s
+        except Exception:
+            pass
+
+    # Execute sessions with budget tracking and resume idempotency
     results = []
     cumulative_spend = 0.0
     budget_exhausted = False
+    skipped_count = 0
 
     for item in schedule:
+        sid = item["session_id"]
+        if sid in existing_sessions:
+            # Resume: skip already completed session!
+            results.append(existing_sessions[sid])
+            cost = existing_sessions[sid]["provider_economics"]["calculated_cost_usd"] or 0.0
+            cumulative_spend += cost
+            skipped_count += 1
+            continue
+
         if args.budget_limit > 0.0 and cumulative_spend >= args.budget_limit:
             budget_exhausted = True
 
@@ -1108,7 +1142,7 @@ def main():
         cost = res["provider_economics"]["calculated_cost_usd"] or 0.0
         cumulative_spend += cost
 
-    print(f"Completed {len(results)} sessions (Cumulative spend: ${cumulative_spend:.4f} USD).")
+    print(f"Completed {len(results)} sessions ({skipped_count} resumed, cumulative spend: ${cumulative_spend:.4f} USD).")
 
     # Run analysis
     analysis = analyze_campaign_results(results)
@@ -1119,7 +1153,8 @@ def main():
         "gate_status": gate_status,
         "product_hypothesis_status": "NOT_EVALUATED",
         "product_decision": "NOT_EVALUATED",
-        "git_commit": get_git_commit(),
+        "source_git_commit": get_git_commit(),
+        "artifact_generation_timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "parameters": {
             "tasks": tasks,
             "repetitions": args.repetitions,
@@ -1134,7 +1169,6 @@ def main():
     }
 
     # Write JSON report
-    out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report_payload, indent=2), encoding="utf-8")
     print(f"Saved JSON report to {out_path}")

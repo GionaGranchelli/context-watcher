@@ -20,6 +20,7 @@ fn test_calibration_cw_store_persistence_roundtrip() {
         cache_state: CacheState::ColdLikely,
         provenance: TelemetryProvenance::ObservedProvider,
         prefix_fingerprint: None,
+        payload_fingerprint: None,
         candidate_id: Some("cand_1".to_string()),
         plan_id: Some("plan_1".to_string()),
         policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
@@ -78,6 +79,7 @@ fn test_calibration_cw_store_persistence_retrospective_nulls_roundtrip() {
         cache_state: CacheState::WarmVerified,
         provenance: TelemetryProvenance::ObservedProvider,
         prefix_fingerprint: None,
+        payload_fingerprint: None,
         candidate_id: None,
         plan_id: None,
         policy_evaluation_status: PolicyEvaluationStatus::NotEvaluatedMissingCandidates,
@@ -271,4 +273,206 @@ fn test_calibration_multiple_decisions_single_request_independently_retrievable(
         .find(|d| d.candidate_id.as_deref() == Some("cand_prune_tool_2"))
         .unwrap();
     assert_eq!(c2_rec.estimated_saved_tokens, Some(250));
+}
+
+#[test]
+fn test_prospective_correlation_and_horizon_store_persistence() {
+    let store = CwStore::open_in_memory().unwrap();
+    let (decisions, _outcomes, correlations, horizons, _report) =
+        cw_core::calibration::generate_synthetic_prospective_fixture();
+
+    assert!(!decisions.is_empty());
+    assert!(!correlations.is_empty());
+    assert!(!horizons.is_empty());
+
+    // Save all correlated decision outcomes
+    for corr in &correlations {
+        store
+            .save_correlated_decision_outcome(corr)
+            .expect("Save correlated outcome");
+    }
+
+    // Save all prospective horizon observations
+    for h in &horizons {
+        store
+            .save_prospective_horizon_observation(h)
+            .expect("Save horizon observation");
+    }
+
+    // List correlated outcomes
+    let loaded_corrs = store
+        .list_correlated_decision_outcomes(Some(&decisions[0].session_id))
+        .expect("List correlated outcomes by session");
+    assert_eq!(loaded_corrs.len(), correlations.len());
+    assert_eq!(
+        loaded_corrs[0].correlation_id,
+        correlations[0].correlation_id
+    );
+    assert!(loaded_corrs[0].outcome.is_some());
+
+    // List horizons
+    let loaded_horizons = store
+        .list_prospective_horizon_observations(Some(&decisions[0].session_id))
+        .expect("List horizon observations by session");
+    assert_eq!(loaded_horizons.len(), horizons.len());
+    assert_eq!(loaded_horizons[0].horizon_id, horizons[0].horizon_id);
+    assert_eq!(loaded_horizons[0].horizon_declared, 3);
+}
+
+#[test]
+fn test_horizon_lifecycle_monotonicity_prevents_reversal_to_pending() {
+    let store = CwStore::open_in_memory().unwrap();
+    let session_id = "sess_mono";
+
+    // 1. Mark session terminated
+    assert!(!store.is_session_terminated(session_id).unwrap());
+    store
+        .mark_session_terminated(session_id, Some("test_termination"))
+        .unwrap();
+    assert!(store.is_session_terminated(session_id).unwrap());
+
+    // 2. Save a horizon observation with TruncatedEarly
+    let mut pho = cw_core::calibration::ProspectiveHorizonObservation {
+        horizon_id: "pho_test_mono_1".to_string(),
+        decision_id: "dec_mono_1".to_string(),
+        session_id: session_id.to_string(),
+        base_request_index: 1,
+        horizon_declared: 3,
+        horizon_observed: 1,
+        horizon_complete: false,
+        tracking_status: cw_core::calibration::HorizonTrackingStatus::TruncatedEarly,
+        truncation_reason: Some("session_ended_before_horizon".to_string()),
+        transitions: vec![],
+        cumulative_observed_cost_usd: Some(0.002),
+        cumulative_predicted_baseline_cost_usd: 0.006,
+        cumulative_modeled_optimized_cost_usd: 0.005,
+        horizon_cost_delta_usd: None,
+        observed_cache_retention_ratio: 1.0,
+        notes: vec![],
+    };
+    store.save_prospective_horizon_observation(&pho).unwrap();
+
+    let loaded = store
+        .list_prospective_horizon_observations(Some(session_id))
+        .unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(
+        loaded[0].tracking_status,
+        cw_core::calibration::HorizonTrackingStatus::TruncatedEarly
+    );
+
+    // 3. Attempt to overwrite with PendingContinuation (reversal)
+    pho.tracking_status = cw_core::calibration::HorizonTrackingStatus::PendingContinuation;
+    pho.truncation_reason = None;
+    store.save_prospective_horizon_observation(&pho).unwrap();
+
+    // 4. Verify terminal status was preserved and NOT reverted to PendingContinuation
+    let loaded_after = store
+        .list_prospective_horizon_observations(Some(session_id))
+        .unwrap();
+    assert_eq!(
+        loaded_after[0].tracking_status,
+        cw_core::calibration::HorizonTrackingStatus::TruncatedEarly
+    );
+    assert_eq!(
+        loaded_after[0].truncation_reason.as_deref(),
+        Some("session_ended_before_horizon")
+    );
+
+    // 5. Attempt to overwrite TruncatedEarly with FullyObserved (terminal-to-terminal reversal)
+    pho.tracking_status = cw_core::calibration::HorizonTrackingStatus::FullyObserved;
+    pho.horizon_complete = true;
+    store.save_prospective_horizon_observation(&pho).unwrap();
+
+    let loaded_after_full = store
+        .get_prospective_horizon_observation(&pho.horizon_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        loaded_after_full.tracking_status,
+        cw_core::calibration::HorizonTrackingStatus::TruncatedEarly
+    );
+    assert_eq!(
+        loaded_after_full.truncation_reason.as_deref(),
+        Some("session_ended_before_horizon")
+    );
+}
+
+#[test]
+fn test_resolve_turn_model_and_pricing_legacy_recovery() {
+    let store = CwStore::open_in_memory().unwrap();
+    let session_id = "sess_legacy_model";
+    store
+        .upsert_session(&cw_core::ir::Session {
+            id: session_id.to_string(),
+            parent_session_id: None,
+            harness: cw_core::ir::HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            provider: ProviderKind::Anthropic,
+            title: Some("Legacy Recovery Test".to_string()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+        .unwrap();
+
+    // 1. Modern turn with explicit model
+    let (turn_modern, _) = cw_core::analyze_turn_from_payload(
+        "turn_mod".to_string(),
+        session_id.to_string(),
+        None,
+        1,
+        &serde_json::json!({
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}]
+        }),
+        ProviderKind::Anthropic,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let (prov, model, pricing, verified) =
+        store.resolve_turn_model_and_pricing(&turn_modern, ProviderKind::Anthropic);
+    assert_eq!(prov, ProviderKind::Anthropic);
+    assert_eq!(model, "claude-3-5-sonnet-20241022");
+    assert!(pricing.is_some());
+    assert!(verified);
+
+    // 2. Legacy turn with model: None, but raw request payload exists in SQLite with "model"
+    let turn_legacy_with_raw = cw_core::ir::ContextTurn {
+        id: "turn_leg_raw".to_string(),
+        model: None,
+        sequence_number: 2,
+        ..turn_modern.clone()
+    };
+    let raw_payload = serde_json::json!({
+        "model": "claude-3-haiku-20240307",
+        "messages": [{"role": "user", "content": "hi"}]
+    });
+    store
+        .save_turn(&turn_legacy_with_raw, Some(&raw_payload), None, None)
+        .unwrap();
+
+    let (prov2, model2, pricing2, verified2) =
+        store.resolve_turn_model_and_pricing(&turn_legacy_with_raw, ProviderKind::Anthropic);
+    assert_eq!(prov2, ProviderKind::Anthropic);
+    assert_eq!(model2, "claude-3-haiku-20240307");
+    assert!(pricing2.is_some());
+    assert!(verified2);
+
+    // 3. Legacy turn with model: None and NO stored raw payload
+    let turn_legacy_no_raw = cw_core::ir::ContextTurn {
+        id: "turn_leg_noraw".to_string(),
+        model: None,
+        sequence_number: 3,
+        ..turn_modern.clone()
+    };
+    let (prov3, model3, pricing3, verified3) =
+        store.resolve_turn_model_and_pricing(&turn_legacy_no_raw, ProviderKind::Anthropic);
+    assert_eq!(prov3, ProviderKind::Anthropic);
+    assert_eq!(model3, "unverified_unknown_model");
+    assert!(pricing3.is_none());
+    assert!(!verified3);
 }

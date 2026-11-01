@@ -3,7 +3,7 @@
 > **Legend:** `P0` = Critical Path | `P1` = Core Feature | `P2` = Enhancement
 > **Workflow:** Move items across `Ready` $\to$ `In Progress` $\to$ `Review` $\to$ `Done`. Always reference ticket IDs (`CW-XXX`) in commits and PRs.
 
-> **Current delivery priority:** CW-117B (Shadow Policy Empirical Calibration & Evidence Loop). CW-117 Phase 1 policy engine merged (PR #23); performance qualification (CW-115), maintainability gate (CW-116), Codex qualification (CW-112), and Long-Session Reliability campaign (CW-114) complete.
+> **Current delivery priority:** CW-117C (Prospective Shadow Decision & Outcome Correlation). CW-117A Phase 1 policy engine merged (PR #23); CW-117B calibration & evidence integrity merged (PR #24); performance qualification (CW-115), maintainability gate (CW-116), Codex qualification (CW-112), and Long-Session Reliability campaign (CW-114) complete.
 
 ---
 
@@ -209,7 +209,9 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-113** Hermes Agent lifecycle hardening | Done | Replaced shared override file with UUID-scoped `hermes-override-<uuid>.json` (mode 0600, atomic `create_new`); middleware validates non-symlink, mode 0600, age <= 120s, and atomically unlinks on consumption; gateway daemon session isolation in `_SESSION_OVERRIDES`; passed 7-gate multi-process qualification and 20-session stress test. |
 | **CW-114** Long-session reliability campaign | Done | Unified acceptance suite across OMP, Codex, and Hermes across 5 coding-task families $\times$ 3 repetitions = 45 sessions (100% pass, 45/45 passed, 0 failed, 360 checkpoints). Documented in `docs/CW-114-LONG-SESSION-RELIABILITY.md`. |
 | **CW-115** Performance and savings qualification | Done | Empirical performance qualification across 2 phases: (1) 3-mode pilot (Mode A Native vs Mode B Passthrough vs Mode C Optimized across 6 live sessions, headline finding +46.2% cost across pilot due to cache invalidation vs -20.7% cache-aligned savings, PR #21 merged); (2) 4-mode optimization isolation experiment (Mode 0 Passthrough vs Mode 1 Tail Pin vs Mode 2 Hist Prune vs Mode 3 Combined), proving 100% prefix preservation in Mode 1 (-34.06% tokens, +37.71% savings) and compound maximum savings in Mode 3 (-50.02% tokens, +48.31% savings); PR #22 merged; documented in docs/CW-115-FOUR-MODE-ISOLATION-REPORT.md and docs/cw115_four_mode_benchmark_data.json. |
-| **CW-117** Cache-aware optimization policy engine (Phase 1) | PR Ready | Cache-state classification (`WarmVerified`, `ColdLikely`, `Unknown`, `Rebuilding`) with evidence provenance; pure economic evaluator modeling provider pricing, uncached re-reading, and cache-write surcharges; explainable decision policy (`Apply`, `Defer`, `Reject`, `NoOp`); shadow-mode integration emitting 0 mutations; 14/14 deterministic tests passing in `crates/cw-core/tests/policy_test.rs`. Documented in `docs/CW-117-CACHE-AWARE-POLICY.md`. |
+| **CW-117** Cache-aware optimization policy engine (Phase 1) | Done | Cache-state classification (`WarmVerified`, `ColdLikely`, `Unknown`, `Rebuilding`) with evidence provenance; pure economic evaluator modeling provider pricing, uncached re-reading, and cache-write surcharges; explainable decision policy (`Apply`, `Defer`, `Reject`, `NoOp`); shadow-mode integration emitting 0 mutations; 20/20 deterministic tests passing in `crates/cw-core/tests/policy_test.rs`. Merged via PR #23. |
+| **CW-117B** Shadow Policy Empirical Calibration & Evidence Loop | Done | Durable privacy-preserving shadow evidence pipeline; exact decimal pricing reconciliation; deterministic offline historical replay across CW-115 datasets; 6 discrepancy findings detected; SQLite unique record identity and strict shadow gating. Merged via PR #24. |
+| **CW-117C** Prospective Shadow Decision & Outcome Correlation | PR Ready | End-to-end prospective measurement pipeline connecting pre-dispatch shadow decisions (with BLAKE3 payload fingerprints) to observed provider outcomes and multi-turn continuation horizons; calibration report isolating Measured, Modeled, and Unverifiable counterfactuals; 11/11 deterministic qualification scenarios passing. Documented in `docs/CW-117C-PROSPECTIVE-CORRELATION.md`. |
 | **CW-116** Architecture consolidation & maintainability | Done | Three bounded, behavior-preserving PRs: CW-116A characterization/contracts, CW-116B CLI/harness modularization, CW-116C proxy/transformation boundaries. Maintainability gate complete. |
 | **CW-116A** Characterization tests & architecture contracts | Done | Characterization baseline documented in docs/CW-116A-BASELINE.md; architecture decomposition plan in docs/CW-116-ARCHITECTURE.md; 12 net new characterization tests added covering CLI lifecycle, transform API, proxy routing, internal header stripping, dry-run preview, and store immutability; 100/100 workspace tests passing (+12 net increase over 88 baseline) with 0 warnings; PR #13 merged into main. |
 | **CW-116B** CLI & harness architecture | Done | Decomposed monolithic `main.rs` (3,210 -> 618 lines, -80.7%) and `lib.rs` (2,385 -> 277 lines, -88.4%) into cohesive command handlers (`wrap.rs`, `daemon.rs`, `init.rs`, `reports.rs`, `session.rs`, `slot.rs`, `web.rs`) and harness lifecycle modules (`error.rs`, `qualification.rs`, `sync.rs`, `auto_heal.rs`, `watcher.rs`, `adapters/`). 100/100 workspace tests passing, 12/12 Hermes Python tests passing, 3/3 ignored harness binary qualification tests passing with zero warnings; PR #14 merged into main. |
@@ -248,7 +250,7 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🚧 In Progress
 
-* **CW-117B** Shadow Policy Empirical Calibration & Evidence Loop — Replay & Calibration Ready
+* **CW-117C** Prospective Shadow Decision & Outcome Correlation — Implementation & Qualification Complete (PR Ready)
 
 ## 📋 Ready
 
@@ -258,6 +260,7 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## ✅ Completed (Recent)
 
+* **CW-117B** Shadow Policy Empirical Calibration & Evidence Loop — Merged via PR #24.
 * **CW-117** Cache-Aware Optimization Policy Engine (Phase 1) — Merged via PR #23.
 
 ---

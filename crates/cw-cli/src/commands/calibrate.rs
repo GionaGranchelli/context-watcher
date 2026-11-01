@@ -1,5 +1,9 @@
 use anyhow::{Context, Result};
-use cw_core::calibration::{CalibrationMetricsReport, replay_historical_trace_file};
+use cw_core::calibration::{
+    CalibrationMetricsReport, ProspectiveCalibrationReport, build_prospective_calibration_report,
+    generate_synthetic_prospective_fixture, replay_historical_trace_file,
+};
+use cw_store::CwStore;
 use std::path::{Path, PathBuf};
 
 /// Find existing committed benchmark files relative to repository root or current directory.
@@ -38,14 +42,71 @@ fn locate_committed_datasets() -> Vec<PathBuf> {
 pub fn handle_calibrate(
     dataset_path: Option<String>,
     horizon: u32,
+    synthetic: bool,
+    session: Option<String>,
     json_output: bool,
+    db_path: &Path,
 ) -> Result<()> {
+    if synthetic {
+        let (_decisions, _outcomes, _correlations, _horizons, report) =
+            generate_synthetic_prospective_fixture();
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            return Ok(());
+        }
+        render_prospective_report(&report);
+        return Ok(());
+    }
+
+    if let Some(session_id) = session {
+        let store = CwStore::open(db_path)?;
+        let decisions = store.list_shadow_decision_evidence(Some(&session_id))?;
+        let turns = store.list_turns(&session_id)?;
+        let session_info = store.get_session(&session_id)?;
+        let (provider, _model) = session_info
+            .map(|s| (s.provider, s.model))
+            .unwrap_or((cw_core::ir::ProviderKind::Anthropic, "unknown".to_string()));
+        let mut outcomes = Vec::new();
+        for t in &turns {
+            let (t_provider, t_model, t_pricing, _verified) =
+                store.resolve_turn_model_and_pricing(t, provider);
+            outcomes.push(
+                cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
+                    t,
+                    t_provider,
+                    &t_model,
+                    t_pricing.as_ref(),
+                    t.created_at,
+                ),
+            );
+        }
+        let correlations = store.list_correlated_decision_outcomes(Some(&session_id))?;
+        let horizons = store.list_prospective_horizon_observations(Some(&session_id))?;
+
+        let report = build_prospective_calibration_report(
+            &decisions,
+            &outcomes,
+            &correlations,
+            &horizons,
+            None,
+            None,
+        );
+        if json_output {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            return Ok(());
+        }
+        render_prospective_report(&report);
+        return Ok(());
+    }
+
     let files = match dataset_path {
         Some(p) => vec![PathBuf::from(p)],
         None => {
             let found = locate_committed_datasets();
             if found.is_empty() {
-                anyhow::bail!("No benchmark datasets found. Please specify --dataset <path>");
+                anyhow::bail!(
+                    "No benchmark datasets found. Please specify --dataset <path> or use --synthetic"
+                );
             }
             found
         }
@@ -172,4 +233,149 @@ pub fn handle_calibrate(
     }
 
     Ok(())
+}
+
+fn render_prospective_report(rep: &ProspectiveCalibrationReport) {
+    println!("┌──────────────────────────────────────────────────────────────────────────────┐");
+    println!("│ contextWatcher — CW-117C Prospective Shadow Calibration                      │");
+    println!("└──────────────────────────────────────────────────────────────────────────────┘");
+    println!();
+    println!("  Report Title: {}", rep.report_title);
+    if let Some(commit) = &rep.git_commit {
+        println!("  Git Commit  : {}", commit);
+    }
+    println!("  Generated At: {}", rep.generated_at.to_rfc3339());
+    println!("  ────────────────────────────────────────────────────────────────────────────");
+    println!(
+        "  [1] Measured Provider Telemetry (Observed Requests: {}, Valid Telemetry: {}):",
+        rep.measured.total_requests_observed, rep.measured.valid_telemetry_requests
+    );
+    println!(
+        "    - Total Measured Cost        : ${:.6}",
+        rep.measured.total_measured_cost_usd
+    );
+    println!(
+        "    - Total Measured Tokens      : {} cached / {} uncached ({} total input)",
+        rep.measured.total_measured_cached_tokens,
+        rep.measured.total_measured_uncached_tokens,
+        rep.measured.total_measured_input_tokens
+    );
+    println!(
+        "    - Overall Measured Hit Ratio : {:.2}%",
+        rep.measured.overall_measured_cache_hit_ratio * 100.0
+    );
+    if let Some(ttfb) = rep.measured.mean_ttfb_ms {
+        println!("    - Mean TTFB                  : {:.1} ms", ttfb);
+    }
+    if let Some(lat) = rep.measured.mean_request_latency_ms {
+        println!("    - Mean Request Latency       : {:.1} ms", lat);
+    }
+    println!();
+    println!(
+        "  [2] Modeled Policy Projections (Total Evaluations: {}):",
+        rep.modeled.total_evaluations
+    );
+    println!(
+        "    - Decisions                  : {} Apply | {} Defer | {} Reject | {} Ignore",
+        rep.modeled.decisions_apply,
+        rep.modeled.decisions_defer,
+        rep.modeled.decisions_reject,
+        rep.modeled.decisions_ignore
+    );
+    println!(
+        "    - Modeled Baseline Cost      : ${:.6}",
+        rep.modeled.modeled_baseline_cost_usd
+    );
+    println!(
+        "    - Modeled Optimized Cost     : ${:.6}",
+        rep.modeled.modeled_optimized_cost_usd
+    );
+    println!(
+        "    - Projected Gross Savings    : ${:.6}",
+        rep.modeled.projected_gross_savings_usd
+    );
+    for (reason, count) in &rep.modeled.reasons_breakdown {
+        println!("      * {:<36} : {}", reason, count);
+    }
+    println!();
+    println!("  [3] Unverifiable Counterfactuals:");
+    println!(
+        "    - Deferred Candidates        : {}",
+        rep.unverifiable.deferred_candidates_count
+    );
+    println!(
+        "    - Rejected Candidates        : {}",
+        rep.unverifiable.rejected_candidates_count
+    );
+    println!(
+        "    - Rationale                  : {}",
+        rep.unverifiable.unverifiable_reason
+    );
+    for note in &rep.unverifiable.notes {
+        println!("      * {}", note);
+    }
+    println!();
+    println!("  [4] Decision-to-Outcome Correlation:");
+    println!(
+        "    - Total Pre-Dispatch Decisions : {}",
+        rep.correlation.total_decisions
+    );
+    println!(
+        "    - Matched Immediate Outbound   : {}",
+        rep.correlation.matched_immediate
+    );
+    println!(
+        "    - Paired Incomplete Execution  : {}",
+        rep.correlation.paired_incomplete
+    );
+    println!(
+        "    - Paired Missing Telemetry     : {}",
+        rep.correlation.paired_missing_telemetry
+    );
+    println!(
+        "    - Cache State Consistent       : {} requests",
+        rep.correlation.cache_state_consistent_count
+    );
+    println!(
+        "    - Cache State Inconsistent     : {} requests",
+        rep.correlation.cache_state_inconsistent_count
+    );
+    println!(
+        "    - Mean Single-Turn Cost Delta  : ${:.6}",
+        rep.correlation.mean_cost_delta_usd
+    );
+    println!();
+    println!(
+        "  [5] Multi-Turn Horizon Tracking (Horizons: {}):",
+        rep.horizon.total_horizons_tracked
+    );
+    println!(
+        "    - Fully Observed Horizons      : {}",
+        rep.horizon.fully_observed_horizons
+    );
+    println!(
+        "    - Pending Continuation         : {}",
+        rep.horizon.pending_horizons
+    );
+    println!(
+        "    - Truncated (Session End)      : {}",
+        rep.horizon.truncated_horizons
+    );
+    println!(
+        "    - Mean Observed Turns          : {:.1}",
+        rep.horizon.mean_horizon_observed_turns
+    );
+    println!(
+        "    - Observed Cache Retention     : {:.2}%",
+        rep.horizon.overall_cache_retention_ratio * 100.0
+    );
+    println!(
+        "    - Warm Cache Drops Detected    : {}",
+        rep.horizon.warm_drops_detected
+    );
+    println!();
+    println!("  [6] Integrity & Safety Invariants:");
+    for note in &rep.notes {
+        println!("    • {}", note);
+    }
 }

@@ -258,7 +258,7 @@ pub async fn handle_proxy_request(
                         let pricing =
                             cw_core::policy::find_pricing_profile(provider, &session.model);
                         for dec in &report.shadow_decisions {
-                            let evidence =
+                            let mut evidence =
                                 cw_core::calibration::ShadowDecisionEvidence::from_policy_decision(
                                     dec,
                                     &cache_obs,
@@ -267,6 +267,8 @@ pub async fn handle_proxy_request(
                                     seq,
                                     seq,
                                 );
+                            let pfp = cw_core::calibration::compute_payload_fingerprint(&outbound);
+                            evidence = evidence.with_payload_fingerprint(Some(pfp));
                             if let Err(error) = state.store.save_shadow_decision_evidence(&evidence)
                             {
                                 tracing::warn!(%error, "Failed to persist shadow decision evidence");
@@ -414,13 +416,21 @@ pub async fn handle_proxy_request(
                 if headers.contains_key("x-cw-dry-run") {
                     return render_dry_run_response(&state, turn, outbound);
                 }
-                recorder = Some(Recorder::new(
-                    state.clone(),
-                    Some(turn),
-                    provider,
-                    previous_nodes,
-                    started,
-                ));
+                let session_terminated = headers
+                    .get("x-cw-session-end")
+                    .or_else(|| headers.get("x-cw-session-terminated"))
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| v == "true" || v == "1")
+                    .unwrap_or(false);
+                if session_terminated {
+                    let _ = state
+                        .store
+                        .mark_session_terminated(&session_id, Some("proxy_header_end"));
+                }
+                let mut rec =
+                    Recorder::new(state.clone(), Some(turn), provider, previous_nodes, started);
+                rec.session_terminated = session_terminated;
+                recorder = Some(rec);
             }
         }
     }

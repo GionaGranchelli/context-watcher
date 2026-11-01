@@ -57,10 +57,15 @@ pub fn analyze_turn_from_payload(
     let kv_report = analyze_kv_cache(prev_nodes, &mut nodes, provider, actual_cached_tokens);
     let lint_out = analyze_context_health(&nodes, &kv_report, workspace_root);
     let input_tokens: u32 = nodes.iter().map(|n| n.token_span.count).sum();
+    let model = payload
+        .get("model")
+        .and_then(Value::as_str)
+        .map(ToString::to_string);
 
     let turn = ContextTurn {
         analysis_complete: normalizer::supports_mutation_payload(payload, provider),
         normalization_provider: Some(provider),
+        model,
         observed_usage: None,
         outcome: None,
         first_body_byte_ms: None,

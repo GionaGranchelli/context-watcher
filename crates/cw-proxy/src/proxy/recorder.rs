@@ -20,6 +20,7 @@ pub struct Recorder {
     pub buffer: Vec<u8>,
     pub terminal_outcome: Option<String>,
     pub current_event: Option<String>,
+    pub session_terminated: bool,
 }
 
 fn trim_ascii(bytes: &[u8]) -> &[u8] {
@@ -57,6 +58,7 @@ impl Recorder {
             buffer: Vec::new(),
             terminal_outcome: None,
             current_event: None,
+            session_terminated: false,
         }
     }
 
@@ -246,6 +248,12 @@ impl Recorder {
             .unwrap_or(0)
             .min(u32::MAX as u64) as u32;
         let state = self.state.clone();
+        let provider = self.provider;
+        let is_session_ended = self.session_terminated
+            || state
+                .store
+                .is_session_terminated(&turn.session_id)
+                .unwrap_or(false);
         Some(tokio::task::spawn_blocking(move || {
             if let Err(error) = state.store.save_turn(&turn, None, None, None) {
                 tracing::error!(%error,"Unable to finalize provider attempt");
@@ -265,6 +273,100 @@ impl Recorder {
                     tracing::error!(%error,"Unable to record mutation evidence");
                 }
             }
+
+            // CW-117C: Correlate observed provider outcome with pre-dispatch shadow decisions
+            let (turn_provider, turn_model, pricing, _is_verified) =
+                state.store.resolve_turn_model_and_pricing(&turn, provider);
+            let outcome = cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
+                &turn,
+                turn_provider,
+                &turn_model,
+                pricing.as_ref(),
+                Utc::now(),
+            );
+
+            if let Ok(decisions) = state
+                .store
+                .list_shadow_decision_evidence(Some(&turn.session_id))
+            {
+                // 1. Immediate correlation for decisions on this exact request
+                for dec in decisions
+                    .iter()
+                    .filter(|d| d.request_index == turn.sequence_number)
+                {
+                    let corr =
+                        cw_core::calibration::correlate_decision_with_outcome(dec, Some(&outcome));
+                    if let Err(err) = state.store.save_correlated_decision_outcome(&corr) {
+                        tracing::warn!(%err, "Failed to persist correlated decision outcome");
+                    }
+                }
+
+                // 2. Horizon continuation tracking for previous decisions within their horizon
+                let prior_decisions: Vec<_> = decisions
+                    .iter()
+                    .filter(|d| {
+                        d.request_index < turn.sequence_number
+                            && turn.sequence_number <= d.request_index + d.forecast_horizon_turns
+                    })
+                    .collect();
+
+                if !prior_decisions.is_empty() || is_session_ended {
+                    // Fetch existing turns to construct full continuation sequence
+                    if let Ok(turns) = state.store.list_turns(&turn.session_id) {
+                        let mut all_outcomes = Vec::new();
+                        for t in &turns {
+                            let (t_provider, t_model, t_pricing, _verified) =
+                                state.store.resolve_turn_model_and_pricing(t, provider);
+                            let o =
+                                cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
+                                    t,
+                                    t_provider,
+                                    &t_model,
+                                    t_pricing.as_ref(),
+                                    t.created_at,
+                                );
+                            all_outcomes.push(o);
+                        }
+                        for dec in prior_decisions {
+                            let base_outcome = all_outcomes
+                                .iter()
+                                .find(|o| o.request_index == dec.request_index);
+                            let pho = cw_core::calibration::evaluate_prospective_horizon(
+                                dec,
+                                base_outcome,
+                                &all_outcomes,
+                                dec.forecast_horizon_turns,
+                                is_session_ended,
+                            );
+                            if let Err(err) = state.store.save_prospective_horizon_observation(&pho)
+                            {
+                                tracing::warn!(%err, "Failed to persist prospective horizon observation");
+                            }
+                        }
+
+                        if is_session_ended {
+                            for dec in decisions
+                                .iter()
+                                .filter(|d| d.request_index == turn.sequence_number)
+                            {
+                                let pho = cw_core::calibration::evaluate_prospective_horizon(
+                                    dec,
+                                    Some(&outcome),
+                                    &all_outcomes,
+                                    dec.forecast_horizon_turns,
+                                    true,
+                                );
+                                if let Err(err) =
+                                    state.store.save_prospective_horizon_observation(&pho)
+                                {
+                                    tracing::warn!(%err, "Failed to persist terminal prospective horizon observation");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             state.broadcast(WsEvent::TurnCompleted {
                 session_id: turn.session_id.clone(),
                 turn: Box::new(turn),

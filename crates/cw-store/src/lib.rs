@@ -229,6 +229,34 @@ impl CwStore {
                 predicted_net_benefit_usd REAL,
                 evidence_json TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS correlated_decision_outcomes (
+                correlation_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                request_index INTEGER NOT NULL,
+                correlation_status TEXT NOT NULL,
+                single_turn_cost_delta_usd REAL,
+                cache_state_consistent INTEGER,
+                record_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS prospective_horizon_observations (
+                horizon_id TEXT PRIMARY KEY,
+                decision_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                base_request_index INTEGER NOT NULL,
+                horizon_declared INTEGER NOT NULL,
+                horizon_observed INTEGER NOT NULL,
+                horizon_complete INTEGER NOT NULL,
+                tracking_status TEXT NOT NULL DEFAULT 'pending_continuation',
+                observed_cache_retention_ratio REAL,
+                record_json TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS session_terminations (
+                session_id TEXT PRIMARY KEY,
+                terminated_at TEXT NOT NULL,
+                reason TEXT
             );")?;
 
         // Ensure any sessions originating from ~/.omp/ are properly categorized as OMP
@@ -1041,6 +1069,214 @@ impl CwStore {
             }
         }
         Ok(out)
+    }
+
+    pub fn save_correlated_decision_outcome(
+        &self,
+        record: &cw_core::calibration::CorrelatedDecisionOutcome,
+    ) -> Result<(), StoreError> {
+        let json_str = serde_json::to_string(record)?;
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let status_str = format!("{:?}", record.correlation_status);
+        let consistent_int = record.cache_state_consistent.map(|b| if b { 1 } else { 0 });
+        conn.execute(
+            "INSERT OR REPLACE INTO correlated_decision_outcomes (
+                correlation_id, session_id, request_index, correlation_status,
+                single_turn_cost_delta_usd, cache_state_consistent, record_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                record.correlation_id,
+                record.session_id,
+                record.request_index,
+                status_str,
+                record.single_turn_cost_delta_usd,
+                consistent_int,
+                json_str,
+                record.decision.decision_timestamp.to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_correlated_decision_outcomes(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Vec<cw_core::calibration::CorrelatedDecisionOutcome>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut out = Vec::new();
+        if let Some(sid) = session_id {
+            let mut stmt = conn.prepare(
+                "SELECT record_json FROM correlated_decision_outcomes WHERE session_id = ?1 ORDER BY request_index ASC",
+            )?;
+            let rows = stmt.query_map(params![sid], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT record_json FROM correlated_decision_outcomes ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn save_prospective_horizon_observation(
+        &self,
+        record: &cw_core::calibration::ProspectiveHorizonObservation,
+    ) -> Result<(), StoreError> {
+        let json_str = serde_json::to_string(record)?;
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+
+        // Lifecycle monotonicity: Once a horizon reaches a finalized terminal state
+        // (TruncatedEarly or FullyObserved), ordinary updates must not overwrite or reclassify it.
+        let existing_status: Option<String> = conn
+            .query_row(
+                "SELECT tracking_status FROM prospective_horizon_observations WHERE horizon_id = ?1",
+                params![record.horizon_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(status) = existing_status {
+            let is_terminal = status == "truncatedearly" || status == "fullyobserved";
+            if is_terminal {
+                // Monotonicity & immutability: once a horizon is finalized as TruncatedEarly or FullyObserved,
+                // late subsequent requests or evaluations cannot overwrite or reclassify it.
+                return Ok(());
+            }
+        }
+
+        let complete_int = if record.horizon_complete { 1 } else { 0 };
+        let tracking_status_str = format!("{:?}", record.tracking_status).to_lowercase();
+        conn.execute(
+            "INSERT OR REPLACE INTO prospective_horizon_observations (
+                horizon_id, decision_id, session_id, base_request_index,
+                horizon_declared, horizon_observed, horizon_complete,
+                tracking_status,
+                observed_cache_retention_ratio, record_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                record.horizon_id,
+                record.decision_id,
+                record.session_id,
+                record.base_request_index,
+                record.horizon_declared,
+                record.horizon_observed,
+                complete_int,
+                tracking_status_str,
+                record.observed_cache_retention_ratio,
+                json_str,
+                chrono::Utc::now().to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_session_terminated(
+        &self,
+        session_id: &str,
+        reason: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO session_terminations (session_id, terminated_at, reason)
+             VALUES (?1, ?2, ?3)",
+            params![session_id, chrono::Utc::now().to_rfc3339(), reason],
+        )?;
+        Ok(())
+    }
+
+    pub fn is_session_terminated(&self, session_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let count: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM session_terminations WHERE session_id = ?1",
+            params![session_id],
+            |r| r.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn list_prospective_horizon_observations(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<Vec<cw_core::calibration::ProspectiveHorizonObservation>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut out = Vec::new();
+        if let Some(sid) = session_id {
+            let mut stmt = conn.prepare(
+                "SELECT record_json FROM prospective_horizon_observations WHERE session_id = ?1 ORDER BY base_request_index ASC",
+            )?;
+            let rows = stmt.query_map(params![sid], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT record_json FROM prospective_horizon_observations ORDER BY created_at DESC",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            for row in rows {
+                out.push(serde_json::from_str(&row?)?);
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn get_prospective_horizon_observation(
+        &self,
+        horizon_id: &str,
+    ) -> Result<Option<cw_core::calibration::ProspectiveHorizonObservation>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let row: Option<String> = conn
+            .query_row(
+                "SELECT record_json FROM prospective_horizon_observations WHERE horizon_id = ?1",
+                params![horizon_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match row {
+            Some(s) => Ok(Some(serde_json::from_str(&s)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn resolve_turn_model_and_pricing(
+        &self,
+        turn: &cw_core::ir::ContextTurn,
+        fallback_provider: cw_core::ir::ProviderKind,
+    ) -> (
+        cw_core::ir::ProviderKind,
+        String,
+        Option<cw_core::policy::ModelPricingProfile>,
+        bool,
+    ) {
+        let provider = turn.normalization_provider.unwrap_or(fallback_provider);
+        let recovered_model = turn.model.clone().or_else(|| {
+            self.get_turn_raw_payload(&turn.id)
+                .ok()
+                .flatten()
+                .and_then(|raw| {
+                    raw.get("model")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToString::to_string)
+                })
+        });
+
+        match recovered_model {
+            Some(m) => {
+                let pricing = cw_core::policy::find_pricing_profile(provider, &m);
+                (provider, m, pricing, true)
+            }
+            None => (
+                provider,
+                "unverified_unknown_model".to_string(),
+                None,
+                false,
+            ),
+        }
     }
 
     pub fn upsert_firewall_rule(&self, rule: &FirewallRule) -> Result<(), StoreError> {

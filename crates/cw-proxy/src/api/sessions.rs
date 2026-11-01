@@ -427,3 +427,77 @@ pub async fn api_ingest_payload(
             .into_response(),
     }
 }
+
+pub async fn api_end_session(
+    State(state): State<DaemonState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let Ok(session_opt) = state.store.get_session(&id) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch session").into_response();
+    };
+    let Some(session) = session_opt else {
+        return (StatusCode::NOT_FOUND, "Session not found").into_response();
+    };
+
+    // Durably persist session termination in the store to prevent reopening or horizon reversion
+    if let Err(error) = state
+        .store
+        .mark_session_terminated(&id, Some("api_explicit_end"))
+    {
+        return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
+    }
+
+    let Ok(turns) = state.store.list_turns(&id) else {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to fetch turns").into_response();
+    };
+    let Ok(decisions) = state.store.list_shadow_decision_evidence(Some(&id)) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to fetch decisions",
+        )
+            .into_response();
+    };
+
+    let mut all_outcomes = Vec::new();
+    for t in &turns {
+        let (t_provider, t_model, t_pricing, _verified) = state
+            .store
+            .resolve_turn_model_and_pricing(t, session.provider);
+        let o = cw_core::calibration::ObservedProviderOutcome::from_completed_turn(
+            t,
+            t_provider,
+            &t_model,
+            t_pricing.as_ref(),
+            t.created_at,
+        );
+        all_outcomes.push(o);
+    }
+
+    let mut updated_count = 0usize;
+    for dec in &decisions {
+        let base_outcome = all_outcomes
+            .iter()
+            .find(|o| o.request_index == dec.request_index);
+        let pho = cw_core::calibration::evaluate_prospective_horizon(
+            dec,
+            base_outcome,
+            &all_outcomes,
+            dec.forecast_horizon_turns,
+            true, // explicit session end signal
+        );
+        if state
+            .store
+            .save_prospective_horizon_observation(&pho)
+            .is_ok()
+        {
+            updated_count += 1;
+        }
+    }
+
+    Json(json!({
+        "status": "terminated",
+        "session_id": id,
+        "horizons_updated": updated_count
+    }))
+    .into_response()
+}

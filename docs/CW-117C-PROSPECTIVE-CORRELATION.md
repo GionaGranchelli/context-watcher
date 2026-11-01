@@ -5,7 +5,7 @@
 **Status:** Completed & Deterministically Qualified  
 **Branch:** `feat/cw-117c-prospective-correlation`  
 **Crates Affected:** `cw-core`, `cw-store`, `cw-proxy`, `cw-cli`  
-**Qualification Test Suite:** `crates/cw-proxy/tests/prospective_correlation_test.rs` (11/11 passed), `crates/cw-store/tests/calibration_evidence_test.rs` (4/4 passed)  
+**Qualification Test Suite:** `crates/cw-proxy/tests/prospective_correlation_test.rs` (15/15 passed), `crates/cw-store/tests/calibration_evidence_test.rs` (4/4 passed)  
 **Evidence Artifact:** [`docs/cw117c_synthetic_calibration_report.json`](cw117c_synthetic_calibration_report.json)  
 **Operating Mode:** Strictly Observation-Only / Strict Shadow Mode (Zero mutations committed or applied to outbound requests)
 
@@ -168,9 +168,9 @@ The prospective calibration report strictly isolates measured evidence from mode
 
 ---
 
-## 5. Qualification Test Suite (11 Deterministic Scenarios)
+## 5. Qualification Test Suite (15 Deterministic Scenarios)
 
-All 11 qualification scenarios are implemented in `crates/cw-proxy/tests/prospective_correlation_test.rs` and executed with mock providers (0 paid API calls, 100% offline):
+All 15 qualification scenarios are implemented in `crates/cw-proxy/tests/prospective_correlation_test.rs` and executed with mock providers (0 paid API calls, 100% offline):
 
 | Scenario | Qualification Test | Verified Invariant | Status |
 |:---|:---|:---|:---:|
@@ -185,6 +185,10 @@ All 11 qualification scenarios are implemented in `crates/cw-proxy/tests/prospec
 | **SC-9** | `test_prospective_correlation_sc9_unexpected_cache_miss_inconsistency` | Predicted `WarmVerified` but provider returned 0 cache hits detects `cache_state_consistent = false` with explanatory note. | **PASS** |
 | **SC-10** | `test_prospective_correlation_sc10_horizon_truncation_on_session_end` | Session terminating before horizon $H$ expires records `horizon_complete = false` and `session_ended_before_horizon`. | **PASS** |
 | **SC-11** | `test_prospective_correlation_sc11_strict_shadow_mode_wire_preservation` | Outbound request payload sent to provider matches original client payload byte-for-byte with 0 mutations. | **PASS** |
+| **SC-12** | `test_prospective_correlation_sc12_provider_model_mismatch_rejected` | Decisions paired with mismatched provider or model are rejected as `UncorrelatedAmbiguous` with diagnostic notes. | **PASS** |
+| **SC-13** | `test_prospective_correlation_sc13_explicit_output_tokens_required` | Wire usage lacking explicit output tokens is rejected across Anthropic, OpenAI, and Gemini to prevent cost undercounting. | **PASS** |
+| **SC-14** | `test_prospective_correlation_sc14_horizon_consecutive_verification_and_unknown_baseline` | Horizon tracking requires $H$ consecutive verified turns for `FullyObserved`; unknown base telemetry yields unverified baseline. | **PASS** |
+| **SC-15** | `test_prospective_correlation_sc15_session_end_signals` | Explicit session end via `x-cw-session-end` header or `POST /api/v1/sessions/:id/end` transitions horizons to `TruncatedEarly`. | **PASS** |
 
 ---
 

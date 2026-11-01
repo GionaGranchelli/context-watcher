@@ -96,6 +96,7 @@ pub fn build_api_router(state: DaemonState) -> Router {
             "/api/v1/sessions/:id/replay",
             post(sessions::api_fork_replay),
         )
+        .route("/api/v1/sessions/:id/end", post(sessions::api_end_session))
         .route("/api/v1/ingest", post(sessions::api_ingest_payload))
         .route(
             "/api/v1/autopilot",

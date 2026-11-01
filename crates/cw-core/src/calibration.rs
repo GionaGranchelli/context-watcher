@@ -294,11 +294,11 @@ pub fn extract_normalized_provider_usage(
                 .map(|v| v.min(u32::MAX as u64) as u32)
                 .unwrap_or(0);
 
-            let output = u
-                .get("output_tokens")
-                .and_then(Value::as_u64)
-                .map(|v| v.min(u32::MAX as u64) as u32)
-                .unwrap_or(0);
+            let output_val = u.get("output_tokens").and_then(Value::as_u64);
+            if output_val.is_none() {
+                missing_fields.push("anthropic_missing_output_tokens".to_string());
+            }
+            let output = output_val.unwrap_or(0).min(u32::MAX as u64) as u32;
 
             if !missing_fields.is_empty() {
                 return Err(missing_fields);
@@ -337,12 +337,15 @@ pub fn extract_normalized_provider_usage(
             let uncached = total.saturating_sub(cached);
             let write = 0u32;
 
-            let output = u
+            let output_val = u
                 .get("completion_tokens")
                 .or_else(|| u.get("output_tokens"))
-                .and_then(Value::as_u64)
-                .map(|v| v.min(u32::MAX as u64) as u32)
-                .unwrap_or(0);
+                .and_then(Value::as_u64);
+
+            if output_val.is_none() {
+                missing_fields.push("openai_missing_completion_tokens".to_string());
+            }
+            let output = output_val.unwrap_or(0).min(u32::MAX as u64) as u32;
 
             if !missing_fields.is_empty() {
                 return Err(missing_fields);
@@ -379,13 +382,16 @@ pub fn extract_normalized_provider_usage(
             let uncached = total.saturating_sub(cached);
             let write = 0u32;
 
-            let output = u
+            let output_val = u
                 .get("candidatesTokenCount")
                 .or_else(|| u.get("completion_tokens"))
                 .or_else(|| u.get("output_tokens"))
-                .and_then(Value::as_u64)
-                .map(|v| v.min(u32::MAX as u64) as u32)
-                .unwrap_or(0);
+                .and_then(Value::as_u64);
+
+            if output_val.is_none() {
+                missing_fields.push("gemini_missing_candidatesTokenCount".to_string());
+            }
+            let output = output_val.unwrap_or(0).min(u32::MAX as u64) as u32;
 
             if !missing_fields.is_empty() {
                 return Err(missing_fields);
@@ -421,13 +427,16 @@ pub fn extract_normalized_provider_usage(
 
             let uncached = input.saturating_sub(cached);
 
-            let output = u
+            let output_val = u
                 .get("output_tokens")
                 .or_else(|| u.get("completion_tokens"))
                 .or_else(|| u.get("candidatesTokenCount"))
-                .and_then(Value::as_u64)
-                .map(|v| v.min(u32::MAX as u64) as u32)
-                .unwrap_or(0);
+                .and_then(Value::as_u64);
+
+            if output_val.is_none() {
+                missing_fields.push("generic_missing_output_tokens".to_string());
+            }
+            let output = output_val.unwrap_or(0).min(u32::MAX as u64) as u32;
 
             if !missing_fields.is_empty() {
                 return Err(missing_fields);
@@ -651,8 +660,27 @@ pub fn correlate_decision_with_outcome(
             ],
         },
         Some(obs) => {
-            if obs.session_id != decision.session_id || obs.request_index != decision.request_index
+            if obs.session_id != decision.session_id
+                || obs.request_index != decision.request_index
+                || obs.provider != decision.provider
+                || obs.model != decision.model
             {
+                let mismatch_note = if obs.session_id != decision.session_id
+                    || obs.request_index != decision.request_index
+                {
+                    format!(
+                        "Session/request mismatch: decision ({}, {}) vs outcome ({}, {})",
+                        decision.session_id,
+                        decision.request_index,
+                        obs.session_id,
+                        obs.request_index
+                    )
+                } else {
+                    format!(
+                        "Provider/model mismatch: decision ({:?}, {}) vs outcome ({:?}, {})",
+                        decision.provider, decision.model, obs.provider, obs.model
+                    )
+                };
                 return CorrelatedDecisionOutcome {
                     correlation_id,
                     session_id,
@@ -662,13 +690,7 @@ pub fn correlate_decision_with_outcome(
                     correlation_status: CorrelationStatus::UncorrelatedAmbiguous,
                     single_turn_cost_delta_usd: None,
                     cache_state_consistent: None,
-                    notes: vec![format!(
-                        "Session/request mismatch: decision ({}, {}) vs outcome ({}, {})",
-                        decision.session_id,
-                        decision.request_index,
-                        obs.session_id,
-                        obs.request_index
-                    )],
+                    notes: vec![mismatch_note],
                 };
             }
 
@@ -827,6 +849,9 @@ pub struct ProspectiveHorizonObservation {
 }
 
 /// Evaluates subsequent requests following a base decision up to horizon H.
+///
+/// Requires H consecutive, completed, usage-valid observations for FullyObserved qualification.
+/// If base telemetry is absent, baseline hit ratio remains unknown rather than inferred.
 pub fn evaluate_prospective_horizon(
     decision: &ShadowDecisionEvidence,
     base_outcome: Option<&ObservedProviderOutcome>,
@@ -842,54 +867,110 @@ pub fn evaluate_prospective_horizon(
     let mut warm_retained = 0;
 
     let base_idx = decision.request_index;
-    let mut matching_outcomes: Vec<&ObservedProviderOutcome> = subsequent_outcomes
-        .iter()
-        .filter(|o| {
-            o.session_id == decision.session_id
-                && o.request_index > base_idx
-                && o.request_index <= base_idx + horizon_declared
+
+    // Deduplicate outcomes by request_index; if multiple exist (e.g. retry), select latest
+    let mut outcome_by_req: BTreeMap<u32, &ObservedProviderOutcome> = BTreeMap::new();
+    for o in subsequent_outcomes {
+        if o.session_id == decision.session_id
+            && o.request_index > base_idx
+            && o.request_index <= base_idx + horizon_declared
+        {
+            outcome_by_req
+                .entry(o.request_index)
+                .and_modify(|existing| {
+                    if o.observed_timestamp > existing.observed_timestamp {
+                        *existing = o;
+                    }
+                })
+                .or_insert(o);
+        }
+    }
+
+    // Baseline cache-hit ratio: only drawn from verified completed base telemetry;
+    // remains None if base outcome or telemetry is unavailable (zero inferred defaults).
+    let mut prev_hit_ratio: Option<f64> = base_outcome
+        .filter(|b| {
+            b.provider == decision.provider
+                && b.model == decision.model
+                && b.execution_outcome == "completed"
+                && b.cache_telemetry_available
         })
-        .collect();
-    matching_outcomes.sort_by_key(|o| o.request_index);
+        .and_then(|b| b.observed_cache_hit_ratio);
 
-    let mut prev_hit_ratio = base_outcome
-        .and_then(|b| b.observed_cache_hit_ratio)
-        .unwrap_or_else(|| {
-            if decision.cache_state == CacheState::WarmVerified {
-                1.0
+    let mut consecutive_verified_count = 0u32;
+    let mut consecutive_sequence_intact = true;
+    let mut interruption_reason: Option<String> = None;
+
+    for step in 1..=horizon_declared {
+        let req_idx = base_idx + step;
+        let Some(obs) = outcome_by_req.get(&req_idx) else {
+            break;
+        };
+
+        let is_compatible = obs.provider == decision.provider && obs.model == decision.model;
+        let is_completed = obs.execution_outcome == "completed";
+        let is_telemetry_valid = obs.cache_telemetry_available
+            && obs.calculated_cost_usd.is_some()
+            && obs.observed_cache_hit_ratio.is_some();
+
+        let is_verified = is_compatible && is_completed && is_telemetry_valid;
+
+        if is_verified && consecutive_sequence_intact {
+            consecutive_verified_count += 1;
+        } else if !is_verified && consecutive_sequence_intact {
+            consecutive_sequence_intact = false;
+            let reason = if !is_compatible {
+                format!(
+                    "Turn {} provider/model mismatch ({:?}, {})",
+                    req_idx, obs.provider, obs.model
+                )
+            } else if !is_completed {
+                format!(
+                    "Turn {} execution incomplete ({})",
+                    req_idx, obs.execution_outcome
+                )
             } else {
-                0.0
-            }
-        });
+                format!("Turn {} missing usage telemetry", req_idx)
+            };
+            interruption_reason = Some(reason);
+        }
 
-    for obs in &matching_outcomes {
         if let Some(c) = obs.calculated_cost_usd {
             cum_observed_cost += c;
         } else {
             all_costs_available = false;
         }
 
-        let is_verified = obs.execution_outcome == "completed"
-            && obs.cache_telemetry_available
-            && obs.calculated_cost_usd.is_some();
-
         let hit_ratio = obs.observed_cache_hit_ratio;
-        let effective_hit = hit_ratio.unwrap_or(0.0);
-
-        let trans_type = if prev_hit_ratio >= 0.5 {
-            warm_transitions += 1;
-            if effective_hit >= 0.5 {
-                warm_retained += 1;
-                "WarmPreserved"
-            } else {
-                "WarmDrop"
+        let trans_type = match (prev_hit_ratio, hit_ratio) {
+            (Some(prev), Some(cur)) => {
+                if prev >= 0.5 {
+                    warm_transitions += 1;
+                    if cur >= 0.5 {
+                        warm_retained += 1;
+                        "WarmPreserved"
+                    } else {
+                        "WarmDrop"
+                    }
+                } else if obs.actual_cache_write_tokens.unwrap_or(0) > 0 || cur > 0.5 {
+                    "ColdWrite"
+                } else {
+                    "ColdContinued"
+                }
             }
-        } else if obs.actual_cache_write_tokens.unwrap_or(0) > 0 || effective_hit > 0.5 {
-            "ColdWrite"
-        } else {
-            "ColdContinued"
+            (None, Some(cur)) => {
+                // Base cache state was unmeasured/unknown; cannot infer warm drop/retention
+                if obs.actual_cache_write_tokens.unwrap_or(0) > 0 {
+                    "ColdWrite"
+                } else if cur >= 0.5 {
+                    "WarmUnverifiedBaseline"
+                } else {
+                    "ColdUnverifiedBaseline"
+                }
+            }
+            (_, None) => "TelemetryMissing",
         };
-        prev_hit_ratio = effective_hit;
+        prev_hit_ratio = hit_ratio;
 
         transitions.push(ContinuationTransition {
             request_index: obs.request_index,
@@ -907,18 +988,17 @@ pub fn evaluate_prospective_horizon(
     }
 
     let horizon_observed = transitions.len() as u32;
-    let (tracking_status, horizon_complete, truncation_reason) =
-        if horizon_observed >= horizon_declared {
-            (HorizonTrackingStatus::FullyObserved, true, None)
-        } else if session_terminated {
-            (
-                HorizonTrackingStatus::TruncatedEarly,
-                false,
-                Some("session_ended_before_horizon".to_string()),
-            )
-        } else {
-            (HorizonTrackingStatus::PendingContinuation, false, None)
-        };
+    let horizon_complete = consecutive_verified_count == horizon_declared;
+
+    let (tracking_status, truncation_reason) = if horizon_complete {
+        (HorizonTrackingStatus::FullyObserved, None)
+    } else if session_terminated {
+        let reason =
+            interruption_reason.unwrap_or_else(|| "session_ended_before_horizon".to_string());
+        (HorizonTrackingStatus::TruncatedEarly, Some(reason))
+    } else {
+        (HorizonTrackingStatus::PendingContinuation, None)
+    };
 
     let cache_retention_ratio = if warm_transitions > 0 {
         warm_retained as f64 / warm_transitions as f64

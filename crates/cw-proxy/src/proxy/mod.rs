@@ -416,13 +416,16 @@ pub async fn handle_proxy_request(
                 if headers.contains_key("x-cw-dry-run") {
                     return render_dry_run_response(&state, turn, outbound);
                 }
-                recorder = Some(Recorder::new(
-                    state.clone(),
-                    Some(turn),
-                    provider,
-                    previous_nodes,
-                    started,
-                ));
+                let session_terminated = headers
+                    .get("x-cw-session-end")
+                    .or_else(|| headers.get("x-cw-session-terminated"))
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| v == "true" || v == "1")
+                    .unwrap_or(false);
+                let mut rec =
+                    Recorder::new(state.clone(), Some(turn), provider, previous_nodes, started);
+                rec.session_terminated = session_terminated;
+                recorder = Some(rec);
             }
         }
     }

@@ -8,7 +8,7 @@ use chrono::Utc;
 use cw_core::calibration::*;
 use cw_core::ir::*;
 use cw_core::policy::{CacheState, DecisionReasonCode, OptimizationDecision, TelemetryProvenance};
-use cw_proxy::{DaemonState, build_proxy_router};
+use cw_proxy::{DaemonState, build_api_router, build_proxy_router};
 use cw_store::CwStore;
 use serde_json::json;
 use std::sync::{
@@ -1001,4 +1001,470 @@ async fn test_prospective_correlation_sc11_strict_shadow_mode_wire_preservation(
 
     // Verify 100% semantic and structural payload preservation with zero mutation
     assert_eq!(received_json, original_json);
+}
+
+// -------------------------------------------------------------------------------------------------
+// Scenario 12: Provider/model mismatch rejection in correlation
+// -------------------------------------------------------------------------------------------------
+#[tokio::test]
+async fn test_prospective_correlation_sc12_provider_model_mismatch_rejected() {
+    let session_id = "sess_sc12_mismatch";
+    let dec = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_1_cand_test", session_id),
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: None,
+        payload_fingerprint: None,
+        candidate_id: Some("cand_01".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Apply),
+        reason_code: Some(DecisionReasonCode::ModeledEconomicBenefitPositive),
+        explanation: "Test provider/model mismatch".to_string(),
+        estimated_saved_tokens: Some(100),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.003),
+        predicted_optimized_cost_usd: Some(0.0028),
+        predicted_net_benefit_usd: Some(0.0002),
+        forecast_horizon_turns: 1,
+        forecast_assumptions: "1-turn".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: Utc::now(),
+    };
+
+    // 1. Provider mismatch (Anthropic decision vs OpenAI outcome)
+    let outcome_provider_mismatch = ObservedProviderOutcome {
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::OpenAI,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        actual_input_tokens: 5000,
+        actual_cached_tokens: 4000,
+        actual_uncached_tokens: 1000,
+        actual_cache_write_tokens: None,
+        actual_output_tokens: 50,
+        calculated_cost_usd: Some(0.005),
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: Some(0.8),
+        ttfb_ms: Some(100),
+        request_latency_ms: Some(400),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: Utc::now(),
+    };
+    let corr_prov = correlate_decision_with_outcome(&dec, Some(&outcome_provider_mismatch));
+    assert_eq!(
+        corr_prov.correlation_status,
+        CorrelationStatus::UncorrelatedAmbiguous
+    );
+    assert!(
+        corr_prov
+            .notes
+            .iter()
+            .any(|n| n.contains("Provider/model mismatch"))
+    );
+
+    // 2. Model mismatch (claude-3-5-sonnet decision vs claude-3-haiku outcome)
+    let outcome_model_mismatch = ObservedProviderOutcome {
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-haiku-20240307".to_string(),
+        actual_input_tokens: 5000,
+        actual_cached_tokens: 4000,
+        actual_uncached_tokens: 1000,
+        actual_cache_write_tokens: None,
+        actual_output_tokens: 50,
+        calculated_cost_usd: Some(0.005),
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: Some(0.8),
+        ttfb_ms: Some(100),
+        request_latency_ms: Some(400),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: Utc::now(),
+    };
+    let corr_model = correlate_decision_with_outcome(&dec, Some(&outcome_model_mismatch));
+    assert_eq!(
+        corr_model.correlation_status,
+        CorrelationStatus::UncorrelatedAmbiguous
+    );
+    assert!(
+        corr_model
+            .notes
+            .iter()
+            .any(|n| n.contains("Provider/model mismatch"))
+    );
+}
+
+// -------------------------------------------------------------------------------------------------
+// Scenario 13: Explicit output token requirement across providers
+// -------------------------------------------------------------------------------------------------
+#[test]
+fn test_prospective_correlation_sc13_explicit_output_tokens_required() {
+    // 1. Anthropic: input present, output_tokens missing
+    let anthropic_raw = json!({
+        "input_tokens": 1000,
+        "cache_read_input_tokens": 500
+    });
+    let anthropic_err =
+        extract_normalized_provider_usage(ProviderKind::Anthropic, &anthropic_raw).unwrap_err();
+    assert!(anthropic_err.contains(&"anthropic_missing_output_tokens".to_string()));
+
+    // 2. OpenAI: prompt_tokens present, completion_tokens missing
+    let openai_raw = json!({
+        "prompt_tokens": 1000
+    });
+    let openai_err =
+        extract_normalized_provider_usage(ProviderKind::OpenAI, &openai_raw).unwrap_err();
+    assert!(openai_err.contains(&"openai_missing_completion_tokens".to_string()));
+
+    // 3. Gemini: promptTokenCount present, candidatesTokenCount missing
+    let gemini_raw = json!({
+        "promptTokenCount": 1000
+    });
+    let gemini_err =
+        extract_normalized_provider_usage(ProviderKind::Gemini, &gemini_raw).unwrap_err();
+    assert!(gemini_err.contains(&"gemini_missing_candidatesTokenCount".to_string()));
+
+    // When output tokens are present, extraction succeeds
+    let anthropic_ok = json!({
+        "input_tokens": 1000,
+        "cache_read_input_tokens": 500,
+        "output_tokens": 50
+    });
+    let norm = extract_normalized_provider_usage(ProviderKind::Anthropic, &anthropic_ok).unwrap();
+    assert_eq!(norm.output_tokens, 50);
+}
+
+// -------------------------------------------------------------------------------------------------
+// Scenario 14: Consecutive verified qualification and unknown baseline in horizon tracking
+// -------------------------------------------------------------------------------------------------
+#[test]
+fn test_prospective_correlation_sc14_horizon_consecutive_verification_and_unknown_baseline() {
+    let session_id = "sess_sc14_consecutive";
+    let dec = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_1_cand_test", session_id),
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: None,
+        payload_fingerprint: None,
+        candidate_id: Some("cand_01".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Apply),
+        reason_code: Some(DecisionReasonCode::ModeledEconomicBenefitPositive),
+        explanation: "Test consecutive verification".to_string(),
+        estimated_saved_tokens: Some(100),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.009),
+        predicted_optimized_cost_usd: Some(0.0075),
+        predicted_net_benefit_usd: Some(0.0015),
+        forecast_horizon_turns: 3,
+        forecast_assumptions: "3-turn horizon".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: Utc::now(),
+    };
+
+    // 1. Unknown baseline: base outcome has no telemetry
+    let base_no_telemetry = ObservedProviderOutcome {
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        actual_input_tokens: 0,
+        actual_cached_tokens: 0,
+        actual_uncached_tokens: 0,
+        actual_cache_write_tokens: None,
+        actual_output_tokens: 0,
+        calculated_cost_usd: None,
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: None,
+        ttfb_ms: None,
+        request_latency_ms: None,
+        cache_telemetry_available: false,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec!["no_usage".to_string()],
+        observed_timestamp: Utc::now(),
+    };
+
+    let continuation_turn2 = ObservedProviderOutcome {
+        session_id: session_id.to_string(),
+        request_index: 2,
+        turn_index: 2,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        actual_input_tokens: 5000,
+        actual_cached_tokens: 4000,
+        actual_uncached_tokens: 1000,
+        actual_cache_write_tokens: None,
+        actual_output_tokens: 50,
+        calculated_cost_usd: Some(0.005),
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: Some(0.8),
+        ttfb_ms: Some(100),
+        request_latency_ms: Some(400),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: Utc::now(),
+    };
+
+    let pho_unknown_base = evaluate_prospective_horizon(
+        &dec,
+        Some(&base_no_telemetry),
+        std::slice::from_ref(&continuation_turn2),
+        3,
+        false,
+    );
+    // Baseline was unknown, so transition is classified as WarmUnverifiedBaseline rather than WarmPreserved/WarmDrop
+    assert_eq!(
+        pho_unknown_base.transitions[0].transition_type,
+        "WarmUnverifiedBaseline"
+    );
+
+    // 2. Non-consecutive qualification: turn 2 is valid, turn 3 is failed/missing telemetry, turn 4 is valid
+    let base_valid = ObservedProviderOutcome {
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        actual_input_tokens: 5000,
+        actual_cached_tokens: 4000,
+        actual_uncached_tokens: 1000,
+        actual_cache_write_tokens: None,
+        actual_output_tokens: 50,
+        calculated_cost_usd: Some(0.005),
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: Some(0.8),
+        ttfb_ms: Some(100),
+        request_latency_ms: Some(400),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: Utc::now(),
+    };
+
+    let continuation_turn3_failed = ObservedProviderOutcome {
+        session_id: session_id.to_string(),
+        request_index: 3,
+        turn_index: 3,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        actual_input_tokens: 5000,
+        actual_cached_tokens: 0,
+        actual_uncached_tokens: 5000,
+        actual_cache_write_tokens: None,
+        actual_output_tokens: 0,
+        calculated_cost_usd: None,
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: None,
+        ttfb_ms: None,
+        request_latency_ms: None,
+        cache_telemetry_available: false,
+        execution_outcome: "stream_error".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec!["stream_failed".to_string()],
+        observed_timestamp: Utc::now(),
+    };
+
+    let continuation_turn4 = ObservedProviderOutcome {
+        session_id: session_id.to_string(),
+        request_index: 4,
+        turn_index: 4,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        actual_input_tokens: 5000,
+        actual_cached_tokens: 4000,
+        actual_uncached_tokens: 1000,
+        actual_cache_write_tokens: None,
+        actual_output_tokens: 50,
+        calculated_cost_usd: Some(0.005),
+        reported_cost_usd: None,
+        observed_cache_hit_ratio: Some(0.8),
+        ttfb_ms: Some(100),
+        request_latency_ms: Some(400),
+        cache_telemetry_available: true,
+        execution_outcome: "completed".to_string(),
+        applied_mutations: vec![],
+        missing_data_reasons: vec![],
+        observed_timestamp: Utc::now(),
+    };
+
+    // Even though 3 outcomes exist, turn 3 is failed/missing telemetry, so consecutive verified count is 1 (< 3)
+    let pho_gap = evaluate_prospective_horizon(
+        &dec,
+        Some(&base_valid),
+        &[
+            continuation_turn2,
+            continuation_turn3_failed,
+            continuation_turn4,
+        ],
+        3,
+        false,
+    );
+    assert_eq!(pho_gap.horizon_declared, 3);
+    assert_eq!(pho_gap.horizon_observed, 3);
+    assert!(!pho_gap.horizon_complete);
+    assert_eq!(
+        pho_gap.tracking_status,
+        HorizonTrackingStatus::PendingContinuation
+    );
+    assert!(pho_gap.horizon_cost_delta_usd.is_none());
+}
+
+// -------------------------------------------------------------------------------------------------
+// Scenario 15: Session-end signal via proxy header and API endpoint
+// -------------------------------------------------------------------------------------------------
+#[tokio::test]
+async fn test_prospective_correlation_sc15_session_end_signals() {
+    let (url, _task) = mock(Router::new().route(
+        "/v1/messages",
+        post(|| async {
+            Json(json!({
+                "id": "msg_end",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Goodbye"}],
+                "usage": {
+                    "input_tokens": 1000,
+                    "cache_read_input_tokens": 800,
+                    "cache_creation_input_tokens": 0,
+                    "output_tokens": 20
+                }
+            }))
+        }),
+    ))
+    .await;
+
+    let store = CwStore::open_in_memory().unwrap();
+    let session_id = "sess_sc15_end_test";
+    store
+        .upsert_session(&Session {
+            id: session_id.to_string(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            provider: ProviderKind::Anthropic,
+            title: Some("Scenario 15 End Signal".to_string()),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+        .unwrap();
+
+    let mut state = DaemonState::new(store.clone());
+    state.anthropic_upstream = url;
+    let token = state.control_token.clone();
+    let proxy_app = build_proxy_router(state.clone());
+
+    // Insert a prior decision declaring a 3-turn horizon
+    let dec = ShadowDecisionEvidence {
+        record_id: format!("sde_{}_1_cand_test", session_id),
+        session_id: session_id.to_string(),
+        request_index: 1,
+        turn_index: 1,
+        provider: ProviderKind::Anthropic,
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        cache_state: CacheState::WarmVerified,
+        provenance: TelemetryProvenance::ObservedProvider,
+        prefix_fingerprint: None,
+        payload_fingerprint: None,
+        candidate_id: Some("cand_01".to_string()),
+        plan_id: None,
+        policy_evaluation_status: PolicyEvaluationStatus::EvaluatedPreDispatch,
+        decision: Some(OptimizationDecision::Apply),
+        reason_code: Some(DecisionReasonCode::ModeledEconomicBenefitPositive),
+        explanation: "Test horizon end signal".to_string(),
+        estimated_saved_tokens: Some(100),
+        estimated_kv_break_tokens: Some(0),
+        predicted_baseline_cost_usd: Some(0.009),
+        predicted_optimized_cost_usd: Some(0.0075),
+        predicted_net_benefit_usd: Some(0.0015),
+        forecast_horizon_turns: 3,
+        forecast_assumptions: "3-turn horizon".to_string(),
+        pricing_model_pattern: Some("claude-3-5-sonnet*".to_string()),
+        pricing_version: "2026-10-v1".to_string(),
+        policy_version: "0.2.4-cw117c".to_string(),
+        decision_timestamp: Utc::now(),
+    };
+    store.save_shadow_decision_evidence(&dec).unwrap();
+
+    // 1. Send request with x-cw-session-end: true header
+    let raw = json!({
+        "model": "claude-3-5-sonnet-20241022",
+        "messages": [{"role": "user", "content": "Final turn"}]
+    })
+    .to_string();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header("host", "127.0.0.1")
+        .header("content-type", "application/json")
+        .header("x-cw-session-id", session_id)
+        .header("x-cw-control-token", &token)
+        .header("x-cw-session-end", "true")
+        .body(Body::from(raw))
+        .unwrap();
+
+    let res = proxy_app.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    to_bytes(res.into_body(), 10000).await.unwrap();
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Verify turn 1 was recorded and evaluated with session_terminated = true
+    let horizons = store
+        .list_prospective_horizon_observations(Some(session_id))
+        .unwrap();
+    assert!(!horizons.is_empty());
+    for h in &horizons {
+        assert_eq!(h.tracking_status, HorizonTrackingStatus::TruncatedEarly);
+        assert_eq!(
+            h.truncation_reason.as_deref(),
+            Some("session_ended_before_horizon")
+        );
+    }
+
+    // 2. Test explicit POST /api/v1/sessions/:id/end API endpoint
+    let api_app = build_api_router(state.clone());
+    let end_req = Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/sessions/{session_id}/end"))
+        .header("host", "127.0.0.1")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+
+    let api_res = api_app.oneshot(end_req).await.unwrap();
+    assert_eq!(api_res.status(), StatusCode::OK);
+    let body_bytes = to_bytes(api_res.into_body(), 10000).await.unwrap();
+    let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(body_json["status"], "terminated");
+    assert_eq!(body_json["session_id"], session_id);
 }

@@ -20,6 +20,7 @@ pub struct Recorder {
     pub buffer: Vec<u8>,
     pub terminal_outcome: Option<String>,
     pub current_event: Option<String>,
+    pub session_terminated: bool,
 }
 
 fn trim_ascii(bytes: &[u8]) -> &[u8] {
@@ -57,6 +58,7 @@ impl Recorder {
             buffer: Vec::new(),
             terminal_outcome: None,
             current_event: None,
+            session_terminated: false,
         }
     }
 
@@ -247,6 +249,7 @@ impl Recorder {
             .min(u32::MAX as u64) as u32;
         let state = self.state.clone();
         let provider = self.provider;
+        let is_session_ended = self.session_terminated;
         Some(tokio::task::spawn_blocking(move || {
             if let Err(error) = state.store.save_turn(&turn, None, None, None) {
                 tracing::error!(%error,"Unable to finalize provider attempt");
@@ -309,7 +312,7 @@ impl Recorder {
                     })
                     .collect();
 
-                if !prior_decisions.is_empty() {
+                if !prior_decisions.is_empty() || is_session_ended {
                     // Fetch existing turns to construct full continuation sequence
                     if let Ok(turns) = state.store.list_turns(&turn.session_id) {
                         let mut all_outcomes = Vec::new();
@@ -333,11 +336,31 @@ impl Recorder {
                                 base_outcome,
                                 &all_outcomes,
                                 dec.forecast_horizon_turns,
-                                false,
+                                is_session_ended,
                             );
                             if let Err(err) = state.store.save_prospective_horizon_observation(&pho)
                             {
                                 tracing::warn!(%err, "Failed to persist prospective horizon observation");
+                            }
+                        }
+
+                        if is_session_ended {
+                            for dec in decisions
+                                .iter()
+                                .filter(|d| d.request_index == turn.sequence_number)
+                            {
+                                let pho = cw_core::calibration::evaluate_prospective_horizon(
+                                    dec,
+                                    Some(&outcome),
+                                    &all_outcomes,
+                                    dec.forecast_horizon_turns,
+                                    true,
+                                );
+                                if let Err(err) =
+                                    state.store.save_prospective_horizon_observation(&pho)
+                                {
+                                    tracing::warn!(%err, "Failed to persist terminal prospective horizon observation");
+                                }
                             }
                         }
                     }

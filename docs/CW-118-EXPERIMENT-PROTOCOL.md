@@ -84,7 +84,7 @@ Across 3 repetitions, each mode occupies every position (0, 1, 2) exactly once p
 
 ## 6. Pre-Registered Decision Criteria (Frozen Thresholds)
 
-To qualify ContextWatcher cache-safe optimization for user pilot (`SUPPORTED_FOR_PILOT`):
+To qualify ContextWatcher cache-safe optimization for user pilot (`SUPPORTED_FOR_PILOT`) during authorized live qualification (Gate B):
 1. **Zero Correctness Regression:** $\text{PassRate}(M2) \ge \text{PassRate}(M1)$.
 2. **Positive Economic Direction:** $\text{Mean}(\Delta_{\text{rel}}) < 0.0$.
 3. **Substantial Median Savings:** $\text{Median}(\Delta_{\text{rel}}) \le -10.0\%$.
@@ -94,10 +94,12 @@ To qualify ContextWatcher cache-safe optimization for user pilot (`SUPPORTED_FOR
 7. **Documented Intervention:** 100% of mutations trace to safe candidates in the overlay engine.
 
 If any criterion fails or evidence is insufficient, outcome defaults to `INCONCLUSIVE` or `REGRESSION`.
+During Gate A (offline engineering qualification), criteria 1, 5, 6, 7 are verified on deterministic infrastructure; criteria 2, 3, 4 are marked `NOT_EVALUATED` because economic savings on LLMs must be measured on live autonomous agents, not assumed or pre-programmed.
+Until Gate B, the product hypothesis is reported as `NOT_EVALUATED`, never `SUPPORTED_FOR_PILOT`.
 
 ---
 
 ## 7. Gate A vs. Gate B Separation
 
-- **Gate A (Offline Qualification):** 100% local execution using deterministic fixtures, synthetic agent simulation, and mock providers. Zero paid provider spend.
-- **Gate B (Authorized Live Qualification):** Strictly opt-in. Requires explicit command-line authorization (`--authorize-spend <ENVELOPE>`). Without explicit authorization, live execution halts immediately with status `BLOCKED_SPEND_AUTHORIZATION`.
+- **Gate A (Engineering Qualification):** 100% local execution using deterministic fixtures, agent tool execution, and mock providers. Verifies that the experimental pipeline, policy gating, and telemetry reconciliation function without defect. Zero paid provider spend.
+- **Gate B (Authorized Live Qualification):** Strictly opt-in. Requires explicit command-line authorization (`--authorize-spend <ENVELOPE>`). Without explicit authorization, live execution halts immediately with status `BLOCKED_SPEND_AUTHORIZATION`. Fails closed if live provider environment is unconfigured (`BLOCKED_LIVE_EXECUTION_UNAVAILABLE`).

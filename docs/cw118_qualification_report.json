@@ -1,6 +1,9 @@
 {
   "campaign": "CW-118 Product Value & Economic Qualification",
-  "gate_status": "BLOCKED_SPEND_AUTHORIZATION (Offline Verified)",
+  "gate_status": "GATE_A_OFFLINE_VERIFIED",
+  "product_hypothesis_status": "NOT_EVALUATED",
+  "product_decision": "NOT_EVALUATED",
+  "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
   "parameters": {
     "tasks": [
       "F1",
@@ -17,78 +20,106 @@
     ],
     "seed": 42,
     "model": "gpt-4o-mini",
+    "budget_limit": 0.0,
     "offline": true
   },
   "analysis": {
     "total_sessions": 45,
     "matched_pairs_m2_vs_m1": 15,
     "matched_pairs_m1_vs_m0": 15,
+    "accounting": {
+      "all_attempt_total_cost_usd": 1.212732,
+      "success_attempt_total_cost_usd": 1.212732
+    },
     "economic_summary": {
-      "mean_relative_cost_change": -0.2748,
-      "median_relative_cost_change": -0.2746,
+      "mean_relative_cost_change": 0.0,
+      "median_relative_cost_change": 0.0,
       "bootstrap_ci_95": [
-        -0.281,
-        -0.2688
+        0.0,
+        0.0
       ],
-      "positive_savings_count": 15,
+      "positive_savings_count": 0,
       "cost_increase_count": 0,
-      "neutral_tied_count": 0,
+      "neutral_tied_count": 15,
       "mean_proxy_overhead_ms": 28.5
     },
     "by_task_family": {
       "F1": {
         "pair_count": 3,
-        "mean_relative_cost_change": -0.2795,
-        "median_relative_cost_change": -0.2841
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
       },
       "F2": {
         "pair_count": 3,
-        "mean_relative_cost_change": -0.2804,
-        "median_relative_cost_change": -0.2841
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
       },
       "F3": {
         "pair_count": 3,
-        "mean_relative_cost_change": -0.266,
-        "median_relative_cost_change": -0.2658
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
       },
       "F4": {
         "pair_count": 3,
-        "mean_relative_cost_change": -0.2731,
-        "median_relative_cost_change": -0.2728
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
       },
       "F5": {
         "pair_count": 3,
-        "mean_relative_cost_change": -0.2748,
-        "median_relative_cost_change": -0.2746
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
       }
     },
     "causal_decomposition": {
       "mechanical_effect_tokens": "Zero Historical Pruning applied in M2 (strictly cache-safe mode)",
       "cache_effect": "100% Prefix Preservation verified (kv_break_tokens == 0 across all M2 runs)",
-      "behavioral_steering_effect": "PinContext injected tail directive reducing agent tool iterations by ~22%",
+      "behavioral_steering_effect": "Evaluated tail directive; live behavioral impact deferred to Gate B",
       "proxy_overhead_effect": "Average proxy processing overhead: 28.5ms per session (<2ms per request)"
     },
+    "product_hypothesis_status": "NOT_EVALUATED",
+    "product_decision": "NOT_EVALUATED",
     "pre_registered_criteria": {
-      "c1_no_correctness_regression": true,
-      "c2_positive_economic_direction": true,
-      "c3_median_savings_ge_10_percent": true,
-      "c4_not_confined_to_single_task": true,
-      "c5_no_cache_prefix_invalidation": true,
-      "c6_no_reliability_regression": true,
-      "c7_attributed_to_documented_intervention": true
+      "c1_no_correctness_regression": {
+        "status": "PASS",
+        "evidence": "100% test pass rate in both M1 and M2; 0 regressions"
+      },
+      "c2_positive_economic_direction": {
+        "status": "NOT_EVALUATED",
+        "evidence": "Reserved for Gate B authorized live LLM trials; Gate A offline engineering replay does not assume model iteration cuts."
+      },
+      "c3_median_savings_ge_10_percent": {
+        "status": "NOT_EVALUATED",
+        "evidence": "Reserved for Gate B authorized live LLM trials."
+      },
+      "c4_not_confined_to_single_task": {
+        "status": "NOT_EVALUATED",
+        "evidence": "Reserved for Gate B authorized live LLM trials."
+      },
+      "c5_no_cache_prefix_invalidation": {
+        "status": "PASS",
+        "evidence": "0 prefix breaks; estimated_kv_break_tokens == 0 across all M2 evaluations."
+      },
+      "c6_no_reliability_regression": {
+        "status": "PASS",
+        "evidence": "100% session completion; 0 proxy crashes or SSE stream drops."
+      },
+      "c7_attributed_to_documented_intervention": {
+        "status": "PASS",
+        "evidence": "All evaluated M2 mutations correspond to registered candidates in the overlay engine."
+      }
     },
     "paired_comparisons": [
       {
         "task_family": "F1",
         "repetition": 0,
         "m1_cost": 0.021276,
-        "m2_cost": 0.01579462,
-        "cost_delta_usd": -0.00548138,
-        "relative_cost_change": -0.2576,
+        "m2_cost": 0.021276,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -4,
-        "input_token_delta": -50000,
-        "cached_token_delta": -37875,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -98,13 +129,13 @@
         "task_family": "F1",
         "repetition": 1,
         "m1_cost": 0.022458,
-        "m2_cost": 0.01579462,
-        "cost_delta_usd": -0.00666338,
-        "relative_cost_change": -0.2967,
+        "m2_cost": 0.022458,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -5,
-        "input_token_delta": -62500,
-        "cached_token_delta": -48875,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -114,13 +145,13 @@
         "task_family": "F1",
         "repetition": 2,
         "m1_cost": 0.02364,
-        "m2_cost": 0.01692285,
-        "cost_delta_usd": -0.00671715,
-        "relative_cost_change": -0.2841,
+        "m2_cost": 0.02364,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -5,
-        "input_token_delta": -62500,
-        "cached_token_delta": -48438,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -130,13 +161,13 @@
         "task_family": "F2",
         "repetition": 0,
         "m1_cost": 0.026004,
-        "m2_cost": 0.01917922,
-        "cost_delta_usd": -0.00682478,
-        "relative_cost_change": -0.2625,
+        "m2_cost": 0.026004,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -5,
-        "input_token_delta": -62500,
-        "cached_token_delta": -47563,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -146,13 +177,13 @@
         "task_family": "F2",
         "repetition": 1,
         "m1_cost": 0.027186,
-        "m2_cost": 0.01917922,
-        "cost_delta_usd": -0.00800678,
-        "relative_cost_change": -0.2945,
+        "m2_cost": 0.027186,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -6,
-        "input_token_delta": -75000,
-        "cached_token_delta": -58563,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -162,13 +193,13 @@
         "task_family": "F2",
         "repetition": 2,
         "m1_cost": 0.028368,
-        "m2_cost": 0.02030737,
-        "cost_delta_usd": -0.00806063,
-        "relative_cost_change": -0.2841,
+        "m2_cost": 0.028368,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -6,
-        "input_token_delta": -75000,
-        "cached_token_delta": -58125,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -178,13 +209,13 @@
         "task_family": "F3",
         "repetition": 0,
         "m1_cost": 0.02955,
-        "m2_cost": 0.0214356,
-        "cost_delta_usd": -0.0081144,
-        "relative_cost_change": -0.2746,
+        "m2_cost": 0.02955,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -6,
-        "input_token_delta": -75000,
-        "cached_token_delta": -57688,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -194,13 +225,13 @@
         "task_family": "F3",
         "repetition": 1,
         "m1_cost": 0.030732,
-        "m2_cost": 0.02256375,
-        "cost_delta_usd": -0.00816825,
-        "relative_cost_change": -0.2658,
+        "m2_cost": 0.030732,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -6,
-        "input_token_delta": -75000,
-        "cached_token_delta": -57250,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -210,13 +241,13 @@
         "task_family": "F3",
         "repetition": 2,
         "m1_cost": 0.031914,
-        "m2_cost": 0.02369198,
-        "cost_delta_usd": -0.00822202,
-        "relative_cost_change": -0.2576,
+        "m2_cost": 0.031914,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -6,
-        "input_token_delta": -75000,
-        "cached_token_delta": -56813,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -226,13 +257,13 @@
         "task_family": "F4",
         "repetition": 0,
         "m1_cost": 0.02364,
-        "m2_cost": 0.01692285,
-        "cost_delta_usd": -0.00671715,
-        "relative_cost_change": -0.2841,
+        "m2_cost": 0.02364,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -5,
-        "input_token_delta": -62500,
-        "cached_token_delta": -48438,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -242,13 +273,13 @@
         "task_family": "F4",
         "repetition": 1,
         "m1_cost": 0.024822,
-        "m2_cost": 0.018051,
-        "cost_delta_usd": -0.006771,
-        "relative_cost_change": -0.2728,
+        "m2_cost": 0.024822,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -5,
-        "input_token_delta": -62500,
-        "cached_token_delta": -48000,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -258,13 +289,13 @@
         "task_family": "F4",
         "repetition": 2,
         "m1_cost": 0.026004,
-        "m2_cost": 0.01917922,
-        "cost_delta_usd": -0.00682478,
-        "relative_cost_change": -0.2625,
+        "m2_cost": 0.026004,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -5,
-        "input_token_delta": -62500,
-        "cached_token_delta": -47563,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -274,13 +305,13 @@
         "task_family": "F5",
         "repetition": 0,
         "m1_cost": 0.028368,
-        "m2_cost": 0.02030737,
-        "cost_delta_usd": -0.00806063,
-        "relative_cost_change": -0.2841,
+        "m2_cost": 0.028368,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -6,
-        "input_token_delta": -75000,
-        "cached_token_delta": -58125,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -290,13 +321,13 @@
         "task_family": "F5",
         "repetition": 1,
         "m1_cost": 0.02955,
-        "m2_cost": 0.0214356,
-        "cost_delta_usd": -0.0081144,
-        "relative_cost_change": -0.2746,
+        "m2_cost": 0.02955,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -6,
-        "input_token_delta": -75000,
-        "cached_token_delta": -57688,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -306,13 +337,13 @@
         "task_family": "F5",
         "repetition": 2,
         "m1_cost": 0.030732,
-        "m2_cost": 0.02256375,
-        "cost_delta_usd": -0.00816825,
-        "relative_cost_change": -0.2658,
+        "m2_cost": 0.030732,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
         "valid_division": true,
-        "request_delta": -6,
-        "input_token_delta": -75000,
-        "cached_token_delta": -57250,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
         "m1_success": true,
         "m2_success": true,
         "both_successful": true,
@@ -332,7 +363,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -396,7 +427,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -460,7 +491,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -473,35 +504,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 28,
-        "model_request_count": 14,
+        "tool_call_count": 36,
+        "model_request_count": 18,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 175000,
-        "cached_tokens": 160125,
-        "uncached_tokens": 14875,
+        "total_input_tokens": 225000,
+        "cached_tokens": 198000,
+        "uncached_tokens": 27000,
         "cache_write_tokens": 0,
-        "output_tokens": 2590,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 3960,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.01579462,
+        "calculated_cost_usd": 0.021276,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 25575,
+        "wall_clock_duration_ms": 32831,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 25.2
+        "proxy_overhead_ms": 31.5
       },
       "optimization_evidence": {
-        "candidate_count": 42,
+        "candidate_count": 54,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 41
+          "noop": 53
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -512,7 +543,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -526,7 +557,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -590,7 +621,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -603,35 +634,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 28,
-        "model_request_count": 14,
+        "tool_call_count": 38,
+        "model_request_count": 19,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 175000,
-        "cached_tokens": 160125,
-        "uncached_tokens": 14875,
+        "total_input_tokens": 237500,
+        "cached_tokens": 209000,
+        "uncached_tokens": 28500,
         "cache_write_tokens": 0,
-        "output_tokens": 2590,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 4180,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.01579462,
+        "calculated_cost_usd": 0.022458,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 25575,
+        "wall_clock_duration_ms": 34633,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 25.2
+        "proxy_overhead_ms": 33.25
       },
       "optimization_evidence": {
-        "candidate_count": 42,
+        "candidate_count": 57,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 41
+          "noop": 56
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -642,7 +673,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -656,7 +687,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -720,7 +751,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -733,35 +764,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 30,
-        "model_request_count": 15,
+        "tool_call_count": 40,
+        "model_request_count": 20,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 187500,
-        "cached_tokens": 171562,
-        "uncached_tokens": 15938,
+        "total_input_tokens": 250000,
+        "cached_tokens": 220000,
+        "uncached_tokens": 30000,
         "cache_write_tokens": 0,
-        "output_tokens": 2775,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 4400,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.01692285,
+        "calculated_cost_usd": 0.02364,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 27377,
+        "wall_clock_duration_ms": 36435,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 27.0
+        "proxy_overhead_ms": 35.0
       },
       "optimization_evidence": {
-        "candidate_count": 45,
+        "candidate_count": 60,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 44
+          "noop": 59
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -772,7 +803,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -786,7 +817,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -850,7 +881,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -914,7 +945,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
@@ -978,7 +1009,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
@@ -1042,7 +1073,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
@@ -1055,35 +1086,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 34,
-        "model_request_count": 17,
+        "tool_call_count": 44,
+        "model_request_count": 22,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 212500,
-        "cached_tokens": 194437,
-        "uncached_tokens": 18063,
+        "total_input_tokens": 275000,
+        "cached_tokens": 242000,
+        "uncached_tokens": 33000,
         "cache_write_tokens": 0,
-        "output_tokens": 3145,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 4840,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.01917922,
+        "calculated_cost_usd": 0.026004,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 30980,
+        "wall_clock_duration_ms": 40038,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 30.6
+        "proxy_overhead_ms": 38.5
       },
       "optimization_evidence": {
-        "candidate_count": 51,
+        "candidate_count": 66,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 50
+          "noop": 65
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -1094,7 +1125,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -1108,7 +1139,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
@@ -1172,7 +1203,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
@@ -1185,35 +1216,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 34,
-        "model_request_count": 17,
+        "tool_call_count": 46,
+        "model_request_count": 23,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 212500,
-        "cached_tokens": 194437,
-        "uncached_tokens": 18063,
+        "total_input_tokens": 287500,
+        "cached_tokens": 253000,
+        "uncached_tokens": 34500,
         "cache_write_tokens": 0,
-        "output_tokens": 3145,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 5060,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.01917922,
+        "calculated_cost_usd": 0.027186,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 30980,
+        "wall_clock_duration_ms": 41840,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 30.6
+        "proxy_overhead_ms": 40.25
       },
       "optimization_evidence": {
-        "candidate_count": 51,
+        "candidate_count": 69,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 50
+          "noop": 68
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -1224,7 +1255,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -1238,7 +1269,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
@@ -1302,7 +1333,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
@@ -1315,35 +1346,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 36,
-        "model_request_count": 18,
+        "tool_call_count": 48,
+        "model_request_count": 24,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 225000,
-        "cached_tokens": 205875,
-        "uncached_tokens": 19125,
+        "total_input_tokens": 300000,
+        "cached_tokens": 264000,
+        "uncached_tokens": 36000,
         "cache_write_tokens": 0,
-        "output_tokens": 3330,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 5280,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.02030737,
+        "calculated_cost_usd": 0.028368,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 32782,
+        "wall_clock_duration_ms": 43642,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 32.4
+        "proxy_overhead_ms": 42.0
       },
       "optimization_evidence": {
-        "candidate_count": 54,
+        "candidate_count": 72,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 53
+          "noop": 71
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -1354,7 +1385,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -1368,7 +1399,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
@@ -1432,7 +1463,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "9121df81a4d9778f8ddee2e528289eae2df17849a2b0df0c7441d215fc7b3f73",
@@ -1496,10 +1527,10 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
-      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
       "pricing_profile": {
         "uncached_input_per_million": 0.15,
         "cached_input_per_million": 0.075,
@@ -1560,10 +1591,10 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
-      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
       "pricing_profile": {
         "uncached_input_per_million": 0.15,
         "cached_input_per_million": 0.075,
@@ -1624,10 +1655,10 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
-      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
       "pricing_profile": {
         "uncached_input_per_million": 0.15,
         "cached_input_per_million": 0.075,
@@ -1637,35 +1668,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 38,
-        "model_request_count": 19,
+        "tool_call_count": 50,
+        "model_request_count": 25,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 237500,
-        "cached_tokens": 217312,
-        "uncached_tokens": 20188,
+        "total_input_tokens": 312500,
+        "cached_tokens": 275000,
+        "uncached_tokens": 37500,
         "cache_write_tokens": 0,
-        "output_tokens": 3515,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 5500,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.0214356,
+        "calculated_cost_usd": 0.02955,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 34584,
+        "wall_clock_duration_ms": 45443,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 34.2
+        "proxy_overhead_ms": 43.75
       },
       "optimization_evidence": {
-        "candidate_count": 57,
+        "candidate_count": 75,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 56
+          "noop": 74
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -1676,7 +1707,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -1690,10 +1721,10 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
-      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
       "pricing_profile": {
         "uncached_input_per_million": 0.15,
         "cached_input_per_million": 0.075,
@@ -1754,10 +1785,10 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
-      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
       "pricing_profile": {
         "uncached_input_per_million": 0.15,
         "cached_input_per_million": 0.075,
@@ -1767,35 +1798,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 40,
-        "model_request_count": 20,
+        "tool_call_count": 52,
+        "model_request_count": 26,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 250000,
-        "cached_tokens": 228750,
-        "uncached_tokens": 21250,
+        "total_input_tokens": 325000,
+        "cached_tokens": 286000,
+        "uncached_tokens": 39000,
         "cache_write_tokens": 0,
-        "output_tokens": 3700,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 5720,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.02256375,
+        "calculated_cost_usd": 0.030732,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 36386,
+        "wall_clock_duration_ms": 47245,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 36.0
+        "proxy_overhead_ms": 45.5
       },
       "optimization_evidence": {
-        "candidate_count": 60,
+        "candidate_count": 78,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 59
+          "noop": 77
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -1806,7 +1837,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -1820,10 +1851,10 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
-      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
       "pricing_profile": {
         "uncached_input_per_million": 0.15,
         "cached_input_per_million": 0.075,
@@ -1884,10 +1915,10 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
-      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
       "pricing_profile": {
         "uncached_input_per_million": 0.15,
         "cached_input_per_million": 0.075,
@@ -1897,35 +1928,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 42,
-        "model_request_count": 21,
+        "tool_call_count": 54,
+        "model_request_count": 27,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 262500,
-        "cached_tokens": 240187,
-        "uncached_tokens": 22313,
+        "total_input_tokens": 337500,
+        "cached_tokens": 297000,
+        "uncached_tokens": 40500,
         "cache_write_tokens": 0,
-        "output_tokens": 3885,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 5940,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.02369198,
+        "calculated_cost_usd": 0.031914,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 38187,
+        "wall_clock_duration_ms": 49047,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 37.8
+        "proxy_overhead_ms": 47.25
       },
       "optimization_evidence": {
-        "candidate_count": 63,
+        "candidate_count": 81,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 62
+          "noop": 80
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -1936,7 +1967,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -1950,10 +1981,10 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
-      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
       "pricing_profile": {
         "uncached_input_per_million": 0.15,
         "cached_input_per_million": 0.075,
@@ -2014,10 +2045,10 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
-      "fixture_hash": "598fb16eaa61b90a226268d0f1e8e851b4966b3d0abe0348e6fbde3994892e2d",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
       "pricing_profile": {
         "uncached_input_per_million": 0.15,
         "cached_input_per_million": 0.075,
@@ -2078,7 +2109,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
@@ -2142,7 +2173,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
@@ -2206,7 +2237,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
@@ -2219,35 +2250,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 30,
-        "model_request_count": 15,
+        "tool_call_count": 40,
+        "model_request_count": 20,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 187500,
-        "cached_tokens": 171562,
-        "uncached_tokens": 15938,
+        "total_input_tokens": 250000,
+        "cached_tokens": 220000,
+        "uncached_tokens": 30000,
         "cache_write_tokens": 0,
-        "output_tokens": 2775,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 4400,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.01692285,
+        "calculated_cost_usd": 0.02364,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 27377,
+        "wall_clock_duration_ms": 36435,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 27.0
+        "proxy_overhead_ms": 35.0
       },
       "optimization_evidence": {
-        "candidate_count": 45,
+        "candidate_count": 60,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 44
+          "noop": 59
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -2258,7 +2289,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -2272,7 +2303,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
@@ -2336,7 +2367,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
@@ -2349,35 +2380,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 32,
-        "model_request_count": 16,
+        "tool_call_count": 42,
+        "model_request_count": 21,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 200000,
-        "cached_tokens": 183000,
-        "uncached_tokens": 17000,
+        "total_input_tokens": 262500,
+        "cached_tokens": 231000,
+        "uncached_tokens": 31500,
         "cache_write_tokens": 0,
-        "output_tokens": 2960,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 4620,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.018051,
+        "calculated_cost_usd": 0.024822,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 29178,
+        "wall_clock_duration_ms": 38236,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 28.8
+        "proxy_overhead_ms": 36.75
       },
       "optimization_evidence": {
-        "candidate_count": 48,
+        "candidate_count": 63,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 47
+          "noop": 62
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -2388,7 +2419,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -2402,7 +2433,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
@@ -2466,7 +2497,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
@@ -2479,35 +2510,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 34,
-        "model_request_count": 17,
+        "tool_call_count": 44,
+        "model_request_count": 22,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 212500,
-        "cached_tokens": 194437,
-        "uncached_tokens": 18063,
+        "total_input_tokens": 275000,
+        "cached_tokens": 242000,
+        "uncached_tokens": 33000,
         "cache_write_tokens": 0,
-        "output_tokens": 3145,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 4840,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.01917922,
+        "calculated_cost_usd": 0.026004,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 30980,
+        "wall_clock_duration_ms": 40038,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 30.6
+        "proxy_overhead_ms": 38.5
       },
       "optimization_evidence": {
-        "candidate_count": 51,
+        "candidate_count": 66,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 50
+          "noop": 65
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -2518,7 +2549,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -2532,7 +2563,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
@@ -2596,7 +2627,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "c2c4077c11fbf9bf4ee24f483b7a5f7dcd85a0234f4e90f95e7dc08b4c8d16f5",
@@ -2660,7 +2691,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
@@ -2724,7 +2755,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
@@ -2788,7 +2819,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
@@ -2801,35 +2832,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 36,
-        "model_request_count": 18,
+        "tool_call_count": 48,
+        "model_request_count": 24,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 225000,
-        "cached_tokens": 205875,
-        "uncached_tokens": 19125,
+        "total_input_tokens": 300000,
+        "cached_tokens": 264000,
+        "uncached_tokens": 36000,
         "cache_write_tokens": 0,
-        "output_tokens": 3330,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 5280,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.02030737,
+        "calculated_cost_usd": 0.028368,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 32782,
+        "wall_clock_duration_ms": 43642,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 32.4
+        "proxy_overhead_ms": 42.0
       },
       "optimization_evidence": {
-        "candidate_count": 54,
+        "candidate_count": 72,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 53
+          "noop": 71
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -2840,7 +2871,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -2854,7 +2885,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
@@ -2918,7 +2949,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
@@ -2931,35 +2962,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 38,
-        "model_request_count": 19,
+        "tool_call_count": 50,
+        "model_request_count": 25,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 237500,
-        "cached_tokens": 217312,
-        "uncached_tokens": 20188,
+        "total_input_tokens": 312500,
+        "cached_tokens": 275000,
+        "uncached_tokens": 37500,
         "cache_write_tokens": 0,
-        "output_tokens": 3515,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 5500,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.0214356,
+        "calculated_cost_usd": 0.02955,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 34584,
+        "wall_clock_duration_ms": 45443,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 34.2
+        "proxy_overhead_ms": 43.75
       },
       "optimization_evidence": {
-        "candidate_count": 57,
+        "candidate_count": 75,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 56
+          "noop": 74
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -2970,7 +3001,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -2984,7 +3015,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
@@ -3048,7 +3079,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 0,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
@@ -3061,35 +3092,35 @@
       "execution_outcome": {
         "task_success": true,
         "acceptance_test_passed": true,
-        "tool_call_count": 40,
-        "model_request_count": 20,
+        "tool_call_count": 52,
+        "model_request_count": 26,
         "retried_request_count": 0,
         "failed_request_count": 0,
         "termination_reason": "completed"
       },
       "provider_economics": {
-        "total_input_tokens": 250000,
-        "cached_tokens": 228750,
-        "uncached_tokens": 21250,
+        "total_input_tokens": 325000,
+        "cached_tokens": 286000,
+        "uncached_tokens": 39000,
         "cache_write_tokens": 0,
-        "output_tokens": 3700,
-        "cache_hit_ratio": 0.915,
+        "output_tokens": 5720,
+        "cache_hit_ratio": 0.88,
         "observed_cache_drops": 0,
-        "calculated_cost_usd": 0.02256375,
+        "calculated_cost_usd": 0.030732,
         "telemetry_complete": true
       },
       "performance": {
-        "wall_clock_duration_ms": 36386,
+        "wall_clock_duration_ms": 47245,
         "ttfb_ms": 620.0,
-        "proxy_overhead_ms": 36.0
+        "proxy_overhead_ms": 45.5
       },
       "optimization_evidence": {
-        "candidate_count": 60,
+        "candidate_count": 78,
         "decisions": {
           "apply": 1,
           "defer": 0,
           "reject": 0,
-          "noop": 59
+          "noop": 77
         },
         "mutation_count": 1,
         "mutation_types": [
@@ -3100,7 +3131,7 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_behavioral_steering"
+        "classification": "cache_safe_candidate_evaluated"
       }
     },
     {
@@ -3114,7 +3145,7 @@
       "mode_name": "Native Baseline",
       "execution_order_position": 1,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",
@@ -3178,7 +3209,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 2,
       "randomization_seed": 42,
-      "git_commit": "latest",
+      "git_commit": "4f5a15512f12ddb2c8776083f09801a02b5619eb",
       "model": "gpt-4o-mini",
       "provider": "openai_compatible_mock",
       "fixture_hash": "844ee3dba6213378191a564f761c476b6f53e68211f77ba7629cba7894ab0960",

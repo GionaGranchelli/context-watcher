@@ -2,27 +2,37 @@
 //
 // CW-118: Product Value & Economic Qualification Tests
 //
-// Comprehensive deterministic tests verifying:
+// Rigorous deterministic tests exercising REAL production components:
 //   1. Randomized balanced scheduling (Latin square mode-order rotation across 45 sessions)
-//   2. Identical initial fixture hashes across modes
+//   2. Identical initial fixture hashes across modes (independent acceptance verification)
 //   3. Result persistence and resume idempotency
-//   4. Missing/incompatible provider usage handling
-//   5. Correct cached vs uncached billing accuracy
-//   6. Failed-task cost accounting (all-attempt vs success-conditional)
-//   7. Matched and unmatched experimental blocks
-//   8. Zero-cost and missing-baseline division safety
-//   9. Abstention when policy cannot safely optimize (estimated_kv_break_tokens > 0)
-//  10. Zero unauthorized paid execution (Gate B spend authorization guard)
-//  11. Budget exhaustion and campaign cancellation
-//  12. Payload, signature, transcript and tool-lifecycle preservation
-//  13. Stable regenerated report output
+//   4. Missing/incompatible provider usage handling (fail-closed on unknown model pricing)
+//   5. Correct cached vs uncached billing accuracy (real ModelPricingProfile)
+//   6. Failed-task cost accounting (production analyze_campaign_results all-attempt vs success-conditional)
+//   7. Matched and unmatched experimental blocks (production analyze_campaign_results)
+//   8. Zero-cost and missing-baseline division safety (production analyze_campaign_results)
+//   9. Abstention when policy cannot safely optimize (real cw_core::policy::evaluate_decision)
+//  10. Zero unauthorized paid execution (Gate B spend authorization and unavailability guards)
+//  11. Budget exhaustion and campaign cancellation (real runner --budget-limit)
+//  12. Payload, signature, transcript and tool-lifecycle preservation (real normalizer & policy)
+//  13. Stable regenerated report output (identical report generation)
 
 use std::{
-    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     process::Command,
 };
+
+use cw_core::{
+    analyze_turn_from_payload,
+    ir::*,
+    policy::{
+        CacheState, DecisionReasonCode, OptimizationDecision, classify_cache_state,
+        compute_prefix_fingerprint, evaluate_decision, find_pricing_profile,
+    },
+};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -32,10 +42,6 @@ fn workspace_root() -> PathBuf {
         .unwrap()
         .to_path_buf()
 }
-
-use cw_core::{ir::ProviderKind, policy::find_pricing_profile};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 // ============================================================================
 // 1. Data Structures matching CW-118 Specification
@@ -140,7 +146,7 @@ pub fn generate_schedule(
 }
 
 // ============================================================================
-// Deterministic Tests
+// Production Integration Tests
 // ============================================================================
 
 #[test]
@@ -184,6 +190,7 @@ fn test_cw118_identical_initial_fixture_hashes() {
     let temp_dir = std::env::temp_dir().join(format!("cw118_fixture_{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&temp_dir).unwrap();
     let report_path = temp_dir.join("fixture_report.json");
+    let doc_path = temp_dir.join("fixture_report.md");
 
     let output = Command::new("python3")
         .current_dir(&root)
@@ -197,6 +204,8 @@ fn test_cw118_identical_initial_fixture_hashes() {
             "42",
             "--output",
             report_path.to_str().unwrap(),
+            "--doc-output",
+            doc_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to execute python runner");
@@ -231,6 +240,7 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
     let temp_dir = std::env::temp_dir().join(format!("cw118_persist_{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&temp_dir).unwrap();
     let result_file = temp_dir.join("report.json");
+    let doc_file = temp_dir.join("report.md");
 
     // Run 1: generate 3 sessions
     let output1 = Command::new("python3")
@@ -243,6 +253,8 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
             "1",
             "--output",
             result_file.to_str().unwrap(),
+            "--doc-output",
+            doc_file.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to execute python runner");
@@ -253,7 +265,7 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
     let sessions1 = json1["sessions"].as_array().unwrap();
     assert_eq!(sessions1.len(), 3);
 
-    // Run 2: repeat run with same output file
+    // Run 2: repeat run with same output files
     let output2 = Command::new("python3")
         .current_dir(&root)
         .args([
@@ -264,6 +276,8 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
             "1",
             "--output",
             result_file.to_str().unwrap(),
+            "--doc-output",
+            doc_file.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to execute python runner");
@@ -273,175 +287,333 @@ fn test_cw118_result_persistence_and_resume_idempotency() {
     let json2: serde_json::Value = serde_json::from_str(&content2).unwrap();
     let sessions2 = json2["sessions"].as_array().unwrap();
 
-    // Verify session count is still 3 (idempotent, no duplicated sessions)
     assert_eq!(sessions2.len(), 3);
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
 
-fn calculate_test_cost(
-    profile: &cw_core::policy::ModelPricingProfile,
-    uncached: u32,
-    cached: u32,
-    output: u32,
-) -> f64 {
-    (uncached as f64 * profile.uncached_input_per_mtok / 1_000_000.0)
-        + (cached as f64 * profile.cached_input_read_per_mtok / 1_000_000.0)
-        + (output as f64 * profile.output_per_mtok / 1_000_000.0)
-}
-
 #[test]
 fn test_cw118_missing_incompatible_telemetry_handling() {
-    let profile = find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini").unwrap();
+    let root = workspace_root();
+    // Test that the runner fail-closes when given an unknown or unverified model pricing profile
+    let script = "import sys; sys.path.insert(0, 'benchmark'); from cw118_product_value import calculate_provider_cost; res = calculate_provider_cost('unknown-unsupported-model', 1000, 500, 100); assert res is None, f'Expected None for unknown model, got {res}'";
 
-    let cost = calculate_test_cost(&profile, 2_000, 8_000, 500);
+    let output = Command::new("python3")
+        .current_dir(&root)
+        .args(["-c", script])
+        .output()
+        .expect("Failed to execute python test");
 
-    let expected = (2000.0 * 0.150 / 1_000_000.0)
-        + (8000.0 * 0.075 / 1_000_000.0)
-        + (500.0 * 0.600 / 1_000_000.0);
-    let diff = (cost - expected).abs();
-    assert!(diff < 1e-9);
+    assert!(
+        output.status.success(),
+        "Unknown model pricing must return None fail-closed"
+    );
 }
 
 #[test]
 fn test_cw118_cached_vs_uncached_billing_accuracy() {
     let profile = find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini").unwrap();
 
+    // Verify rate values directly against production profile
+    assert_eq!(profile.uncached_input_per_mtok, 0.150);
+    assert_eq!(profile.cached_input_read_per_mtok, 0.075);
+    assert_eq!(profile.output_per_mtok, 0.600);
+
     // Uncached: 1,000,000 tokens @ $0.15
-    let uncached_cost = calculate_test_cost(&profile, 1_000_000, 0, 0);
+    let uncached_cost = (1_000_000_f64 * profile.uncached_input_per_mtok) / 1_000_000.0;
     assert!((uncached_cost - 0.150).abs() < 1e-6);
 
     // Cached: 1,000,000 tokens @ $0.075 (50% discount)
-    let cached_cost = calculate_test_cost(&profile, 0, 1_000_000, 0);
+    let cached_cost = (1_000_000_f64 * profile.cached_input_read_per_mtok) / 1_000_000.0;
     assert!((cached_cost - 0.075).abs() < 1e-6);
-
-    // Output: 1,000,000 tokens @ $0.60
-    let out_cost = calculate_test_cost(&profile, 0, 0, 1_000_000);
-    assert!((out_cost - 0.600).abs() < 1e-6);
 }
 
 #[test]
 fn test_cw118_failed_task_cost_accounting() {
-    // Test that failed attempts are not dropped from all-attempt primary analysis
-    let attempts = [
-        json!({
-            "task_family": "F1",
-            "mode": "M1",
-            "success": false,
-            "cost": 0.040,
-        }),
-        json!({
-            "task_family": "F1",
-            "mode": "M1",
-            "success": true,
-            "cost": 0.020,
-        }),
-    ];
+    let root = workspace_root();
+    // Test production analyze_campaign_results handles failed runs without dropping incurred costs
+    let script = r#"
+import sys, json
+sys.path.insert(0, 'benchmark')
+from cw118_product_value import analyze_campaign_results
 
-    // All-attempt total cost must include both (0.060)
-    let total_cost: f64 = attempts.iter().map(|a| a["cost"].as_f64().unwrap()).sum();
-    assert!((total_cost - 0.060).abs() < 1e-6);
+sessions = [
+    {
+        "task_family": "F1", "repetition": 0, "mode": "M1",
+        "execution_outcome": {"task_success": False, "model_request_count": 10},
+        "provider_economics": {"calculated_cost_usd": 0.040, "total_input_tokens": 10000, "cached_tokens": 8000},
+        "performance": {"proxy_overhead_ms": 12.0, "wall_clock_duration_ms": 18000},
+        "optimization_evidence": {}
+    },
+    {
+        "task_family": "F1", "repetition": 0, "mode": "M2",
+        "execution_outcome": {"task_success": True, "model_request_count": 8},
+        "provider_economics": {"calculated_cost_usd": 0.030, "total_input_tokens": 8000, "cached_tokens": 7000},
+        "performance": {"proxy_overhead_ms": 14.0, "wall_clock_duration_ms": 15000},
+        "optimization_evidence": {"behavioral_steering_injected": False}
+    }
+]
 
-    // Success-conditional total cost includes only successful attempt (0.020)
-    let success_cost: f64 = attempts
-        .iter()
-        .filter(|a| a["success"].as_bool().unwrap())
-        .map(|a| a["cost"].as_f64().unwrap())
-        .sum();
-    assert!((success_cost - 0.020).abs() < 1e-6);
+res = analyze_campaign_results(sessions)
+acct = res["accounting"]
+assert acct["all_attempt_total_cost_usd"] == 0.070, f"All-attempt cost must sum both: {acct['all_attempt_total_cost_usd']}"
+assert acct["success_attempt_total_cost_usd"] == 0.030, f"Success cost must only include successful run: {acct['success_attempt_total_cost_usd']}"
+"#;
+
+    let output = Command::new("python3")
+        .current_dir(&root)
+        .args(["-c", script])
+        .output()
+        .expect("Failed to execute python test");
+
+    assert!(
+        output.status.success(),
+        "Failed task accounting must separate all-attempt from success-conditional"
+    );
 }
 
 #[test]
 fn test_cw118_matched_and_unmatched_block_handling() {
-    // Matched block: M1 and M2 both present
-    let m1_cost = 0.025_f64;
-    let m2_cost = 0.019_f64;
-    let relative_change = (m2_cost - m1_cost) / m1_cost;
-    assert!((relative_change - (-0.24_f64)).abs() < 1e-4);
+    let root = workspace_root();
+    // Verify production analyze_campaign_results handles unmatched blocks without panicking
+    let script = r#"
+import sys
+sys.path.insert(0, 'benchmark')
+from cw118_product_value import analyze_campaign_results
 
-    // Unmatched block: M1 is present, but M2 is missing
-    let mut block_sessions = HashMap::new();
-    block_sessions.insert("M1", m1_cost);
+# Only M1 present, M2 missing
+sessions = [
+    {
+        "task_family": "F1", "repetition": 0, "mode": "M1",
+        "execution_outcome": {"task_success": True, "model_request_count": 10},
+        "provider_economics": {"calculated_cost_usd": 0.040, "total_input_tokens": 10000, "cached_tokens": 8000},
+        "performance": {"proxy_overhead_ms": 12.0, "wall_clock_duration_ms": 18000},
+        "optimization_evidence": {}
+    }
+]
 
-    let pair = match (block_sessions.get("M1"), block_sessions.get("M2")) {
-        (Some(&c1), Some(&c2)) => Some((c2 - c1) / c1),
-        _ => None,
-    };
+res = analyze_campaign_results(sessions)
+assert res["matched_pairs_m2_vs_m1"] == 0, "Unmatched block must yield 0 pairs"
+assert len(res["paired_comparisons"]) == 0
+"#;
+
+    let output = Command::new("python3")
+        .current_dir(&root)
+        .args(["-c", script])
+        .output()
+        .expect("Failed to execute python test");
+
     assert!(
-        pair.is_none(),
-        "Unmatched blocks must yield None without panicking"
+        output.status.success(),
+        "Unmatched blocks must be safely handled without pairing"
     );
 }
 
 #[test]
 fn test_cw118_zero_cost_and_missing_baseline_division_safety() {
-    // When M1 baseline is zero, division by zero must be prevented
-    let m1_zero = 0.0;
-    let m2_cost = 0.015;
+    let root = workspace_root();
+    // Test division by zero safety when M1 cost is 0.0
+    let script = r#"
+import sys
+sys.path.insert(0, 'benchmark')
+from cw118_product_value import analyze_campaign_results
 
-    let relative_change = if m1_zero > 0.0 {
-        Some((m2_cost - m1_zero) / m1_zero)
-    } else {
-        None
-    };
-    assert!(relative_change.is_none());
+sessions = [
+    {
+        "task_family": "F1", "repetition": 0, "mode": "M1",
+        "execution_outcome": {"task_success": True, "model_request_count": 0},
+        "provider_economics": {"calculated_cost_usd": 0.0, "total_input_tokens": 0, "cached_tokens": 0},
+        "performance": {"proxy_overhead_ms": 0.0, "wall_clock_duration_ms": 0},
+        "optimization_evidence": {}
+    },
+    {
+        "task_family": "F1", "repetition": 0, "mode": "M2",
+        "execution_outcome": {"task_success": True, "model_request_count": 0},
+        "provider_economics": {"calculated_cost_usd": 0.020, "total_input_tokens": 5000, "cached_tokens": 4000},
+        "performance": {"proxy_overhead_ms": 10.0, "wall_clock_duration_ms": 5000},
+        "optimization_evidence": {}
+    }
+]
+
+res = analyze_campaign_results(sessions)
+pair = res["paired_comparisons"][0]
+assert pair["valid_division"] is False, "Zero cost baseline must set valid_division=False"
+assert pair["relative_cost_change"] is None, "Zero cost baseline must return None relative change"
+"#;
+
+    let output = Command::new("python3")
+        .current_dir(&root)
+        .args(["-c", script])
+        .output()
+        .expect("Failed to execute python test");
+
+    assert!(
+        output.status.success(),
+        "Zero cost baseline must avoid ZeroDivisionError"
+    );
 }
 
 #[test]
 fn test_cw118_abstention_when_policy_cannot_safely_optimize() {
-    // In M2, if candidate has estimated_kv_break_tokens > 0, it must NOT be applied in cache-safe mode
-    let candidate_kv_break = 1200; // Historical prune that breaks cache prefix
+    // Exercise REAL PRODUCTION cw_core::policy::evaluate_decision
+    // When cache is warm and a mutation targets a historical tool result (breaking prefix),
+    // the production policy MUST defer with EarlyHistoricalPruneOnWarmCacheDefers.
+    let payload = json!({
+        "model": "gpt-4o-mini",
+        "messages": [
+            { "role": "system", "content": "You are a coding assistant." },
+            { "role": "user", "content": "Run tests and inspect src/math.rs" },
+            {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                    {
+                        "id": "call_exec_1",
+                        "type": "function",
+                        "function": { "name": "exec_command", "arguments": "{\"command\":\"cargo test\"}" }
+                    }
+                ]
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_exec_1",
+                "content": "test output from 10 turns ago\n".repeat(30)
+            },
+            { "role": "assistant", "content": "Tests executed." },
+            { "role": "user", "content": "Continue." }
+        ]
+    });
 
-    let can_apply_cache_safe = candidate_kv_break == 0;
-    assert!(!can_apply_cache_safe);
+    let (turn, _) = analyze_turn_from_payload(
+        "turn_warm_1".into(),
+        "sess_warm_1".into(),
+        None,
+        2,
+        &payload,
+        ProviderKind::OpenAI,
+        None,
+        Some(1200),
+        None,
+    )
+    .expect("failed to analyze synthetic turn");
 
-    // Abstention is recorded, original payload is forwarded unmodified
-    let abstention_recorded = true;
-    assert!(abstention_recorded);
+    let prefix_fp = compute_prefix_fingerprint(&turn.nodes);
+    let cache_obs = classify_cache_state(
+        &turn.session_id,
+        ProviderKind::OpenAI,
+        "gpt-4o-mini",
+        turn.sequence_number,
+        Some(&prefix_fp),
+        None,
+        Some(&turn.kv_cache_report),
+        false,
+    );
+    assert_eq!(cache_obs.state, CacheState::WarmVerified);
+
+    let op = MutationOp::PruneOrStub {
+        target_fingerprint: None,
+        target_call_id: Some("call_exec_1".to_string()),
+        target_json_pointer: None,
+        stub_text: "[pruned]".to_string(),
+    };
+
+    let pricing = find_pricing_profile(ProviderKind::OpenAI, "gpt-4o-mini");
+    let decision = evaluate_decision(
+        Some("cand_prune_history"),
+        None,
+        &op,
+        &turn,
+        &cache_obs,
+        pricing.as_ref(),
+        3,
+    );
+
+    // Assert that the production policy explicitly defers to protect the warm cache prefix
+    assert_eq!(decision.decision, OptimizationDecision::Defer);
+    assert_eq!(decision.reason_code, DecisionReasonCode::CachePrefixAtRisk);
+    assert!(decision.estimated_kv_break_tokens > 0);
 }
 
 #[test]
 fn test_cw118_zero_unauthorized_paid_execution() {
     let root = workspace_root();
-    // Running benchmark with --live without explicit spend authorization must exit with code 2
-    let output = Command::new("python3")
+
+    // 1. Running benchmark with --live without explicit spend authorization must exit with code 2
+    let output1 = Command::new("python3")
         .current_dir(&root)
         .args(["benchmark/cw118_product_value.py", "--live"])
         .output()
         .expect("Failed to execute python runner");
 
-    assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("BLOCKED_SPEND_AUTHORIZATION"));
+    assert_eq!(output1.status.code(), Some(2));
+    let stderr1 = String::from_utf8_lossy(&output1.stderr);
+    assert!(stderr1.contains("BLOCKED_SPEND_AUTHORIZATION"));
+
+    // 2. Running benchmark with --live and --authorize-spend without live environment must exit with code 3 (unavailable)
+    let output2 = Command::new("python3")
+        .current_dir(&root)
+        .args([
+            "benchmark/cw118_product_value.py",
+            "--live",
+            "--authorize-spend",
+            "5.0",
+        ])
+        .output()
+        .expect("Failed to execute python runner");
+
+    assert_eq!(output2.status.code(), Some(3));
+    let stderr2 = String::from_utf8_lossy(&output2.stderr);
+    assert!(stderr2.contains("BLOCKED_LIVE_EXECUTION_UNAVAILABLE"));
 }
 
 #[test]
 fn test_cw118_budget_exhaustion_and_campaign_cancellation() {
-    // Verify budget tracking: when accumulated spend reaches envelope, stop further runs
-    let budget_envelope = 0.050_f64; // $0.05
-    let session_costs = [0.020_f64, 0.025_f64, 0.015_f64];
+    let root = workspace_root();
+    let temp_dir = std::env::temp_dir().join(format!("cw118_budget_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let report_file = temp_dir.join("budget_report.json");
+    let doc_file = temp_dir.join("budget_report.md");
 
-    let mut committed = 0.0_f64;
-    let mut executed_count = 0;
-    let mut canceled_count = 0;
+    // Run runner with an extremely low budget limit ($0.0001) so second session exhausts budget
+    let output = Command::new("python3")
+        .current_dir(&root)
+        .args([
+            "benchmark/cw118_product_value.py",
+            "--task",
+            "f1",
+            "--repetitions",
+            "1",
+            "--budget-limit",
+            "0.0001",
+            "--output",
+            report_file.to_str().unwrap(),
+            "--doc-output",
+            doc_file.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to execute python runner");
 
-    for cost in session_costs {
-        if committed + cost <= budget_envelope {
-            committed += cost;
-            executed_count += 1;
-        } else {
-            canceled_count += 1;
-        }
-    }
+    assert!(output.status.success());
+    let content = fs::read_to_string(&report_file).unwrap();
+    let json_data: serde_json::Value = serde_json::from_str(&content).unwrap();
 
-    assert_eq!(executed_count, 2);
-    assert_eq!(canceled_count, 1);
-    assert!((committed - 0.045_f64).abs() < 1e-6);
+    let sessions = json_data["sessions"].as_array().unwrap();
+    // At least one session must be canceled due to budget exhaustion
+    let canceled = sessions
+        .iter()
+        .any(|s| s["execution_outcome"]["termination_reason"] == "canceled_budget_exhaustion");
+    assert!(
+        canceled,
+        "Subsequent sessions must be canceled when budget envelope is exhausted"
+    );
+
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_cw118_payload_signature_transcript_preservation() {
-    // In M1 (passthrough), verify raw wire byte transparency and zero-drop forwarding
+    // Exercise REAL PRODUCTION cw_core normalizer and policy to verify that
+    // thinking signatures are preserved and protected from mutation
     let raw_payload = json!({
         "model": "claude-3-5-sonnet-20241022",
         "messages": [
@@ -466,25 +638,81 @@ fn test_cw118_payload_signature_transcript_preservation() {
         ]
     });
 
-    // Passthrough must preserve exact thinking signature and content
-    let serialized = serde_json::to_string(&raw_payload).unwrap();
-    let roundtripped: serde_json::Value = serde_json::from_str(&serialized).unwrap();
-    assert_eq!(raw_payload, roundtripped);
+    let (turn, _) = analyze_turn_from_payload(
+        "turn_sig_1".into(),
+        "sess_sig_1".into(),
+        None,
+        1,
+        &raw_payload,
+        ProviderKind::Anthropic,
+        None,
+        Some(300),
+        None,
+    )
+    .expect("failed to parse turn");
 
-    let sig = roundtripped["messages"][1]["content"][0]["signature"]
-        .as_str()
-        .unwrap();
-    assert_eq!(sig, "cryptographic_signature_byte_exact_abc123");
+    // Find the thinking node with signature
+    let thinking_node = turn.nodes.iter().find(|n| {
+        matches!(
+            &n.kind,
+            NodeKind::AssistantThinking {
+                signature: Some(sig),
+                ..
+            } if sig == "cryptographic_signature_byte_exact_abc123"
+        )
+    });
+    assert!(
+        thinking_node.is_some(),
+        "Cryptographic signature must be captured in canonical IR"
+    );
+
+    // Attempt to evaluate a mutation targeting the signed thinking block
+    let node = thinking_node.unwrap();
+    let op = MutationOp::PruneOrStub {
+        target_fingerprint: Some(node.fingerprint.0.clone()),
+        target_call_id: None,
+        target_json_pointer: Some(node.raw_json_pointer.clone()),
+        stub_text: "[pruned]".to_string(),
+    };
+
+    let prefix_fp = compute_prefix_fingerprint(&turn.nodes);
+    let cache_obs = classify_cache_state(
+        &turn.session_id,
+        ProviderKind::Anthropic,
+        "claude-3-5-sonnet-20241022",
+        turn.sequence_number,
+        Some(&prefix_fp),
+        None,
+        Some(&turn.kv_cache_report),
+        false,
+    );
+
+    let pricing = find_pricing_profile(ProviderKind::Anthropic, "claude-3-5-sonnet-20241022");
+    let decision = evaluate_decision(
+        Some("cand_prune_signed"),
+        None,
+        &op,
+        &turn,
+        &cache_obs,
+        pricing.as_ref(),
+        3,
+    );
+
+    // Production policy must strictly reject mutations targeting signed thinking content
+    assert_eq!(decision.decision, OptimizationDecision::Reject);
+    assert_eq!(decision.reason_code, DecisionReasonCode::SafetyViolation);
+    assert!(decision.explanation.contains("signed thinking"));
 }
 
 #[test]
 fn test_cw118_stable_regenerated_report_output() {
     let root = workspace_root();
-    // Verify that running report generation twice produces identical report output
     let temp_dir = std::env::temp_dir().join(format!("cw118_stable_{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&temp_dir).unwrap();
     let rep1_path = temp_dir.join("rep1.json");
+    let doc1_path = temp_dir.join("rep1.md");
     let rep2_path = temp_dir.join("rep2.json");
+    let doc2_path = temp_dir.join("rep2.md");
 
     let out1 = Command::new("python3")
         .current_dir(&root)
@@ -498,6 +726,8 @@ fn test_cw118_stable_regenerated_report_output() {
             "42",
             "--output",
             rep1_path.to_str().unwrap(),
+            "--doc-output",
+            doc1_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to execute runner");
@@ -515,6 +745,8 @@ fn test_cw118_stable_regenerated_report_output() {
             "42",
             "--output",
             rep2_path.to_str().unwrap(),
+            "--doc-output",
+            doc2_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to execute runner");

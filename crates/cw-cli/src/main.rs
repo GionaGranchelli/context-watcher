@@ -314,6 +314,15 @@ enum Commands {
         #[arg(long)]
         session: Option<String>,
     },
+    /// Check harness readiness, environment isolation, and live provider qualification preconditions (CW-119)
+    Readiness {
+        /// Specific harness to check (codex, omp, hermes, all)
+        #[arg(long, default_value = "all")]
+        harness: String,
+        /// Output machine-readable JSON report
+        #[arg(long)]
+        json: bool,
+    },
     /// Alias for `cw init`: install contextWatcher integrations for supported harnesses, including Hermes
     InstallIntegrations,
 }
@@ -637,6 +646,9 @@ async fn main() -> Result<()> {
         Commands::Hook { quiet, session } => {
             let store = CwStore::open(&db_path)?;
             commands::session::run_hook_check(&store, quiet, session)?;
+        }
+        Commands::Readiness { harness, json } => {
+            commands::readiness::run_readiness(harness, json)?;
         }
         Commands::InstallIntegrations => {
             commands::init::run_init_installer(false, false)?;

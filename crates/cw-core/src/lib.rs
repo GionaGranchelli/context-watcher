@@ -12,6 +12,7 @@ pub mod policy;
 pub mod radix;
 pub mod repository;
 pub mod slot_bridge;
+pub mod spend_guard;
 pub mod swarm;
 pub mod tokenizer;
 pub mod validator;

@@ -4,12 +4,12 @@ Welcome to `contextWatcher` (`cw`). Every human or AI agent working in this repo
 
 ---
 
-## 0. Active milestone: CW-118 Product Value & Economic Qualification
+## 0. Active milestone: CW-119 Controlled Live-Agent Product Value Qualification
 
 **Before coding**, read [BOARD.md](BOARD.md), [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), and [docs/HARNESS_MATRIX.md](docs/HARNESS_MATRIX.md). Checked historical board tasks are not current product qualification. Ground claims in code, fixtures, CI and reproducible evidence.
 
-- **Completed:** CW-116 Maintainability Gate (PRs #13, #14, #16); CW-112 Codex CLI qualification (PRs #17, #18); CW-114 Long-Session Reliability Campaign across harnesses (PR #20); CW-115 Performance and Savings Qualification (Phase 1 merged via PR #21; Phase 2 four-mode isolation merged via PR #22); CW-117A Policy Engine (PR #23); CW-117B Calibration & Evidence Integrity (PR #24); CW-117C Prospective Shadow Decision & Outcome Correlation (PR #25).
-- **Active:** CW-118 Product Value & Economic Qualification (3-mode qualification runner M0/M1/M2, 5 task families F1-F5 across 45 sessions, randomized balanced block scheduling, Gate A offline qualification, economic delta analysis, independent correctness gates).
+- **Completed:** CW-116 Maintainability Gate (PRs #13, #14, #16); CW-112 Codex CLI qualification (PRs #17, #18); CW-114 Long-Session Reliability Campaign across harnesses (PR #20); CW-115 Performance and Savings Qualification (Phase 1 merged via PR #21; Phase 2 four-mode isolation merged via PR #22); CW-117A Policy Engine (PR #23); CW-117B Calibration & Evidence Integrity (PR #24); CW-117C Prospective Shadow Decision & Outcome Correlation (PR #25); CW-118 Product Value & Economic Qualification Gate A (PR #26).
+- **Active:** CW-119 Controlled Live-Agent Product Value Qualification (Multi-harness readiness checks across Codex/OMP/Hermes, fail-closed SpendGuard budget safeguards, and small authorized pilot across M0/M1/M2 on OpenAI `gpt-4o-mini`).
 - **Next Backlog:** CW-103 broader Codex/Hermes continuation, CW-104 local model qualification, CW-R11 large-history IO qualification.
 - Preserve public CLI/API, session identity, authenticated vs observation-only behavior, raw provider wire bytes/streaming, signed and unknown content, transcript originals, mutation eligibility and fail-open behavior. Do not claim observed cache savings where only estimates exist.
 - Use temporary isolated HOME/config and data directories, mock ports and test stores. Do not edit actual user Hermes config, live session transcripts, installed agent settings or running services.

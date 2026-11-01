@@ -1,0 +1,46 @@
+{
+  "harness": "Codex CLI 0.166.0",
+  "milestone": "CW-119",
+  "model": "gpt-4o-mini",
+  "provider": "OpenAI",
+  "sessions": [
+    {
+      "acceptance_passed": true,
+      "cache_hit_ratio": 0.8522671767107299,
+      "cached_tokens": 165760,
+      "description": "Native Baseline",
+      "input_tokens": 194493,
+      "mode": "M0",
+      "output_tokens": 2377,
+      "provider_cost_usd": 0.018168149999999997,
+      "wall_time_ms": 24154
+    },
+    {
+      "acceptance_passed": true,
+      "cache_hit_ratio": 0.8318535469107552,
+      "cached_tokens": 136320,
+      "description": "Passthrough Control",
+      "input_tokens": 163875,
+      "mode": "M1",
+      "output_tokens": 1318,
+      "provider_cost_usd": 0.015148049999999998,
+      "wall_time_ms": 16204
+    },
+    {
+      "acceptance_passed": true,
+      "cache_hit_ratio": 0.8618509709724855,
+      "cached_tokens": 182272,
+      "description": "Cache-Safe Optimization",
+      "input_tokens": 211489,
+      "mode": "M2",
+      "output_tokens": 3248,
+      "provider_cost_usd": 0.02000175,
+      "wall_time_ms": 31846
+    }
+  ],
+  "spend_envelope_usd": 0.25,
+  "timestamp": "2026-11-01T20:54:39.984063519+00:00",
+  "title": "Controlled Live-Agent Product Value Qualification Pilot",
+  "total_campaign_spend_usd": 0.053318,
+  "workload": "F1BugFixing"
+}

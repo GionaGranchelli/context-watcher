@@ -54,6 +54,12 @@ This document establishes the empirical justification, real-world benchmark data
    * *Gate A Engineering Qualification (Verified):* 100% independent unit test pass rate across all 45 sessions; proxy latency overhead verified at **28.5 ms/session** (< 1.8 ms/request); **100% prefix preservation** (`estimated_kv_break_tokens == 0`); zero unexpected cache drops. Product hypothesis is explicitly reported as `NOT_EVALUATED` pending Gate B authorized live qualification on production LLMs.
    * *Gate B Live Authorization Invariant:* Zero unauthorized paid API spend. Live execution is strictly opt-in and blocked with status `BLOCKED_SPEND_AUTHORIZATION` until an explicit spend authorization envelope is granted. Documented in `docs/CW-118-PRODUCT-VALUE-QUALIFICATION.md` and `docs/CW-118-EXPERIMENT-PROTOCOL.md`.
 
+6. **Controlled Live-Agent Product Value Qualification (CW-119): Empirical Pilot on Live Autonomous Agents**
+   * *Multi-Harness Readiness:* Automated readiness audit (`cw readiness`) verifying Codex CLI (`0.166.0`), OMP (`18.12.6`), and Hermes Agent (`v0.22.5`) installation, loopback proxy routing, and tool credential sandboxing (`CW_CONTROL_TOKEN` stripped from model tools).
+   * *SpendGuard Budget Safeguard:* Production admission control enforcing pre-session reservations ($0.08 USD), hard per-session ceilings ($0.15 USD), iteration caps (25 requests), real-time usage accounting, and fail-closed spend authorization.
+   * *Controlled 3-Mode Live Pilot:* Empirical qualification driving installed Codex CLI against OpenAI `gpt-4o-mini` across Mode M0 (Native Baseline), Mode M1 (Passthrough Control), and Mode M2 (Cache-Safe Optimization with `PinContext`).
+   * *Measured Live Telemetry:* Total campaign spend of **$0.05332 USD** under authorized $0.25 USD envelope; **100% functional acceptance pass rate** across independent unit tests (`python3 -m unittest test_math_ops.py`); high prompt cache retention (85.23% M0, 83.19% M1, 86.19% M2); documented in `docs/CW-119-LIVE-AGENT-QUALIFICATION.md` and `docs/cw119_pilot_benchmark_data.json`.
+
 ---
 
 ## 2. Dataset & Empirical Measurement (278 Real Sessions)

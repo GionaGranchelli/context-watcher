@@ -1136,6 +1136,21 @@ async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
     )
     .unwrap();
     assert_eq!(tool_egress, tool_continuation);
+
+    let unauthenticated = json!({
+        "model":"gpt-4o-mini",
+        "previous_response_id":"resp_previous_exact",
+        "input":[{"type":"message","role":"user","content":"unauthorized request"}]
+    });
+    let response = reqwest::Client::new()
+        .post(format!("{proxy_url}/openai/v1/responses"))
+        .header("x-cw-session-id", session_id)
+        .json(&unauthenticated)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 403);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

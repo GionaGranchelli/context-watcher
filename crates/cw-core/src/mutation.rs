@@ -1081,4 +1081,50 @@ mod tests {
         assert_eq!(report.skipped_rules[0].reason, "SkippedNoEligibleUserTail");
         assert_eq!(payload, original);
     }
+
+    #[test]
+    fn stateful_responses_reject_every_historical_mutation_operator() {
+        let operations = [
+            MutationOp::PruneOrStub {
+                target_fingerprint: None,
+                target_call_id: None,
+                target_json_pointer: None,
+                stub_text: "stub".into(),
+            },
+            MutationOp::FoldSubtree {
+                start_turn: 1,
+                end_turn: 2,
+                summary_text: "summary".into(),
+            },
+            MutationOp::ShadowDedupe { file_path: None },
+            MutationOp::GateToolsAndSkills {
+                disabled_tools: vec!["shell".into()],
+                disabled_mcp_servers: vec![],
+                disabled_skills: vec![],
+            },
+            MutationOp::NormalizePrefix {
+                sort_tools_deterministically: true,
+                relocate_dynamic_system_metadata: true,
+            },
+        ];
+        let mut payload = json!({
+            "model": "test",
+            "previous_response_id": "resp_previous",
+            "input": [{"type":"message","role":"user","content":"new input"}]
+        });
+        let original = payload.clone();
+        for (index, op) in operations.into_iter().enumerate() {
+            let mut rule = pin_rule();
+            rule.id = format!("historical-{index}");
+            rule.op = op;
+            let report = apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[rule], 1);
+            assert!(report.applied_rule_ids.is_empty());
+            assert_eq!(report.skipped_rules.len(), 1);
+            assert_eq!(
+                report.skipped_rules[0].reason,
+                "RejectedStatefulProviderOwnedHistory"
+            );
+            assert_eq!(payload, original);
+        }
+    }
 }

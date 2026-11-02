@@ -15,7 +15,7 @@ use chrono::Utc;
 use cw_core::{
     analyze_turn_from_payload,
     autopilot::evaluate_autopilot_policies,
-    ir::{HarnessKind, Session},
+    ir::{HarnessKind, ProviderKind, Session},
     local_llm::strip_internal_cw_fields,
     mutation::{apply_mutations_to_payload, evaluate_firewall, has_signed_content},
     normalizer::detect_provider,
@@ -40,6 +40,28 @@ use crate::{
         WsEvent,
     },
 };
+
+fn fallback_invalid_mutation(
+    raw: &Value,
+    outbound: &mut Value,
+    provider: ProviderKind,
+    applied: &mut Vec<String>,
+    skipped: &mut Vec<cw_core::ir::SkippedMutation>,
+) {
+    if validate_protocol_invariants(outbound, provider).is_err()
+        && validate_protocol_invariants(raw, provider).is_ok()
+    {
+        *outbound = raw.clone();
+        skipped.extend(
+            applied
+                .drain(..)
+                .map(|rule_id| cw_core::ir::SkippedMutation {
+                    rule_id,
+                    reason: "PostMutationValidationFailed".into(),
+                }),
+        );
+    }
+}
 
 /// Builds the Intercepting Proxy Router (`127.0.0.1:4401`).
 pub fn build_proxy_router(state: DaemonState) -> Router {
@@ -361,17 +383,13 @@ pub async fn handle_proxy_request(
                 if active {
                     strip_internal_cw_fields(&mut outbound);
                 }
-                if validate_protocol_invariants(&outbound, provider).is_err()
-                    && validate_protocol_invariants(&raw, provider).is_ok()
-                {
-                    outbound = raw.clone();
-                    skipped_mutations.extend(applied.drain(..).map(|rule_id| {
-                        cw_core::ir::SkippedMutation {
-                            rule_id,
-                            reason: "PostMutationValidationFailed".into(),
-                        }
-                    }));
-                }
+                fallback_invalid_mutation(
+                    &raw,
+                    &mut outbound,
+                    provider,
+                    &mut applied,
+                    &mut skipped_mutations,
+                );
                 if outbound != raw {
                     outbound_body = match serde_json::to_vec(&outbound) {
                         Ok(b) => b,
@@ -466,4 +484,41 @@ pub async fn handle_proxy_request(
     }
 
     forward_to_upstream(&state, method, target, &headers, outbound_body, recorder).await
+}
+
+#[cfg(test)]
+mod mutation_fallback_tests {
+    use super::{fallback_invalid_mutation, validate_protocol_invariants};
+    use cw_core::ir::ProviderKind;
+    use serde_json::json;
+
+    #[test]
+    fn invalid_mutation_fallback_clears_applied_and_records_skip_reason() {
+        let raw = json!({
+            "model":"test",
+            "messages":[{"role":"user","content":"continue"}]
+        });
+        let mut outbound = json!({
+            "model":"test",
+            "messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"orphan","content":"bad"}]}]
+        });
+        assert!(validate_protocol_invariants(&outbound, ProviderKind::Anthropic).is_err());
+        assert!(validate_protocol_invariants(&raw, ProviderKind::Anthropic).is_ok());
+
+        let mut applied = vec!["pin-1".to_string()];
+        let mut skipped = Vec::new();
+        fallback_invalid_mutation(
+            &raw,
+            &mut outbound,
+            ProviderKind::Anthropic,
+            &mut applied,
+            &mut skipped,
+        );
+
+        assert_eq!(outbound, raw);
+        assert!(applied.is_empty());
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].rule_id, "pin-1");
+        assert_eq!(skipped[0].reason, "PostMutationValidationFailed");
+    }
 }

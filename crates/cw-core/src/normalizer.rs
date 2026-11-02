@@ -1348,6 +1348,16 @@ mod mutation_eligibility_tests {
             );
         }
 
+        for opaque in [
+            json!({"previous_response_id":"resp_previous","input":[{"role":"user","content":"continue"}],"signature":"signed"}),
+            json!({"previous_response_id":"resp_previous","input":[{"role":"user","content":"continue"}],"encrypted_content":"opaque"}),
+        ] {
+            assert_eq!(
+                classify_mutation_eligibility(&opaque, ProviderKind::OpenAI),
+                MutationEligibility::Ineligible
+            );
+        }
+
         let conversation =
             json!({"conversation":{"id":"conv_1"},"input":[{"role":"user","content":"continue"}]});
         assert_eq!(

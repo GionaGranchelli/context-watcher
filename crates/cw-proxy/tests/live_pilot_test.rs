@@ -474,6 +474,9 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         .find(|rule| rule.id == rule_id && rule.status == MutationStatus::Committed);
     let mut total_after_commit = 0usize;
     let mut eligible_requests = 0usize;
+    let mut stateful_requests = 0usize;
+    let mut stateful_mutated = 0usize;
+    let mut request_diagnostics = Vec::new();
     let mut eligible_mutated = 0usize;
     let mut idempotent_already_present = 0usize;
     let mut ineligible_abstained = 0usize;
@@ -514,8 +517,20 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         };
         let eligibility =
             cw_core::normalizer::classify_mutation_eligibility(&raw, ProviderKind::OpenAI);
+        request_diagnostics.push(json!({
+            "sequence": t.sequence_number,
+            "eligibility": eligibility,
+            "raw_equals_egress": raw == egress,
+            "applied_rule_ids": t.applied_mutation_ids,
+            "skipped_rules": t.skipped_mutations,
+        }));
         match eligibility {
-            cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible => {
+            cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible
+            | cw_core::normalizer::MutationEligibility::StatelessEligible => {
+                if eligibility == cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible
+                {
+                    stateful_requests += 1;
+                }
                 eligible_requests += 1;
                 let mut expected_egress = raw.clone();
                 let expected_report = committed_rule.as_ref().map(|rule| {
@@ -529,17 +544,31 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
                 let expected_applied = expected_report
                     .as_ref()
                     .is_some_and(|report| report.applied_rule_ids.iter().any(|id| id == rule_id));
+                if !expected_applied
+                    && eligibility == cw_core::normalizer::MutationEligibility::StatelessEligible
+                {
+                    eligible_requests -= 1;
+                    ineligible_abstained += 1;
+                    let expected_skip = committed_rule
+                        .as_ref()
+                        .and_then(|rule| eligibility.is_op_eligible(&rule.op).err());
+                    if raw != egress
+                        || !mutation_ledger_matches(t, rule_id, false, expected_skip, true)
+                    {
+                        failures.push(format!(
+                            "stateless turn {} without a pin target changed or has an inconsistent mutation ledger",
+                            t.sequence_number
+                        ));
+                        invalid_mutations += 1;
+                        wire_preservation_failures += 1;
+                    }
+                    continue;
+                }
                 let already_present = expected_applied && expected_egress == raw;
                 cw_core::local_llm::strip_internal_cw_fields(&mut expected_egress);
                 let exact_wire_match = expected_applied && expected_egress == egress;
                 if already_present {
-                    if t.applied_mutation_ids.iter().any(|id| id == rule_id)
-                        && !t
-                            .skipped_mutations
-                            .iter()
-                            .any(|skip| skip.rule_id == rule_id)
-                        && exact_wire_match
-                    {
+                    if mutation_ledger_matches(t, rule_id, true, None, false) && exact_wire_match {
                         idempotent_already_present += 1;
                     } else {
                         invalid_mutations += 1;
@@ -550,23 +579,21 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
                     }
                     continue;
                 }
-                let rule_was_recorded = t.applied_mutation_ids.iter().any(|id| id == rule_id);
-                let rule_was_skipped = t
-                    .skipped_mutations
-                    .iter()
-                    .any(|skip| skip.rule_id == rule_id);
+                let rule_was_recorded = mutation_ledger_matches(t, rule_id, true, None, false);
                 let directive_on_wire = egress.to_string().contains(PIN_DIRECTIVE);
-                if !rule_was_recorded || rule_was_skipped || !directive_on_wire {
+                if !rule_was_recorded || !directive_on_wire {
                     unexpected_misses += 1;
+                    invalid_mutations += 1;
                     failures.push(format!(
                         "eligible turn {} was not mutated and recorded (ledger={rule_was_recorded}, wire={directive_on_wire})",
                         t.sequence_number
                     ));
                     continue;
                 }
-                eligible_mutated += 1;
+                let mut valid_wire = true;
                 if raw["previous_response_id"] != egress["previous_response_id"] {
                     invalid_mutations += 1;
+                    valid_wire = false;
                     failures.push(format!(
                         "turn {} changed previous_response_id",
                         t.sequence_number
@@ -576,10 +603,19 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
                 if !tail_preserved || !exact_wire_match {
                     invalid_mutations += 1;
                     wire_preservation_failures += 1;
+                    valid_wire = false;
                     failures.push(format!(
                         "turn {} wire differs from the exact authorized transformation or changed original input",
                         t.sequence_number
                     ));
+                }
+                if valid_wire {
+                    eligible_mutated += 1;
+                    if eligibility
+                        == cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible
+                    {
+                        stateful_mutated += 1;
+                    }
                 }
             }
             _ => {
@@ -592,12 +628,7 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
                     })
                     .err()
                     .unwrap_or("PayloadIneligible");
-                let skip_recorded = t
-                    .skipped_mutations
-                    .iter()
-                    .any(|skip| skip.rule_id == rule_id && skip.reason == expected_skip);
-                if t.applied_mutation_ids.iter().any(|id| id == rule_id)
-                    || !skip_recorded
+                if !mutation_ledger_matches(t, rule_id, false, Some(expected_skip), false)
                     || raw != egress
                 {
                     invalid_mutations += 1;
@@ -610,10 +641,11 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
             }
         }
     }
-    let status = if eligible_requests == 0 {
+    let status = if !failures.is_empty() {
+        "FAIL"
+    } else if eligible_requests == 0 {
         "BLOCKED_NO_ELIGIBLE_TREATMENT"
-    } else if failures.is_empty()
-        && eligible_mutated > 0
+    } else if eligible_mutated > 0
         && eligible_mutated + idempotent_already_present == eligible_requests
     {
         "PASS"
@@ -621,6 +653,10 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         "FAIL"
     };
     json!({
+        "stateful_eligible_requests": stateful_requests,
+        "stateful_requests_mutated": stateful_mutated,
+        "stateful_treatment_verified": status == "PASS" && stateful_mutated > 0,
+        "request_diagnostics": request_diagnostics,
         "total_requests_after_commit": total_after_commit,
         "eligible_requests": eligible_requests,
         "eligible_requests_mutated": eligible_mutated,
@@ -633,6 +669,30 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         "treatment_verified": status == "PASS",
         "failures": failures,
     })
+}
+
+fn mutation_ledger_matches(
+    turn: &ContextTurn,
+    rule_id: &str,
+    expect_applied: bool,
+    expected_skip: Option<&str>,
+    allow_no_skip: bool,
+) -> bool {
+    let applied_matches = if expect_applied {
+        turn.applied_mutation_ids.len() == 1 && turn.applied_mutation_ids[0] == rule_id
+    } else {
+        turn.applied_mutation_ids.is_empty()
+    };
+    let skips_match = match expected_skip {
+        Some(reason) => {
+            (allow_no_skip && turn.skipped_mutations.is_empty())
+                || (turn.skipped_mutations.len() == 1
+                    && turn.skipped_mutations[0].rule_id == rule_id
+                    && turn.skipped_mutations[0].reason == reason)
+        }
+        None => turn.skipped_mutations.is_empty(),
+    };
+    applied_matches && skips_match
 }
 
 fn pin_tail_preserves_input(raw: &Value, egress: &Value) -> bool {
@@ -806,7 +866,129 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
     assert_eq!(result["status"], "PASS", "{result}");
     assert_eq!(result["eligible_requests"], 1);
     assert_eq!(result["eligible_requests_mutated"], 1);
+    assert_eq!(result["stateful_eligible_requests"], 1);
+    assert_eq!(result["stateful_requests_mutated"], 1);
+    assert_eq!(result["stateful_treatment_verified"], true);
     assert_eq!(result["ineligible_requests_abstained"], 1);
+
+    let mut stateless_raw = eligible_raw.clone();
+    stateless_raw
+        .as_object_mut()
+        .unwrap()
+        .remove("previous_response_id");
+    let mut stateless_egress = eligible_egress.clone();
+    stateless_egress
+        .as_object_mut()
+        .unwrap()
+        .remove("previous_response_id");
+    store
+        .save_turn(&eligible_turn, Some(&stateless_raw), None, None)
+        .unwrap();
+    store
+        .save_wire_egress(
+            &eligible_turn.id,
+            &serde_json::to_vec(&stateless_egress).unwrap(),
+        )
+        .unwrap();
+    let stateless = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(stateless["status"], "PASS", "{stateless}");
+    assert_eq!(stateless["stateful_treatment_verified"], false);
+    assert_eq!(stateless["provider_wire_preservation_failures"], 0);
+    let mut stateless_tool = tool_raw.clone();
+    stateless_tool
+        .as_object_mut()
+        .unwrap()
+        .remove("previous_response_id");
+    tool_turn.skipped_mutations.clear();
+    store
+        .save_turn(&tool_turn, Some(&stateless_tool), None, None)
+        .unwrap();
+    store
+        .save_wire_egress(&tool_turn.id, &serde_json::to_vec(&stateless_tool).unwrap())
+        .unwrap();
+    let tool_followup = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(tool_followup["status"], "PASS", "{tool_followup}");
+    assert_eq!(tool_followup["eligible_requests_mutated"], 1);
+    assert_eq!(tool_followup["ineligible_requests_abstained"], 1);
+
+    let mut changed_tool_egress = stateless_tool.clone();
+    changed_tool_egress["unexpected"] = json!(true);
+    store
+        .save_wire_egress(
+            &tool_turn.id,
+            &serde_json::to_vec(&changed_tool_egress).unwrap(),
+        )
+        .unwrap();
+    let changed_tool = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(changed_tool["status"], "FAIL", "{changed_tool}");
+    assert_eq!(changed_tool["provider_wire_preservation_failures"], 1);
+
+    store
+        .save_wire_egress(&tool_turn.id, &serde_json::to_vec(&stateless_tool).unwrap())
+        .unwrap();
+    tool_turn.applied_mutation_ids = vec!["unexpected-rule".into()];
+    store
+        .save_turn(&tool_turn, Some(&stateless_tool), None, None)
+        .unwrap();
+    let unexpected_mutation = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(
+        unexpected_mutation["status"], "FAIL",
+        "{unexpected_mutation}"
+    );
+
+    tool_turn.applied_mutation_ids.clear();
+    tool_turn.skipped_mutations = vec![SkippedMutation {
+        rule_id: "pin-verifier".into(),
+        reason: "wrong-reason".into(),
+    }];
+    store
+        .save_turn(&tool_turn, Some(&stateless_tool), None, None)
+        .unwrap();
+    let inconsistent_skip = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(inconsistent_skip["status"], "FAIL", "{inconsistent_skip}");
+    tool_turn.skipped_mutations.clear();
+    store
+        .save_turn(&tool_turn, Some(&stateless_tool), None, None)
+        .unwrap();
+
+    let mut already_pinned_turn = cw_core::analyze_turn_from_payload(
+        "turn_3".into(),
+        session_id.into(),
+        Some("turn_2".into()),
+        3,
+        &eligible_egress,
+        ProviderKind::OpenAI,
+        None,
+        None,
+        None,
+    )
+    .unwrap()
+    .0;
+    already_pinned_turn.applied_mutation_ids = vec!["pin-verifier".into()];
+    store
+        .save_turn(&already_pinned_turn, Some(&eligible_egress), None, None)
+        .unwrap();
+    store
+        .save_wire_egress(
+            &already_pinned_turn.id,
+            &serde_json::to_vec(&eligible_egress).unwrap(),
+        )
+        .unwrap();
+    let mixed = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(mixed["status"], "PASS", "{mixed}");
+    assert_eq!(mixed["stateful_eligible_requests"], 1);
+    assert_eq!(mixed["stateful_requests_mutated"], 0);
+    assert_eq!(mixed["stateful_treatment_verified"], false);
+
+    store
+        .save_turn(&eligible_turn, Some(&eligible_raw), None, None)
+        .unwrap();
+    store
+        .save_wire_egress(
+            &eligible_turn.id,
+            &serde_json::to_vec(&eligible_egress).unwrap(),
+        )
+        .unwrap();
 
     let mut valid_eligible_egress = eligible_egress.clone();
     eligible_egress["unrelated_upstream_field"] = json!("unexpected");
@@ -938,6 +1120,20 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
         .unwrap();
     let blocked = verify_m2_treatment(&blocked_store, blocked_session, 1, "pin-verifier");
     assert_eq!(blocked["status"], "BLOCKED_NO_ELIGIBLE_TREATMENT");
+
+    let mut changed_tool_egress = blocked_raw;
+    changed_tool_egress["unexpected"] = json!(true);
+    blocked_store
+        .save_wire_egress(
+            "blocked_turn",
+            serde_json::to_string(&changed_tool_egress)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+    let failed = verify_m2_treatment(&blocked_store, blocked_session, 1, "pin-verifier");
+    assert_eq!(failed["status"], "FAIL", "{failed}");
+    assert_eq!(failed["provider_wire_preservation_failures"], 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -970,6 +1166,16 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
         request_reservation_usd: 0.01,
     });
 
+    let evidence_dir = workspace_root()
+        .join("target")
+        .join(format!("cw119c_evidence_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&evidence_dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&evidence_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    println!("Private evidence directory: {}", evidence_dir.display());
     let mut sessions = Vec::new();
     for mode in [Mode::M1, Mode::M2] {
         println!("\n=== Executing {mode:?} ===");
@@ -980,7 +1186,7 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
         let sid = format!("cw119_{mode:?}_{}", uuid::Uuid::new_v4().simple());
 
         // Proxy (M1/M2) with in-flight per-request SpendGuard enforcement.
-        let store = CwStore::open_in_memory().unwrap();
+        let store = CwStore::open(evidence_dir.join(format!("{mode:?}.db"))).unwrap();
         let (route, token, proxy_task) = {
             let mut cfg = store.get_autopilot_config().unwrap();
             if mode == Mode::M2 {
@@ -1116,6 +1322,15 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
             "acceptance_passed": acceptance,
             "treatment": treatment,
         }));
+        fs::write(
+            evidence_dir.join("sessions.json"),
+            serde_json::to_vec_pretty(&json!({
+                "sessions": sessions, "total_campaign_spend_usd": guard.total_spent_usd(),
+                "killswitch_tripped": guard.is_killswitch_tripped(), "spend_envelope_usd": auth_usd,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
         assert!(
             t2_ok,
             "{mode:?} T2: {}",

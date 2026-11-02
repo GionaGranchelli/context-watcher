@@ -11,6 +11,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "r11a-qualification")]
+use std::time::{Duration, Instant};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -32,6 +34,15 @@ pub struct CwStore {
 }
 
 impl CwStore {
+    #[cfg(feature = "r11a-qualification")]
+    pub fn qualification_lock_wait(&self) -> Result<Duration, StoreError> {
+        let started = Instant::now();
+        let guard = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let waited = started.elapsed();
+        drop(guard);
+        Ok(waited)
+    }
+
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, StoreError> {
         if let Some(parent) = path.as_ref().parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -625,7 +636,7 @@ impl CwStore {
             ],
         )?;
 
-        // Reclaim any blob hashes that were superseded by this turn update and are no longer referenced
+        // New hashes are referenced by the row just written; only superseded hashes need reachability checks.
         let mut candidate_hashes = Vec::new();
         if let Some((old_raw, old_mut, old_resp)) = prev_hashes {
             if let Some(h) = old_raw {
@@ -637,9 +648,6 @@ impl CwStore {
             if let Some(h) = old_resp {
                 candidate_hashes.push(h);
             }
-        }
-        if let Some(h) = raw_req_hash {
-            candidate_hashes.push(h);
         }
         candidate_hashes.sort();
         candidate_hashes.dedup();
@@ -1616,6 +1624,251 @@ mod tests {
     use super::*;
     use cw_core::analyze_turn_from_payload;
     use serde_json::json;
+
+    #[test]
+    fn save_turn_reclaims_only_unreferenced_superseded_blobs() {
+        let store = CwStore::open_in_memory().unwrap();
+        let now = Utc::now();
+        store
+            .upsert_session(&Session {
+                id: "blob_session".into(),
+                parent_session_id: None,
+                harness: HarnessKind::GenericProxy,
+                workspace_root: None,
+                model: "fixture".into(),
+                provider: ProviderKind::OpenAI,
+                title: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        let first_payload = json!({"messages":[{"role":"user","content":"shared"}]});
+        let second_payload = json!({"messages":[{"role":"user","content":"replacement"}]});
+        let third_payload = json!({"messages":[{"role":"user","content":"final"}]});
+        let (first, _) = analyze_turn_from_payload(
+            "blob_turn_1".into(),
+            "blob_session".into(),
+            None,
+            1,
+            &first_payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (second, _) = analyze_turn_from_payload(
+            "blob_turn_2".into(),
+            "blob_session".into(),
+            Some(first.id.clone()),
+            2,
+            &first_payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        store
+            .save_turn(&first, Some(&first_payload), None, None)
+            .unwrap();
+        store
+            .save_turn(&second, Some(&first_payload), None, None)
+            .unwrap();
+        let old_hash: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT raw_request_hash FROM turns WHERE id='blob_turn_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let (updated_first, _) = analyze_turn_from_payload(
+            first.id.clone(),
+            first.session_id.clone(),
+            None,
+            1,
+            &second_payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        store
+            .save_turn(&updated_first, Some(&second_payload), None, None)
+            .unwrap();
+        assert_eq!(
+            store.get_blob(&old_hash).unwrap(),
+            Some(first_payload.clone())
+        );
+        assert_eq!(
+            store.get_turn_raw_payload(&first.id).unwrap(),
+            Some(second_payload.clone())
+        );
+
+        let (updated_second, _) = analyze_turn_from_payload(
+            second.id.clone(),
+            second.session_id.clone(),
+            Some(first.id.clone()),
+            2,
+            &third_payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        store
+            .save_turn(&updated_second, Some(&third_payload), None, None)
+            .unwrap();
+        assert_eq!(store.get_blob(&old_hash).unwrap(), None);
+    }
+
+    #[test]
+    fn missing_and_malformed_turn_records_are_reported_without_panicking() {
+        let store = CwStore::open_in_memory().unwrap();
+        assert!(store.get_turn("missing").unwrap().is_none());
+        assert!(store.get_latest_turn("missing").unwrap().is_none());
+        assert!(store.get_turn_raw_payload("missing").unwrap().is_none());
+
+        let now = Utc::now();
+        store
+            .upsert_session(&Session {
+                id: "malformed".into(),
+                parent_session_id: None,
+                harness: HarnessKind::GenericProxy,
+                workspace_root: None,
+                model: "fixture".into(),
+                provider: ProviderKind::OpenAI,
+                title: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        store.conn.lock().unwrap().execute(
+            "INSERT INTO turns(id,session_id,seq_num,turn_json,created_at) VALUES('bad','malformed',1,'{','now')",
+            [],
+        ).unwrap();
+        assert!(matches!(store.get_turn("bad"), Err(StoreError::Json(_))));
+        assert!(matches!(
+            store.get_latest_turn("malformed"),
+            Err(StoreError::Json(_))
+        ));
+        assert!(matches!(
+            store.list_turns_page("malformed", 10, 0),
+            Err(StoreError::Json(_))
+        ));
+    }
+
+    #[test]
+    fn locked_database_error_is_surfaced_and_turn_write_is_atomic() {
+        use std::time::Duration;
+
+        let path = std::env::temp_dir().join(format!("cw_r11a_locked_{}.db", uuid::Uuid::new_v4()));
+        let store = CwStore::open(&path).unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .busy_timeout(Duration::from_millis(1))
+            .unwrap();
+        let now = Utc::now();
+        store
+            .upsert_session(&Session {
+                id: "locked".into(),
+                parent_session_id: None,
+                harness: HarnessKind::GenericProxy,
+                workspace_root: None,
+                model: "fixture".into(),
+                provider: ProviderKind::OpenAI,
+                title: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        let payload = json!({"messages":[{"role":"user","content":"locked fixture"}]});
+        let (turn, _) = analyze_turn_from_payload(
+            "locked-turn".into(),
+            "locked".into(),
+            None,
+            1,
+            &payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let blocker = rusqlite::Connection::open(&path).unwrap();
+        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
+        let error = store
+            .save_turn(&turn, Some(&payload), None, None)
+            .unwrap_err();
+        assert!(
+            matches!(error, StoreError::Sqlite(rusqlite::Error::SqliteFailure(ref failure, _))
+            if matches!(failure.code, rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked))
+        );
+        assert!(store.get_turn("locked-turn").unwrap().is_none());
+        let blob_count: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(blob_count, 0);
+        blocker.execute_batch("ROLLBACK").unwrap();
+        store.save_turn(&turn, Some(&payload), None, None).unwrap();
+        assert!(store.get_turn("locked-turn").unwrap().is_some());
+        drop(blocker);
+        drop(store);
+        let reopened = CwStore::open(&path).unwrap();
+        assert!(reopened.get_turn("locked-turn").unwrap().is_some());
+        assert_eq!(
+            reopened.get_turn_raw_payload("locked-turn").unwrap(),
+            Some(payload)
+        );
+        drop(reopened);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("db-wal"));
+        let _ = std::fs::remove_file(path.with_extension("db-shm"));
+    }
+
+    #[test]
+    fn interrupted_sqlite_query_returns_an_error() {
+        use std::{
+            sync::{Arc, Barrier},
+            thread,
+            time::Duration,
+        };
+
+        let store = CwStore::open_in_memory().unwrap();
+        let interrupt = store.conn.lock().unwrap().get_interrupt_handle();
+        let query_store = store.clone();
+        let started = Arc::new(Barrier::new(2));
+        let query_started = started.clone();
+        let query = thread::spawn(move || {
+            let conn = query_store.conn.lock().unwrap();
+            query_started.wait();
+            conn.query_row(
+                "WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<100000000) SELECT sum(n) FROM seq",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        });
+        started.wait();
+        thread::sleep(Duration::from_millis(25));
+        interrupt.interrupt();
+        let result = query.join().unwrap();
+        assert!(
+            matches!(result, Err(rusqlite::Error::SqliteFailure(ref failure, _))
+            if failure.code == rusqlite::ErrorCode::OperationInterrupted)
+        );
+    }
 
     #[test]
     fn test_sqlite_store_roundtrip() {

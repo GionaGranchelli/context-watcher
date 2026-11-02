@@ -1,0 +1,447 @@
+{
+  "build": "release",
+  "concurrent": {
+    "api_ingest_writes": {
+      "count": 50,
+      "latency": {
+        "max_ms": 65.538928,
+        "median_ms": 39.453877999999996,
+        "min_ms": 13.5658,
+        "p95_ms": 48.730979,
+        "samples": 50
+      },
+      "throughput_ops_per_second": 22.81556227453787
+    },
+    "errors": 0,
+    "latency": {
+      "max_ms": 230.565596,
+      "median_ms": 2.955839,
+      "min_ms": 0.014988,
+      "p95_ms": 53.089749999999995,
+      "samples": 500
+    },
+    "mutation_store_writes": {
+      "count": 50,
+      "latency": {
+        "max_ms": 3.272277,
+        "median_ms": 0.018896,
+        "min_ms": 0.018535000000000003,
+        "p95_ms": 0.030077,
+        "samples": 50
+      },
+      "throughput_ops_per_second": 22.81556227453787
+    },
+    "operations": 500,
+    "proxy_dry_run_writes": {
+      "count": 50,
+      "latency": {
+        "max_ms": 230.565596,
+        "median_ms": 39.443098000000006,
+        "min_ms": 24.874242000000002,
+        "p95_ms": 64.40688899999999,
+        "samples": 50
+      },
+      "throughput_ops_per_second": 22.81556227453787
+    },
+    "successful_operations": 500,
+    "throughput_ops_per_second": 228.1556227453787,
+    "wall_seconds": 2.191486644
+  },
+  "database": {
+    "db_bytes": 54075392,
+    "wal_bytes": 4169472
+  },
+  "effectiveness_api": {
+    "latency": {
+      "max_ms": 0.028895,
+      "median_ms": 0.020088,
+      "min_ms": 0.019466999999999998,
+      "p95_ms": 0.024145,
+      "samples": 20
+    }
+  },
+  "evidence_read": {
+    "elapsed_ms": 1.8548060000000002,
+    "rows": 1000
+  },
+  "evidence_store_read": {
+    "latency": {
+      "max_ms": 1.4937939999999998,
+      "median_ms": 1.45942,
+      "min_ms": 1.4473660000000002,
+      "p95_ms": 1.48631,
+      "samples": 20
+    },
+    "rows": 1000
+  },
+  "fixture_base_commit": "d5e45a08f1ffb29b753f9b1094859823aed96fb4",
+  "full_history_pagination": {
+    "session_api_latency": {
+      "max_ms": 11.234490999999998,
+      "median_ms": 7.6024639999999994,
+      "min_ms": 5.111494,
+      "p95_ms": 11.234490999999998,
+      "samples": 10
+    },
+    "session_pages": 10,
+    "session_response_bytes": {
+      "max": 268001,
+      "median": 268001,
+      "min": 267995,
+      "p95": 268001,
+      "samples": 10
+    },
+    "turn_api_latency": {
+      "max_ms": 43.560162999999996,
+      "median_ms": 37.449237000000004,
+      "min_ms": 29.101644999999998,
+      "p95_ms": 43.560162999999996,
+      "samples": 10
+    },
+    "turn_pages": 10,
+    "turn_response_bytes": {
+      "max": 1445004,
+      "median": 1445001,
+      "min": 1441680,
+      "p95": 1445004,
+      "samples": 10
+    },
+    "unique_sessions": 10000,
+    "unique_turn_sequences": 10000
+  },
+  "long_context": {
+    "generated_tokens": 351000,
+    "graph_elapsed_ms": 3.425908,
+    "graph_response_bytes": 141293,
+    "graph_status_success": true,
+    "turns": 100
+  },
+  "measured_revision": "d5e45a0",
+  "memory": {
+    "process_peak_rss_kib": 35756
+  },
+  "mutation_api": {
+    "latency": {
+      "max_ms": 0.240294,
+      "median_ms": 0.22235000000000002,
+      "min_ms": 0.21846300000000002,
+      "p95_ms": 0.24002400000000002,
+      "samples": 20
+    },
+    "response_bytes": 26285,
+    "rows": 100
+  },
+  "mutation_read": {
+    "elapsed_ms": 0.138642,
+    "rows": 100
+  },
+  "mutex_lock_wait_probe": {
+    "max_ms": 175.702272,
+    "median_ms": 7.728102,
+    "min_ms": 0.00002,
+    "p95_ms": 20.835816,
+    "samples": 13845
+  },
+  "note": "All rows and payload text are generated. No provider is contacted. Lock wait is sampled by a separate 1ms probe thread during the workload; the probe itself briefly acquires and releases the shared connection mutex.",
+  "query_plans": {
+    "mutations": [
+      "SCAN mutations",
+      "USE TEMP B-TREE FOR ORDER BY"
+    ],
+    "session_page": [
+      "SCAN sessions",
+      "USE TEMP B-TREE FOR ORDER BY"
+    ],
+    "shadow_evidence": [
+      "SCAN shadow_decision_evidence",
+      "USE TEMP B-TREE FOR ORDER BY"
+    ],
+    "turn_page": [
+      "SEARCH turns USING INDEX idx_turns_session_seq (session_id=?)",
+      "USE TEMP B-TREE FOR LAST TERM OF ORDER BY"
+    ]
+  },
+  "raw_payload_api": {
+    "latency": {
+      "max_ms": 0.084099,
+      "median_ms": 0.06344,
+      "min_ms": 0.062579,
+      "p95_ms": 0.072647,
+      "samples": 20
+    },
+    "response_bytes": 11999
+  },
+  "samples_per_read_cell": 20,
+  "scales": [
+    {
+      "graph_api": {
+        "median_ms": 0.23953200000000002,
+        "p95_ms": 0.334182,
+        "response_bytes": 20508
+      },
+      "latest_turn_store_total": {
+        "max_ms": 0.027943,
+        "median_ms": 0.024367,
+        "min_ms": 0.023153999999999997,
+        "p95_ms": 0.02613,
+        "samples": 20
+      },
+      "primary_turns": 10,
+      "session_list_api": {
+        "latency": {
+          "max_ms": 0.163139,
+          "median_ms": 0.07880899999999999,
+          "min_ms": 0.076795,
+          "p95_ms": 0.08756599999999999,
+          "samples": 20
+        },
+        "response_bytes": {
+          "max": 2675,
+          "median": 2675,
+          "min": 2675,
+          "p95": 2675,
+          "samples": 20
+        }
+      },
+      "sessions": 10,
+      "sqlite_pages": {
+        "evidence_query_sql": {
+          "max_ms": 0.012604,
+          "median_ms": 0.005039,
+          "min_ms": 0.004989,
+          "p95_ms": 0.007885,
+          "samples": 20
+        },
+        "mutation_query_sql": {
+          "max_ms": 0.010189,
+          "median_ms": 0.005971,
+          "min_ms": 0.005901,
+          "p95_ms": 0.006713,
+          "samples": 20
+        },
+        "session_page_sql": {
+          "max_ms": 0.15736799999999998,
+          "median_ms": 0.013425,
+          "min_ms": 0.013295000000000001,
+          "p95_ms": 0.016351,
+          "samples": 20
+        },
+        "turn_page_sql": {
+          "max_ms": 0.033824,
+          "median_ms": 0.018014000000000002,
+          "min_ms": 0.017784,
+          "p95_ms": 0.019988,
+          "samples": 20
+        }
+      },
+      "turn_page_api": {
+        "median_ms": 0.261324,
+        "p95_ms": 0.273127,
+        "response_bytes": 14364
+      }
+    },
+    {
+      "graph_api": {
+        "median_ms": 0.9088879999999999,
+        "p95_ms": 1.177176,
+        "response_bytes": 115646
+      },
+      "latest_turn_store_total": {
+        "max_ms": 0.06344,
+        "median_ms": 0.033994,
+        "min_ms": 0.028263,
+        "p95_ms": 0.056587,
+        "samples": 20
+      },
+      "primary_turns": 100,
+      "session_list_api": {
+        "latency": {
+          "max_ms": 0.70874,
+          "median_ms": 0.46964799999999995,
+          "min_ms": 0.456132,
+          "p95_ms": 0.646362,
+          "samples": 20
+        },
+        "response_bytes": {
+          "max": 26795,
+          "median": 26795,
+          "min": 26795,
+          "p95": 26795,
+          "samples": 20
+        }
+      },
+      "sessions": 100,
+      "sqlite_pages": {
+        "evidence_query_sql": {
+          "max_ms": 0.0073030000000000005,
+          "median_ms": 0.005180000000000001,
+          "min_ms": 0.00513,
+          "p95_ms": 0.006713,
+          "samples": 20
+        },
+        "mutation_query_sql": {
+          "max_ms": 0.011561,
+          "median_ms": 0.007193000000000001,
+          "min_ms": 0.006902999999999999,
+          "p95_ms": 0.008446,
+          "samples": 20
+        },
+        "session_page_sql": {
+          "max_ms": 0.23125700000000002,
+          "median_ms": 0.066165,
+          "min_ms": 0.064953,
+          "p95_ms": 0.075873,
+          "samples": 20
+        },
+        "turn_page_sql": {
+          "max_ms": 0.21645,
+          "median_ms": 0.10194299999999999,
+          "min_ms": 0.1,
+          "p95_ms": 0.12159,
+          "samples": 20
+        }
+      },
+      "turn_page_api": {
+        "median_ms": 2.796438,
+        "p95_ms": 3.045729,
+        "response_bytes": 143877
+      }
+    },
+    {
+      "graph_api": {
+        "median_ms": 1.052931,
+        "p95_ms": 1.1662350000000001,
+        "response_bytes": 115870
+      },
+      "latest_turn_store_total": {
+        "max_ms": 0.14817000000000002,
+        "median_ms": 0.131969,
+        "min_ms": 0.12324300000000002,
+        "p95_ms": 0.141628,
+        "samples": 20
+      },
+      "primary_turns": 1000,
+      "session_list_api": {
+        "latency": {
+          "max_ms": 5.7074609999999995,
+          "median_ms": 4.332431000000001,
+          "min_ms": 4.260326,
+          "p95_ms": 4.801288,
+          "samples": 20
+        },
+        "response_bytes": {
+          "max": 267995,
+          "median": 267995,
+          "min": 267995,
+          "p95": 267995,
+          "samples": 20
+        }
+      },
+      "sessions": 1000,
+      "sqlite_pages": {
+        "evidence_query_sql": {
+          "max_ms": 0.007875,
+          "median_ms": 0.00558,
+          "min_ms": 0.0054399999999999995,
+          "p95_ms": 0.0063419999999999995,
+          "samples": 20
+        },
+        "mutation_query_sql": {
+          "max_ms": 0.022622,
+          "median_ms": 0.008106,
+          "min_ms": 0.007835,
+          "p95_ms": 0.013556,
+          "samples": 20
+        },
+        "session_page_sql": {
+          "max_ms": 0.94643,
+          "median_ms": 0.6273369999999999,
+          "min_ms": 0.613921,
+          "p95_ms": 0.693531,
+          "samples": 20
+        },
+        "turn_page_sql": {
+          "max_ms": 1.864936,
+          "median_ms": 0.941641,
+          "min_ms": 0.9231149999999999,
+          "p95_ms": 0.9770270000000001,
+          "samples": 20
+        }
+      },
+      "turn_page_api": {
+        "median_ms": 32.243244,
+        "p95_ms": 33.500672,
+        "response_bytes": 1441680
+      }
+    },
+    {
+      "graph_api": {
+        "median_ms": 1.083189,
+        "p95_ms": 1.164682,
+        "response_bytes": 116076
+      },
+      "latest_turn_store_total": {
+        "max_ms": 0.14416299999999999,
+        "median_ms": 0.129375,
+        "min_ms": 0.12258200000000001,
+        "p95_ms": 0.137079,
+        "samples": 20
+      },
+      "primary_turns": 10000,
+      "session_list_api": {
+        "latency": {
+          "max_ms": 10.222318,
+          "median_ms": 9.074387,
+          "min_ms": 8.894778,
+          "p95_ms": 9.749293,
+          "samples": 20
+        },
+        "response_bytes": {
+          "max": 268001,
+          "median": 268001,
+          "min": 268001,
+          "p95": 268001,
+          "samples": 20
+        }
+      },
+      "sessions": 10000,
+      "sqlite_pages": {
+        "evidence_query_sql": {
+          "max_ms": 0.008637,
+          "median_ms": 0.0074540000000000006,
+          "min_ms": 0.007043,
+          "p95_ms": 0.008546999999999999,
+          "samples": 20
+        },
+        "mutation_query_sql": {
+          "max_ms": 0.044113,
+          "median_ms": 0.016441,
+          "min_ms": 0.013566,
+          "p95_ms": 0.04246,
+          "samples": 20
+        },
+        "session_page_sql": {
+          "max_ms": 5.981851,
+          "median_ms": 5.133557000000001,
+          "min_ms": 5.0088099999999995,
+          "p95_ms": 5.455014,
+          "samples": 20
+        },
+        "turn_page_sql": {
+          "max_ms": 12.617266,
+          "median_ms": 11.881264000000002,
+          "min_ms": 11.697818,
+          "p95_ms": 12.550029,
+          "samples": 20
+        }
+      },
+      "turn_page_api": {
+        "median_ms": 41.286774,
+        "p95_ms": 42.804733999999996,
+        "response_bytes": 1441680
+      }
+    }
+  ],
+  "seed_elapsed_seconds": 122.284470945,
+  "sqlite_version": "3.46.0"
+}

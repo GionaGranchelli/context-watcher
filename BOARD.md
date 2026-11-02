@@ -193,7 +193,7 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-R8** Cache planning and engine capabilities | Done as a conservative preview | Unknown usage stays unknown; physical page unmapping is not implemented. |
 | **CW-R9** Request/response lifecycle telemetry | Done for mock paths | Raw bytes and completed-stream paths are covered by mocks; no real-provider latency measurement exists. |
 | **CW-R10** Web and IDE client behavior | Deferred | Final acceptance task by user request. Web check/build, IntelliJ package build, and proxy API mutation test pass; interactive browser/IDE behavior remains unverified. |
-| **CW-R11** Storage and IO ownership | Partial | Blocking work and pagination are implemented; large-history and full database IO qualification remain open. |
+| **CW-R11** Storage and IO ownership | Partial | CW-R11A measured generated 10K-session/turn storage and page IO, then removed a redundant blob reachability scan (122.28s to 2.29s on the matched fixture). Single-host synthetic qualification is recorded in `docs/CW-R11A-LARGE-HISTORY-QUALIFICATION.md`; broader DB and filesystem IO qualification remains open. |
 | **CW-R12** CI and product qualification | Partial | CI/docs and sanitized multi-task evidence are current; broad quality, performance, and hardware qualification remain open. |
 | **CW-090** Built-in updater | Done (implementation) | Release checksum verification, bounded downloads, safe binary extraction, atomic install, source build, integration refresh, and optional daemon restart are implemented. Six CLI tests and clippy pass; no live update was run against the user's installed binary. |
 | **CW-100** Verified context optimization milestone | Done | Milestone addressing logic risk remediation, claims reconciliation, and focused end-to-end qualification foundation. |
@@ -273,7 +273,7 @@ The checked tickets below are historical implementation milestones. They are not
 
 * **CW-103** Broader Codex/Hermes qualification continuation (CW-112 live qualification and CW-114 multi-task completed).
 * **CW-104** Hardware and local model qualification.
-* **CW-R11** Large-history IO and pagination qualification.
+* **CW-R11** Large-history IO and pagination qualification — CW-R11A implementation and generated baseline are in review; broader qualification remains open.
 * **CW-R12** Broader task-family and provider qualification.
 
 ## CW-119B stateful Responses tail qualification

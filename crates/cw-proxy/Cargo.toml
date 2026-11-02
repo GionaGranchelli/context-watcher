@@ -3,6 +3,9 @@ name = "cw-proxy"
 version.workspace = true
 edition.workspace = true
 
+[features]
+r11a-qualification = ["cw-store/r11a-qualification"]
+
 [dependencies]
 cw-core.workspace = true
 cw-store.workspace = true
@@ -25,4 +28,10 @@ tracing.workspace = true
 
 [dev-dependencies]
 blake3.workspace = true
+rusqlite.workspace = true
+
+[[test]]
+name = "r11a_qualification"
+path = "tests/r11a_qualification.rs"
+required-features = ["r11a-qualification"]
 

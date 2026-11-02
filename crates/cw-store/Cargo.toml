@@ -3,6 +3,9 @@ name = "cw-store"
 version.workspace = true
 edition.workspace = true
 
+[features]
+r11a-qualification = []
+
 [dependencies]
 cw-core.workspace = true
 thiserror.workspace = true

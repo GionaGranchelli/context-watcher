@@ -621,6 +621,7 @@ dependencies = [
  "cw-store",
  "futures",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

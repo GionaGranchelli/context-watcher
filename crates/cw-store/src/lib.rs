@@ -11,6 +11,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "r11a-qualification")]
+use std::time::{Duration, Instant};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -32,6 +34,15 @@ pub struct CwStore {
 }
 
 impl CwStore {
+    #[cfg(feature = "r11a-qualification")]
+    pub fn qualification_lock_wait(&self) -> Result<Duration, StoreError> {
+        let started = Instant::now();
+        let guard = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let waited = started.elapsed();
+        drop(guard);
+        Ok(waited)
+    }
+
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, StoreError> {
         if let Some(parent) = path.as_ref().parent() {
             let _ = std::fs::create_dir_all(parent);
@@ -625,7 +636,7 @@ impl CwStore {
             ],
         )?;
 
-        // Reclaim any blob hashes that were superseded by this turn update and are no longer referenced
+        // New hashes are referenced by the row just written; only superseded hashes need reachability checks.
         let mut candidate_hashes = Vec::new();
         if let Some((old_raw, old_mut, old_resp)) = prev_hashes {
             if let Some(h) = old_raw {
@@ -637,9 +648,6 @@ impl CwStore {
             if let Some(h) = old_resp {
                 candidate_hashes.push(h);
             }
-        }
-        if let Some(h) = raw_req_hash {
-            candidate_hashes.push(h);
         }
         candidate_hashes.sort();
         candidate_hashes.dedup();
@@ -1616,6 +1624,109 @@ mod tests {
     use super::*;
     use cw_core::analyze_turn_from_payload;
     use serde_json::json;
+
+    #[test]
+    fn save_turn_reclaims_only_unreferenced_superseded_blobs() {
+        let store = CwStore::open_in_memory().unwrap();
+        let now = Utc::now();
+        store
+            .upsert_session(&Session {
+                id: "blob_session".into(),
+                parent_session_id: None,
+                harness: HarnessKind::GenericProxy,
+                workspace_root: None,
+                model: "fixture".into(),
+                provider: ProviderKind::OpenAI,
+                title: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
+        let first_payload = json!({"messages":[{"role":"user","content":"shared"}]});
+        let second_payload = json!({"messages":[{"role":"user","content":"replacement"}]});
+        let third_payload = json!({"messages":[{"role":"user","content":"final"}]});
+        let (first, _) = analyze_turn_from_payload(
+            "blob_turn_1".into(),
+            "blob_session".into(),
+            None,
+            1,
+            &first_payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let (second, _) = analyze_turn_from_payload(
+            "blob_turn_2".into(),
+            "blob_session".into(),
+            Some(first.id.clone()),
+            2,
+            &first_payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        store
+            .save_turn(&first, Some(&first_payload), None, None)
+            .unwrap();
+        store
+            .save_turn(&second, Some(&first_payload), None, None)
+            .unwrap();
+        let old_hash: String = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT raw_request_hash FROM turns WHERE id='blob_turn_1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let (updated_first, _) = analyze_turn_from_payload(
+            first.id.clone(),
+            first.session_id.clone(),
+            None,
+            1,
+            &second_payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        store
+            .save_turn(&updated_first, Some(&second_payload), None, None)
+            .unwrap();
+        assert_eq!(
+            store.get_blob(&old_hash).unwrap(),
+            Some(first_payload.clone())
+        );
+        assert_eq!(
+            store.get_turn_raw_payload(&first.id).unwrap(),
+            Some(second_payload.clone())
+        );
+
+        let (updated_second, _) = analyze_turn_from_payload(
+            second.id.clone(),
+            second.session_id.clone(),
+            Some(first.id.clone()),
+            2,
+            &third_payload,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        store
+            .save_turn(&updated_second, Some(&third_payload), None, None)
+            .unwrap();
+        assert_eq!(store.get_blob(&old_hash).unwrap(), None);
+    }
 
     #[test]
     fn test_sqlite_store_roundtrip() {

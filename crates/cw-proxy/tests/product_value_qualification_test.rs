@@ -219,6 +219,58 @@ fn test_cw118_randomized_balanced_schedule() {
 }
 
 #[test]
+fn test_cw120a_offline_schedule_and_report_are_reproducible_without_provider_calls() {
+    let root = workspace_root();
+    let temp_dir = std::env::temp_dir().join(format!("cw120a_readiness_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir).unwrap();
+    let report_path = temp_dir.join("report.json");
+    let output = Command::new("python3")
+        .current_dir(&root)
+        .args([
+            "benchmark/cw120a_offline_readiness.py",
+            "--output",
+            report_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to run CW-120A offline readiness rehearsal");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    assert_eq!(report["provider_calls"], 0);
+    assert_eq!(report["actual_provider_spend_usd"], 0.0);
+    assert_eq!(report["synthetic_costs_are_not_product_evidence"], true);
+    assert_eq!(report["schedule"].as_array().unwrap().len(), 12);
+    assert_eq!(report["sessions"].as_array().unwrap().len(), 12);
+    assert_eq!(
+        report["analysis"]["paired_comparisons"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
+    );
+    assert_eq!(report["analysis"]["total_sessions"], 12);
+    let first_schedule = report["schedule"].clone();
+    let rerun = Command::new("python3")
+        .current_dir(&root)
+        .args([
+            "benchmark/cw120a_offline_readiness.py",
+            "--output",
+            report_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to rerun CW-120A offline readiness rehearsal");
+    assert!(rerun.status.success());
+    let rerun_report: serde_json::Value =
+        serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
+    assert_eq!(rerun_report["schedule"], first_schedule);
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn test_cw118_identical_initial_fixture_hashes() {
     let root = workspace_root();
     let temp_dir = std::env::temp_dir().join(format!("cw118_fixture_{}", uuid::Uuid::new_v4()));

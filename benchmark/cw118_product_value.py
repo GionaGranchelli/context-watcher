@@ -30,6 +30,12 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 PRICING_PROFILES = {
+    "gpt-6-luna": {
+        "uncached_input_per_million": 0.100,
+        "cached_input_per_million": 0.010,
+        "output_per_million": 0.500,
+        "cache_write_surcharge_per_million": 0.125,
+    },
     "gpt-4o-mini": {
         "uncached_input_per_million": 0.150,
         "cached_input_per_million": 0.075,

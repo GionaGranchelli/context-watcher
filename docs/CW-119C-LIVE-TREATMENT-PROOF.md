@@ -1,8 +1,8 @@
 # CW-119C Live Treatment Proof
 
-**Status:** `BLOCKED_SPEND_AUTHORIZATION`  
+**Status:** `TREATMENT_FAILED`
 **Offline runner:** implemented; deterministic local gates passed; PR #28 merged in the qualified baseline
-**Provider calls:** none  
+**Provider calls:** M1 and M2 executed; M2 treatment was not verified
 **Product value:** `NOT_EVALUATED`
 
 ## Scope
@@ -23,11 +23,26 @@ The verified baseline is `c7a5cd0d4665803b1c626fbf4394bd73c195c02b`, the PR #29 
 
 The runner selects `gpt-4o-mini`. The repository pricing profile matches OpenAI's published text rates ($0.15/M uncached input, $0.075/M cached input, $0.60/M output), but OpenAI lists the model as deprecated and schedules `gpt-4o-mini-2024-07-18` shutdown on January 14, 2027, with `gpt-6-luna` as the replacement. A future run must revalidate the exact model alias, account availability, and pricing; this preflight made no model request. Sources: [model and pricing](https://developers.openai.com/api/docs/models/gpt-4o-mini), [deprecation schedule](https://developers.openai.com/api/docs/deprecations).
 
-**Disposition:** `BLOCKED_SPEND_AUTHORIZATION`. The environment has no campaign authorization. No paid run is authorized by this record. No provider-side hard financial ceiling was established or independently verified.
+The initial preflight was `BLOCKED_SPEND_AUTHORIZATION`. Afterward, the user explicitly authorized use of the OpenAI API in the context of the proposed $0.30 nominal M1/M2 campaign. The run used `CW_LIVE_AUTH_USD=0.30`. The supplied dashboard screenshot showed $5.57 credit and a $5 project budget display, but that display was not verified as a hard provider-side cap.
+
+### 2026-11-02 live attempt result
+
+The opt-in test ran at baseline `c7a5cd0d4665803b1c626fbf4394bd73c195c02b` with Codex CLI `0.166.0` and model alias `gpt-4o-mini`. Both M1 and M2 Codex tasks exited successfully, and both independent F1 acceptance runs passed.
+
+| Mode | Wall time | Codex reported input / cached / output tokens | SpendGuard usage-derived cost | Task acceptance |
+| --- | ---: | ---: | ---: | --- |
+| M1 passthrough | 28.874 s | 155,387 / 127,360 / 1,485 | $0.00963 | Pass |
+| M2 committed PinContext | 20.695 s | 165,517 / 137,600 / 987 | $0.00918 | Pass |
+
+The combined SpendGuard amount is $0.01881, calculated from provider-reported token usage with the repository's local pricing profile. It is not an independently reconciled invoice or dashboard charge. Exact admitted-request counts and final per-session SpendGuard state were not retained: the test panicked before writing its final `CW119_PILOT_OUT` report.
+
+The M2 verifier examined three requests after the rule commit, classified zero as eligible, and reported three ineligible requests with egress preservation failures. It reported zero mutated eligible requests. The test failed its required `PASS` assertion. The verifier's emitted status was `BLOCKED_NO_ELIGIBLE_TREATMENT` even though its failure list showed egress mismatches; a deterministic regression test now ensures failures take precedence over that blocked status. Raw and egress payloads were held in an in-memory store and were not persisted after the panic, so the exact changed fields and whether a directive reached any request cannot be established from this run.
+
+**Disposition:** `TREATMENT_FAILED`. The tasks passed, but the intervention was not verified and the egress safety check failed. Stop live runs until the mismatch is explained and corrected. No cache-effect or product-value claim follows from these results.
 
 ## Spend exposure and enforcement
 
-The runner configures a $0.15 per-session ceiling, at most 25 provider requests per session (50 across both sessions), and a $0.01 reservation per request. It launches two Codex subprocesses per session, each with a 300-second timeout. The nominal campaign allocation is $0.30 ($0.15 for M1 and $0.15 for M2). This is not a guaranteed maximum charge: an admitted request can exceed its $0.01 reservation before usage settlement trips the kill switch. Provider-side retries or charges cannot be rolled back. No provider-side hard limit was established or independently verified during preflight.
+The runner configures a $0.15 per-session ceiling, at most 25 provider requests per session (50 across both sessions), and a $0.01 reservation per request. It launches two Codex subprocesses per session, each with a 300-second timeout. The nominal campaign allocation was $0.30 ($0.15 for M1 and $0.15 for M2). This is not a guaranteed maximum charge: an admitted request can exceed its $0.01 reservation before usage settlement trips the kill switch. Provider-side retries or charges cannot be rolled back. No provider-side hard limit was established or independently verified.
 
 ## Authorization-gated command
 

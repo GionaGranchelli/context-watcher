@@ -610,7 +610,9 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
             }
         }
     }
-    let status = if eligible_requests == 0 {
+    let status = if !failures.is_empty() {
+        "FAIL"
+    } else if eligible_requests == 0 {
         "BLOCKED_NO_ELIGIBLE_TREATMENT"
     } else if failures.is_empty()
         && eligible_mutated > 0
@@ -938,6 +940,20 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
         .unwrap();
     let blocked = verify_m2_treatment(&blocked_store, blocked_session, 1, "pin-verifier");
     assert_eq!(blocked["status"], "BLOCKED_NO_ELIGIBLE_TREATMENT");
+
+    let mut changed_tool_egress = blocked_raw;
+    changed_tool_egress["unexpected"] = json!(true);
+    blocked_store
+        .save_wire_egress(
+            "blocked_turn",
+            serde_json::to_string(&changed_tool_egress)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+    let failed = verify_m2_treatment(&blocked_store, blocked_session, 1, "pin-verifier");
+    assert_eq!(failed["status"], "FAIL", "{failed}");
+    assert_eq!(failed["provider_wire_preservation_failures"], 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

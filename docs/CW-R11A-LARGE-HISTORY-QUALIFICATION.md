@@ -2,7 +2,7 @@
 
 **Baseline:** merged PR #28, `d5e45a08f1ffb29b753f9b1094859823aed96fb4`  
 **Scope:** generated, file-backed SQLite data only; no provider calls or user data  
-**Result:** one redundant blob reachability scan was removed. The generated write fixture fell from 122.28 s to 2.30 s (about 53×) with the same fixture generator and row counts.
+**Result:** one redundant blob reachability scan was removed. The generated write fixture fell from 122.28 s to 2.29 s (about 53×) with the same fixture generator and row counts.
 
 ## Architecture and performance map
 
@@ -25,22 +25,22 @@ The first columns below are median/p95 milliseconds. Both runs use the same fixt
 
 | Scale | Session API base → after | Turn API base → after | Graph API base → after | Session SQL base → after | Turn SQL base → after |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 10 sessions / turns | 0.079/0.088 → 0.079/0.107 | 0.261/0.273 → 0.267/0.298 | 0.240/0.334 → 0.249/0.270 | 0.013/0.016 → 0.014/0.017 | 0.018/0.020 → 0.018/0.021 |
-| 100 sessions / turns | 0.470/0.646 → 0.455/0.523 | 2.796/3.046 → 2.720/3.005 | 0.909/1.177 → 0.909/1.040 | 0.066/0.076 → 0.064/0.077 | 0.102/0.122 → 0.099/0.109 |
-| 1,000 sessions / turns | 4.332/4.801 → 4.263/4.492 | 32.243/33.501 → 31.560/32.112 | 1.053/1.166 → 1.066/1.113 | 0.627/0.694 → 0.639/0.700 | 0.942/0.977 → 0.954/1.190 |
-| 10,000 sessions / turns | 9.074/9.749 → 8.935/9.169 | 41.287/42.805 → 41.579/42.180 | 1.083/1.165 → 1.055/1.149 | 5.134/5.455 → 5.126/5.392 | 11.881/12.550 → 11.739/12.351 |
+| 10 sessions / turns | 0.079/0.088 → 0.079/0.143 | 0.261/0.273 → 0.268/0.314 | 0.240/0.334 → 0.245/0.333 | 0.013/0.016 → 0.014/0.021 | 0.018/0.020 → 0.019/0.028 |
+| 100 sessions / turns | 0.470/0.646 → 0.459/0.507 | 2.796/3.046 → 2.717/2.913 | 0.909/1.177 → 0.909/0.985 | 0.066/0.076 → 0.065/0.075 | 0.102/0.122 → 0.101/0.116 |
+| 1,000 sessions / turns | 4.332/4.801 → 4.294/4.986 | 32.243/33.501 → 31.843/34.344 | 1.053/1.166 → 1.059/1.207 | 0.627/0.694 → 0.622/0.647 | 0.942/0.977 → 0.936/0.965 |
+| 10,000 sessions / turns | 9.074/9.749 → 9.026/9.767 | 41.287/42.805 → 42.526/45.243 | 1.083/1.165 → 1.102/1.150 | 5.134/5.455 → 5.422/5.831 | 11.881/12.550 → 12.500/13.296 |
 
 | Additional measurement | Base | After | Notes |
 | --- | ---: | ---: | --- |
-| Seed 10,000 sessions + 10,000 turns | 122.28 s | 2.30 s | Matched synthetic workload; about 53× faster |
-| Concurrent API ingest median / p95 | 39.45 / 48.73 ms | 13.96 / 26.91 ms | 50 writes in 500 mixed operations; 22.8 → 53.2 writes/s |
-| Concurrent proxy dry-run median / p95 | 39.44 / 64.41 ms | 14.64 / 17.07 ms | 50 locally recorded dry-run requests in the mixed workload |
-| Concurrent mutation writes median / p95 | 0.019 / 0.030 ms | 0.019 / 0.036 ms | 50 writes per run |
-| Mutex wait median / p95 | 7.73 / 20.84 ms | 0.00004 / 6.15 ms | Separate 1 ms probe; it competes for the mutex |
-| Peak RSS | 35,756 KiB | 35,848 KiB | Process high-water mark |
+| Seed 10,000 sessions + 10,000 turns | 122.28 s | 2.29 s | Matched synthetic workload; about 53× faster |
+| Concurrent API ingest median / p95 | 39.45 / 48.73 ms | 14.48 / 23.95 ms | 50 writes in 500 mixed operations; 22.8 → 52.1 writes/s |
+| Concurrent proxy dry-run median / p95 | 39.44 / 64.41 ms | 15.18 / 16.81 ms | 50 locally recorded dry-run requests in the mixed workload |
+| Concurrent mutation writes median / p95 | 0.019 / 0.030 ms | 0.019 / 0.305 ms | 50 writes per run; one scheduling outlier |
+| Mutex wait median / p95 | 7.73 / 20.84 ms | 0.00008 / 1.94 ms | Separate 1 ms probe; it competes for the mutex |
+| Peak RSS | 35,756 KiB | 35,576 KiB | Process high-water mark |
 | Database / WAL bytes | 54,075,392 / 4,169,472 | 54,083,584 / 4,169,472 | Same generated workload |
 | 100-turn graph over 351K estimated tokens | 3.43 ms | 3.63 ms | About 141 KB response; no material change |
-| All API pages at 10K sessions/turns | 10,000 unique / 10,000 unique | 10,000 unique / 10,000 unique | 10 pages each; session API 7.60 → 7.39 ms median, turns API 37.45 → 36.28 ms median |
+| All API pages at 10K sessions/turns | 10,000 unique / 10,000 unique | 10,000 unique / 10,000 unique | 10 pages each; session API 7.60 → 8.14 ms median, turns API 37.45 → 38.97 ms median |
 
 API and SQL paging results remain close between revisions; no read-path optimization was justified by this change. Small p95 differences are within the limits of a single 20-sample run on a shared host. The measured write-path improvement is large, while the existing 10K-row page costs remain visible.
 

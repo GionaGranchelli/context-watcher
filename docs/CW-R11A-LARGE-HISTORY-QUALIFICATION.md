@@ -67,24 +67,24 @@ The remaining 10,000-row page cost is visible but is not changed here. The run v
 
 ```bash
 # Deterministic CI-sized concurrent append and pagination check
-rtk cargo test -p cw-proxy --test r11a_smoke
+cargo test -p cw-proxy --test r11a_smoke
 
 # Full workspace deterministic test suite
-rtk cargo check --workspace
-rtk cargo test --workspace
+cargo check --workspace
+cargo test --workspace
 
 # Opt-in generated release benchmark (no provider access)
-CW_R11A_REVISION="$(git rev-parse HEAD)" rtk cargo test -p cw-proxy --release \
+CW_R11A_REVISION="$(git rev-parse HEAD)" cargo test -p cw-proxy --release \
   --features r11a-qualification --test r11a_qualification \
   cw_r11a_large_history_baseline -- --ignored --exact --nocapture
 
 # Static analysis and formatting gates
-rtk cargo clippy --workspace --all-targets -- -D warnings
-rtk cargo fmt --all -- --check
-rtk python3 plugins/hermes/context-watcher/test_plugin.py
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+python3 plugins/hermes/context-watcher/test_plugin.py
 
 # Feature-gated benchmark target lint
-rtk cargo clippy -p cw-proxy --all-targets --features r11a-qualification -- -D warnings
+cargo clippy -p cw-proxy --all-targets --features r11a-qualification -- -D warnings
 ```
 
 The opt-in test writes `target/cw-r11a-baseline.json`. Its source is `crates/cw-proxy/tests/r11a_qualification.rs`; it is ignored and feature-gated so ordinary CI does not run the stress workload.

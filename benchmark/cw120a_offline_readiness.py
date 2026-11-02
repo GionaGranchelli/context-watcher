@@ -25,6 +25,40 @@ TASK_INSTRUCTIONS = {
 }
 
 
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def validate_schedule(schedule):
+    require(len(schedule) == 12, "schedule must contain 12 sessions")
+    require(
+        sum(row["execution_order_position"] == 0 and row["mode"] == "M1" for row in schedule) == 3,
+        "schedule must contain three M1-first blocks",
+    )
+    require(
+        sum(row["execution_order_position"] == 0 and row["mode"] == "M2" for row in schedule) == 3,
+        "schedule must contain three M2-first blocks",
+    )
+    require(len({row["block_id"] for row in schedule}) == 6, "schedule must contain six matched blocks")
+    for task in TASKS:
+        for mode in MODES:
+            require(
+                sum(row["task_family"] == task and row["mode"] == mode for row in schedule) == 3,
+                f"{task} must have three {mode} sessions",
+            )
+    for block_id in {row["block_id"] for row in schedule}:
+        block = [row for row in schedule if row["block_id"] == block_id]
+        require(
+            [row["mode"] for row in block] in (["M1", "M2"], ["M2", "M1"]),
+            f"{block_id} must contain one session per mode",
+        )
+        require(
+            [row["execution_order_position"] for row in block] == [0, 1],
+            f"{block_id} must have ordered positions 0 and 1",
+        )
+
+
 def build_schedule():
     rng = random.Random(SEED)
     blocks = [(task, rep) for task in TASKS for rep in range(REPETITIONS)]
@@ -47,33 +81,34 @@ def build_schedule():
                 "global_schedule_index": index * 2 + position,
                 "seed": SEED,
             })
+    validate_schedule(schedule)
     return schedule
 
 
 def run(output: Path):
     schedule = build_schedule()
-    assert len(schedule) == 12
-    assert sum(row["execution_order_position"] == 0 and row["mode"] == "M1" for row in schedule) == 3
-    assert sum(row["execution_order_position"] == 0 and row["mode"] == "M2" for row in schedule) == 3
-    assert len({row["block_id"] for row in schedule}) == 6
-    for task in TASKS:
-        assert sum(row["task_family"] == task and row["mode"] == "M1" for row in schedule) == 3
-        assert sum(row["task_family"] == task and row["mode"] == "M2" for row in schedule) == 3
-    for block_id in {row["block_id"] for row in schedule}:
-        block = [row for row in schedule if row["block_id"] == block_id]
-        assert [row["mode"] for row in block] in (["M1", "M2"], ["M2", "M1"])
-        assert [row["execution_order_position"] for row in block] == [0, 1]
-
     sessions = []
     for item in schedule:
         session = cw118.simulate_offline_session(item, model="gpt-6-luna")
-        assert session["synthetic_telemetry"] is True
-        assert session["evidence_provenance"] == "SyntheticFixtureReplay"
-        assert session["execution_outcome"]["acceptance_test_passed"] is True
+        require(session["synthetic_telemetry"] is True, "rehearsal session must use synthetic telemetry")
+        require(
+            session["evidence_provenance"] == "SyntheticFixtureReplay",
+            "rehearsal session has unexpected evidence provenance",
+        )
+        require(
+            session["execution_outcome"]["acceptance_test_passed"] is True,
+            f"synthetic acceptance failed for {item['session_id']}",
+        )
         if item["mode"] == "M1":
-            assert session["optimization_evidence"]["mutation_count"] == 0
+            require(
+                session["optimization_evidence"]["mutation_count"] == 0,
+                f"M1 session {item['session_id']} must have zero mutations",
+            )
         else:
-            assert session["optimization_evidence"]["mutation_count"] == 1
+            require(
+                session["optimization_evidence"]["mutation_count"] == 1,
+                f"M2 session {item['session_id']} must have exactly one mutation",
+            )
         sessions.append(session)
 
     indexed = {(s["task_family"], s["repetition"], s["mode"]): s for s in sessions}
@@ -81,9 +116,18 @@ def run(output: Path):
         for repetition in range(REPETITIONS):
             m1 = indexed[(task, repetition, "M1")]
             m2 = indexed[(task, repetition, "M2")]
-            assert m1["fixture_hash"] == m2["fixture_hash"]
+            require(
+                m1["fixture_hash"] == m2["fixture_hash"],
+                f"{task}-R{repetition + 1} modes must start from identical fixtures",
+            )
 
     analysis = cw118.analyze_campaign_results(sessions)
+    require(len(analysis["paired_comparisons"]) == 6, "analysis must contain six M1/M2 pairs")
+    require(
+        analysis["matched_pairs_m1_vs_m0"] == 0
+        and analysis["economic_summary"]["mean_proxy_overhead_ms"] is None,
+        "proxy overhead must remain unevaluated without M0 sessions",
+    )
     report = {
         "campaign": "CW-120A offline readiness rehearsal",
         "source_git_commit": cw118.get_git_commit(),

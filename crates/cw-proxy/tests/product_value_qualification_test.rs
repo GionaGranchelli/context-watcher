@@ -227,6 +227,7 @@ fn test_cw120a_offline_schedule_and_report_are_reproducible_without_provider_cal
     let output = Command::new("python3")
         .current_dir(&root)
         .args([
+            "-O",
             "benchmark/cw120a_offline_readiness.py",
             "--output",
             report_path.to_str().unwrap(),
@@ -243,6 +244,15 @@ fn test_cw120a_offline_schedule_and_report_are_reproducible_without_provider_cal
     assert_eq!(report["provider_calls"], 0);
     assert_eq!(report["actual_provider_spend_usd"], 0.0);
     assert_eq!(report["synthetic_costs_are_not_product_evidence"], true);
+    assert_eq!(report["analysis"]["matched_pairs_m1_vs_m0"], 0);
+    assert_eq!(
+        report["analysis"]["economic_summary"]["mean_proxy_overhead_ms"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        report["analysis"]["causal_decomposition"]["proxy_overhead_effect"],
+        "NOT_EVALUATED: requires matched M0/M1 sessions"
+    );
     assert_eq!(report["schedule"].as_array().unwrap().len(), 12);
     assert_eq!(report["sessions"].as_array().unwrap().len(), 12);
     assert_eq!(
@@ -254,16 +264,35 @@ fn test_cw120a_offline_schedule_and_report_are_reproducible_without_provider_cal
     );
     assert_eq!(report["analysis"]["total_sessions"], 12);
     let first_schedule = report["schedule"].clone();
+    let invalid_schedule = Command::new("python3")
+        .current_dir(&root)
+        .args([
+            "-O",
+            "-c",
+            "import sys; sys.path.insert(0, 'benchmark'); from cw120a_offline_readiness import build_schedule, validate_schedule; schedule = build_schedule(); schedule.pop(); validate_schedule(schedule)",
+        ])
+        .output()
+        .expect("failed to check optimized CW-120A schedule validation");
+    assert!(
+        !invalid_schedule.status.success(),
+        "invalid schedule must fail validation under python -O"
+    );
+
     let rerun = Command::new("python3")
         .current_dir(&root)
         .args([
+            "-O",
             "benchmark/cw120a_offline_readiness.py",
             "--output",
             report_path.to_str().unwrap(),
         ])
         .output()
         .expect("failed to rerun CW-120A offline readiness rehearsal");
-    assert!(rerun.status.success());
+    assert!(
+        rerun.status.success(),
+        "optimized readiness rerun failed: {}",
+        String::from_utf8_lossy(&rerun.stderr)
+    );
     let rerun_report: serde_json::Value =
         serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
     assert_eq!(rerun_report["schedule"], first_schedule);

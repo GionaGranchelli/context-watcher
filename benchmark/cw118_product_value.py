@@ -794,7 +794,7 @@ def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Proxy overhead summary
     overhead_ms_list = [o["proxy_overhead_ms"] for o in overhead_comparisons]
     mean_proxy_overhead_ms = (
-        round(sum(overhead_ms_list) / len(overhead_ms_list), 2) if overhead_ms_list else 0.0
+        round(sum(overhead_ms_list) / len(overhead_ms_list), 2) if overhead_ms_list else None
     )
 
     # All-attempt vs success-conditional accounting
@@ -861,7 +861,11 @@ def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
             "mechanical_effect_tokens": "Zero Historical Pruning applied in M2 (strictly cache-safe mode)",
             "cache_effect": "100% Prefix Preservation verified (kv_break_tokens == 0 across all M2 runs)",
             "behavioral_steering_effect": "Evaluated tail directive; live behavioral impact deferred to Gate B",
-            "proxy_overhead_effect": f"Average proxy processing overhead: {mean_proxy_overhead_ms}ms per session (<2ms per request)",
+            "proxy_overhead_effect": (
+                f"Average proxy processing overhead: {mean_proxy_overhead_ms}ms per session (<2ms per request)"
+                if mean_proxy_overhead_ms is not None
+                else "NOT_EVALUATED: requires matched M0/M1 sessions"
+            ),
         },
         "product_hypothesis_status": "NOT_EVALUATED",
         "product_decision": "NOT_EVALUATED",
@@ -1001,7 +1005,7 @@ All workloads require independent verification via `python3 -m unittest` before 
 
 ## 9. Performance Results
 
-- **Analytical Model Proxy Overhead:** **{econ['mean_proxy_overhead_ms']:.2f} ms** per multi-turn session (simulation model parameter).
+- **Analytical Model Proxy Overhead:** {f"**{econ['mean_proxy_overhead_ms']:.2f} ms** per multi-turn session (simulation model parameter)." if econ['mean_proxy_overhead_ms'] is not None else "NOT EVALUATED (no matched M0/M1 sessions)."}
 - **Empirical Proxy Socket Forwarding Overhead:** Measured at **~1-3 ms** per request on real loopback TCP sockets (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`). The automated test bounds regression at < 150 ms to accommodate CI runner variance without asserting an unverified production SLA.
 - **TTFB:** Unchanged between M0 and M1.
 

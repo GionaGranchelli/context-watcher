@@ -1,7 +1,7 @@
 # CW-119C Live Treatment Proof
 
-**Status:** `BLOCKED_SPEND_AUTHORIZATION`  
-**Offline runner:** implemented; deterministic local gates passed, GitHub CI pending  
+**Status:** `BLOCKED_SPEND_AUTHORIZATION`; local `BLOCKED_PREFLIGHT`  
+**Offline runner:** implemented; deterministic local gates and GitHub CI passed for `f66ae0c`  
 **Provider calls:** none  
 **Product value:** `NOT_EVALUATED`
 
@@ -13,7 +13,7 @@ This is a single treatment proof, not a product value study. A passing result es
 
 ## Offline readiness
 
-The ignored live test is gated by `CW_QUALIFY_LIVE_PILOT=1`, explicit `CW_LIVE_AUTH_USD`, and `OPENAI_API_KEY`. No authorization is present or inferred. In this environment the `codex` executable is unavailable, so local harness readiness is blocked as well. Do not install or invoke a provider as part of offline checks.
+The ignored live test is gated by `CW_QUALIFY_LIVE_PILOT=1`, explicit `CW_LIVE_AUTH_USD`, and `OPENAI_API_KEY`. No authorization is present or inferred. In this environment the `codex` executable is unavailable, so local harness readiness is `BLOCKED_PREFLIGHT` as well. Do not install or invoke a provider as part of offline checks.
 
 ## Spend exposure and enforcement
 

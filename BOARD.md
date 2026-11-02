@@ -285,6 +285,6 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## CW-119C live treatment proof
 
-* **Status:** Offline runner and deterministic checks only; live test is blocked pending fresh spend authorization and local Codex preflight.
+* **Status:** Offline runner and deterministic checks only; 2026-11-02 preflight confirmed Codex installed/configured. Live execution remains blocked pending fresh spend authorization; credentials and proxy isolation were not functionally verified.
 * **Scope:** Codex/OpenAI Responses M1 passthrough versus M2 committed PinContext. No M0 path.
 * **Value:** Not evaluated. One live M1/M2 pair would prove treatment delivery and task acceptance only; repeated matched qualification belongs to CW-120.

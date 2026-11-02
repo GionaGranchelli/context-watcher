@@ -1,7 +1,7 @@
 # CW-119C Live Treatment Proof
 
 **Status:** `BLOCKED_SPEND_AUTHORIZATION`  
-**Offline runner:** implemented; deterministic local gates passed; GitHub CI is tracked on PR #28  
+**Offline runner:** implemented; deterministic local gates passed; PR #28 merged in the qualified baseline
 **Provider calls:** none  
 **Product value:** `NOT_EVALUATED`
 
@@ -15,9 +15,19 @@ This is a single treatment proof, not a product value study. A passing result es
 
 The ignored live test is gated by `CW_QUALIFY_LIVE_PILOT=1`, explicit `CW_LIVE_AUTH_USD`, and `OPENAI_API_KEY`. No authorization is present or inferred. This host has Codex CLI `0.166.0`; `cw readiness` reports Codex as `CONFIGURED`, not functionally verified. The proxy route is available from isolated config, but route and credential isolation remain unverified without an observed proxied request. Do not invoke a provider as part of offline checks.
 
+### 2026-11-02 preflight record
+
+The verified baseline is `c7a5cd0d4665803b1c626fbf4394bd73c195c02b`, the PR #29 merge commit. The local PR #29 head and merged baseline have identical trees. `command -v codex` resolved `/home/gionag/.npm-global/bin/codex`; `codex --version` returned `codex-cli 0.166.0`. `cargo run -p cw-cli -- readiness` returned `UNAUTHORIZED ($0.00 / fail-closed)` and Codex `CONFIGURED`, not functionally verified. The shell had `OPENAI_API_KEY` set, but its value and validity were not inspected; readiness does not verify credentials, route, or credential isolation. `CW_LIVE_AUTH_USD` and `CW_QUALIFY_LIVE_PILOT` were unset.
+
+`cargo test -p cw-proxy --test live_pilot_test` passed 7 deterministic tests; the one real-provider test remained ignored. No provider request was made and spend is $0.00. This includes local proof of the existing SpendGuard admission and failure protections, not a live provider-side spend-limit check.
+
+The runner selects `gpt-4o-mini`. The repository pricing profile matches OpenAI's published text rates ($0.15/M uncached input, $0.075/M cached input, $0.60/M output), but OpenAI lists the model as deprecated and schedules `gpt-4o-mini-2024-07-18` shutdown on January 14, 2027, with `gpt-6-luna` as the replacement. A future run must revalidate the exact model alias, account availability, and pricing; this preflight made no model request. Sources: [model and pricing](https://developers.openai.com/api/docs/models/gpt-4o-mini), [deprecation schedule](https://developers.openai.com/api/docs/deprecations).
+
+**Disposition:** `BLOCKED_SPEND_AUTHORIZATION`. The environment has no campaign authorization. No paid run is authorized by this record. No provider-side hard financial ceiling was established or independently verified.
+
 ## Spend exposure and enforcement
 
-The runner configures a $0.15 per-session ceiling, at most 25 requests per session, and a $0.01 reservation per provider request. The campaign includes two sessions. The configured authorization must be explicit and positive, and must cover the planned exposure; `$0.30` covers the two nominal session ceilings. This is not a guaranteed maximum charge: a request admitted with a $0.01 reservation can incur a larger provider charge before usage is reported and the kill switch trips. Provider-side retries or charges also cannot be rolled back. The user must choose a fresh authorization after reviewing this limitation.
+The runner configures a $0.15 per-session ceiling, at most 25 provider requests per session (50 across both sessions), and a $0.01 reservation per request. It launches two Codex subprocesses per session, each with a 300-second timeout. The nominal campaign allocation is $0.30 ($0.15 for M1 and $0.15 for M2). This is not a guaranteed maximum charge: an admitted request can exceed its $0.01 reservation before usage settlement trips the kill switch. Provider-side retries or charges cannot be rolled back. No provider-side hard limit was established or independently verified during preflight.
 
 ## Authorization-gated command
 

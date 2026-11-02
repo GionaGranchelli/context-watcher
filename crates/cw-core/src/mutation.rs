@@ -856,10 +856,8 @@ fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)
             }
             Value::Array(items) => {
                 if let Some(message) = items.last_mut().filter(|item| {
-                    matches!(
-                        item.get("type").and_then(Value::as_str),
-                        None | Some("message")
-                    ) && item.get("role").and_then(Value::as_str) == Some("user")
+                    crate::normalizer::is_supported_responses_message_type(item)
+                        && item.get("role").and_then(Value::as_str) == Some("user")
                 }) {
                     match message.get_mut("content") {
                         Some(Value::String(text)) => {

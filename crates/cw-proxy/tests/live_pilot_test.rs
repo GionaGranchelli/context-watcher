@@ -445,6 +445,11 @@ fn codex_cmd(
 /// all original items before the final (tail) item are byte-identical and in order.
 fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &str) -> Value {
     let turns = store.list_turns(sid).expect("list M2 turns");
+    let committed_rule = store
+        .list_mutations(sid)
+        .expect("list M2 mutation rules")
+        .into_iter()
+        .find(|rule| rule.id == rule_id && rule.status == MutationStatus::Committed);
     let mut total_after_commit = 0usize;
     let mut eligible_requests = 0usize;
     let mut eligible_mutated = 0usize;
@@ -490,13 +495,28 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         match eligibility {
             cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible => {
                 eligible_requests += 1;
-                if raw.to_string().contains(PIN_DIRECTIVE) {
+                let mut expected_egress = raw.clone();
+                let expected_report = committed_rule.as_ref().map(|rule| {
+                    cw_core::mutation::apply_mutations_to_payload(
+                        &mut expected_egress,
+                        ProviderKind::OpenAI,
+                        std::slice::from_ref(rule),
+                        t.sequence_number,
+                    )
+                });
+                let expected_applied = expected_report
+                    .as_ref()
+                    .is_some_and(|report| report.applied_rule_ids.iter().any(|id| id == rule_id));
+                let already_present = expected_applied && expected_egress == raw;
+                cw_core::local_llm::strip_internal_cw_fields(&mut expected_egress);
+                let exact_wire_match = expected_applied && expected_egress == egress;
+                if already_present {
                     if t.applied_mutation_ids.iter().any(|id| id == rule_id)
                         && !t
                             .skipped_mutations
                             .iter()
                             .any(|skip| skip.rule_id == rule_id)
-                        && raw == egress
+                        && exact_wire_match
                     {
                         idempotent_already_present += 1;
                     } else {
@@ -531,11 +551,11 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
                     ));
                 }
                 let tail_preserved = pin_tail_preserves_input(&raw, &egress);
-                if !tail_preserved {
+                if !tail_preserved || !exact_wire_match {
                     invalid_mutations += 1;
                     wire_preservation_failures += 1;
                     failures.push(format!(
-                        "turn {} changed original input or did not append exactly one pin block",
+                        "turn {} wire differs from the exact authorized transformation or changed original input",
                         t.sequence_number
                     ));
                 }
@@ -765,6 +785,92 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
     assert_eq!(result["eligible_requests"], 1);
     assert_eq!(result["eligible_requests_mutated"], 1);
     assert_eq!(result["ineligible_requests_abstained"], 1);
+
+    let mut valid_eligible_egress = eligible_egress.clone();
+    eligible_egress["unrelated_upstream_field"] = json!("unexpected");
+    store
+        .save_wire_egress(
+            "turn_1",
+            serde_json::to_string(&eligible_egress).unwrap().as_bytes(),
+        )
+        .unwrap();
+    let tampered = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(tampered["status"], "FAIL", "{tampered}");
+    assert_eq!(tampered["provider_wire_preservation_failures"], 1);
+
+    let blocks = valid_eligible_egress["input"][0]["content"]
+        .as_array_mut()
+        .unwrap();
+    let duplicate_block = blocks.last().unwrap().clone();
+    blocks.push(duplicate_block);
+    store
+        .save_wire_egress(
+            "turn_1",
+            serde_json::to_string(&valid_eligible_egress)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+    let duplicate = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(duplicate["status"], "FAIL", "{duplicate}");
+
+    store
+        .save_wire_egress(
+            "turn_1",
+            serde_json::to_string(&valid_eligible_egress)
+                .unwrap()
+                .as_bytes(),
+        )
+        .unwrap();
+
+    let suffix_raw = json!({
+        "model":"gpt-4o-mini",
+        "previous_response_id":"resp_string",
+        "input":[{"role":"user","content":"continue"}]
+    });
+    let rule = store
+        .list_mutations(session_id)
+        .unwrap()
+        .into_iter()
+        .find(|rule| rule.id == "pin-verifier")
+        .unwrap();
+    let mut suffix_egress = suffix_raw.clone();
+    let suffix_report = cw_core::mutation::apply_mutations_to_payload(
+        &mut suffix_egress,
+        ProviderKind::OpenAI,
+        &[rule],
+        3,
+    );
+    let mut suffix_turn = cw_core::analyze_turn_from_payload(
+        "turn_3".into(),
+        session_id.into(),
+        Some("turn_2".into()),
+        3,
+        &suffix_egress,
+        ProviderKind::OpenAI,
+        None,
+        None,
+        None,
+    )
+    .unwrap()
+    .0;
+    suffix_turn.applied_mutation_ids = suffix_report.applied_rule_ids;
+    suffix_turn.skipped_mutations = suffix_report.skipped_rules;
+    store
+        .save_turn(&suffix_turn, Some(&suffix_raw), None, None)
+        .unwrap();
+    suffix_egress["input"][0]["content"] = json!(format!(
+        "{}unexpected",
+        suffix_egress["input"][0]["content"].as_str().unwrap()
+    ));
+    store
+        .save_wire_egress(
+            "turn_3",
+            serde_json::to_string(&suffix_egress).unwrap().as_bytes(),
+        )
+        .unwrap();
+    let suffix = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(suffix["status"], "FAIL", "{suffix}");
 
     let blocked_store = CwStore::open_in_memory().unwrap();
     let blocked_session = "cw119b_verifier_no_treatment";

@@ -1171,9 +1171,9 @@ async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
             .contains("preserve this directive")
     );
     let mut expected_no_type = no_type.clone();
-    expected_no_type["input"][0]["content"] = json!(format!(
+    expected_no_type["input"][0]["content"] = json!(
         "continue without explicit type\n<cw_pinned_context>\n- [qualification]: preserve this directive\n</cw_pinned_context>"
-    ));
+    );
     assert_eq!(no_type_upstream, expected_no_type);
     let no_type_turn = store
         .get_latest_turn(session_id)

@@ -1,0 +1,1151 @@
+{
+  "campaign": "CW-120A offline readiness rehearsal",
+  "source_git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+  "provider_calls": 0,
+  "actual_provider_spend_usd": 0.0,
+  "synthetic_costs_are_not_product_evidence": true,
+  "configuration": {
+    "families": [
+      "F1",
+      "F3"
+    ],
+    "repetitions": 3,
+    "modes": [
+      "M1",
+      "M2"
+    ],
+    "task_instructions": {
+      "F1": "Fix divide_or_fallback so division by zero returns the supplied fallback. Make safe_mean return 0.0 for empty input. Preserve other behavior and run the tests.",
+      "F3": "Implement CachedStore so get caches non-None backing-store values and put updates both cache and backing store. Preserve the tested behavior and run the tests."
+    },
+    "pin_directive": "Keep the requested change focused. Inspect relevant code and tests before editing. Run the relevant tests after editing and report any failures honestly.",
+    "codex_version": "must be recorded and held constant at future execution",
+    "model": "gpt-6-luna"
+  },
+  "model_pricing_profile": "gpt-6-luna standard short-context rates; rehearsal only",
+  "seed": 1202026,
+  "schedule": [
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R2",
+      "session_id": "cw120a_f1_r2_m1",
+      "task_family": "F1",
+      "repetition": 1,
+      "mode": "M1",
+      "execution_order_position": 0,
+      "global_schedule_index": 0,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R2",
+      "session_id": "cw120a_f1_r2_m2",
+      "task_family": "F1",
+      "repetition": 1,
+      "mode": "M2",
+      "execution_order_position": 1,
+      "global_schedule_index": 1,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R3",
+      "session_id": "cw120a_f1_r3_m2",
+      "task_family": "F1",
+      "repetition": 2,
+      "mode": "M2",
+      "execution_order_position": 0,
+      "global_schedule_index": 2,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R3",
+      "session_id": "cw120a_f1_r3_m1",
+      "task_family": "F1",
+      "repetition": 2,
+      "mode": "M1",
+      "execution_order_position": 1,
+      "global_schedule_index": 3,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R3",
+      "session_id": "cw120a_f3_r3_m1",
+      "task_family": "F3",
+      "repetition": 2,
+      "mode": "M1",
+      "execution_order_position": 0,
+      "global_schedule_index": 4,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R3",
+      "session_id": "cw120a_f3_r3_m2",
+      "task_family": "F3",
+      "repetition": 2,
+      "mode": "M2",
+      "execution_order_position": 1,
+      "global_schedule_index": 5,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R1",
+      "session_id": "cw120a_f1_r1_m2",
+      "task_family": "F1",
+      "repetition": 0,
+      "mode": "M2",
+      "execution_order_position": 0,
+      "global_schedule_index": 6,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R1",
+      "session_id": "cw120a_f1_r1_m1",
+      "task_family": "F1",
+      "repetition": 0,
+      "mode": "M1",
+      "execution_order_position": 1,
+      "global_schedule_index": 7,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R2",
+      "session_id": "cw120a_f3_r2_m1",
+      "task_family": "F3",
+      "repetition": 1,
+      "mode": "M1",
+      "execution_order_position": 0,
+      "global_schedule_index": 8,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R2",
+      "session_id": "cw120a_f3_r2_m2",
+      "task_family": "F3",
+      "repetition": 1,
+      "mode": "M2",
+      "execution_order_position": 1,
+      "global_schedule_index": 9,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R1",
+      "session_id": "cw120a_f3_r1_m2",
+      "task_family": "F3",
+      "repetition": 0,
+      "mode": "M2",
+      "execution_order_position": 0,
+      "global_schedule_index": 10,
+      "seed": 1202026
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R1",
+      "session_id": "cw120a_f3_r1_m1",
+      "task_family": "F3",
+      "repetition": 0,
+      "mode": "M1",
+      "execution_order_position": 1,
+      "global_schedule_index": 11,
+      "seed": 1202026
+    }
+  ],
+  "analysis": {
+    "total_sessions": 12,
+    "matched_pairs_m2_vs_m1": 6,
+    "matched_pairs_m1_vs_m0": 0,
+    "accounting": {
+      "all_attempt_total_cost_usd": 0.0999,
+      "success_attempt_total_cost_usd": 0.0999
+    },
+    "economic_summary": {
+      "mean_relative_cost_change": 0.0,
+      "median_relative_cost_change": 0.0,
+      "bootstrap_ci_95": [
+        0.0,
+        0.0
+      ],
+      "positive_savings_count": 0,
+      "cost_increase_count": 0,
+      "neutral_tied_count": 6,
+      "mean_proxy_overhead_ms": 0.0
+    },
+    "by_task_family": {
+      "F1": {
+        "pair_count": 3,
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
+      },
+      "F2": {
+        "pair_count": 0,
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
+      },
+      "F3": {
+        "pair_count": 3,
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
+      },
+      "F4": {
+        "pair_count": 0,
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
+      },
+      "F5": {
+        "pair_count": 0,
+        "mean_relative_cost_change": 0.0,
+        "median_relative_cost_change": 0.0
+      }
+    },
+    "causal_decomposition": {
+      "mechanical_effect_tokens": "Zero Historical Pruning applied in M2 (strictly cache-safe mode)",
+      "cache_effect": "100% Prefix Preservation verified (kv_break_tokens == 0 across all M2 runs)",
+      "behavioral_steering_effect": "Evaluated tail directive; live behavioral impact deferred to Gate B",
+      "proxy_overhead_effect": "Average proxy processing overhead: 0.0ms per session (<2ms per request)"
+    },
+    "product_hypothesis_status": "NOT_EVALUATED",
+    "product_decision": "NOT_EVALUATED",
+    "pre_registered_criteria": {
+      "c1_no_correctness_regression": {
+        "status": "PASS",
+        "evidence": "100% test pass rate in both M1 and M2; 0 regressions"
+      },
+      "c2_positive_economic_direction": {
+        "status": "NOT_EVALUATED",
+        "evidence": "Reserved for Gate B authorized live LLM trials; Gate A offline engineering replay does not assume model iteration cuts."
+      },
+      "c3_median_savings_ge_10_percent": {
+        "status": "NOT_EVALUATED",
+        "evidence": "Reserved for Gate B authorized live LLM trials."
+      },
+      "c4_not_confined_to_single_task": {
+        "status": "NOT_EVALUATED",
+        "evidence": "Reserved for Gate B authorized live LLM trials."
+      },
+      "c5_no_cache_prefix_invalidation": {
+        "status": "PASS",
+        "evidence": "0 prefix breaks; estimated_kv_break_tokens == 0 across all M2 evaluations."
+      },
+      "c6_no_reliability_regression": {
+        "status": "PASS",
+        "evidence": "100% session completion; 0 proxy crashes or SSE stream drops."
+      },
+      "c7_attributed_to_documented_intervention": {
+        "status": "PASS",
+        "evidence": "All evaluated M2 mutations correspond to registered candidates in the overlay engine."
+      }
+    },
+    "paired_comparisons": [
+      {
+        "task_family": "F1",
+        "repetition": 0,
+        "m1_cost": 0.00666,
+        "m2_cost": 0.00666,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
+        "valid_division": true,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F1",
+        "repetition": 1,
+        "m1_cost": 0.00703,
+        "m2_cost": 0.00703,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
+        "valid_division": true,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F1",
+        "repetition": 2,
+        "m1_cost": 0.0074,
+        "m2_cost": 0.0074,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
+        "valid_division": true,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F3",
+        "repetition": 0,
+        "m1_cost": 0.00925,
+        "m2_cost": 0.00925,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
+        "valid_division": true,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F3",
+        "repetition": 1,
+        "m1_cost": 0.00962,
+        "m2_cost": 0.00962,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
+        "valid_division": true,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      },
+      {
+        "task_family": "F3",
+        "repetition": 2,
+        "m1_cost": 0.00999,
+        "m2_cost": 0.00999,
+        "cost_delta_usd": 0.0,
+        "relative_cost_change": 0.0,
+        "valid_division": true,
+        "request_delta": 0,
+        "input_token_delta": 0,
+        "cached_token_delta": 0,
+        "m1_success": true,
+        "m2_success": true,
+        "both_successful": true,
+        "behavioral_steering": true
+      }
+    ]
+  },
+  "sessions": [
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R2",
+      "session_id": "cw120a_f1_r2_m1",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 1,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 0,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 38,
+        "model_request_count": 19,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 237500,
+        "cached_tokens": 209000,
+        "uncached_tokens": 28500,
+        "cache_write_tokens": 0,
+        "output_tokens": 4180,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00703,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 34623,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 23.75
+      },
+      "optimization_evidence": {
+        "candidate_count": 57,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 57
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R2",
+      "session_id": "cw120a_f1_r2_m2",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 1,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 1,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 38,
+        "model_request_count": 19,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 237500,
+        "cached_tokens": 209000,
+        "uncached_tokens": 28500,
+        "cache_write_tokens": 0,
+        "output_tokens": 4180,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00703,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 34633,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 33.25
+      },
+      "optimization_evidence": {
+        "candidate_count": 57,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 56
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_candidate_evaluated"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R3",
+      "session_id": "cw120a_f1_r3_m2",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 2,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 0,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 40,
+        "model_request_count": 20,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 250000,
+        "cached_tokens": 220000,
+        "uncached_tokens": 30000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4400,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.0074,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 36435,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 35.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 60,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 59
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_candidate_evaluated"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R3",
+      "session_id": "cw120a_f1_r3_m1",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 2,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 1,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 40,
+        "model_request_count": 20,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 250000,
+        "cached_tokens": 220000,
+        "uncached_tokens": 30000,
+        "cache_write_tokens": 0,
+        "output_tokens": 4400,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.0074,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 36425,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 25.0
+      },
+      "optimization_evidence": {
+        "candidate_count": 60,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 60
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R3",
+      "session_id": "cw120a_f3_r3_m1",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 2,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 0,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 54,
+        "model_request_count": 27,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 337500,
+        "cached_tokens": 297000,
+        "uncached_tokens": 40500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5940,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00999,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 49033,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 33.75
+      },
+      "optimization_evidence": {
+        "candidate_count": 81,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 81
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R3",
+      "session_id": "cw120a_f3_r3_m2",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 2,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 1,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 54,
+        "model_request_count": 27,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 337500,
+        "cached_tokens": 297000,
+        "uncached_tokens": 40500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5940,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00999,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 49047,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 47.25
+      },
+      "optimization_evidence": {
+        "candidate_count": 81,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 80
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_candidate_evaluated"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R1",
+      "session_id": "cw120a_f1_r1_m2",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 0,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 0,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 36,
+        "model_request_count": 18,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 225000,
+        "cached_tokens": 198000,
+        "uncached_tokens": 27000,
+        "cache_write_tokens": 0,
+        "output_tokens": 3960,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00666,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 32831,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 31.5
+      },
+      "optimization_evidence": {
+        "candidate_count": 54,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 53
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_candidate_evaluated"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F1-R1",
+      "session_id": "cw120a_f1_r1_m1",
+      "task_family": "F1",
+      "task_name": "Bug fixing (math_ops)",
+      "repetition": 0,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 1,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 36,
+        "model_request_count": 18,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 225000,
+        "cached_tokens": 198000,
+        "uncached_tokens": 27000,
+        "cache_write_tokens": 0,
+        "output_tokens": 3960,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00666,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 32822,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 22.5
+      },
+      "optimization_evidence": {
+        "candidate_count": 54,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 54
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R2",
+      "session_id": "cw120a_f3_r2_m1",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 1,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 0,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 52,
+        "model_request_count": 26,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 325000,
+        "cached_tokens": 286000,
+        "uncached_tokens": 39000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5720,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00962,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 47232,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 32.5
+      },
+      "optimization_evidence": {
+        "candidate_count": 78,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 78
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R2",
+      "session_id": "cw120a_f3_r2_m2",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 1,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 1,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 52,
+        "model_request_count": 26,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 325000,
+        "cached_tokens": 286000,
+        "uncached_tokens": 39000,
+        "cache_write_tokens": 0,
+        "output_tokens": 5720,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00962,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 47245,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 45.5
+      },
+      "optimization_evidence": {
+        "candidate_count": 78,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 77
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_candidate_evaluated"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R1",
+      "session_id": "cw120a_f3_r1_m2",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 0,
+      "mode": "M2",
+      "mode_name": "ContextWatcher Cache-Safe Optimized",
+      "execution_order_position": 0,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 50,
+        "model_request_count": 25,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 312500,
+        "cached_tokens": 275000,
+        "uncached_tokens": 37500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5500,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00925,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 45443,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 43.75
+      },
+      "optimization_evidence": {
+        "candidate_count": 75,
+        "decisions": {
+          "apply": 1,
+          "defer": 0,
+          "reject": 0,
+          "noop": 74
+        },
+        "mutation_count": 1,
+        "mutation_types": [
+          "PinContext"
+        ],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": true,
+        "classification": "cache_safe_candidate_evaluated"
+      }
+    },
+    {
+      "campaign_id": "cw120a_product_value_readiness",
+      "block_id": "F3-R1",
+      "session_id": "cw120a_f3_r1_m1",
+      "task_family": "F3",
+      "task_name": "Feature implementation (cache_system)",
+      "repetition": 0,
+      "mode": "M1",
+      "mode_name": "ContextWatcher Passthrough",
+      "execution_order_position": 1,
+      "randomization_seed": 1202026,
+      "git_commit": "27998fdd58068c8815dadd309d7e487e7b6fc9e0",
+      "model": "gpt-6-luna",
+      "provider": "openai_compatible_mock",
+      "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
+      "pricing_profile": {
+        "uncached_input_per_million": 0.1,
+        "cached_input_per_million": 0.01,
+        "output_per_million": 0.5,
+        "cache_write_surcharge_per_million": 0.125
+      },
+      "evidence_provenance": "SyntheticFixtureReplay",
+      "synthetic_telemetry": true,
+      "execution_outcome": {
+        "task_success": true,
+        "acceptance_test_passed": true,
+        "tool_call_count": 50,
+        "model_request_count": 25,
+        "retried_request_count": 0,
+        "failed_request_count": 0,
+        "termination_reason": "completed"
+      },
+      "provider_economics": {
+        "total_input_tokens": 312500,
+        "cached_tokens": 275000,
+        "uncached_tokens": 37500,
+        "cache_write_tokens": 0,
+        "output_tokens": 5500,
+        "cache_hit_ratio": 0.88,
+        "observed_cache_drops": 0,
+        "calculated_cost_usd": 0.00925,
+        "telemetry_complete": true
+      },
+      "performance": {
+        "wall_clock_duration_ms": 45431,
+        "ttfb_ms": 620.0,
+        "proxy_overhead_ms": 31.25
+      },
+      "optimization_evidence": {
+        "candidate_count": 75,
+        "decisions": {
+          "apply": 0,
+          "defer": 0,
+          "reject": 0,
+          "noop": 75
+        },
+        "mutation_count": 0,
+        "mutation_types": [],
+        "estimated_kv_break_tokens": 0,
+        "observed_cache_break": false,
+        "abstention_count": 0,
+        "abstention_reasons": [],
+        "behavioral_steering_injected": false,
+        "classification": "passthrough_control"
+      }
+    }
+  ]
+}

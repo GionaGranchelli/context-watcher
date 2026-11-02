@@ -6,7 +6,7 @@
 //   1. SpendGuard integration and fail-closed budget preconditions
 //   2. Harness readiness suite across Codex, OMP, and Hermes
 //   3. Workload fixture verification and independent acceptance testing
-//   4. Controlled live pilot across Modes M0 (Native), M1 (Passthrough), and M2 (Optimized)
+//   4. Opt-in live comparison of M1 passthrough and M2 committed PinContext
 
 use std::{
     fs,
@@ -397,17 +397,39 @@ const PIN_DIRECTIVE: &str = "OPTIMIZATION_ACTIVE: keep helper signatures concise
 
 /// Runs a harness subprocess with a hard wall-clock bound; the child is killed on timeout.
 async fn run_bounded(mut cmd: tokio::process::Command) -> Result<std::process::Output, String> {
+    run_bounded_for(&mut cmd, SUBPROCESS_TIMEOUT).await
+}
+
+async fn run_bounded_for(
+    cmd: &mut tokio::process::Command,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
     cmd.kill_on_drop(true).stdin(std::process::Stdio::null());
-    match tokio::time::timeout(SUBPROCESS_TIMEOUT, cmd.output()).await {
+    match tokio::time::timeout(timeout, cmd.output()).await {
         Ok(Ok(out)) => Ok(out),
         Ok(Err(e)) => Err(format!("spawn failed: {e}")),
-        Err(_) => Err(format!("killed after {SUBPROCESS_TIMEOUT:?} timeout")),
+        Err(_) => Err(format!("killed after {timeout:?} timeout")),
     }
+}
+
+#[tokio::test]
+async fn test_cw119c_bounded_subprocess_kills_timed_out_child() {
+    let marker = std::env::temp_dir().join(format!("cw119_timeout_{}", uuid::Uuid::new_v4()));
+    let mut child = tokio::process::Command::new("sh");
+    child.args(["-c", "sleep 0.3; touch \"$1\"", "sh"]);
+    child.arg(&marker);
+    assert!(
+        run_bounded_for(&mut child, Duration::from_millis(25))
+            .await
+            .unwrap_err()
+            .contains("killed after")
+    );
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(!marker.exists(), "timed out child was not terminated");
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Mode {
-    M0,
     M1,
     M2,
 }
@@ -920,7 +942,7 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "opt-in real Codex live pilot; requires CW_QUALIFY_LIVE_PILOT=1, CW_LIVE_AUTH_USD and OPENAI_API_KEY"]
-async fn test_cw119_controlled_live_pilot_codex_m0_m1_m2() {
+async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
     if std::env::var("CW_QUALIFY_LIVE_PILOT").as_deref() != Ok("1") {
         panic!("SKIPPED: Live pilot requires explicit opt-in with CW_QUALIFY_LIVE_PILOT=1");
     }
@@ -949,7 +971,7 @@ async fn test_cw119_controlled_live_pilot_codex_m0_m1_m2() {
     });
 
     let mut sessions = Vec::new();
-    for mode in [Mode::M0, Mode::M1, Mode::M2] {
+    for mode in [Mode::M1, Mode::M2] {
         println!("\n=== Executing {mode:?} ===");
         let fixture = F1Fixture::new();
         let home =
@@ -959,9 +981,7 @@ async fn test_cw119_controlled_live_pilot_codex_m0_m1_m2() {
 
         // Proxy (M1/M2) with in-flight per-request SpendGuard enforcement.
         let store = CwStore::open_in_memory().unwrap();
-        let (route, token, proxy_task) = if mode == Mode::M0 {
-            (codex_direct_config_args(), None, None)
-        } else {
+        let (route, token, proxy_task) = {
             let mut cfg = store.get_autopilot_config().unwrap();
             if mode == Mode::M2 {
                 // Activate the mutation path, but only for explicitly committed rules.
@@ -972,6 +992,7 @@ async fn test_cw119_controlled_live_pilot_codex_m0_m1_m2() {
                 cfg.local_model_window_guard = false;
                 cfg.auto_heal_low_health = false;
                 cfg.auto_sync_to_disk = false;
+                cfg.shadow_policy.enabled = false;
                 cfg.shadow_policy.strict_shadow_only = false;
             } else {
                 cfg.enabled = false;
@@ -990,10 +1011,6 @@ async fn test_cw119_controlled_live_pilot_codex_m0_m1_m2() {
             });
             (codex_proxy_config_args(port), Some(token), Some(task))
         };
-        // M0 cannot be metered in flight (no proxy by design). Its admission reserves the
-        // whole session ceiling up front and it is bounded only by the subprocess timeout.
-        let m0_reservation =
-            (mode == Mode::M0).then(|| guard.reserve_session().expect("M0 admission reservation"));
 
         let started = Instant::now();
         let with_env = |mut c: tokio::process::Command| {
@@ -1070,33 +1087,13 @@ async fn test_cw119_controlled_live_pilot_codex_m0_m1_m2() {
         let (i1, c1, o1) = extract_turn_completed_usage(&out1).expect("T1 usage");
         let (i2, c2, o2) = extract_turn_completed_usage(&out2).expect("T2 usage");
         let (inp, cached, out) = (i1 + i2, c1 + c2, o1 + o2);
-        let (cost, enforcement, requests) = if mode == Mode::M0 {
-            let cost = guard
-                .record_usage(
-                    (inp - cached) as u32,
-                    cached as u32,
-                    out as u32,
-                    ProviderKind::OpenAI,
-                    model,
-                )
-                .expect("M0 record usage");
-            m0_reservation.unwrap().commit(0.0).unwrap();
-            (
-                cost,
-                "post_hoc_reconciliation_with_upfront_ceiling_reservation_and_timeout",
-                None,
-            )
-        } else {
-            (
-                guard.session_spent_usd(&sid),
-                "in_flight_per_request_admission_and_settlement",
-                Some(guard.session_request_count(&sid)),
-            )
-        };
+        let cost = guard.session_spent_usd(&sid);
+        let requests = guard.session_request_count(&sid);
+        let enforcement = "in_flight_per_request_admission_and_settlement";
         let treatment = rule_id
             .as_deref()
             .map(|r| verify_m2_treatment(&store, &sid, first_t2_seq, r));
-        if mode == Mode::M1 && t2_ok {
+        if mode == Mode::M1 && t2_ok && acceptance {
             mark_functionally_verified(&mut readiness, format!("proxied session {sid}"));
         }
         let _ = fs::remove_dir_all(&home);
@@ -1111,7 +1108,7 @@ async fn test_cw119_controlled_live_pilot_codex_m0_m1_m2() {
             "cached_tokens": cached,
             "output_tokens": out,
             "provider_cost_usd": cost,
-            "cost_source": if mode == Mode::M0 { "codex_turn_completed_usage" } else { "proxy_observed_provider_usage" },
+            "cost_source": "proxy_observed_provider_usage",
             "codex_reported_usage": {"input": inp, "cached": cached, "output": out},
             "proxy_admitted_requests": requests,
             "spend_enforcement": enforcement,
@@ -1124,6 +1121,25 @@ async fn test_cw119_controlled_live_pilot_codex_m0_m1_m2() {
             "{mode:?} T2: {}",
             String::from_utf8_lossy(&t2.stderr)
         );
+        assert!(
+            acceptance,
+            "{mode:?} failed the independent F1 acceptance test"
+        );
+        assert!(
+            !guard.is_killswitch_tripped(),
+            "spend guard kill switch tripped"
+        );
+        assert!(
+            requests > 0,
+            "no provider requests were admitted through the proxy"
+        );
+        if mode == Mode::M2 {
+            let treatment = treatment.as_ref().expect("M2 treatment report");
+            assert_eq!(
+                treatment["status"], "PASS",
+                "M2 treatment unverified: {treatment}"
+            );
+        }
         if let Some(t) = treatment {
             assert_eq!(
                 t["treatment_verified"], true,

@@ -2,7 +2,7 @@
 
 **Baseline:** merged PR #28, `d5e45a08f1ffb29b753f9b1094859823aed96fb4`  
 **Scope:** generated, file-backed SQLite data only; no provider calls or user data  
-**Result:** one redundant blob reachability scan was removed. The generated write fixture fell from 123.20 s to 2.32 s (about 53×) with the same fixture generator and row counts.
+**Result:** one redundant blob reachability scan was removed. The generated write fixture fell from 123.20 s to 2.39 s (about 51×) with the same fixture generator and row counts.
 
 ## Method
 
@@ -14,13 +14,13 @@ The matched before run used the base commit's `save_turn` implementation with th
 
 | Measurement | Base | After | Notes |
 | --- | ---: | ---: | --- |
-| Seed 10,000 sessions + 10,000 turns | 123.20 s | 2.32 s | Matched synthetic workload; about 53× faster |
-| Concurrent API ingest median / p95 | 20.15 / 43.32 ms | 6.68 / 17.32 ms | 50 writes in a mixed workload |
-| Concurrent proxy dry-run median / p95 | 29.73 / 56.23 ms | 13.98 / 15.94 ms | Records locally and returns before upstream dispatch |
-| Mutex wait median / p95 | 7.95 / 18.43 ms | 0.10 / 13.40 ms | Separate 1 ms sampling thread; probe affects the workload |
-| Session page API at 10,000 rows | 7.00 ms median | 7.03 ms median | 1,000-row page, about 268 KB response |
-| Turn page API at 10,000 turns | 18.89 ms median | 18.48 ms median | 1,000-row page, about 1.44 MB response |
-| 100-turn graph over ≥350K estimated tokens | — | 2.70 ms | About 141 KB response |
+| Seed 10,000 sessions + 10,000 turns | 123.20 s | 2.39 s | Matched synthetic workload; about 51× faster |
+| Concurrent API ingest median / p95 | 20.15 / 43.32 ms | 7.12 / 18.19 ms | 50 writes in a mixed workload |
+| Concurrent proxy dry-run median / p95 | 29.73 / 56.23 ms | 14.87 / 20.17 ms | Records locally and returns before upstream dispatch |
+| Mutex wait median / p95 | 7.95 / 18.43 ms | 0.14 / 4.92 ms | Separate 1 ms sampling thread; probe affects the workload |
+| Session page API at 10,000 rows | 7.00 ms median | 6.87 ms median | 1,000-row page, about 268 KB response |
+| Turn page API at 10,000 turns | 18.89 ms median | 18.63 ms median | 1,000-row page, about 1.44 MB response |
+| 100-turn graph over ≥350K estimated tokens | — | 2.86 ms | About 141 KB response |
 
 In `save_turn`, every newly inserted raw request hash was added to the candidate list for orphan reclamation. The code then queried whether any turn referenced that hash, even though the just-written turn necessarily did. With no index on the three blob-reference columns, repeated inserts performed a growing table scan. The fix checks only hashes from the prior row version; those are the only candidates that can have become unreachable. A store regression test verifies that a shared old blob survives the first replacement and is reclaimed when the last reference moves.
 

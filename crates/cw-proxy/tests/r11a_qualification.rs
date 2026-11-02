@@ -9,6 +9,7 @@ use cw_store::CwStore;
 use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -117,6 +118,30 @@ async fn request(
     let success = response.status().is_success();
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     (started.elapsed(), body.len(), success)
+}
+
+async fn request_array(
+    app: &Router,
+    token: &str,
+    uri: &str,
+) -> (Duration, usize, bool, Vec<Value>) {
+    let req = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header("host", "127.0.0.1:4400")
+        .header("authorization", format!("Bearer {token}"))
+        .header("content-type", "application/json")
+        .body(Body::empty())
+        .unwrap();
+    let started = Instant::now();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let success = response.status().is_success();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let items = serde_json::from_slice::<Value>(&body)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    (started.elapsed(), body.len(), success, items)
 }
 
 async fn proxy_dry_run(app: &Router, token: &str, content: &str) -> (Duration, bool) {
@@ -375,15 +400,17 @@ async fn cw_r11a_large_history_baseline() {
         let page_limit = target.min(1000);
         let page_offset = target.saturating_sub(page_limit);
         for _ in 0..SAMPLE_COUNT {
-            let (elapsed, bytes, success) = request(
+            let (elapsed, bytes, success, items) = request_array(
                 &api,
                 &token,
                 &format!("/api/v1/sessions?limit={page_limit}&offset={page_offset}"),
-                "GET",
-                Body::empty(),
             )
             .await;
             assert!(success, "session list API failed");
+            assert_eq!(
+                items.len(),
+                page_limit.min(target.saturating_sub(page_offset))
+            );
             api_rows.push(elapsed);
             api_bytes.push(bytes);
 
@@ -398,15 +425,17 @@ async fn cw_r11a_large_history_baseline() {
             assert!(success, "session graph API failed");
             graph_sizes.push((elapsed, bytes));
 
-            let (elapsed, bytes, success) = request(
+            let (elapsed, bytes, success, items) = request_array(
                 &api,
                 &token,
                 &format!("/api/v1/sessions/{PRIMARY_SESSION}/turns?limit={page_limit}&offset={page_offset}"),
-                "GET",
-                Body::empty(),
             )
             .await;
             assert!(success, "turn page API failed");
+            assert_eq!(
+                items.len(),
+                page_limit.min(target.saturating_sub(page_offset))
+            );
             turns_sizes.push((elapsed, bytes));
 
             let started = Instant::now();
@@ -426,6 +455,54 @@ async fn cw_r11a_large_history_baseline() {
             "sqlite_pages": query_sql_ms(&sqlite, target, target),
         }));
     }
+
+    let mut session_ids = HashSet::new();
+    let mut session_page_times = Vec::new();
+    let mut session_page_bytes = Vec::new();
+    let mut turn_sequences = HashSet::new();
+    let mut turn_page_times = Vec::new();
+    let mut turn_page_bytes = Vec::new();
+    for offset in (0..10_000).step_by(1000) {
+        let (elapsed, bytes, success, items) = request_array(
+            &api,
+            &token,
+            &format!("/api/v1/sessions?limit=1000&offset={offset}"),
+        )
+        .await;
+        assert!(success, "full session page {offset} failed");
+        assert_eq!(items.len(), 1000);
+        for item in items {
+            assert!(session_ids.insert(item["id"].as_str().unwrap().to_owned()));
+        }
+        session_page_times.push(elapsed);
+        session_page_bytes.push(bytes);
+
+        let (elapsed, bytes, success, items) = request_array(
+            &api,
+            &token,
+            &format!("/api/v1/sessions/{PRIMARY_SESSION}/turns?limit=1000&offset={offset}"),
+        )
+        .await;
+        assert!(success, "full turn page {offset} failed");
+        assert_eq!(items.len(), 1000);
+        for item in items {
+            assert!(turn_sequences.insert(item["sequence_number"].as_u64().unwrap()));
+        }
+        turn_page_times.push(elapsed);
+        turn_page_bytes.push(bytes);
+    }
+    assert_eq!(session_ids.len(), 10_000);
+    assert_eq!(turn_sequences, (1..=10_000).collect());
+    let full_history_pagination = json!({
+        "session_pages":session_page_times.len(),
+        "unique_sessions":session_ids.len(),
+        "session_api_latency":distribution(&session_page_times),
+        "session_response_bytes":distribution_usize(&session_page_bytes),
+        "turn_pages":turn_page_times.len(),
+        "unique_turn_sequences":turn_sequences.len(),
+        "turn_api_latency":distribution(&turn_page_times),
+        "turn_response_bytes":distribution_usize(&turn_page_bytes)
+    });
 
     add_session(&store, LONG_SESSION, 20_000);
     let mut generated_tokens = 0u64;
@@ -468,6 +545,14 @@ async fn cw_r11a_large_history_baseline() {
     .await;
     let long_latest = store.get_latest_turn(LONG_SESSION).unwrap().unwrap();
     assert!(generated_tokens >= 350_000 && long_latest.token_usage.input_tokens >= 3_500);
+    let long_raw = store
+        .get_turn_raw_payload(&long_latest.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        long_raw["messages"][0]["content"].as_str().unwrap().len(),
+        generated_context(3_500, 100).len()
+    );
     let evidence_timer = Instant::now();
     let evidence_count = store
         .list_shadow_decision_evidence(Some(PRIMARY_SESSION))
@@ -534,6 +619,7 @@ async fn cw_r11a_large_history_baseline() {
     let throughput_times = Arc::new(Mutex::new(Vec::<Duration>::new()));
     let ingest_times = Arc::new(Mutex::new(Vec::<Duration>::new()));
     let proxy_write_times = Arc::new(Mutex::new(Vec::<Duration>::new()));
+    let mutation_write_times = Arc::new(Mutex::new(Vec::<Duration>::new()));
     let success_count = Arc::new(AtomicUsize::new(0));
     let errors = Arc::new(AtomicUsize::new(0));
     let mut tasks = Vec::new();
@@ -625,6 +711,87 @@ async fn cw_r11a_large_history_baseline() {
             }
         }));
     }
+    {
+        let latest_store = store.clone();
+        let times = throughput_times.clone();
+        let ok = success_count.clone();
+        let failures = errors.clone();
+        tasks.push(tokio::spawn(async move {
+            for _ in 0..50 {
+                let started = Instant::now();
+                let success = latest_store
+                    .get_latest_turn(PRIMARY_SESSION)
+                    .is_ok_and(|turn| turn.is_some());
+                if success {
+                    ok.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    failures.fetch_add(1, Ordering::Relaxed);
+                }
+                times.lock().unwrap().push(started.elapsed());
+            }
+        }));
+    }
+    {
+        let app = api.clone();
+        let token = token.clone();
+        let turn_id = latest_id.clone();
+        let times = throughput_times.clone();
+        let ok = success_count.clone();
+        let failures = errors.clone();
+        tasks.push(tokio::spawn(async move {
+            for _ in 0..50 {
+                let (elapsed, _, success) = request(
+                    &app,
+                    &token,
+                    &format!("/api/v1/sessions/{LONG_SESSION}/turns/{turn_id}/raw"),
+                    "GET",
+                    Body::empty(),
+                )
+                .await;
+                if success {
+                    ok.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    failures.fetch_add(1, Ordering::Relaxed);
+                }
+                times.lock().unwrap().push(elapsed);
+            }
+        }));
+    }
+    {
+        let mutation_store = store.clone();
+        let times = throughput_times.clone();
+        let write_times = mutation_write_times.clone();
+        let ok = success_count.clone();
+        let failures = errors.clone();
+        tasks.push(tokio::spawn(async move {
+            for index in 0..50 {
+                let started = Instant::now();
+                let success = mutation_store
+                    .save_mutation(&MutationRule {
+                        id: format!("r11a-concurrent-mutation-{index}"),
+                        session_id: PRIMARY_SESSION.into(),
+                        op: MutationOp::PinContext {
+                            label: "concurrent fixture".into(),
+                            content: format!("generated concurrent pin {index}"),
+                            source_node_id: None,
+                        },
+                        status: MutationStatus::Committed,
+                        estimated_saved_tokens: 0,
+                        estimated_kv_break_tokens: 0,
+                        created_at: timestamp(30_000 + index as i64),
+                    })
+                    .is_ok();
+                let elapsed = started.elapsed();
+                if success {
+                    ok.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    failures.fetch_add(1, Ordering::Relaxed);
+                }
+                times.lock().unwrap().push(elapsed);
+                write_times.lock().unwrap().push(elapsed);
+            }
+        }));
+    }
     for task in tasks {
         task.await.unwrap();
     }
@@ -635,10 +802,33 @@ async fn cw_r11a_large_history_baseline() {
     let concurrent_times = throughput_times.lock().unwrap().clone();
     let ingest_samples = ingest_times.lock().unwrap().clone();
     let proxy_write_samples = proxy_write_times.lock().unwrap().clone();
+    let mutation_write_samples = mutation_write_times.lock().unwrap().clone();
     let db_bytes = fs::metadata(&temp.0).map(|m| m.len()).unwrap_or(0);
     let wal_path = PathBuf::from(format!("{}-wal", temp.0.display()));
     let wal_bytes = fs::metadata(wal_path).map(|m| m.len()).unwrap_or(0);
     let sqlite = Connection::open(&temp.0).unwrap();
+    let concurrent_turn_count: i64 = sqlite
+        .query_row(
+            "SELECT COUNT(*) FROM turns WHERE session_id=?1",
+            params![PRIMARY_SESSION],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(concurrent_turn_count, 10_100);
+    let concurrent_mutations = store.list_mutations(PRIMARY_SESSION).unwrap();
+    assert_eq!(concurrent_mutations.len(), 150);
+    assert!(
+        concurrent_mutations
+            .iter()
+            .all(|rule| rule.status == MutationStatus::Committed)
+    );
+    assert_eq!(
+        store
+            .list_shadow_decision_evidence(Some(PRIMARY_SESSION))
+            .unwrap()
+            .len(),
+        1000
+    );
     let sqlite_version: String = sqlite
         .query_row("SELECT sqlite_version()", [], |row| row.get(0))
         .unwrap();
@@ -650,6 +840,7 @@ async fn cw_r11a_large_history_baseline() {
         "samples_per_read_cell":SAMPLE_COUNT,
         "seed_elapsed_seconds":seed_time.as_secs_f64(),
         "scales":reports,
+        "full_history_pagination":full_history_pagination,
         "long_context":{"turns":100,"generated_tokens":generated_tokens,"graph_status_success":long_graph.2,"graph_elapsed_ms":long_graph.0.as_secs_f64()*1000.0,"graph_response_bytes":long_graph.1},
         "mutation_read":{"rows":mutation_count,"elapsed_ms":mutation_read.as_secs_f64()*1000.0},
         "evidence_read":{"rows":evidence_count,"elapsed_ms":evidence_read.as_secs_f64()*1000.0},
@@ -657,7 +848,7 @@ async fn cw_r11a_large_history_baseline() {
         "effectiveness_api":{"latency":distribution(&effectiveness_api_times)},
         "raw_payload_api":{"latency":distribution(&raw_api_times),"response_bytes":raw_api_bytes},
         "evidence_store_read":{"rows":evidence_count,"latency":distribution(&evidence_times)},
-        "concurrent":{"successful_operations":success_count.load(Ordering::Relaxed),"errors":errors.load(Ordering::Relaxed),"operations":concurrent_times.len(),"wall_seconds":concurrent_wall.as_secs_f64(),"latency":distribution(&concurrent_times),"throughput_ops_per_second":concurrent_times.len() as f64 / concurrent_wall.as_secs_f64(),"api_ingest_writes":{"count":ingest_samples.len(),"latency":distribution(&ingest_samples),"throughput_ops_per_second":ingest_samples.len() as f64 / concurrent_wall.as_secs_f64()},"proxy_dry_run_writes":{"count":proxy_write_samples.len(),"latency":distribution(&proxy_write_samples),"throughput_ops_per_second":proxy_write_samples.len() as f64 / concurrent_wall.as_secs_f64()}},
+        "concurrent":{"successful_operations":success_count.load(Ordering::Relaxed),"errors":errors.load(Ordering::Relaxed),"operations":concurrent_times.len(),"wall_seconds":concurrent_wall.as_secs_f64(),"latency":distribution(&concurrent_times),"throughput_ops_per_second":concurrent_times.len() as f64 / concurrent_wall.as_secs_f64(),"api_ingest_writes":{"count":ingest_samples.len(),"latency":distribution(&ingest_samples),"throughput_ops_per_second":ingest_samples.len() as f64 / concurrent_wall.as_secs_f64()},"proxy_dry_run_writes":{"count":proxy_write_samples.len(),"latency":distribution(&proxy_write_samples),"throughput_ops_per_second":proxy_write_samples.len() as f64 / concurrent_wall.as_secs_f64()},"mutation_store_writes":{"count":mutation_write_samples.len(),"latency":distribution(&mutation_write_samples),"throughput_ops_per_second":mutation_write_samples.len() as f64 / concurrent_wall.as_secs_f64()}},
         "mutex_lock_wait_probe":distribution(&lock_waits),
         "memory":{"process_peak_rss_kib":proc_memory_kib()},
         "database":{"db_bytes":db_bytes,"wal_bytes":wal_bytes},

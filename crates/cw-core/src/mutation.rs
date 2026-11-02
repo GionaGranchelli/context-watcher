@@ -855,10 +855,12 @@ fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)
                 return true;
             }
             Value::Array(items) => {
-                if let Some(message) = items
-                    .last_mut()
-                    .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-                {
+                if let Some(message) = items.last_mut().filter(|item| {
+                    matches!(
+                        item.get("type").and_then(Value::as_str),
+                        None | Some("message")
+                    ) && item.get("role").and_then(Value::as_str) == Some("user")
+                }) {
                     match message.get_mut("content") {
                         Some(Value::String(text)) => {
                             text.push_str(&block);
@@ -1017,22 +1019,28 @@ mod tests {
         let mut payload = json!({
             "model": "test",
             "previous_response_id": "resp_previous",
-            "input": [{"type":"message","role":"user","content":[{"type":"input_text","text":"original"}]}]
+            "input": [
+                {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call_1","output":"result"},
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"original"}]}
+            ]
         });
         let original_prefix = payload["input"].clone();
         let report =
             apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
         assert_eq!(report.applied_rule_ids, ["pin-1"]);
         assert_eq!(payload["previous_response_id"], "resp_previous");
+        assert_eq!(payload["input"][0], original_prefix[0]);
+        assert_eq!(payload["input"][1], original_prefix[1]);
         assert_eq!(
-            payload["input"][0]["content"][0],
-            original_prefix[0]["content"][0]
+            payload["input"][2]["content"][0],
+            original_prefix[2]["content"][0]
         );
         let retry_report =
             apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
         assert_eq!(retry_report.applied_rule_ids, ["pin-1"]);
         assert_eq!(
-            payload["input"][0]["content"]
+            payload["input"][2]["content"]
                 .as_array()
                 .unwrap()
                 .iter()

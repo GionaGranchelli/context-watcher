@@ -1313,6 +1313,12 @@ mod mutation_eligibility_tests {
             MutationEligibility::StatefulToolOnlyOrNoUserTail
         );
 
+        let function_call_only = json!({"previous_response_id":"resp_previous","input":[{"type":"function_call","call_id":"call_1","name":"tool","arguments":"{}"}]});
+        assert_eq!(
+            classify_mutation_eligibility(&function_call_only, ProviderKind::OpenAI),
+            MutationEligibility::StatefulToolOnlyOrNoUserTail
+        );
+
         let unknown_item = json!({"previous_response_id":"resp_previous","input":[{"type":"unknown","role":"user","content":"do not mutate"}]});
         assert_eq!(
             classify_mutation_eligibility(&unknown_item, ProviderKind::OpenAI),

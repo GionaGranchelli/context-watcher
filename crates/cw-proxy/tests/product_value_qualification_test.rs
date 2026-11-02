@@ -1036,6 +1036,35 @@ async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
     let mut autopilot = store.get_autopilot_config().unwrap_or_default();
     autopilot.enabled = true;
     store.set_autopilot_config(&autopilot).unwrap();
+    let raw = json!({
+        "model":"gpt-4o-mini",
+        "previous_response_id":"resp_previous_exact",
+        "input":[{"type":"message","role":"user","content":"before rule commit"}]
+    });
+    let precommit_response = reqwest::Client::new()
+        .post(format!("{proxy_url}/openai/v1/responses"))
+        .header("x-cw-session-id", session_id)
+        .header("x-cw-control-token", &control_token)
+        .json(&raw)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(precommit_response.status(), 200);
+    assert_eq!(received.lock().unwrap()[0].1, raw);
+    let precommit_turn = store
+        .get_latest_turn(session_id)
+        .unwrap()
+        .expect("pre-commit request must persist");
+    assert!(precommit_turn.applied_mutation_ids.is_empty());
+    let precommit_egress: serde_json::Value = serde_json::from_slice(
+        &store
+            .get_wire_egress(&precommit_turn.id)
+            .unwrap()
+            .expect("pre-commit wire egress must persist"),
+    )
+    .unwrap();
+    assert_eq!(precommit_egress, raw);
+
     store
         .save_mutation(&MutationRule {
             id: "cw119b_pin".into(),
@@ -1066,12 +1095,12 @@ async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
         .await
         .unwrap();
     assert_eq!(response.status(), 200);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 
     let upstream = {
         let captured = received.lock().unwrap();
-        assert_eq!(captured.len(), 1);
-        let (headers, upstream) = &captured[0];
+        assert_eq!(captured.len(), 2);
+        let (headers, upstream) = &captured[1];
         assert!(headers.get("x-cw-control-token").is_none());
         assert!(headers.get("x-cw-session-id").is_none());
         assert_eq!(upstream["previous_response_id"], "resp_previous_exact");
@@ -1081,6 +1110,15 @@ async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
         );
         assert_eq!(upstream["input"][0]["content"].as_array().unwrap().len(), 2);
         assert!(upstream.to_string().contains("preserve this directive"));
+        let mut expected = raw.clone();
+        expected["input"][0]["content"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({
+                "type":"input_text",
+                "text":"\n<cw_pinned_context>\n- [qualification]: preserve this directive\n</cw_pinned_context>"
+            }));
+        assert_eq!(*upstream, expected);
         upstream.clone()
     };
 
@@ -1102,6 +1140,60 @@ async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
     .unwrap();
     assert_eq!(egress, upstream);
 
+    let no_type = json!({
+        "model":"gpt-4o-mini",
+        "previous_response_id":"resp_previous_exact",
+        "input":[{"role":"user","content":"continue without explicit type"}]
+    });
+    let response = reqwest::Client::new()
+        .post(format!("{proxy_url}/openai/v1/responses"))
+        .header("x-cw-session-id", session_id)
+        .header("x-cw-control-token", &control_token)
+        .json(&no_type)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let no_type_upstream = received.lock().unwrap()[2].1.clone();
+    assert_eq!(
+        no_type_upstream["previous_response_id"],
+        "resp_previous_exact"
+    );
+    assert!(
+        no_type_upstream["input"][0]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("continue without explicit type")
+    );
+    assert!(
+        no_type_upstream
+            .to_string()
+            .contains("preserve this directive")
+    );
+    let mut expected_no_type = no_type.clone();
+    expected_no_type["input"][0]["content"] = json!(format!(
+        "continue without explicit type\n<cw_pinned_context>\n- [qualification]: preserve this directive\n</cw_pinned_context>"
+    ));
+    assert_eq!(no_type_upstream, expected_no_type);
+    let no_type_turn = store
+        .get_latest_turn(session_id)
+        .unwrap()
+        .expect("no-type user tail turn must persist");
+    assert!(
+        no_type_turn
+            .applied_mutation_ids
+            .iter()
+            .any(|id| id == "cw119b_pin")
+    );
+    let no_type_egress: serde_json::Value = serde_json::from_slice(
+        &store
+            .get_wire_egress(&no_type_turn.id)
+            .unwrap()
+            .expect("no-type wire egress must persist"),
+    )
+    .unwrap();
+    assert_eq!(no_type_egress, no_type_upstream);
+
     let tool_continuation = json!({
         "model":"gpt-4o-mini",
         "previous_response_id":"resp_previous_exact",
@@ -1116,7 +1208,7 @@ async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
         .await
         .unwrap();
     assert_eq!(tool_response.status(), 200);
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
     let tool_turn = store
         .get_latest_turn(session_id)
         .unwrap()
@@ -1150,7 +1242,7 @@ async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
         .await
         .unwrap();
     assert_eq!(response.status(), 403);
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
 }
 
 #[tokio::test]

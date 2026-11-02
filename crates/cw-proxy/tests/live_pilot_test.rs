@@ -485,11 +485,19 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
             ));
             continue;
         };
-        match cw_core::normalizer::classify_mutation_eligibility(&raw, ProviderKind::OpenAI) {
+        let eligibility =
+            cw_core::normalizer::classify_mutation_eligibility(&raw, ProviderKind::OpenAI);
+        match eligibility {
             cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible => {
                 eligible_requests += 1;
                 if raw.to_string().contains(PIN_DIRECTIVE) {
-                    if t.applied_mutation_ids.iter().any(|id| id == rule_id) && raw == egress {
+                    if t.applied_mutation_ids.iter().any(|id| id == rule_id)
+                        && !t
+                            .skipped_mutations
+                            .iter()
+                            .any(|skip| skip.rule_id == rule_id)
+                        && raw == egress
+                    {
                         idempotent_already_present += 1;
                     } else {
                         invalid_mutations += 1;
@@ -501,8 +509,12 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
                     continue;
                 }
                 let rule_was_recorded = t.applied_mutation_ids.iter().any(|id| id == rule_id);
+                let rule_was_skipped = t
+                    .skipped_mutations
+                    .iter()
+                    .any(|skip| skip.rule_id == rule_id);
                 let directive_on_wire = egress.to_string().contains(PIN_DIRECTIVE);
-                if !rule_was_recorded || !directive_on_wire {
+                if !rule_was_recorded || rule_was_skipped || !directive_on_wire {
                     unexpected_misses += 1;
                     failures.push(format!(
                         "eligible turn {} was not mutated and recorded (ledger={rule_was_recorded}, wire={directive_on_wire})",
@@ -518,44 +530,7 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
                         t.sequence_number
                     ));
                 }
-                let tail_preserved = match (&raw["input"], &egress["input"]) {
-                    (Value::String(original), Value::String(outbound)) => {
-                        outbound.starts_with(original)
-                            && outbound[original.len()..].contains(PIN_DIRECTIVE)
-                    }
-                    (Value::Array(ri), Value::Array(ei)) => {
-                        if ri.is_empty() || ri.len() != ei.len() {
-                            false
-                        } else {
-                            let tail_index = ri.len() - 1;
-                            if ri[..tail_index] != ei[..tail_index] {
-                                false
-                            } else if let (Some(raw_content), Some(egress_content)) = (
-                                ri[tail_index]["content"].as_array(),
-                                ei[tail_index]["content"].as_array(),
-                            ) {
-                                if egress_content.len() != raw_content.len() + 1
-                                    || egress_content[..raw_content.len()] != *raw_content
-                                {
-                                    false
-                                } else {
-                                    let mut restored_tail = ei[tail_index].clone();
-                                    restored_tail["content"] = ri[tail_index]["content"].clone();
-                                    restored_tail == ri[tail_index]
-                                        && egress_content.last().is_some_and(|block| {
-                                            block["type"] == "input_text"
-                                                && block["text"].as_str().is_some_and(|text| {
-                                                    text.contains(PIN_DIRECTIVE)
-                                                })
-                                        })
-                                }
-                            } else {
-                                false
-                            }
-                        }
-                    }
-                    _ => false,
-                };
+                let tail_preserved = pin_tail_preserves_input(&raw, &egress);
                 if !tail_preserved {
                     invalid_mutations += 1;
                     wire_preservation_failures += 1;
@@ -567,7 +542,22 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
             }
             _ => {
                 ineligible_abstained += 1;
-                if t.applied_mutation_ids.iter().any(|id| id == rule_id) || raw != egress {
+                let expected_skip = eligibility
+                    .is_op_eligible(&MutationOp::PinContext {
+                        label: String::new(),
+                        content: String::new(),
+                        source_node_id: None,
+                    })
+                    .err()
+                    .unwrap_or("PayloadIneligible");
+                let skip_recorded = t
+                    .skipped_mutations
+                    .iter()
+                    .any(|skip| skip.rule_id == rule_id && skip.reason == expected_skip);
+                if t.applied_mutation_ids.iter().any(|id| id == rule_id)
+                    || !skip_recorded
+                    || raw != egress
+                {
                     invalid_mutations += 1;
                     wire_preservation_failures += 1;
                     failures.push(format!(
@@ -603,8 +593,66 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
     })
 }
 
+fn pin_tail_preserves_input(raw: &Value, egress: &Value) -> bool {
+    match (&raw["input"], &egress["input"]) {
+        (Value::String(original), Value::String(outbound)) => {
+            outbound.starts_with(original) && outbound[original.len()..].contains(PIN_DIRECTIVE)
+        }
+        (Value::Array(original), Value::Array(outbound)) => {
+            if original.is_empty() || original.len() != outbound.len() {
+                return false;
+            }
+            let tail_index = original.len() - 1;
+            if original[..tail_index] != outbound[..tail_index] {
+                return false;
+            }
+            let (Some(raw_content), Some(egress_content)) = (
+                original[tail_index]["content"].as_array(),
+                outbound[tail_index]["content"].as_array(),
+            ) else {
+                let (Some(raw_text), Some(egress_text)) = (
+                    original[tail_index]["content"].as_str(),
+                    outbound[tail_index]["content"].as_str(),
+                ) else {
+                    return false;
+                };
+                let mut restored_tail = outbound[tail_index].clone();
+                restored_tail["content"] = Value::String(raw_text.to_owned());
+                return egress_text.starts_with(raw_text)
+                    && egress_text[raw_text.len()..].contains(PIN_DIRECTIVE)
+                    && restored_tail == original[tail_index];
+            };
+            if egress_content.len() != raw_content.len() + 1
+                || egress_content[..raw_content.len()] != *raw_content
+            {
+                return false;
+            }
+            let mut restored_tail = outbound[tail_index].clone();
+            restored_tail["content"] = original[tail_index]["content"].clone();
+            restored_tail == original[tail_index]
+                && egress_content.last().is_some_and(|block| {
+                    block["type"] == "input_text"
+                        && block["text"]
+                            .as_str()
+                            .is_some_and(|text| text.contains(PIN_DIRECTIVE))
+                })
+        }
+        _ => false,
+    }
+}
+
 #[test]
 fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention() {
+    let no_type_raw = json!({
+        "previous_response_id":"resp_string_tail",
+        "input":[{"role":"user","content":"original string content"}]
+    });
+    let no_type_egress = json!({
+        "previous_response_id":"resp_string_tail",
+        "input":[{"role":"user","content":format!("original string content{PIN_DIRECTIVE}")}]
+    });
+    assert!(pin_tail_preserves_input(&no_type_raw, &no_type_egress));
+
     let store = CwStore::open_in_memory().unwrap();
     let session_id = "cw119b_verifier";
     let now = Utc::now();

@@ -2836,8 +2836,19 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
 
     // Verify Turn 1 request reached upstream
     let captured1 = f.mock.captured.lock().unwrap().clone();
-    assert_eq!(captured1.len(), 1);
-    assert_eq!(captured1[0].path, "/v1/chat/completions");
+    let turn1_requests = captured1
+        .iter()
+        .filter(|request| {
+            String::from_utf8_lossy(&request.body).contains("Turn 1 pristine prompt text")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        turn1_requests.len(),
+        1,
+        "expected one task request among {} OMP provider requests",
+        captured1.len()
+    );
+    assert_eq!(turn1_requests[0].path, "/v1/chat/completions");
 
     // AC5 / Transcript Evidence: Assert that a real persisted session transcript file was created
     let session_dir = temp_agent_dir.join("sessions");

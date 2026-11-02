@@ -1,7 +1,7 @@
 # CW-119C Live Treatment Proof
 
-**Status:** `BLOCKED_SPEND_AUTHORIZATION`; local `BLOCKED_PREFLIGHT`  
-**Offline runner:** implemented; deterministic local gates and GitHub CI passed for `f66ae0c`  
+**Status:** `BLOCKED_SPEND_AUTHORIZATION`  
+**Offline runner:** implemented; deterministic local gates passed; GitHub CI is tracked on PR #28  
 **Provider calls:** none  
 **Product value:** `NOT_EVALUATED`
 
@@ -13,7 +13,7 @@ This is a single treatment proof, not a product value study. A passing result es
 
 ## Offline readiness
 
-The ignored live test is gated by `CW_QUALIFY_LIVE_PILOT=1`, explicit `CW_LIVE_AUTH_USD`, and `OPENAI_API_KEY`. No authorization is present or inferred. In this environment the `codex` executable is unavailable, so local harness readiness is `BLOCKED_PREFLIGHT` as well. Do not install or invoke a provider as part of offline checks.
+The ignored live test is gated by `CW_QUALIFY_LIVE_PILOT=1`, explicit `CW_LIVE_AUTH_USD`, and `OPENAI_API_KEY`. No authorization is present or inferred. This host has Codex CLI `0.166.0`; `cw readiness` reports Codex as `CONFIGURED`, not functionally verified. The proxy route is available from isolated config, but route and credential isolation remain unverified without an observed proxied request. Do not invoke a provider as part of offline checks.
 
 ## Spend exposure and enforcement
 
@@ -26,7 +26,7 @@ After Codex readiness and credentials are independently confirmed, run from the 
 ```bash
 CW_QUALIFY_LIVE_PILOT=1 CW_LIVE_AUTH_USD="$BUDGET_USD" \
   OPENAI_API_KEY="$OPENAI_API_KEY" \
-  rtk cargo test -p cw-proxy --test live_pilot_test \
+cargo test -p cw-proxy --test live_pilot_test \
   test_cw119c_controlled_live_treatment_codex_m1_m2 -- --ignored --exact --nocapture
 ```
 

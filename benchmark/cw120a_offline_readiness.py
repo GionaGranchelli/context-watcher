@@ -55,6 +55,14 @@ def run(output: Path):
     assert len(schedule) == 12
     assert sum(row["execution_order_position"] == 0 and row["mode"] == "M1" for row in schedule) == 3
     assert sum(row["execution_order_position"] == 0 and row["mode"] == "M2" for row in schedule) == 3
+    assert len({row["block_id"] for row in schedule}) == 6
+    for task in TASKS:
+        assert sum(row["task_family"] == task and row["mode"] == "M1" for row in schedule) == 3
+        assert sum(row["task_family"] == task and row["mode"] == "M2" for row in schedule) == 3
+    for block_id in {row["block_id"] for row in schedule}:
+        block = [row for row in schedule if row["block_id"] == block_id]
+        assert [row["mode"] for row in block] in (["M1", "M2"], ["M2", "M1"])
+        assert [row["execution_order_position"] for row in block] == [0, 1]
 
     sessions = []
     for item in schedule:
@@ -62,6 +70,10 @@ def run(output: Path):
         assert session["synthetic_telemetry"] is True
         assert session["evidence_provenance"] == "SyntheticFixtureReplay"
         assert session["execution_outcome"]["acceptance_test_passed"] is True
+        if item["mode"] == "M1":
+            assert session["optimization_evidence"]["mutation_count"] == 0
+        else:
+            assert session["optimization_evidence"]["mutation_count"] == 1
         sessions.append(session)
 
     indexed = {(s["task_family"], s["repetition"], s["mode"]): s for s in sessions}

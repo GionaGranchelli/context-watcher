@@ -1,9 +1,22 @@
 {
   "campaign": "CW-120A offline readiness rehearsal",
-  "source_git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+  "source_git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
   "provider_calls": 0,
+  "codex_sessions": 0,
+  "proxy_mutations": 0,
   "actual_provider_spend_usd": 0.0,
   "synthetic_costs_are_not_product_evidence": true,
+  "evidence_scope": "SYNTHETIC_REHEARSAL_ONLY",
+  "independent_mock_test_references": [
+    {
+      "test": "test_cw118_real_mock_provider_proxy_execution_m0_m1_m2",
+      "scope": "Separate deterministic HTTP proxy test; not included in this simulated campaign."
+    },
+    {
+      "test": "test_cw118_cache_safe_policy_qualification_defer_and_pin",
+      "scope": "Separate deterministic policy and PinContext egress test; not included in this simulated campaign."
+    }
+  ],
   "configuration": {
     "families": [
       "F1",
@@ -164,7 +177,7 @@
     "matched_pairs_m1_vs_m0": 0,
     "accounting": {
       "all_attempt_total_cost_usd": 0.0999,
-      "success_attempt_total_cost_usd": 0.0999
+      "success_attempt_total_cost_usd": null
     },
     "economic_summary": {
       "mean_relative_cost_change": 0.0,
@@ -206,17 +219,17 @@
       }
     },
     "causal_decomposition": {
-      "mechanical_effect_tokens": "Zero Historical Pruning applied in M2 (strictly cache-safe mode)",
-      "cache_effect": "100% Prefix Preservation verified (kv_break_tokens == 0 across all M2 runs)",
-      "behavioral_steering_effect": "Evaluated tail directive; live behavioral impact deferred to Gate B",
+      "mechanical_effect_tokens": "NOT_EVALUATED: synthetic replay does not transform an agent request",
+      "cache_effect": "SIMULATION_ONLY: estimated KV breakage is assigned by the fixture; no provider cache was observed",
+      "behavioral_steering_effect": "SIMULATION_ONLY: the M2 rule is a scenario value and was not applied to a request",
       "proxy_overhead_effect": "NOT_EVALUATED: requires matched M0/M1 sessions"
     },
     "product_hypothesis_status": "NOT_EVALUATED",
     "product_decision": "NOT_EVALUATED",
     "pre_registered_criteria": {
       "c1_no_correctness_regression": {
-        "status": "PASS",
-        "evidence": "100% test pass rate in both M1 and M2; 0 regressions"
+        "status": "SIMULATION_ONLY",
+        "evidence": "A predefined solution passed fixture tests; no agent-produced task result was evaluated."
       },
       "c2_positive_economic_direction": {
         "status": "NOT_EVALUATED",
@@ -231,16 +244,16 @@
         "evidence": "Reserved for Gate B authorized live LLM trials."
       },
       "c5_no_cache_prefix_invalidation": {
-        "status": "PASS",
-        "evidence": "0 prefix breaks; estimated_kv_break_tokens == 0 across all M2 evaluations."
+        "status": "SIMULATION_ONLY",
+        "evidence": "Zero estimated KV breakage is a simulated field; no request prefix or provider cache was measured."
       },
       "c6_no_reliability_regression": {
-        "status": "PASS",
-        "evidence": "100% session completion; 0 proxy crashes or SSE stream drops."
+        "status": "NOT_EVALUATED",
+        "evidence": "The synthetic session did not run the proxy or an agent harness."
       },
       "c7_attributed_to_documented_intervention": {
-        "status": "PASS",
-        "evidence": "All evaluated M2 mutations correspond to registered candidates in the overlay engine."
+        "status": "SIMULATION_ONLY",
+        "evidence": "The M2 mutation is assigned by the simulator; no production mutation was applied or verified."
       }
     },
     "paired_comparisons": [
@@ -255,10 +268,11 @@
         "request_delta": 0,
         "input_token_delta": 0,
         "cached_token_delta": 0,
-        "m1_success": true,
-        "m2_success": true,
-        "both_successful": true,
-        "behavioral_steering": true
+        "m1_success": null,
+        "m2_success": null,
+        "both_successful": null,
+        "behavioral_steering": null,
+        "behavioral_steering_status": "SIMULATION_ONLY"
       },
       {
         "task_family": "F1",
@@ -271,10 +285,11 @@
         "request_delta": 0,
         "input_token_delta": 0,
         "cached_token_delta": 0,
-        "m1_success": true,
-        "m2_success": true,
-        "both_successful": true,
-        "behavioral_steering": true
+        "m1_success": null,
+        "m2_success": null,
+        "both_successful": null,
+        "behavioral_steering": null,
+        "behavioral_steering_status": "SIMULATION_ONLY"
       },
       {
         "task_family": "F1",
@@ -287,10 +302,11 @@
         "request_delta": 0,
         "input_token_delta": 0,
         "cached_token_delta": 0,
-        "m1_success": true,
-        "m2_success": true,
-        "both_successful": true,
-        "behavioral_steering": true
+        "m1_success": null,
+        "m2_success": null,
+        "both_successful": null,
+        "behavioral_steering": null,
+        "behavioral_steering_status": "SIMULATION_ONLY"
       },
       {
         "task_family": "F3",
@@ -303,10 +319,11 @@
         "request_delta": 0,
         "input_token_delta": 0,
         "cached_token_delta": 0,
-        "m1_success": true,
-        "m2_success": true,
-        "both_successful": true,
-        "behavioral_steering": true
+        "m1_success": null,
+        "m2_success": null,
+        "both_successful": null,
+        "behavioral_steering": null,
+        "behavioral_steering_status": "SIMULATION_ONLY"
       },
       {
         "task_family": "F3",
@@ -319,10 +336,11 @@
         "request_delta": 0,
         "input_token_delta": 0,
         "cached_token_delta": 0,
-        "m1_success": true,
-        "m2_success": true,
-        "both_successful": true,
-        "behavioral_steering": true
+        "m1_success": null,
+        "m2_success": null,
+        "both_successful": null,
+        "behavioral_steering": null,
+        "behavioral_steering_status": "SIMULATION_ONLY"
       },
       {
         "task_family": "F3",
@@ -335,10 +353,11 @@
         "request_delta": 0,
         "input_token_delta": 0,
         "cached_token_delta": 0,
-        "m1_success": true,
-        "m2_success": true,
-        "both_successful": true,
-        "behavioral_steering": true
+        "m1_success": null,
+        "m2_success": null,
+        "both_successful": null,
+        "behavioral_steering": null,
+        "behavioral_steering_status": "SIMULATION_ONLY"
       }
     ]
   },
@@ -354,7 +373,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 0,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -367,13 +386,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 38,
         "model_request_count": 19,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 237500,
@@ -391,7 +411,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 23.75
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 57,
         "decisions": {
           "apply": 0,
@@ -406,7 +426,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": false,
-        "classification": "passthrough_control"
+        "classification": "passthrough_control",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -420,7 +449,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 1,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -433,13 +462,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 38,
         "model_request_count": 19,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 237500,
@@ -457,7 +487,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 33.25
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 57,
         "decisions": {
           "apply": 1,
@@ -474,7 +504,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_candidate_evaluated"
+        "classification": "cache_safe_candidate_evaluated",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -488,7 +527,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 0,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -501,13 +540,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 40,
         "model_request_count": 20,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 250000,
@@ -525,7 +565,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 35.0
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 60,
         "decisions": {
           "apply": 1,
@@ -542,7 +582,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_candidate_evaluated"
+        "classification": "cache_safe_candidate_evaluated",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -556,7 +605,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 1,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -569,13 +618,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 40,
         "model_request_count": 20,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 250000,
@@ -593,7 +643,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 25.0
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 60,
         "decisions": {
           "apply": 0,
@@ -608,7 +658,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": false,
-        "classification": "passthrough_control"
+        "classification": "passthrough_control",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -622,7 +681,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 0,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
@@ -635,13 +694,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 54,
         "model_request_count": 27,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 337500,
@@ -659,7 +719,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 33.75
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 81,
         "decisions": {
           "apply": 0,
@@ -674,7 +734,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": false,
-        "classification": "passthrough_control"
+        "classification": "passthrough_control",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -688,7 +757,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 1,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
@@ -701,13 +770,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 54,
         "model_request_count": 27,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 337500,
@@ -725,7 +795,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 47.25
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 81,
         "decisions": {
           "apply": 1,
@@ -742,7 +812,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_candidate_evaluated"
+        "classification": "cache_safe_candidate_evaluated",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -756,7 +835,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 0,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -769,13 +848,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 36,
         "model_request_count": 18,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 225000,
@@ -793,7 +873,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 31.5
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 54,
         "decisions": {
           "apply": 1,
@@ -810,7 +890,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_candidate_evaluated"
+        "classification": "cache_safe_candidate_evaluated",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -824,7 +913,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 1,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "e8443767a975e41bb8a6f73978f56cc1fabf0ad2896af80b0e157360fb67291d",
@@ -837,13 +926,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 36,
         "model_request_count": 18,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 225000,
@@ -861,7 +951,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 22.5
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 54,
         "decisions": {
           "apply": 0,
@@ -876,7 +966,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": false,
-        "classification": "passthrough_control"
+        "classification": "passthrough_control",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -890,7 +989,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 0,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
@@ -903,13 +1002,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 52,
         "model_request_count": 26,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 325000,
@@ -927,7 +1027,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 32.5
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 78,
         "decisions": {
           "apply": 0,
@@ -942,7 +1042,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": false,
-        "classification": "passthrough_control"
+        "classification": "passthrough_control",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -956,7 +1065,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 1,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
@@ -969,13 +1078,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 52,
         "model_request_count": 26,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 325000,
@@ -993,7 +1103,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 45.5
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 78,
         "decisions": {
           "apply": 1,
@@ -1010,7 +1120,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_candidate_evaluated"
+        "classification": "cache_safe_candidate_evaluated",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -1024,7 +1143,7 @@
       "mode_name": "ContextWatcher Cache-Safe Optimized",
       "execution_order_position": 0,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
@@ -1037,13 +1156,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 50,
         "model_request_count": 25,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 312500,
@@ -1061,7 +1181,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 43.75
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 75,
         "decisions": {
           "apply": 1,
@@ -1078,7 +1198,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": true,
-        "classification": "cache_safe_candidate_evaluated"
+        "classification": "cache_safe_candidate_evaluated",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     },
     {
@@ -1092,7 +1221,7 @@
       "mode_name": "ContextWatcher Passthrough",
       "execution_order_position": 1,
       "randomization_seed": 1202026,
-      "git_commit": "313d30f9fd6e6ada0972a7408070c6f005c0fbde",
+      "git_commit": "9bd8c2aaf22146618f0ba4977225daaf19ec399a",
       "model": "gpt-6-luna",
       "provider": "openai_compatible_mock",
       "fixture_hash": "1148ecbc76b48cc58ba8700afb10e20d55824bce1f40f88a301c865d5349bb03",
@@ -1105,13 +1234,14 @@
       "evidence_provenance": "SyntheticFixtureReplay",
       "synthetic_telemetry": true,
       "execution_outcome": {
-        "task_success": true,
+        "task_success": null,
         "acceptance_test_passed": true,
         "tool_call_count": 50,
         "model_request_count": 25,
         "retried_request_count": 0,
         "failed_request_count": 0,
-        "termination_reason": "completed"
+        "termination_reason": "completed",
+        "acceptance_scope": "predefined_solution_fixture_tests_only; no agent-generated task solution"
       },
       "provider_economics": {
         "total_input_tokens": 312500,
@@ -1129,7 +1259,7 @@
         "ttfb_ms": 620.0,
         "proxy_overhead_ms": 31.25
       },
-      "optimization_evidence": {
+      "simulated_optimization_evidence": {
         "candidate_count": 75,
         "decisions": {
           "apply": 0,
@@ -1144,7 +1274,16 @@
         "abstention_count": 0,
         "abstention_reasons": [],
         "behavioral_steering_injected": false,
-        "classification": "passthrough_control"
+        "classification": "passthrough_control",
+        "evidence_status": "SIMULATION_ONLY",
+        "applied_to_request": false
+      },
+      "optimization_evidence": {
+        "evidence_status": "NOT_EVALUATED",
+        "mutation_count": null,
+        "estimated_kv_break_tokens": null,
+        "behavioral_steering_injected": null,
+        "egress_verified": false
       }
     }
   ]

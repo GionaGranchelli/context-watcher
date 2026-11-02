@@ -3,7 +3,7 @@
 > **Legend:** `P0` = Critical Path | `P1` = Core Feature | `P2` = Enhancement
 > **Workflow:** Move items across `Ready` $\to$ `In Progress` $\to$ `Review` $\to$ `Done`. Always reference ticket IDs (`CW-XXX`) in commits and PRs.
 
-> **Current delivery priority:** CW-119C live treatment proof after CW-119B offline qualification; no paid calls are authorized. CW-118 product value Gate A offline qualification merged (PR #26); CW-117C prospective shadow correlation merged (PR #25); CW-117B calibration & evidence integrity merged (PR #24); CW-117A Phase 1 policy engine merged (PR #23).
+> **Current delivery priority:** CW-120A Product Value Experiment Readiness; offline study preparation only, no provider spending authorized. CW-119C stateless PinContext delivery was verified by saved-evidence replay and merged via PR #30; stateful delivery and product economics remain unverified. CW-118 Gate A offline qualification merged via PR #26.
 
 ---
 
@@ -213,7 +213,8 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-117B** Shadow Policy Empirical Calibration & Evidence Loop | Done | Durable privacy-preserving shadow evidence pipeline; exact decimal pricing reconciliation; deterministic offline historical replay across CW-115 datasets; 6 discrepancy findings detected; SQLite unique record identity and strict shadow gating. Merged via PR #24. |
 | **CW-117C** Prospective Shadow Decision & Outcome Correlation | Done | End-to-end prospective measurement pipeline connecting pre-dispatch shadow decisions (with BLAKE3 payload fingerprints) to observed provider outcomes and multi-turn continuation horizons; calibration report isolating Measured, Modeled, and Unverifiable counterfactuals; 11/11 deterministic qualification scenarios passing. Merged via PR #25; documented in `docs/CW-117C-PROSPECTIVE-CORRELATION.md`. |
 | **CW-118** Product Value & Economic Qualification | Done | 3-mode (M0 native vs M1 passthrough vs M2 cache-safe optimization) qualification runner across 5 task families $\times$ 3 repetitions = 45 sessions with randomized balanced block scheduling, strict Gate A offline qualification, and SpendGuard ceiling. Merged via PR #26 at `aad14e4`. |
-| **CW-119** Controlled Live-Agent Product Value Qualification | In Progress | CW-119B offline qualification is complete. CW-119C requires a fresh explicit spend authorization for a bounded Codex M1/M2 live treatment proof; CW-120 product value remains a separate, not evaluated gate. |
+| **CW-119** Controlled Live-Agent Product Value Qualification | Done (stateless treatment proof only) | PR #30 merged at `b127991`; saved-evidence replay verifies one exact stateless treatment and seven unchanged tool follow-ups. Stateful treatment and product value are not established. |
+| **CW-120A** Product Value Experiment Readiness | In Progress | Freeze and rehearse a matched F1/F3 M1/M2 study offline. No paid calls; CW-120B execution requires fresh spend authorization and a verified runner for the full schedule. |
 | **CW-116** Architecture consolidation & maintainability | Done | Three bounded, behavior-preserving PRs: CW-116A characterization/contracts, CW-116B CLI/harness modularization, CW-116C proxy/transformation boundaries. Maintainability gate complete. |
 | **CW-116A** Characterization tests & architecture contracts | Done | Characterization baseline documented in docs/CW-116A-BASELINE.md; architecture decomposition plan in docs/CW-116-ARCHITECTURE.md; 12 net new characterization tests added covering CLI lifecycle, transform API, proxy routing, internal header stripping, dry-run preview, and store immutability; 100/100 workspace tests passing (+12 net increase over 88 baseline) with 0 warnings; PR #13 merged into main. |
 | **CW-116B** CLI & harness architecture | Done | Decomposed monolithic `main.rs` (3,210 -> 618 lines, -80.7%) and `lib.rs` (2,385 -> 277 lines, -88.4%) into cohesive command handlers (`wrap.rs`, `daemon.rs`, `init.rs`, `reports.rs`, `session.rs`, `slot.rs`, `web.rs`) and harness lifecycle modules (`error.rs`, `qualification.rs`, `sync.rs`, `auto_heal.rs`, `watcher.rs`, `adapters/`). 100/100 workspace tests passing, 12/12 Hermes Python tests passing, 3/3 ignored harness binary qualification tests passing with zero warnings; PR #14 merged into main. |
@@ -288,3 +289,10 @@ The checked tickets below are historical implementation milestones. They are not
 * **Status:** Diagnostic live rerun and saved-evidence replay verified one exact stateless PinContext treatment and seven unchanged tool follow-ups. Both tasks passed. Stateful treatment remains unverified; product value is not evaluated.
 * **Scope:** Codex/OpenAI Responses M1 passthrough versus M2 committed PinContext. No M0 path.
 * **Value:** Not evaluated. One live M1/M2 pair would prove treatment delivery and task acceptance only; repeated matched qualification belongs to CW-120.
+
+## CW-120A product value experiment readiness
+
+* **Status:** Offline preparation in progress; no provider spending authorized.
+* **Scope:** Six matched F1/F3 pairs, M1 passthrough versus M2 committed stateless PinContext, three repetitions per family, seeded counterbalanced order.
+* **Value:** Product hypothesis remains `NOT_EVALUATED`; synthetic CW-118 rehearsal values are not product results.
+* **Gate:** See [CW-120A readiness plan](docs/CW-120A-PRODUCT-VALUE-READINESS.md) and [pre-implementation gap analysis](docs/CW-120A-GAP-ANALYSIS.md).

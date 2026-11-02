@@ -30,6 +30,12 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 PRICING_PROFILES = {
+    "gpt-6-luna": {
+        "uncached_input_per_million": 0.100,
+        "cached_input_per_million": 0.010,
+        "output_per_million": 0.500,
+        "cache_write_surcharge_per_million": 0.125,
+    },
     "gpt-4o-mini": {
         "uncached_input_per_million": 0.150,
         "cached_input_per_million": 0.075,
@@ -394,8 +400,9 @@ def calculate_provider_cost(
     output_tokens: int,
     cache_write_tokens: int = 0,
 ) -> Optional[float]:
-    """Exact decimal pricing calculation matching pricing profiles.
+    """Price disjoint token counts; uncached excludes cached reads and cache writes.
     
+    For Responses usage, derive uncached as input_tokens - cached_tokens - cache_write_tokens.
     Fails closed (returns None) if model pricing is unverified or unknown.
     """
     if model not in PRICING_PROFILES:
@@ -507,9 +514,10 @@ def simulate_offline_session(
         fixture_hash = setup_workspace(task, temp_dir)
         test_file = FIXTURE_TEMPLATES[task]["test_file"]
 
-        # Initial acceptance tests fail on buggy fixture
+        # Initial acceptance tests must fail on the buggy fixture.
         initial_passed, _ = run_acceptance_tests(temp_dir, test_file)
-        assert not initial_passed, f"Initial fixture for {task} must fail acceptance before fix"
+        if initial_passed:
+            raise RuntimeError(f"Initial fixture for {task} must fail acceptance before fix")
 
         # Apply deterministic agent solution
         for sol_file, sol_content in FIXTURE_TEMPLATES[task]["solution"].items():
@@ -517,7 +525,8 @@ def simulate_offline_session(
 
         # Acceptance tests pass after solution
         passed, test_output = run_acceptance_tests(temp_dir, test_file)
-        assert passed, f"Acceptance tests failed for {task} after solution: {test_output}"
+        if not passed:
+            raise RuntimeError(f"Acceptance tests failed for {task} after solution: {test_output}")
 
         # Standard deterministic request counts per task family
         base_requests_by_task = {
@@ -670,6 +679,7 @@ def calculate_bootstrap_ci(
 
 def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Run comprehensive economic, statistical, and causal analysis on campaign sessions."""
+    synthetic_only = bool(sessions) and all(s.get("synthetic_telemetry") is True for s in sessions)
     indexed: Dict[Tuple[str, int, str], Dict[str, Any]] = {}
     for s in sessions:
         key = (s["task_family"], s["repetition"], s["mode"])
@@ -737,7 +747,16 @@ def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
                 "m1_success": success1,
                 "m2_success": success2,
                 "both_successful": success1 and success2,
-                "behavioral_steering": s2["optimization_evidence"].get("behavioral_steering_injected", False),
+                "behavioral_steering": (
+                    None
+                    if s1.get("synthetic_telemetry") is True or s2.get("synthetic_telemetry") is True
+                    else s2["optimization_evidence"].get("behavioral_steering_injected", False)
+                ),
+                "behavioral_steering_status": (
+                    "SIMULATION_ONLY"
+                    if s1.get("synthetic_telemetry") is True or s2.get("synthetic_telemetry") is True
+                    else "OBSERVED"
+                ),
             })
 
     # Statistical summaries
@@ -788,7 +807,7 @@ def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Proxy overhead summary
     overhead_ms_list = [o["proxy_overhead_ms"] for o in overhead_comparisons]
     mean_proxy_overhead_ms = (
-        round(sum(overhead_ms_list) / len(overhead_ms_list), 2) if overhead_ms_list else 0.0
+        round(sum(overhead_ms_list) / len(overhead_ms_list), 2) if overhead_ms_list else None
     )
 
     # All-attempt vs success-conditional accounting
@@ -832,6 +851,40 @@ def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
             "evidence": "All evaluated M2 mutations correspond to registered candidates in the overlay engine.",
         },
     }
+    if synthetic_only:
+        criteria_checks["c1_no_correctness_regression"] = {
+            "status": "SIMULATION_ONLY",
+            "evidence": "A predefined solution passed fixture tests; no agent-produced task result was evaluated.",
+        }
+        criteria_checks["c5_no_cache_prefix_invalidation"] = {
+            "status": "SIMULATION_ONLY",
+            "evidence": "Zero estimated KV breakage is a simulated field; no request prefix or provider cache was measured.",
+        }
+        criteria_checks["c6_no_reliability_regression"] = {
+            "status": "NOT_EVALUATED",
+            "evidence": "The synthetic session did not run the proxy or an agent harness.",
+        }
+        criteria_checks["c7_attributed_to_documented_intervention"] = {
+            "status": "SIMULATION_ONLY",
+            "evidence": "The M2 mutation is assigned by the simulator; no production mutation was applied or verified.",
+        }
+
+    causal_decomposition = {
+        "mechanical_effect_tokens": "Zero Historical Pruning applied in M2 (strictly cache-safe mode)",
+        "cache_effect": "100% Prefix Preservation verified (kv_break_tokens == 0 across all M2 runs)",
+        "behavioral_steering_effect": "Evaluated tail directive; live behavioral impact deferred to Gate B",
+        "proxy_overhead_effect": (
+            f"Average proxy processing overhead: {mean_proxy_overhead_ms}ms per session (<2ms per request)"
+            if mean_proxy_overhead_ms is not None
+            else "NOT_EVALUATED: requires matched M0/M1 sessions"
+        ),
+    }
+    if synthetic_only:
+        causal_decomposition.update({
+            "mechanical_effect_tokens": "NOT_EVALUATED: synthetic replay does not transform an agent request",
+            "cache_effect": "SIMULATION_ONLY: estimated KV breakage is assigned by the fixture; no provider cache was observed",
+            "behavioral_steering_effect": "SIMULATION_ONLY: the M2 rule is a scenario value and was not applied to a request",
+        })
 
     return {
         "total_sessions": len(sessions),
@@ -851,12 +904,7 @@ def analyze_campaign_results(sessions: List[Dict[str, Any]]) -> Dict[str, Any]:
             "mean_proxy_overhead_ms": mean_proxy_overhead_ms,
         },
         "by_task_family": by_family,
-        "causal_decomposition": {
-            "mechanical_effect_tokens": "Zero Historical Pruning applied in M2 (strictly cache-safe mode)",
-            "cache_effect": "100% Prefix Preservation verified (kv_break_tokens == 0 across all M2 runs)",
-            "behavioral_steering_effect": "Evaluated tail directive; live behavioral impact deferred to Gate B",
-            "proxy_overhead_effect": f"Average proxy processing overhead: {mean_proxy_overhead_ms}ms per session (<2ms per request)",
-        },
+        "causal_decomposition": causal_decomposition,
         "product_hypothesis_status": "NOT_EVALUATED",
         "product_decision": "NOT_EVALUATED",
         "pre_registered_criteria": criteria_checks,
@@ -995,7 +1043,7 @@ All workloads require independent verification via `python3 -m unittest` before 
 
 ## 9. Performance Results
 
-- **Analytical Model Proxy Overhead:** **{econ['mean_proxy_overhead_ms']:.2f} ms** per multi-turn session (simulation model parameter).
+- **Analytical Model Proxy Overhead:** {f"**{econ['mean_proxy_overhead_ms']:.2f} ms** per multi-turn session (simulation model parameter)." if econ['mean_proxy_overhead_ms'] is not None else "NOT EVALUATED (no matched M0/M1 sessions)."}
 - **Empirical Proxy Socket Forwarding Overhead:** Measured at **~1-3 ms** per request on real loopback TCP sockets (`test_cw118_real_mock_provider_proxy_execution_m0_m1_m2`). The automated test bounds regression at < 150 ms to accommodate CI runner variance without asserting an unverified production SLA.
 - **TTFB:** Unchanged between M0 and M1.
 

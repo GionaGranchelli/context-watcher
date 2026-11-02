@@ -285,6 +285,6 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## CW-119C live treatment proof
 
-* **Status:** 2026-11-02 M1/M2 live attempt: both tasks passed acceptance, but M2 treatment was unverified and egress preservation failed. Live runs stopped pending diagnosis; spend-based product value remains not evaluated.
+* **Status:** Diagnostic live rerun and saved-evidence replay verified one exact stateless PinContext treatment and seven unchanged tool follow-ups. Both tasks passed. Stateful treatment remains unverified; product value is not evaluated.
 * **Scope:** Codex/OpenAI Responses M1 passthrough versus M2 committed PinContext. No M0 path.
 * **Value:** Not evaluated. One live M1/M2 pair would prove treatment delivery and task acceptance only; repeated matched qualification belongs to CW-120.

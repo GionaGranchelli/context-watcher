@@ -474,6 +474,8 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         .find(|rule| rule.id == rule_id && rule.status == MutationStatus::Committed);
     let mut total_after_commit = 0usize;
     let mut eligible_requests = 0usize;
+    let mut stateful_requests = 0usize;
+    let mut request_diagnostics = Vec::new();
     let mut eligible_mutated = 0usize;
     let mut idempotent_already_present = 0usize;
     let mut ineligible_abstained = 0usize;
@@ -514,8 +516,20 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         };
         let eligibility =
             cw_core::normalizer::classify_mutation_eligibility(&raw, ProviderKind::OpenAI);
+        request_diagnostics.push(json!({
+            "sequence": t.sequence_number,
+            "eligibility": eligibility,
+            "raw_equals_egress": raw == egress,
+            "applied_rule_ids": t.applied_mutation_ids,
+            "skipped_rules": t.skipped_mutations,
+        }));
         match eligibility {
-            cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible => {
+            cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible
+            | cw_core::normalizer::MutationEligibility::StatelessEligible => {
+                if eligibility == cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible
+                {
+                    stateful_requests += 1;
+                }
                 eligible_requests += 1;
                 let mut expected_egress = raw.clone();
                 let expected_report = committed_rule.as_ref().map(|rule| {
@@ -529,6 +543,20 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
                 let expected_applied = expected_report
                     .as_ref()
                     .is_some_and(|report| report.applied_rule_ids.iter().any(|id| id == rule_id));
+                if !expected_applied
+                    && eligibility == cw_core::normalizer::MutationEligibility::StatelessEligible
+                {
+                    eligible_requests -= 1;
+                    ineligible_abstained += 1;
+                    if raw != egress || t.applied_mutation_ids.iter().any(|id| id == rule_id) {
+                        failures.push(format!(
+                            "stateless turn {} without a pin target changed",
+                            t.sequence_number
+                        ));
+                        wire_preservation_failures += 1;
+                    }
+                    continue;
+                }
                 let already_present = expected_applied && expected_egress == raw;
                 cw_core::local_llm::strip_internal_cw_fields(&mut expected_egress);
                 let exact_wire_match = expected_applied && expected_egress == egress;
@@ -623,6 +651,9 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         "FAIL"
     };
     json!({
+        "stateful_eligible_requests": stateful_requests,
+        "stateful_treatment_verified": status == "PASS" && stateful_requests > 0,
+        "request_diagnostics": request_diagnostics,
         "total_requests_after_commit": total_after_commit,
         "eligible_requests": eligible_requests,
         "eligible_requests_mutated": eligible_mutated,
@@ -810,6 +841,56 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
     assert_eq!(result["eligible_requests_mutated"], 1);
     assert_eq!(result["ineligible_requests_abstained"], 1);
 
+    let mut stateless_raw = eligible_raw.clone();
+    stateless_raw
+        .as_object_mut()
+        .unwrap()
+        .remove("previous_response_id");
+    let mut stateless_egress = eligible_egress.clone();
+    stateless_egress
+        .as_object_mut()
+        .unwrap()
+        .remove("previous_response_id");
+    store
+        .save_turn(&eligible_turn, Some(&stateless_raw), None, None)
+        .unwrap();
+    store
+        .save_wire_egress(
+            &eligible_turn.id,
+            &serde_json::to_vec(&stateless_egress).unwrap(),
+        )
+        .unwrap();
+    let stateless = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(stateless["status"], "PASS", "{stateless}");
+    assert_eq!(stateless["stateful_treatment_verified"], false);
+    assert_eq!(stateless["provider_wire_preservation_failures"], 0);
+    let mut stateless_tool = tool_raw.clone();
+    stateless_tool
+        .as_object_mut()
+        .unwrap()
+        .remove("previous_response_id");
+    tool_turn.skipped_mutations.clear();
+    store
+        .save_turn(&tool_turn, Some(&stateless_tool), None, None)
+        .unwrap();
+    store
+        .save_wire_egress(&tool_turn.id, &serde_json::to_vec(&stateless_tool).unwrap())
+        .unwrap();
+    let tool_followup = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(tool_followup["status"], "PASS", "{tool_followup}");
+    assert_eq!(tool_followup["eligible_requests_mutated"], 1);
+    assert_eq!(tool_followup["ineligible_requests_abstained"], 1);
+
+    store
+        .save_turn(&eligible_turn, Some(&eligible_raw), None, None)
+        .unwrap();
+    store
+        .save_wire_egress(
+            &eligible_turn.id,
+            &serde_json::to_vec(&eligible_egress).unwrap(),
+        )
+        .unwrap();
+
     let mut valid_eligible_egress = eligible_egress.clone();
     eligible_egress["unrelated_upstream_field"] = json!("unexpected");
     store
@@ -986,6 +1067,16 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
         request_reservation_usd: 0.01,
     });
 
+    let evidence_dir = workspace_root()
+        .join("target")
+        .join(format!("cw119c_evidence_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&evidence_dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&evidence_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    println!("Private evidence directory: {}", evidence_dir.display());
     let mut sessions = Vec::new();
     for mode in [Mode::M1, Mode::M2] {
         println!("\n=== Executing {mode:?} ===");
@@ -996,7 +1087,7 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
         let sid = format!("cw119_{mode:?}_{}", uuid::Uuid::new_v4().simple());
 
         // Proxy (M1/M2) with in-flight per-request SpendGuard enforcement.
-        let store = CwStore::open_in_memory().unwrap();
+        let store = CwStore::open(evidence_dir.join(format!("{mode:?}.db"))).unwrap();
         let (route, token, proxy_task) = {
             let mut cfg = store.get_autopilot_config().unwrap();
             if mode == Mode::M2 {
@@ -1132,6 +1223,15 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
             "acceptance_passed": acceptance,
             "treatment": treatment,
         }));
+        fs::write(
+            evidence_dir.join("sessions.json"),
+            serde_json::to_vec_pretty(&json!({
+                "sessions": sessions, "total_campaign_spend_usd": guard.total_spent_usd(),
+                "killswitch_tripped": guard.is_killswitch_tripped(), "spend_envelope_usd": auth_usd,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
         assert!(
             t2_ok,
             "{mode:?} T2: {}",

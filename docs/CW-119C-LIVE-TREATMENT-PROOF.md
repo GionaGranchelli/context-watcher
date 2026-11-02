@@ -1,6 +1,6 @@
 # CW-119C Live Treatment Proof
 
-**Status:** `TREATMENT_FAILED`
+**Status:** Stateless treatment verified by saved-evidence replay; stateful treatment remains unverified
 **Offline runner:** implemented; deterministic local gates passed; PR #28 merged in the qualified baseline
 **Provider calls:** M1 and M2 executed; M2 treatment was not verified
 **Product value:** `NOT_EVALUATED`
@@ -60,3 +60,12 @@ Expected exposure is up to two nominal $0.15 session ceilings ($0.30 total), wit
 ## Result record
 
 Record the exact commit, CI result, Codex version/readiness, model, authorized amount, campaign spend, killswitch state, admitted request counts, per-mode input/cached/output usage, wall time, task acceptance, and M2 treatment status. Keep the raw task workspaces and credential material out of committed evidence. Preserve historical pilot results unchanged. A failure, missing field, timeout, unverified request, or spend guard trip blocks qualification.
+
+
+## Authorized diagnostic rerun
+
+The rerun used $0.28119 nominal admission authorization, accounting for the prior reported $0.01881 against the $0.30 campaign. M1 admitted 9 requests and cost $0.011075; M2 admitted 13 and cost $0.017005. Both task acceptance checks passed, and the guard did not trip. Usage-derived rerun cost was $0.02808, bringing reported combined spend to approximately $0.04689; billing-dashboard reconciliation remains outstanding.
+
+The live invocation failed an intermediate verifier that incorrectly demanded a pin on every stateless tool follow-up. Durable SQLite evidence resolved the cause: request 6 carried the committed directive with exact expected JSON and ledger agreement; requests 7–13 ended in function-call outputs and remained unchanged. The corrected verifier replayed those same saved requests offline and passed: one applied treatment, seven safe abstentions, zero wire-preservation failures. No further paid request was needed for replay. All post-commit requests were stateless, so this does not qualify stateful Responses behavior or economic value.
+
+The sanitized [diagnostic artifact](cw119c-live-rerun-diagnostics.json) preserves the original failed assessment and corrected offline replay separately. Private raw/egress SQLite databases remain locally under `target/cw119c_evidence_be7f20e5-840f-4b4a-bcee-6005c0980e5a/` (directory mode 0700); they are not committed. The runner now persists SQLite throughout execution and writes session diagnostics before treatment assertions. Deterministic regression coverage includes stateless user-tail treatment and unchanged stateless tool follow-ups.

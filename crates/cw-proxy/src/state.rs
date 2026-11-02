@@ -85,6 +85,9 @@ pub struct DaemonState {
     pub llamacpp_api_key: Option<String>,
     pub vllm_upstream: String,
     pub capture_wire_egress: bool,
+    /// When set, every provider request must be admitted by the SpendGuard before
+    /// dispatch and settled from provider-reported usage (live qualification runs).
+    pub spend_guard: Option<cw_core::spend_guard::SpendGuard>,
     pub(crate) intercepts: Arc<Mutex<HashMap<String, ActiveIntercept>>>,
 }
 
@@ -119,6 +122,7 @@ impl DaemonState {
                 .unwrap_or_else(|_| "http://127.0.0.1:8000".to_string()),
             capture_wire_egress: std::env::var("CW_CAPTURE_WIRE_EGRESS").ok().as_deref()
                 == Some("1"),
+            spend_guard: None,
             intercepts: Arc::new(Mutex::new(HashMap::new())),
         }
     }

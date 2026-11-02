@@ -361,6 +361,7 @@ pub fn preview_turn(
     preview.outcome = Some("preview".into());
     preview.token_usage.saved_by_mutations = report.saved_tokens;
     preview.applied_mutation_ids = report.applied_rule_ids;
+    preview.skipped_mutations = report.skipped_rules;
     Some(preview)
 }
 

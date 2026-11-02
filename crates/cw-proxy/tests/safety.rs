@@ -782,7 +782,7 @@ async fn strict_shadow_mode_prevents_committed_mutations_and_forwards_original_p
     let mut state = DaemonState::new(store.clone());
     state.openai_upstream = url;
     let token = state.control_token.clone();
-    let original_raw_body = r#"{"model":"gpt-4o-mini","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello world"}]}]}"#;
+    let original_raw_body = r#"{"model":"gpt-4o-mini","previous_response_id":"resp_shadow_exact","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hello world"}]}]}"#;
     let request = Request::builder()
         .method("POST")
         .uri("/openai/v1/responses")

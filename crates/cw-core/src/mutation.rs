@@ -1,6 +1,6 @@
 use crate::ir::{
     ContextNode, FirewallAction, FirewallRule, FirewallTrigger, KvCacheReport, MutationOp,
-    MutationRule, MutationStatus, NodeKind, ProviderKind, ToolSemanticMeta,
+    MutationRule, MutationStatus, NodeKind, ProviderKind, SkippedMutation, ToolSemanticMeta,
 };
 use crate::normalizer::parse_request_to_nodes;
 use crate::tokenizer::estimate_tokens;
@@ -21,6 +21,7 @@ static PINNED_CONTEXT_RE: LazyLock<Regex> =
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MutationApplicationReport {
     pub applied_rule_ids: Vec<String>,
+    pub skipped_rules: Vec<SkippedMutation>,
     pub saved_tokens: u32,
 }
 
@@ -36,11 +37,25 @@ pub fn apply_mutations_to_payload(
         .iter()
         .filter(|r| r.status == MutationStatus::Committed)
         .collect();
-    if active_rules.is_empty()
-        || has_signed_content(payload)
-        || !crate::normalizer::supports_mutation_payload(payload, provider)
-    {
+    if active_rules.is_empty() {
         return MutationApplicationReport::default();
+    }
+    let eligibility = crate::normalizer::classify_mutation_eligibility(payload, provider);
+    if has_signed_content(payload) || !eligibility.allows_any_mutation() {
+        let reason = eligibility
+            .is_op_eligible(&active_rules[0].op)
+            .err()
+            .unwrap_or("PayloadIneligible");
+        return MutationApplicationReport {
+            skipped_rules: active_rules
+                .iter()
+                .map(|rule| SkippedMutation {
+                    rule_id: rule.id.clone(),
+                    reason: reason.into(),
+                })
+                .collect(),
+            ..MutationApplicationReport::default()
+        };
     }
 
     let before_nodes = parse_request_to_nodes(payload, provider, turn_seq).unwrap_or_default();
@@ -60,8 +75,16 @@ pub fn apply_mutations_to_payload(
     let mut applied_ids = Vec::new();
     let mut pinned_blocks: Vec<(String, String)> = Vec::new();
     let mut pin_rule_ids = Vec::new();
+    let mut skipped_rules = Vec::new();
 
     for rule in &active_rules {
+        if let Err(reason) = eligibility.is_op_eligible(&rule.op) {
+            skipped_rules.push(SkippedMutation {
+                rule_id: rule.id.clone(),
+                reason: reason.into(),
+            });
+            continue;
+        }
         let mut applied = false;
         match &rule.op {
             MutationOp::PruneOrStub {
@@ -257,6 +280,7 @@ pub fn apply_mutations_to_payload(
 
     MutationApplicationReport {
         applied_rule_ids: applied_ids,
+        skipped_rules,
         saved_tokens: before_tokens.saturating_sub(after_tokens),
     }
 }
@@ -831,10 +855,10 @@ fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)
                 return true;
             }
             Value::Array(items) => {
-                if let Some(message) = items
-                    .last_mut()
-                    .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-                {
+                if let Some(message) = items.last_mut().filter(|item| {
+                    crate::normalizer::is_supported_responses_message_type(item)
+                        && item.get("role").and_then(Value::as_str) == Some("user")
+                }) {
                     match message.get_mut("content") {
                         Some(Value::String(text)) => {
                             text.push_str(&block);
@@ -986,5 +1010,127 @@ mod tests {
 
         assert!(report.applied_rule_ids.is_empty());
         assert_eq!(payload, original);
+    }
+
+    #[test]
+    fn stateful_responses_apply_only_committed_tail_pin_rules() {
+        let mut payload = json!({
+            "model": "test",
+            "previous_response_id": "resp_previous",
+            "input": [
+                {"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},
+                {"type":"function_call_output","call_id":"call_1","output":"result"},
+                {"type":"message","role":"user","content":[{"type":"input_text","text":"original"}]}
+            ]
+        });
+        let original_prefix = payload["input"].clone();
+        let report =
+            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+        assert_eq!(report.applied_rule_ids, ["pin-1"]);
+        assert_eq!(payload["previous_response_id"], "resp_previous");
+        assert_eq!(payload["input"][0], original_prefix[0]);
+        assert_eq!(payload["input"][1], original_prefix[1]);
+        assert_eq!(
+            payload["input"][2]["content"][0],
+            original_prefix[2]["content"][0]
+        );
+        let retry_report =
+            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+        assert_eq!(retry_report.applied_rule_ids, ["pin-1"]);
+        assert_eq!(
+            payload["input"][2]["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|block| {
+                    block["text"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("<cw_pinned_context>"))
+                })
+                .count(),
+            1
+        );
+
+        let mut historical = pin_rule();
+        historical.id = "fold-1".into();
+        historical.op = MutationOp::FoldSubtree {
+            start_turn: 1,
+            end_turn: 2,
+            summary_text: "summary".into(),
+        };
+        let original = payload.clone();
+        let report =
+            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[historical], 1);
+        assert!(report.applied_rule_ids.is_empty());
+        assert_eq!(report.skipped_rules.len(), 1);
+        assert_eq!(report.skipped_rules[0].rule_id, "fold-1");
+        assert_eq!(
+            report.skipped_rules[0].reason,
+            "RejectedStatefulProviderOwnedHistory"
+        );
+        assert_eq!(payload, original);
+    }
+
+    #[test]
+    fn stateful_tool_continuation_reports_pin_abstention_reason() {
+        let mut payload = json!({
+            "model": "test",
+            "previous_response_id": "resp_previous",
+            "input": [{"type":"function_call_output","call_id":"call-1","output":"done"}]
+        });
+        let original = payload.clone();
+        let report =
+            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+        assert!(report.applied_rule_ids.is_empty());
+        assert_eq!(report.skipped_rules.len(), 1);
+        assert_eq!(report.skipped_rules[0].rule_id, "pin-1");
+        assert_eq!(report.skipped_rules[0].reason, "SkippedNoEligibleUserTail");
+        assert_eq!(payload, original);
+    }
+
+    #[test]
+    fn stateful_responses_reject_every_historical_mutation_operator() {
+        let operations = [
+            MutationOp::PruneOrStub {
+                target_fingerprint: None,
+                target_call_id: None,
+                target_json_pointer: None,
+                stub_text: "stub".into(),
+            },
+            MutationOp::FoldSubtree {
+                start_turn: 1,
+                end_turn: 2,
+                summary_text: "summary".into(),
+            },
+            MutationOp::ShadowDedupe { file_path: None },
+            MutationOp::GateToolsAndSkills {
+                disabled_tools: vec!["shell".into()],
+                disabled_mcp_servers: vec![],
+                disabled_skills: vec![],
+            },
+            MutationOp::NormalizePrefix {
+                sort_tools_deterministically: true,
+                relocate_dynamic_system_metadata: true,
+            },
+        ];
+        let mut payload = json!({
+            "model": "test",
+            "previous_response_id": "resp_previous",
+            "input": [{"type":"message","role":"user","content":"new input"}]
+        });
+        let original = payload.clone();
+        for (index, op) in operations.into_iter().enumerate() {
+            let mut rule = pin_rule();
+            rule.id = format!("historical-{index}");
+            rule.op = op;
+            let report = apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[rule], 1);
+            assert!(report.applied_rule_ids.is_empty());
+            assert_eq!(report.skipped_rules.len(), 1);
+            assert_eq!(
+                report.skipped_rules[0].reason,
+                "RejectedStatefulProviderOwnedHistory"
+            );
+            assert_eq!(payload, original);
+        }
     }
 }

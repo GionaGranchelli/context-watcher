@@ -21,6 +21,7 @@ pub struct Recorder {
     pub terminal_outcome: Option<String>,
     pub current_event: Option<String>,
     pub session_terminated: bool,
+    pub spend_permit: Option<cw_core::spend_guard::RequestPermit>,
 }
 
 fn trim_ascii(bytes: &[u8]) -> &[u8] {
@@ -59,6 +60,7 @@ impl Recorder {
             terminal_outcome: None,
             current_event: None,
             session_terminated: false,
+            spend_permit: None,
         }
     }
 
@@ -213,6 +215,16 @@ impl Recorder {
             && let Ok(value) = serde_json::from_slice::<Value>(&self.buffer)
         {
             self.read_usage(&value);
+        }
+        if let Some(permit) = self.spend_permit.take() {
+            let model = self
+                .turn
+                .as_ref()
+                .and_then(|t| t.model.clone())
+                .unwrap_or_default();
+            if let Err(error) = permit.settle(self.usage.as_ref(), self.provider, &model) {
+                tracing::error!(%error, "SpendGuard settlement failed; killswitch engaged");
+            }
         }
         let mut turn = self.turn.take()?;
         let effective_outcome = if let Some(ref term) = self.terminal_outcome {

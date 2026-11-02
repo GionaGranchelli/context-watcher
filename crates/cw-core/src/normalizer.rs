@@ -1,9 +1,10 @@
 use crate::ir::{
-    CacheControlBreakpoint, ContextNode, KvNodeStatus, NodeFingerprint, NodeKind, ProviderKind,
-    Role, SkillEntry, TokenSpan, ToolSemanticMeta,
+    CacheControlBreakpoint, ContextNode, KvNodeStatus, MutationOp, NodeFingerprint, NodeKind,
+    ProviderKind, Role, SkillEntry, TokenSpan, ToolSemanticMeta,
 };
 use crate::tokenizer::assign_token_spans_and_salience;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -1096,5 +1097,331 @@ pub fn supports_mutation_payload(payload: &Value, provider: ProviderKind) -> boo
                 })
         }
         _ => false,
+    }
+}
+
+/// Operation-specific mutation eligibility classification for provider payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MutationEligibility {
+    /// Stateless, supported conversation payload. All mutation operators are eligible
+    /// subject to standard safety invariants.
+    StatelessEligible,
+    /// Stateful request (e.g. `previous_response_id` present) with an eligible new user text input.
+    /// Only tail-append operations (`PinContext`) are permitted; historical mutations are rejected.
+    StatefulTailOnlyEligible,
+    /// Stateful request containing only tool-call outputs or no eligible user text tail.
+    /// Abstains by default to preserve the tool execution lifecycle without mutation.
+    StatefulToolOnlyOrNoUserTail,
+    /// Unknown structure, signed content, incomplete analysis, or unsupported format.
+    /// Mutation is strictly rejected.
+    Ineligible,
+}
+
+impl MutationEligibility {
+    /// Whether any mutation operation could potentially apply to this payload.
+    pub fn allows_any_mutation(&self) -> bool {
+        matches!(
+            self,
+            MutationEligibility::StatelessEligible | MutationEligibility::StatefulTailOnlyEligible
+        )
+    }
+
+    /// Whether a specific mutation operation is permitted on this payload.
+    pub fn is_op_eligible(&self, op: &MutationOp) -> Result<(), &'static str> {
+        match self {
+            MutationEligibility::StatelessEligible => Ok(()),
+            MutationEligibility::StatefulTailOnlyEligible => {
+                if matches!(op, MutationOp::PinContext { .. }) {
+                    Ok(())
+                } else {
+                    Err("RejectedStatefulProviderOwnedHistory")
+                }
+            }
+            MutationEligibility::StatefulToolOnlyOrNoUserTail => Err("SkippedNoEligibleUserTail"),
+            MutationEligibility::Ineligible => Err("PayloadIneligible"),
+        }
+    }
+}
+
+pub(crate) fn is_supported_responses_message_type(item: &Value) -> bool {
+    match item.get("type") {
+        None => true,
+        Some(Value::String(item_type)) => item_type == "message",
+        Some(_) => false,
+    }
+}
+
+/// Classifies a provider payload into its operation-specific mutation eligibility.
+pub fn classify_mutation_eligibility(
+    payload: &Value,
+    provider: ProviderKind,
+) -> MutationEligibility {
+    if !payload.is_object()
+        || payload
+            .get("cw_analysis_incomplete")
+            .and_then(Value::as_bool)
+            == Some(true)
+        || crate::mutation::has_signed_content(payload)
+    {
+        return MutationEligibility::Ineligible;
+    }
+
+    if payload.get("conversation").is_some_and(|v| !v.is_null()) {
+        return MutationEligibility::Ineligible;
+    }
+    if payload.get("messages").is_some() && payload.get("input").is_some() {
+        return MutationEligibility::Ineligible;
+    }
+    let previous_response_id = payload.get("previous_response_id");
+    if previous_response_id.is_some_and(|v| !v.is_null() && v.as_str().is_none_or(str::is_empty)) {
+        return MutationEligibility::Ineligible;
+    }
+    let is_stateful =
+        previous_response_id.is_some_and(|v| v.as_str().is_some_and(|s| !s.is_empty()));
+
+    if is_stateful {
+        if provider != ProviderKind::OpenAI {
+            return MutationEligibility::Ineligible;
+        }
+        match payload.get("input") {
+            Some(Value::String(text)) if !text.trim().is_empty() => {
+                MutationEligibility::StatefulTailOnlyEligible
+            }
+            Some(Value::String(_)) => MutationEligibility::StatefulToolOnlyOrNoUserTail,
+            Some(Value::Array(items)) => {
+                if items.is_empty() {
+                    return MutationEligibility::StatefulToolOnlyOrNoUserTail;
+                }
+                let history_item_supported =
+                    |item: &Value| match item.get("type").and_then(Value::as_str) {
+                        Some("function_call") => {
+                            item.get("call_id")
+                                .and_then(Value::as_str)
+                                .is_some_and(|s| !s.is_empty())
+                                && item
+                                    .get("name")
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|s| !s.is_empty())
+                                && item.get("arguments").is_some_and(Value::is_string)
+                                && item.as_object().is_some_and(|fields| {
+                                    fields.keys().all(|key| {
+                                        matches!(
+                                            key.as_str(),
+                                            "type" | "call_id" | "name" | "arguments"
+                                        )
+                                    })
+                                })
+                        }
+                        Some("function_call_output") => {
+                            item.get("call_id")
+                                .and_then(Value::as_str)
+                                .is_some_and(|s| !s.is_empty())
+                                && item.get("output").is_some_and(Value::is_string)
+                                && item.as_object().is_some_and(|fields| {
+                                    fields.keys().all(|key| {
+                                        matches!(key.as_str(), "type" | "call_id" | "output")
+                                    })
+                                })
+                        }
+                        _ if is_supported_responses_message_type(item) => {
+                            matches!(
+                                item.get("role").and_then(Value::as_str),
+                                Some("system" | "developer" | "user" | "assistant")
+                            ) && item.get("content").is_some_and(|content| match content {
+                                Value::String(text) => !text.trim().is_empty(),
+                                Value::Array(blocks) => {
+                                    !blocks.is_empty()
+                                        && blocks.iter().all(|block| {
+                                            matches!(
+                                                block.get("type").and_then(Value::as_str),
+                                                Some("input_text" | "output_text" | "text")
+                                            ) && block
+                                                .get("text")
+                                                .and_then(Value::as_str)
+                                                .is_some_and(|text| !text.trim().is_empty())
+                                                && block.as_object().is_some_and(|fields| {
+                                                    fields.keys().all(|key| {
+                                                        matches!(key.as_str(), "type" | "text")
+                                                    })
+                                                })
+                                        })
+                                }
+                                _ => false,
+                            })
+                        }
+                        _ => false,
+                    };
+                if items[..items.len() - 1]
+                    .iter()
+                    .any(|item| !history_item_supported(item))
+                {
+                    return MutationEligibility::Ineligible;
+                }
+                if let Some(last) = items.last() {
+                    if last.get("type").is_some_and(|kind| !kind.is_string()) {
+                        return MutationEligibility::Ineligible;
+                    }
+                    let role = last.get("role").and_then(Value::as_str);
+                    let text_only_content = |content: &Value| match content {
+                        Value::String(text) => !text.trim().is_empty(),
+                        Value::Array(blocks) => {
+                            !blocks.is_empty()
+                                && blocks.iter().all(|block| {
+                                    block.get("type").and_then(Value::as_str) == Some("input_text")
+                                        && block
+                                            .get("text")
+                                            .and_then(Value::as_str)
+                                            .is_some_and(|text| !text.trim().is_empty())
+                                        && block.as_object().is_some_and(|fields| {
+                                            fields
+                                                .keys()
+                                                .all(|key| matches!(key.as_str(), "type" | "text"))
+                                        })
+                                })
+                        }
+                        _ => false,
+                    };
+                    if role == Some("user")
+                        && is_supported_responses_message_type(last)
+                        && last.get("content").is_some_and(text_only_content)
+                    {
+                        MutationEligibility::StatefulTailOnlyEligible
+                    } else {
+                        MutationEligibility::StatefulToolOnlyOrNoUserTail
+                    }
+                } else {
+                    MutationEligibility::StatefulToolOnlyOrNoUserTail
+                }
+            }
+            _ => MutationEligibility::StatefulToolOnlyOrNoUserTail,
+        }
+    } else if supports_mutation_payload(payload, provider) {
+        MutationEligibility::StatelessEligible
+    } else {
+        MutationEligibility::Ineligible
+    }
+}
+
+#[cfg(test)]
+mod mutation_eligibility_tests {
+    use super::{MutationEligibility, classify_mutation_eligibility};
+    use crate::ir::ProviderKind;
+    use serde_json::json;
+
+    #[test]
+    fn stateful_responses_only_allow_user_text_tail() {
+        let eligible = json!({"previous_response_id":"resp_previous","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]});
+        assert_eq!(
+            classify_mutation_eligibility(&eligible, ProviderKind::OpenAI),
+            MutationEligibility::StatefulTailOnlyEligible
+        );
+
+        let no_explicit_type = json!({"previous_response_id":"resp_previous","input":[{"role":"user","content":"continue"}]});
+        assert_eq!(
+            classify_mutation_eligibility(&no_explicit_type, ProviderKind::OpenAI),
+            MutationEligibility::StatefulTailOnlyEligible
+        );
+
+        let tool_only = json!({"previous_response_id":"resp_previous","input":[{"type":"function_call_output","call_id":"call_1","output":"done"}]});
+        assert_eq!(
+            classify_mutation_eligibility(&tool_only, ProviderKind::OpenAI),
+            MutationEligibility::StatefulToolOnlyOrNoUserTail
+        );
+
+        let function_call_only = json!({"previous_response_id":"resp_previous","input":[{"type":"function_call","call_id":"call_1","name":"tool","arguments":"{}"}]});
+        assert_eq!(
+            classify_mutation_eligibility(&function_call_only, ProviderKind::OpenAI),
+            MutationEligibility::StatefulToolOnlyOrNoUserTail
+        );
+
+        let unknown_item = json!({"previous_response_id":"resp_previous","input":[{"type":"unknown","role":"user","content":"do not mutate"}]});
+        assert_eq!(
+            classify_mutation_eligibility(&unknown_item, ProviderKind::OpenAI),
+            MutationEligibility::StatefulToolOnlyOrNoUserTail
+        );
+
+        let unknown_history = json!({"previous_response_id":"resp_previous","input":[{"type":"unknown","data":"opaque"},{"type":"message","role":"user","content":"continue"}]});
+        assert_eq!(
+            classify_mutation_eligibility(&unknown_history, ProviderKind::OpenAI),
+            MutationEligibility::Ineligible
+        );
+
+        let opaque_history = json!({"previous_response_id":"resp_previous","input":[{"type":"message","role":"assistant","content":[{"type":"image","url":"opaque"}]},{"type":"message","role":"user","content":"continue"}]});
+        assert_eq!(
+            classify_mutation_eligibility(&opaque_history, ProviderKind::OpenAI),
+            MutationEligibility::Ineligible
+        );
+
+        let mixed_tool_tail = json!({"previous_response_id":"resp_previous","input":[{"type":"message","role":"user","content":"hello"},{"type":"function_call_output","call_id":"call_1","output":"done"}]});
+        assert_eq!(
+            classify_mutation_eligibility(&mixed_tool_tail, ProviderKind::OpenAI),
+            MutationEligibility::StatefulToolOnlyOrNoUserTail
+        );
+
+        for invalid_type in [json!(null), json!(7), json!({"kind":"message"})] {
+            let explicit_invalid_type = json!({
+                "previous_response_id":"resp_previous",
+                "input":[{"type":invalid_type.clone(),"role":"user","content":"continue"}]
+            });
+            assert_eq!(
+                classify_mutation_eligibility(&explicit_invalid_type, ProviderKind::OpenAI),
+                MutationEligibility::Ineligible
+            );
+
+            let invalid_prefix_type = json!({
+                "previous_response_id":"resp_previous",
+                "input":[
+                    {"type":invalid_type,"role":"assistant","content":"prior"},
+                    {"type":"message","role":"user","content":"continue"}
+                ]
+            });
+            assert_eq!(
+                classify_mutation_eligibility(&invalid_prefix_type, ProviderKind::OpenAI),
+                MutationEligibility::Ineligible
+            );
+        }
+
+        for malformed in [
+            json!({"previous_response_id":42,"input":[{"role":"user","content":"hello"}]}),
+            json!({"previous_response_id":"resp_previous","input":[{"role":"user","content":[]}]}),
+            json!({"previous_response_id":"resp_previous","input":[{"role":"user","content":"  "}]}),
+        ] {
+            assert_ne!(
+                classify_mutation_eligibility(&malformed, ProviderKind::OpenAI),
+                MutationEligibility::StatefulTailOnlyEligible
+            );
+        }
+
+        for opaque in [
+            json!({"previous_response_id":"resp_previous","input":[{"role":"user","content":"continue"}],"signature":"signed"}),
+            json!({"previous_response_id":"resp_previous","input":[{"role":"user","content":"continue"}],"encrypted_content":"opaque"}),
+        ] {
+            assert_eq!(
+                classify_mutation_eligibility(&opaque, ProviderKind::OpenAI),
+                MutationEligibility::Ineligible
+            );
+        }
+
+        let conversation =
+            json!({"conversation":{"id":"conv_1"},"input":[{"role":"user","content":"continue"}]});
+        assert_eq!(
+            classify_mutation_eligibility(&conversation, ProviderKind::OpenAI),
+            MutationEligibility::Ineligible
+        );
+
+        let mixed_shape = json!({
+            "previous_response_id":"resp_previous",
+            "messages":[{"role":"user","content":"ambiguous"}],
+            "input":[{"role":"user","content":"ambiguous"}]
+        });
+        assert_eq!(
+            classify_mutation_eligibility(&mixed_shape, ProviderKind::OpenAI),
+            MutationEligibility::Ineligible
+        );
+
+        assert_eq!(
+            classify_mutation_eligibility(&eligible, ProviderKind::Anthropic),
+            MutationEligibility::Ineligible
+        );
     }
 }

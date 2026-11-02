@@ -54,6 +54,11 @@ This document establishes the empirical justification, real-world benchmark data
    * *Gate A Engineering Qualification (Verified):* 100% independent unit test pass rate across all 45 sessions; proxy latency overhead verified at **28.5 ms/session** (< 1.8 ms/request); **100% prefix preservation** (`estimated_kv_break_tokens == 0`); zero unexpected cache drops. Product hypothesis is explicitly reported as `NOT_EVALUATED` pending Gate B authorized live qualification on production LLMs.
    * *Gate B Live Authorization Invariant:* Zero unauthorized paid API spend. Live execution is strictly opt-in and blocked with status `BLOCKED_SPEND_AUTHORIZATION` until an explicit spend authorization envelope is granted. Documented in `docs/CW-118-PRODUCT-VALUE-QUALIFICATION.md` and `docs/CW-118-EXPERIMENT-PROTOCOL.md`.
 
+6. **Controlled Live-Agent Product Value Qualification (CW-119): Empirical Pilot on Live Autonomous Agents**
+   * *Harness readiness:* `cw readiness` reports a ladder (`Unavailable < Detected < Installed < Configured < FunctionallyVerified`). Static checks never claim functional verification, and credential isolation is reported as declared, not verified.
+   * *SpendGuard:* explicit authorization is required (no default). Each request is admitted in the proxy before dispatch, enforcing request caps, the session cost ceiling and the global budget, then settled incrementally from provider usage. Missing telemetry, unverified pricing or an unsettled permit trips the killswitch. Covered by default-CI tests with the real proxy and a mock upstream.
+   * *Pilot 1 (diagnostic):* three Codex runs on `gpt-4o-mini` completed and passed acceptance ($0.05332 reconciled). **The M2 intervention was not verified** (AutoPilot was disabled), so no economic benefit or harm has been demonstrated. The repaired runner, which checks treatment from wire egress, has not been run yet. Details: `docs/CW-119-LIVE-AGENT-QUALIFICATION.md`.
+
 ---
 
 ## 2. Dataset & Empirical Measurement (278 Real Sessions)
@@ -135,3 +140,7 @@ When presenting this project to users, developers, and teams:
    * Eliminates the #1 cause of agent hallucination: conflicting file states in the attention window.
 3. **"Zero Effort, Zero Vendor Lock-in"**
    * Works with whichever harness you use today (Antigravity, Claude Code, Codex, Pi, Hermes) via standard `/cw optimize min|mid|max` slash commands or local proxy.
+
+## CW-119B offline evidence note
+
+The stateful OpenAI Responses `PinContext` capability is limited to authenticated, committed tail appends on recognized new user-text input. Stateful requests from other providers, mixed `messages`/`input` payloads, and explicit invalid `type` values abstain. The M2 verifier compares the complete outbound JSON with the expected authorized transformation and mutation ledger. Deterministic core and proxy suites are the evidence for request-shape handling and wire behavior; these checks do not demonstrate provider-side cache reuse or economic effect. Pilot 1 still has unverified M2 treatment, Pilot 2 was blocked by stateful Responses eligibility, and the product hypothesis remains `NOT_EVALUATED`.

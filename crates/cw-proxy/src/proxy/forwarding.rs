@@ -18,6 +18,40 @@ pub async fn forward_to_upstream(
     outbound_body: Vec<u8>,
     mut recorder: Option<Recorder>,
 ) -> Response {
+    // GET (e.g. model listing) is not a billable generation request.
+    if let Some(guard) = state.spend_guard.as_ref()
+        && method != axum::http::Method::GET
+    {
+        // Live spend control: admit before dispatch, never forward unmetered requests.
+        let Some(session_id) = recorder
+            .as_ref()
+            .and_then(|r| r.turn.as_ref())
+            .map(|t| t.session_id.clone())
+        else {
+            return (
+                StatusCode::FORBIDDEN,
+                "SpendGuard: unmetered provider request rejected",
+            )
+                .into_response();
+        };
+        match guard.admit_request(&session_id) {
+            Ok(permit) => {
+                if let Some(rec) = recorder.as_mut() {
+                    rec.spend_permit = Some(permit);
+                }
+            }
+            Err(error) => {
+                if let Some(mut rec) = recorder {
+                    rec.finish("blocked");
+                }
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    format!("SpendGuard: {error}"),
+                )
+                    .into_response();
+            }
+        }
+    }
     if state.capture_wire_egress
         && let Some(ref rec) = recorder
         && let Some(ref turn) = rec.turn

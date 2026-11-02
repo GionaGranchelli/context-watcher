@@ -242,8 +242,11 @@ fn test_cw120a_offline_schedule_and_report_are_reproducible_without_provider_cal
     let report: serde_json::Value =
         serde_json::from_slice(&fs::read(&report_path).unwrap()).unwrap();
     assert_eq!(report["provider_calls"], 0);
+    assert_eq!(report["codex_sessions"], 0);
+    assert_eq!(report["proxy_mutations"], 0);
     assert_eq!(report["actual_provider_spend_usd"], 0.0);
     assert_eq!(report["synthetic_costs_are_not_product_evidence"], true);
+    assert_eq!(report["evidence_scope"], "SYNTHETIC_REHEARSAL_ONLY");
     assert_eq!(report["analysis"]["matched_pairs_m1_vs_m0"], 0);
     assert_eq!(
         report["analysis"]["economic_summary"]["mean_proxy_overhead_ms"],
@@ -252,6 +255,89 @@ fn test_cw120a_offline_schedule_and_report_are_reproducible_without_provider_cal
     assert_eq!(
         report["analysis"]["causal_decomposition"]["proxy_overhead_effect"],
         "NOT_EVALUATED: requires matched M0/M1 sessions"
+    );
+    let criteria = &report["analysis"]["pre_registered_criteria"];
+    assert_eq!(
+        criteria["c1_no_correctness_regression"]["status"],
+        "SIMULATION_ONLY"
+    );
+    assert_eq!(
+        criteria["c5_no_cache_prefix_invalidation"]["status"],
+        "SIMULATION_ONLY"
+    );
+    assert_eq!(
+        criteria["c6_no_reliability_regression"]["status"],
+        "NOT_EVALUATED"
+    );
+    assert_eq!(
+        criteria["c7_attributed_to_documented_intervention"]["status"],
+        "SIMULATION_ONLY"
+    );
+    assert!(
+        report["analysis"]["causal_decomposition"]["cache_effect"]
+            .as_str()
+            .unwrap()
+            .starts_with("SIMULATION_ONLY:")
+    );
+    assert!(
+        report["analysis"]["causal_decomposition"]["behavioral_steering_effect"]
+            .as_str()
+            .unwrap()
+            .starts_with("SIMULATION_ONLY:")
+    );
+    assert_eq!(
+        report["analysis"]["paired_comparisons"][0]["behavioral_steering"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        report["analysis"]["paired_comparisons"][0]["behavioral_steering_status"],
+        "SIMULATION_ONLY"
+    );
+    let simulated_m2 = report["sessions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|session| session["mode"] == "M2")
+        .unwrap();
+    assert_eq!(
+        simulated_m2["execution_outcome"]["task_success"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        simulated_m2["execution_outcome"]["acceptance_test_passed"],
+        true
+    );
+    assert_eq!(
+        simulated_m2["execution_outcome"]["acceptance_scope"],
+        "predefined_solution_fixture_tests_only; no agent-generated task solution"
+    );
+    assert_eq!(
+        simulated_m2["optimization_evidence"]["evidence_status"],
+        "NOT_EVALUATED"
+    );
+    assert_eq!(
+        simulated_m2["optimization_evidence"]["mutation_count"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        simulated_m2["optimization_evidence"]["egress_verified"],
+        false
+    );
+    assert_eq!(
+        simulated_m2["simulated_optimization_evidence"]["mutation_count"],
+        1
+    );
+    assert_eq!(
+        simulated_m2["simulated_optimization_evidence"]["applied_to_request"],
+        false
+    );
+    assert_eq!(
+        report["independent_mock_test_references"][0]["test"],
+        "test_cw118_real_mock_provider_proxy_execution_m0_m1_m2"
+    );
+    assert_eq!(
+        report["independent_mock_test_references"][1]["test"],
+        "test_cw118_cache_safe_policy_qualification_defer_and_pin"
     );
     assert_eq!(report["schedule"].as_array().unwrap().len(), 12);
     assert_eq!(report["sessions"].as_array().unwrap().len(), 12);
@@ -263,6 +349,10 @@ fn test_cw120a_offline_schedule_and_report_are_reproducible_without_provider_cal
         6
     );
     assert_eq!(report["analysis"]["total_sessions"], 12);
+    assert_eq!(
+        report["analysis"]["accounting"]["success_attempt_total_cost_usd"],
+        serde_json::Value::Null
+    );
     let first_schedule = report["schedule"].clone();
     let invalid_schedule = Command::new("python3")
         .current_dir(&root)
@@ -276,6 +366,38 @@ fn test_cw120a_offline_schedule_and_report_are_reproducible_without_provider_cal
     assert!(
         !invalid_schedule.status.success(),
         "invalid schedule must fail validation under python -O"
+    );
+
+    let failed_acceptance = Command::new("python3")
+        .current_dir(&root)
+        .args([
+            "-O",
+            "-c",
+            r#"
+import sys
+sys.path.insert(0, 'benchmark')
+import cw118_product_value as cw118
+item = {"campaign_id":"test", "block_id":"F1-R1", "session_id":"test", "task_family":"F1", "repetition":0, "mode":"M1", "execution_order_position":0, "seed":1202026}
+def verify(responses, expected):
+    results = iter(responses)
+    cw118.run_acceptance_tests = lambda *_: next(results)
+    try:
+        cw118.simulate_offline_session(item)
+    except RuntimeError as error:
+        if expected not in str(error):
+            raise
+    else:
+        raise SystemExit(f"acceptance failure was not detected: {expected}")
+verify([(True, "unexpected initial pass")], "must fail acceptance before fix")
+verify([(False, "buggy fixture"), (False, "still failing")], "Acceptance tests failed")
+"#,
+        ])
+        .output()
+        .expect("failed to test optimized acceptance validation");
+    assert!(
+        failed_acceptance.status.success(),
+        "simulated acceptance failures must be rejected under python -O: {}",
+        String::from_utf8_lossy(&failed_acceptance.stderr)
     );
 
     let rerun = Command::new("python3")
@@ -534,6 +656,34 @@ fn test_cw118_cached_vs_uncached_billing_accuracy() {
     // Cached: 1,000,000 tokens @ $0.075 (50% discount)
     let cached_cost = (1_000_000_f64 * profile.cached_input_read_per_mtok) / 1_000_000.0;
     assert!((cached_cost - 0.075).abs() < 1e-6);
+}
+
+#[test]
+fn test_cw120a_cache_write_tokens_are_priced_as_a_disjoint_input_bucket() {
+    let root = workspace_root();
+    let script = r#"
+import sys
+sys.path.insert(0, 'benchmark')
+from cw118_product_value import calculate_provider_cost
+
+input_tokens, cached_tokens, cache_write_tokens, output_tokens = 170, 50, 20, 10
+uncached_tokens = input_tokens - cached_tokens - cache_write_tokens
+cost = calculate_provider_cost(
+    'gpt-6-luna', uncached_tokens, cached_tokens, output_tokens, cache_write_tokens
+)
+if cost != 0.000018:
+    raise SystemExit(f'cache-write buckets double-counted or mispriced: {cost}')
+"#;
+    let output = Command::new("python3")
+        .current_dir(&root)
+        .args(["-O", "-c", script])
+        .output()
+        .expect("failed to test GPT-6 Luna cache-write accounting");
+    assert!(
+        output.status.success(),
+        "cache-write tokens must be excluded from uncached tokens: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

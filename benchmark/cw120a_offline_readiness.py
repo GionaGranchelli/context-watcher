@@ -109,6 +109,21 @@ def run(output: Path):
                 session["optimization_evidence"]["mutation_count"] == 1,
                 f"M2 session {item['session_id']} must have exactly one mutation",
             )
+        session["execution_outcome"]["task_success"] = None
+        session["execution_outcome"]["acceptance_scope"] = (
+            "predefined_solution_fixture_tests_only; no agent-generated task solution"
+        )
+        simulated_evidence = session.pop("optimization_evidence")
+        simulated_evidence["evidence_status"] = "SIMULATION_ONLY"
+        simulated_evidence["applied_to_request"] = False
+        session["simulated_optimization_evidence"] = simulated_evidence
+        session["optimization_evidence"] = {
+            "evidence_status": "NOT_EVALUATED",
+            "mutation_count": None,
+            "estimated_kv_break_tokens": None,
+            "behavioral_steering_injected": None,
+            "egress_verified": False,
+        }
         sessions.append(session)
 
     indexed = {(s["task_family"], s["repetition"], s["mode"]): s for s in sessions}
@@ -123,6 +138,7 @@ def run(output: Path):
 
     analysis = cw118.analyze_campaign_results(sessions)
     require(len(analysis["paired_comparisons"]) == 6, "analysis must contain six M1/M2 pairs")
+    analysis["accounting"]["success_attempt_total_cost_usd"] = None
     require(
         analysis["matched_pairs_m1_vs_m0"] == 0
         and analysis["economic_summary"]["mean_proxy_overhead_ms"] is None,
@@ -132,8 +148,21 @@ def run(output: Path):
         "campaign": "CW-120A offline readiness rehearsal",
         "source_git_commit": cw118.get_git_commit(),
         "provider_calls": 0,
+        "codex_sessions": 0,
+        "proxy_mutations": 0,
         "actual_provider_spend_usd": 0.0,
         "synthetic_costs_are_not_product_evidence": True,
+        "evidence_scope": "SYNTHETIC_REHEARSAL_ONLY",
+        "independent_mock_test_references": [
+            {
+                "test": "test_cw118_real_mock_provider_proxy_execution_m0_m1_m2",
+                "scope": "Separate deterministic HTTP proxy test; not included in this simulated campaign.",
+            },
+            {
+                "test": "test_cw118_cache_safe_policy_qualification_defer_and_pin",
+                "scope": "Separate deterministic policy and PinContext egress test; not included in this simulated campaign.",
+            },
+        ],
         "configuration": {
             "families": list(TASKS),
             "repetitions": REPETITIONS,

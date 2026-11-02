@@ -642,8 +642,7 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         "FAIL"
     } else if eligible_requests == 0 {
         "BLOCKED_NO_ELIGIBLE_TREATMENT"
-    } else if failures.is_empty()
-        && eligible_mutated > 0
+    } else if eligible_mutated > 0
         && eligible_mutated + idempotent_already_present == eligible_requests
     {
         "PASS"

@@ -1,8 +1,8 @@
 # CW-119C Live Treatment Proof
 
-**Status:** Stateless treatment verified by saved-evidence replay; stateful treatment remains unverified
+**Status:** Stateless treatment delivery verified by saved-evidence replay; stateful treatment remains unverified
 **Offline runner:** implemented; deterministic local gates passed; PR #28 merged in the qualified baseline
-**Provider calls:** M1 and M2 executed; M2 treatment was not verified
+**Provider calls:** M1 and M2 executed; live assertion failed, then saved-evidence replay verified one stateless treatment
 **Product value:** `NOT_EVALUATED`
 
 ## Scope
@@ -13,7 +13,7 @@ This is a single treatment proof, not a product value study. A passing result es
 
 ## Offline readiness
 
-The ignored live test is gated by `CW_QUALIFY_LIVE_PILOT=1`, explicit `CW_LIVE_AUTH_USD`, and `OPENAI_API_KEY`. No authorization is present or inferred. This host has Codex CLI `0.166.0`; `cw readiness` reports Codex as `CONFIGURED`, not functionally verified. The proxy route is available from isolated config, but route and credential isolation remain unverified without an observed proxied request. Do not invoke a provider as part of offline checks.
+The ignored live test is gated by `CW_QUALIFY_LIVE_PILOT=1`, explicit `CW_LIVE_AUTH_USD`, and `OPENAI_API_KEY`. The user authorized the two recorded M1/M2 campaigns on 2026-11-02; that authorization is spent and does not authorize another run. This host has Codex CLI `0.166.0`; `cw readiness` reports Codex as `CONFIGURED`, not functionally verified. The proxy route and credential isolation were exercised by the recorded proxied requests. Do not invoke a provider as part of offline checks.
 
 ### 2026-11-02 preflight record
 
@@ -38,7 +38,7 @@ The combined SpendGuard amount is $0.01881, calculated from provider-reported to
 
 The M2 verifier examined three requests after the rule commit, classified zero as eligible, and reported three ineligible requests with egress preservation failures. It reported zero mutated eligible requests. The test failed its required `PASS` assertion. The verifier's emitted status was `BLOCKED_NO_ELIGIBLE_TREATMENT` even though its failure list showed egress mismatches; a deterministic regression test now ensures failures take precedence over that blocked status. Raw and egress payloads were held in an in-memory store and were not persisted after the panic, so the exact changed fields and whether a directive reached any request cannot be established from this run.
 
-**Disposition:** `TREATMENT_FAILED`. The tasks passed, but the intervention was not verified and the egress safety check failed. Stop live runs until the mismatch is explained and corrected. No cache-effect or product-value claim follows from these results.
+**Historical disposition for this first attempt:** `TREATMENT_FAILED`. The tasks passed, but the intervention was not verified and the egress safety check failed. The later authorized diagnostic rerun and saved-evidence replay below supersede this as the current stateless treatment status; the first attempt remains a failure in the evidence record. No cache-effect or product-value claim follows from either run.
 
 ## Spend exposure and enforcement
 
@@ -55,7 +55,7 @@ cargo test -p cw-proxy --test live_pilot_test \
   test_cw119c_controlled_live_treatment_codex_m1_m2 -- --ignored --exact --nocapture
 ```
 
-Expected exposure is up to two nominal $0.15 session ceilings ($0.30 total), with an unbounded per-request overage relative to the $0.01 reservation. The authorization value is not a hard provider-side spending cap. No live run is authorized by this document.
+Historical campaign exposure was up to two nominal $0.15 session ceilings ($0.30 total), with a possible per-request overage relative to the $0.01 reservation. The authorization value was not a hard provider-side spending cap. The recorded campaigns are complete; no further live run is authorized by this document.
 
 ## Result record
 

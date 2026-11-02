@@ -911,6 +911,8 @@ async fn spawn_mock_openai_upstream() -> (
     let requests = Arc::new(Mutex::new(Vec::new()));
     let count_clone = call_count.clone();
     let requests_clone = requests.clone();
+    let response_count = call_count.clone();
+    let response_requests = requests.clone();
 
     let app = Router::new().route(
         "/v1/chat/completions",
@@ -960,6 +962,26 @@ async fn spawn_mock_openai_upstream() -> (
                 }
             },
         ),
+    )
+    .route(
+        "/v1/responses",
+        post(
+            move |headers: axum::http::HeaderMap, AxumJson(payload): AxumJson<serde_json::Value>| {
+                let count = response_count.clone();
+                let requests = response_requests.clone();
+                async move {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    requests.lock().unwrap().push((headers, payload));
+                    axum::Json(json!({
+                        "id": "resp_mock_next",
+                        "object": "response",
+                        "status": "completed",
+                        "output": [],
+                        "usage": {"input_tokens": 10, "output_tokens": 1}
+                    }))
+                }
+            },
+        ),
     );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -988,6 +1010,132 @@ async fn spawn_real_cw_proxy(
     });
 
     (format!("http://{addr}"), control_token, handle)
+}
+
+#[tokio::test]
+async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
+    let (mock_url, calls, received, _mock_task) = spawn_mock_openai_upstream().await;
+    let store = CwStore::open_in_memory().unwrap();
+    let (proxy_url, control_token, _proxy_task) =
+        spawn_real_cw_proxy(store.clone(), mock_url).await;
+    let session_id = "cw119b_stateful_responses";
+    let now = Utc::now();
+    store
+        .upsert_session(&Session {
+            id: session_id.into(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "gpt-4o-mini".into(),
+            provider: ProviderKind::OpenAI,
+            title: Some("CW-119B mock Responses test".into()),
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+    let mut autopilot = store.get_autopilot_config().unwrap_or_default();
+    autopilot.enabled = true;
+    store.set_autopilot_config(&autopilot).unwrap();
+    store
+        .save_mutation(&MutationRule {
+            id: "cw119b_pin".into(),
+            session_id: session_id.into(),
+            op: MutationOp::PinContext {
+                label: "qualification".into(),
+                content: "preserve this directive".into(),
+                source_node_id: None,
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: now,
+        })
+        .unwrap();
+
+    let raw = json!({
+        "model":"gpt-4o-mini",
+        "previous_response_id":"resp_previous_exact",
+        "input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"finish the task"}]}]
+    });
+    let response = reqwest::Client::new()
+        .post(format!("{proxy_url}/openai/v1/responses"))
+        .header("x-cw-session-id", session_id)
+        .header("x-cw-control-token", &control_token)
+        .json(&raw)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let upstream = {
+        let captured = received.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let (headers, upstream) = &captured[0];
+        assert!(headers.get("x-cw-control-token").is_none());
+        assert!(headers.get("x-cw-session-id").is_none());
+        assert_eq!(upstream["previous_response_id"], "resp_previous_exact");
+        assert_eq!(
+            upstream["input"][0]["content"][0],
+            raw["input"][0]["content"][0]
+        );
+        assert_eq!(upstream["input"][0]["content"].as_array().unwrap().len(), 2);
+        assert!(upstream.to_string().contains("preserve this directive"));
+        upstream.clone()
+    };
+
+    let turn = store
+        .get_latest_turn(session_id)
+        .unwrap()
+        .expect("proxy turn must persist");
+    assert!(
+        turn.applied_mutation_ids
+            .iter()
+            .any(|id| id == "cw119b_pin")
+    );
+    let egress: serde_json::Value = serde_json::from_slice(
+        &store
+            .get_wire_egress(&turn.id)
+            .unwrap()
+            .expect("wire egress must persist"),
+    )
+    .unwrap();
+    assert_eq!(egress, upstream);
+
+    let tool_continuation = json!({
+        "model":"gpt-4o-mini",
+        "previous_response_id":"resp_previous_exact",
+        "input":[{"type":"function_call_output","call_id":"call_tool","output":"tool result"}]
+    });
+    let tool_response = reqwest::Client::new()
+        .post(format!("{proxy_url}/openai/v1/responses"))
+        .header("x-cw-session-id", session_id)
+        .header("x-cw-control-token", &control_token)
+        .json(&tool_continuation)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(tool_response.status(), 200);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let tool_turn = store
+        .get_latest_turn(session_id)
+        .unwrap()
+        .expect("tool continuation turn must persist");
+    assert!(tool_turn.applied_mutation_ids.is_empty());
+    assert_eq!(tool_turn.skipped_mutations.len(), 1);
+    assert_eq!(tool_turn.skipped_mutations[0].rule_id, "cw119b_pin");
+    assert_eq!(
+        tool_turn.skipped_mutations[0].reason,
+        "SkippedNoEligibleUserTail"
+    );
+    let tool_egress: serde_json::Value = serde_json::from_slice(
+        &store
+            .get_wire_egress(&tool_turn.id)
+            .unwrap()
+            .expect("tool continuation egress must persist"),
+    )
+    .unwrap();
+    assert_eq!(tool_egress, tool_continuation);
 }
 
 #[tokio::test]

@@ -182,11 +182,10 @@ pub async fn handle_proxy_request(
             };
             let previous = state.store.get_latest_turn(&session_id).ok().flatten();
             let previous_nodes = previous.as_ref().map(|t| t.nodes.clone());
-            let active = !strict_shadow
-                && mutation_requested
-                && cw_core::normalizer::supports_mutation_payload(&raw, provider);
+            let active = !strict_shadow && mutation_requested;
             let mut outbound = raw.clone();
             let mut applied = Vec::new();
+            let mut skipped_mutations = Vec::new();
             if active {
                 let rules = match state.store.list_mutations(&session_id) {
                     Ok(rules) => rules,
@@ -197,6 +196,7 @@ pub async fn handle_proxy_request(
                 };
                 let report = apply_mutations_to_payload(&mut outbound, provider, &rules, seq);
                 applied = report.applied_rule_ids;
+                skipped_mutations = report.skipped_rules;
             }
             // Disk inspection belongs on the blocking pool, never on the forwarding executor.
             let input = outbound.clone();
@@ -365,7 +365,12 @@ pub async fn handle_proxy_request(
                     && validate_protocol_invariants(&raw, provider).is_ok()
                 {
                     outbound = raw.clone();
-                    applied.clear();
+                    skipped_mutations.extend(applied.drain(..).map(|rule_id| {
+                        cw_core::ir::SkippedMutation {
+                            rule_id,
+                            reason: "PostMutationValidationFailed".into(),
+                        }
+                    }));
                 }
                 if outbound != raw {
                     outbound_body = match serde_json::to_vec(&outbound) {
@@ -388,6 +393,7 @@ pub async fn handle_proxy_request(
                     turn = actual;
                 }
                 turn.applied_mutation_ids = applied;
+                turn.skipped_mutations = skipped_mutations;
                 turn.outcome = Some("pending".into());
                 let raw_tokens = cw_core::normalizer::parse_request_to_nodes(&raw, provider, seq)
                     .map(|n| n.iter().map(|n| n.token_span.count).sum::<u32>())

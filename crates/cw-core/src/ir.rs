@@ -449,6 +449,8 @@ pub struct ContextTurn {
     pub first_body_byte_ms: Option<u64>,
     #[serde(default)]
     pub applied_mutation_ids: Vec<String>,
+    #[serde(default)]
+    pub skipped_mutations: Vec<SkippedMutation>,
     pub id: TurnId,
     pub session_id: SessionId,
     pub parent_turn_id: Option<TurnId>,
@@ -462,6 +464,12 @@ pub struct ContextTurn {
     pub health_score: u8,
     pub latency_ms: Option<u64>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedMutation {
+    pub rule_id: String,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

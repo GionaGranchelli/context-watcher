@@ -140,3 +140,7 @@ When presenting this project to users, developers, and teams:
    * Eliminates the #1 cause of agent hallucination: conflicting file states in the attention window.
 3. **"Zero Effort, Zero Vendor Lock-in"**
    * Works with whichever harness you use today (Antigravity, Claude Code, Codex, Pi, Hermes) via standard `/cw optimize min|mid|max` slash commands or local proxy.
+
+## CW-119B offline evidence note
+
+The stateful OpenAI Responses `PinContext` capability is limited to authenticated, committed tail appends on recognized new user-text input. Deterministic core and proxy suites are the evidence for request-shape handling and wire behavior; these checks do not demonstrate provider-side cache reuse or economic effect. Pilot 1 still has unverified M2 treatment, Pilot 2 was blocked by stateful Responses eligibility, and the product hypothesis remains `NOT_EVALUATED`.

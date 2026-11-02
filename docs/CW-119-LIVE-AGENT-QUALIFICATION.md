@@ -9,6 +9,10 @@
 
 ## 1. Conclusion so far
 
+### CW-119B stateful Responses compatibility (offline qualification)
+
+Stateful OpenAI Responses requests are operation-specific. A request with `previous_response_id` may receive only an explicitly committed `PinContext` appended to a recognized new user-text tail. The exact `previous_response_id`, roles, IDs, item order, and all original user-authored text are preserved as an exact prefix. Tool-only continuations, unknown input forms, signed/encrypted content, non-null `conversation` references, and historical Prune/Fold/Dedupe/Normalize operations abstain. These rules do not establish provider-side cache reuse; cache effect remains unverified until observed from provider telemetry. This offline capability does not alter the historical conclusions below: Pilot 1 treatment was not verified; Pilot 2 treatment was blocked by stateful Responses eligibility; neither pilot establishes economic effect, and the product hypothesis remains **NOT EVALUATED**.
+
 > Three Codex runs completed successfully. The intended M2 intervention was not verified, and no reliable economic benefit has been demonstrated.
 
 What Pilot 1 **does** show:

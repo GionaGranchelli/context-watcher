@@ -71,6 +71,7 @@ pub fn analyze_turn_from_payload(
         outcome: None,
         first_body_byte_ms: None,
         applied_mutation_ids: Vec::new(),
+        skipped_mutations: Vec::new(),
         id: turn_id,
         session_id,
         parent_turn_id,

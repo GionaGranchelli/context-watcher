@@ -445,9 +445,22 @@ fn codex_cmd(
 /// all original items before the final (tail) item are byte-identical and in order.
 fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &str) -> Value {
     let turns = store.list_turns(sid).expect("list M2 turns");
-    let mut checked = 0usize;
+    let mut total_after_commit = 0usize;
+    let mut eligible_requests = 0usize;
+    let mut eligible_mutated = 0usize;
+    let mut idempotent_already_present = 0usize;
+    let mut ineligible_abstained = 0usize;
+    let mut unexpected_misses = 0usize;
+    let mut invalid_mutations = 0usize;
+    let mut wire_preservation_failures = 0usize;
     let mut failures = Vec::new();
     for t in turns.iter().filter(|t| t.sequence_number < first_t2_seq) {
+        if t.applied_mutation_ids.iter().any(|id| id == rule_id) {
+            failures.push(format!(
+                "pre-commit turn {} recorded the rule as applied",
+                t.sequence_number
+            ));
+        }
         if let Ok(Some(e)) = store.get_wire_egress(&t.id)
             && String::from_utf8_lossy(&e).contains(PIN_DIRECTIVE)
         {
@@ -458,7 +471,7 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
         }
     }
     for t in turns.iter().filter(|t| t.sequence_number >= first_t2_seq) {
-        checked += 1;
+        total_after_commit += 1;
         let raw = store.get_turn_raw_payload(&t.id).ok().flatten();
         let egress = store
             .get_wire_egress(&t.id)
@@ -472,30 +485,283 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
             ));
             continue;
         };
-        if !t.applied_mutation_ids.iter().any(|id| id == rule_id) {
-            failures.push(format!(
-                "turn {} did not record rule as applied",
-                t.sequence_number
-            ));
-        }
-        if !egress.to_string().contains(PIN_DIRECTIVE) {
-            failures.push(format!("turn {} egress lacks directive", t.sequence_number));
-        }
-        let ri = raw["input"].as_array().cloned().unwrap_or_default();
-        let ei = egress["input"].as_array().cloned().unwrap_or_default();
-        let keep = ri.len().saturating_sub(1);
-        if ei.len() < ri.len() || ri[..keep] != ei[..keep] {
-            failures.push(format!(
-                "turn {} original prefix not preserved",
-                t.sequence_number
-            ));
+        match cw_core::normalizer::classify_mutation_eligibility(&raw, ProviderKind::OpenAI) {
+            cw_core::normalizer::MutationEligibility::StatefulTailOnlyEligible => {
+                eligible_requests += 1;
+                if raw.to_string().contains(PIN_DIRECTIVE) {
+                    if t.applied_mutation_ids.iter().any(|id| id == rule_id) && raw == egress {
+                        idempotent_already_present += 1;
+                    } else {
+                        invalid_mutations += 1;
+                        failures.push(format!(
+                            "eligible turn {} had pre-existing pin but was not an unchanged idempotent application",
+                            t.sequence_number
+                        ));
+                    }
+                    continue;
+                }
+                let rule_was_recorded = t.applied_mutation_ids.iter().any(|id| id == rule_id);
+                let directive_on_wire = egress.to_string().contains(PIN_DIRECTIVE);
+                if !rule_was_recorded || !directive_on_wire {
+                    unexpected_misses += 1;
+                    failures.push(format!(
+                        "eligible turn {} was not mutated and recorded (ledger={rule_was_recorded}, wire={directive_on_wire})",
+                        t.sequence_number
+                    ));
+                    continue;
+                }
+                eligible_mutated += 1;
+                if raw["previous_response_id"] != egress["previous_response_id"] {
+                    invalid_mutations += 1;
+                    failures.push(format!(
+                        "turn {} changed previous_response_id",
+                        t.sequence_number
+                    ));
+                }
+                let tail_preserved = match (&raw["input"], &egress["input"]) {
+                    (Value::String(original), Value::String(outbound)) => {
+                        outbound.starts_with(original)
+                            && outbound[original.len()..].contains(PIN_DIRECTIVE)
+                    }
+                    (Value::Array(ri), Value::Array(ei)) => {
+                        if ri.is_empty() || ri.len() != ei.len() {
+                            false
+                        } else {
+                            let tail_index = ri.len() - 1;
+                            if ri[..tail_index] != ei[..tail_index] {
+                                false
+                            } else if let (Some(raw_content), Some(egress_content)) = (
+                                ri[tail_index]["content"].as_array(),
+                                ei[tail_index]["content"].as_array(),
+                            ) {
+                                if egress_content.len() != raw_content.len() + 1
+                                    || egress_content[..raw_content.len()] != *raw_content
+                                {
+                                    false
+                                } else {
+                                    let mut restored_tail = ei[tail_index].clone();
+                                    restored_tail["content"] = ri[tail_index]["content"].clone();
+                                    restored_tail == ri[tail_index]
+                                        && egress_content.last().is_some_and(|block| {
+                                            block["type"] == "input_text"
+                                                && block["text"].as_str().is_some_and(|text| {
+                                                    text.contains(PIN_DIRECTIVE)
+                                                })
+                                        })
+                                }
+                            } else {
+                                false
+                            }
+                        }
+                    }
+                    _ => false,
+                };
+                if !tail_preserved {
+                    invalid_mutations += 1;
+                    wire_preservation_failures += 1;
+                    failures.push(format!(
+                        "turn {} changed original input or did not append exactly one pin block",
+                        t.sequence_number
+                    ));
+                }
+            }
+            _ => {
+                ineligible_abstained += 1;
+                if t.applied_mutation_ids.iter().any(|id| id == rule_id) || raw != egress {
+                    invalid_mutations += 1;
+                    wire_preservation_failures += 1;
+                    failures.push(format!(
+                        "ineligible turn {} was mutated or changed on egress",
+                        t.sequence_number
+                    ));
+                }
+            }
         }
     }
+    let status = if eligible_requests == 0 {
+        "BLOCKED_NO_ELIGIBLE_TREATMENT"
+    } else if failures.is_empty()
+        && eligible_mutated > 0
+        && eligible_mutated + idempotent_already_present == eligible_requests
+    {
+        "PASS"
+    } else {
+        "FAIL"
+    };
     json!({
-        "turn2_requests_checked": checked,
-        "treatment_verified": checked > 0 && failures.is_empty(),
+        "total_requests_after_commit": total_after_commit,
+        "eligible_requests": eligible_requests,
+        "eligible_requests_mutated": eligible_mutated,
+        "eligible_requests_idempotent_pin_already_present": idempotent_already_present,
+        "ineligible_requests_abstained": ineligible_abstained,
+        "unexpectedly_unmodified_eligible_requests": unexpected_misses,
+        "invalid_or_unsafe_mutations": invalid_mutations,
+        "provider_wire_preservation_failures": wire_preservation_failures,
+        "status": status,
+        "treatment_verified": status == "PASS",
         "failures": failures,
     })
+}
+
+#[test]
+fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention() {
+    let store = CwStore::open_in_memory().unwrap();
+    let session_id = "cw119b_verifier";
+    let now = Utc::now();
+    store
+        .upsert_session(&Session {
+            id: session_id.into(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "gpt-4o-mini".into(),
+            provider: ProviderKind::OpenAI,
+            title: Some("verifier fixture".into()),
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+    let rule = MutationRule {
+        id: "pin-verifier".into(),
+        session_id: session_id.into(),
+        op: MutationOp::PinContext {
+            label: "fixture".into(),
+            content: PIN_DIRECTIVE.into(),
+            source_node_id: None,
+        },
+        status: MutationStatus::Committed,
+        estimated_saved_tokens: 0,
+        estimated_kv_break_tokens: 0,
+        created_at: now,
+    };
+    store.save_mutation(&rule).unwrap();
+
+    let eligible_raw = json!({"model":"gpt-4o-mini","previous_response_id":"resp_1","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]});
+    let mut eligible_egress = eligible_raw.clone();
+    let report = cw_core::mutation::apply_mutations_to_payload(
+        &mut eligible_egress,
+        ProviderKind::OpenAI,
+        &[rule],
+        1,
+    );
+    let mut eligible_turn = cw_core::analyze_turn_from_payload(
+        "turn_1".into(),
+        session_id.into(),
+        None,
+        1,
+        &eligible_egress,
+        ProviderKind::OpenAI,
+        None,
+        None,
+        None,
+    )
+    .unwrap()
+    .0;
+    eligible_turn.applied_mutation_ids = report.applied_rule_ids;
+    eligible_turn.skipped_mutations = report.skipped_rules;
+    store
+        .save_turn(&eligible_turn, Some(&eligible_raw), None, None)
+        .unwrap();
+    store
+        .save_wire_egress(
+            &eligible_turn.id,
+            serde_json::to_string(&eligible_egress).unwrap().as_bytes(),
+        )
+        .unwrap();
+
+    let tool_raw = json!({"model":"gpt-4o-mini","previous_response_id":"resp_1","input":[{"type":"function_call_output","call_id":"call_1","output":"done"}]});
+    let tool_report = cw_core::mutation::apply_mutations_to_payload(
+        &mut tool_raw.clone(),
+        ProviderKind::OpenAI,
+        &[MutationRule {
+            id: "pin-verifier".into(),
+            session_id: session_id.into(),
+            op: MutationOp::PinContext {
+                label: "fixture".into(),
+                content: PIN_DIRECTIVE.into(),
+                source_node_id: None,
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: now,
+        }],
+        2,
+    );
+    let mut tool_turn = cw_core::analyze_turn_from_payload(
+        "turn_2".into(),
+        session_id.into(),
+        Some("turn_1".into()),
+        2,
+        &tool_raw,
+        ProviderKind::OpenAI,
+        None,
+        None,
+        None,
+    )
+    .unwrap()
+    .0;
+    tool_turn.skipped_mutations = tool_report.skipped_rules;
+    store
+        .save_turn(&tool_turn, Some(&tool_raw), None, None)
+        .unwrap();
+    store
+        .save_wire_egress(
+            &tool_turn.id,
+            serde_json::to_string(&tool_raw).unwrap().as_bytes(),
+        )
+        .unwrap();
+
+    let result = verify_m2_treatment(&store, session_id, 1, "pin-verifier");
+    assert_eq!(result["status"], "PASS", "{result}");
+    assert_eq!(result["eligible_requests"], 1);
+    assert_eq!(result["eligible_requests_mutated"], 1);
+    assert_eq!(result["ineligible_requests_abstained"], 1);
+
+    let blocked_store = CwStore::open_in_memory().unwrap();
+    let blocked_session = "cw119b_verifier_no_treatment";
+    blocked_store
+        .upsert_session(&Session {
+            id: blocked_session.into(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "gpt-4o-mini".into(),
+            provider: ProviderKind::OpenAI,
+            title: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+    let blocked_raw = json!({"model":"gpt-4o-mini","previous_response_id":"resp_1","input":[{"type":"function_call_output","call_id":"call_1","output":"done"}]});
+    let mut blocked_turn = cw_core::analyze_turn_from_payload(
+        "blocked_turn".into(),
+        blocked_session.into(),
+        None,
+        1,
+        &blocked_raw,
+        ProviderKind::OpenAI,
+        None,
+        None,
+        None,
+    )
+    .unwrap()
+    .0;
+    blocked_turn.skipped_mutations = vec![cw_core::ir::SkippedMutation {
+        rule_id: "pin-verifier".into(),
+        reason: "SkippedNoEligibleUserTail".into(),
+    }];
+    blocked_store
+        .save_turn(&blocked_turn, Some(&blocked_raw), None, None)
+        .unwrap();
+    blocked_store
+        .save_wire_egress(
+            &blocked_turn.id,
+            serde_json::to_string(&blocked_raw).unwrap().as_bytes(),
+        )
+        .unwrap();
+    let blocked = verify_m2_treatment(&blocked_store, blocked_session, 1, "pin-verifier");
+    assert_eq!(blocked["status"], "BLOCKED_NO_ELIGIBLE_TREATMENT");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

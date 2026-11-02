@@ -275,3 +275,10 @@ The checked tickets below are historical implementation milestones. They are not
 * **CW-104** Hardware and local model qualification.
 * **CW-R11** Large-history IO and pagination qualification.
 * **CW-R12** Broader task-family and provider qualification.
+
+## CW-119B stateful Responses tail qualification
+
+* **Status:** Offline implementation in progress; no new paid provider runs authorized or performed.
+* **Supported narrowly:** Authenticated OpenAI Responses request with `previous_response_id`, recognized new user-text tail, and explicitly committed `PinContext` only.
+* **Abstain:** Tool-only or unknown input tails, signed/encrypted payloads, non-null `conversation` references, and historical mutation operations. Provider-side cache effect remains unverified.
+* **Historical pilots:** Pilot 1 M2 treatment unverified; Pilot 2 treatment blocked by stateful Responses eligibility. Product hypothesis remains `NOT_EVALUATED`.

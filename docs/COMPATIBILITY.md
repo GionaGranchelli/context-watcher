@@ -6,7 +6,8 @@ This is the current safety contract. Fixture coverage is narrower than full real
 |---|---|---|---|---|
 | OpenAI Chat, known unsigned text shapes | Raw bytes and analysis | Explicit authenticated session; opt-in | Through supported harness adapter | Unsupported |
 | OpenAI Responses, stateless text and function items | Raw bytes and known-item analysis | Known unsigned text only when the client sends authenticated session headers | Adapter dependent | Unsupported |
-| Responses `previous_response_id` / `conversation` | Raw bytes; partial local view | Disabled | Unsupported | Unsupported |
+| Responses `previous_response_id` + supported user-text tail + committed `PinContext` | Raw bytes; partial local view | Narrow tail append only; authenticated session and explicit committed rule required | Unsupported | Unsupported |
+| Responses `previous_response_id` with tool-only/unknown tail; historical Prune/Fold/Dedupe/Normalize; any non-null `conversation` reference | Raw bytes; partial local view | Abstain and preserve request | Unsupported | Unsupported |
 | Anthropic known text/tool blocks | Raw bytes and analysis | Unsigned known shapes only | Exact tool-result mappings | Unsupported |
 | Gemini known text/function blocks | Raw bytes and analysis | No authenticated session headers from `cw wrap`; observation only | Adapter dependent | Unsupported |
 | Signed thinking / thought signatures / encrypted content | Opaque raw preservation | Disabled for whole payload | Source preserved | Unsupported |

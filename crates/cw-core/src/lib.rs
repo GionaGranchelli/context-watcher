@@ -660,6 +660,15 @@ mod tests {
             },
         ];
         assert!(dup_pins[0].op.is_semantically_equivalent(&dup_pins[1].op));
+        let tool_tail_payload = payload.clone();
+        let tool_tail_report =
+            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &dup_pins, 15);
+        assert_eq!(payload, tool_tail_payload);
+        assert!(tool_tail_report.applied_rule_ids.is_empty());
+        payload["messages"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"role":"user", "content":"continue"}));
         apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &dup_pins, 15);
         let after_str = serde_json::to_string(&payload).unwrap();
         assert_eq!(

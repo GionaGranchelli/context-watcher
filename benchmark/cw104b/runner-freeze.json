@@ -1,5 +1,5 @@
 {
-  "version": "CW-121A-OFFLINE-BOUNDARY-1",
+  "version": "CW-121B-OFFLINE-CREATION-1",
   "default": "sanitized offline fixture",
   "historical_freeze": "benchmark/cw104b/freeze.json is retained unchanged for CW-104B-1 observations",
   "live_scope": "one-local-m1-m2-smoke-pair; explicit live switch plus current single-use operator authorization required",
@@ -21,18 +21,22 @@
     "benchmark/cw104b/request_options.js": "05deb68b9cc718ed9a6fe454d989ccefff1c728deda913f1dba86c810066de97",
     "benchmark/cw104b/smoke.py": "cda5758edc458433907c3bafca4bc4de77ab5dcecc7c41f518aa91e2b1f98da8",
     "benchmark/cw104b/test_smoke.py": "48778bd5a220c7bfa212eed0de4048b202724ba09ec22261f4ca8007f92193ff",
-    "crates/cw-core/src/autopilot.rs": "d5524b7dee5f3ccc0600bbb3e5da6a4181086da113b532cb070a7a686b9af3a6",
+    "crates/cw-cli/src/commands/session.rs": "eaaee5a80b99ffd89e0a9079a4e3dbb9a0a240e566e0a1c88555c9df74357b47",
+    "crates/cw-core/src/autopilot.rs": "0fa844c8a9ac8dee86785d87334ecb296484c3f55e4cacae447bf181740e2a95",
     "crates/cw-core/src/control.rs": "350d7bb40c099d4a3e2780fdd41e06c5146e4eac5d9b7ba016456d6411078bf4",
-    "crates/cw-core/src/mutation.rs": "abdb73f627d43127b0bd597b2ec0d97f099c096a4fead2a43bac4da8dc0db1d2",
+    "crates/cw-core/src/mutation.rs": "d83261abacafabf952d8a358b9fbe028049d229f3da89bf6a1b79e19067c0372",
     "crates/cw-harnesses/src/adapters/generic.rs": "75565ff7cf4ffb5923181108d9e48a0a912ffa762bdf2194853597934bc7fab3",
+    "crates/cw-harnesses/src/auto_heal.rs": "5a70e2d2397676650e84abac382c794f8f900379833271589cc7812bad98339c",
     "crates/cw-harnesses/src/error.rs": "605692c3a827574c592c9a7809da99d10aebf703cc2e8bdb5541b1cb16bb5ad1",
     "crates/cw-proxy/src/api/mod.rs": "bdc3bc3e517b41939eccece3ed66bbcd956d5f859c506b830969a4de9602b23a",
-    "crates/cw-proxy/src/api/pin_policy.rs": "92576dfa22b35ee7086bfad926bd93de4b463e8467f0bbec459568da11ed6077",
+    "crates/cw-proxy/src/api/mutations.rs": "460114501ec41b7d8566c55e90a6c60dc7f2aa31f2c0e20618396eb0fe752f69",
+    "crates/cw-proxy/src/api/pin_policy.rs": "3e74212067efc541cb3fb2d87120fc316c9ca9bab5f4819b4bc8dfd44ea0a079",
     "crates/cw-proxy/src/api/transform.rs": "249d9e257908c94376d5cb0b9ab3eefcb20a935ab8b32cdae12a15d1d9fd13c1",
-    "crates/cw-proxy/src/proxy/mod.rs": "d840665227a1c5666e6f0e8831df6291f15b973b3a58a61c83c4f74e390c90d8",
-    "crates/cw-proxy/tests/pin_lifecycle.rs": "a5d5aa4e55d12c4703eaa200b5061f264418e27bc4f9370e5be3b6cdd5143425",
-    "crates/cw-store/src/lib.rs": "f4280746a8aafe2b86fb17f0ce834eea0924f72abde454a85a9f1b2853a943f0",
+    "crates/cw-proxy/src/proxy/mod.rs": "2bd7834725607ead9454d062dffd3f2336e3ee9fd555d6abc3da14d985cf821f",
+    "crates/cw-proxy/tests/pin_lifecycle.rs": "1b767c9a97a5e53e832309a78c71716ddaa2e7d4ccc83ac93667589a591cf8f8",
+    "crates/cw-store/src/lib.rs": "548fd530d778c2d8d1363e9cc7bfd6aa1b271331eb8c25961b000933011425ee",
+    "crates/cw-tui/src/lib.rs": "98bcb47bcf58d103c8e7e776862256a51a7cffcb7dd369dee226dcaa12e59b11",
     "plugins/pi-opencode/index.js": "9623aeefb02ac6da1346eca42567fb75c4e1a9e1bbc8469c4e950c8827a1a08e"
   },
-  "qualification": "Offline lifecycle fixture only; live runner not requalified for session consent"
+  "qualification": "Offline lifecycle/creation fixtures only; live runner not requalified"
 }

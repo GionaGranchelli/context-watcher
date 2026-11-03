@@ -27,6 +27,10 @@
 
 ---
 
+## CW-121B implementation
+
+In Review: gate automatic/strategy PinContext creation on session consent, preserve explicit inactive manual pins, and expose activation scope. No inference or production changes. Broader controls remain CW-121C. See [creation contract and complete path inventory](docs/CW-121B-CONSENT-AWARE-CREATION.md).
+
 ## Historical implementation milestones
 
 These checkboxes record earlier implementation work, not current qualification. The remediation section and [support contract](docs/COMPATIBILITY.md) govern current behavior; unsupported claims below remain historical design descriptions.

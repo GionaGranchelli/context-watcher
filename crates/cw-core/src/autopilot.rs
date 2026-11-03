@@ -68,6 +68,8 @@ pub struct AutoPilotReport {
     pub spilled_log_files: Vec<String>,
     #[serde(default)]
     pub application: MutationApplicationReport,
+    #[serde(default)]
+    pub suppressed_pin_candidates: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shadow_decisions: Vec<crate::policy::PolicyDecision>,
 }
@@ -130,6 +132,10 @@ pub fn evaluate_autopilot_policies_with_policy(
                 if matches!(node.kind, NodeKind::InjectedRule { .. })
                     && node.attention_salience < 0.42
                 {
+                    if !pin_policy.is_enabled_for(session_id) || provider == ProviderKind::Gemini {
+                        report.suppressed_pin_candidates += 1;
+                        continue;
+                    }
                     let snippet: String = node
                         .kind
                         .text_for_tokenization()
@@ -211,7 +217,12 @@ pub fn evaluate_autopilot_policies_with_policy(
                 });
 
             if let Some(plan) = chosen_plan {
+                let before = report.generated_mutations.len();
                 for item in &plan.items {
+                    if !pin_policy.permits_generated_op(&item.mutation_op, session_id, provider) {
+                        report.suppressed_pin_candidates += 1;
+                        continue;
+                    }
                     report.generated_mutations.push(MutationRule {
                         id: format!("ap_heal_{}", &Uuid::new_v4().to_string()[..8]),
                         session_id: session_id.to_string(),
@@ -222,13 +233,11 @@ pub fn evaluate_autopilot_policies_with_policy(
                         created_at: Utc::now(),
                     });
                 }
-                if !plan.items.is_empty() {
+                let created = report.generated_mutations.len() - before;
+                if created > 0 {
                     report.triggered_policies.push(format!(
                         "low_health_self_healer(score={}<{}, strat={}, ops={})",
-                        turn_ref.health_score,
-                        config.min_health_score,
-                        plan.id,
-                        plan.items.len()
+                        turn_ref.health_score, config.min_health_score, plan.id, created
                     ));
                 }
             }

@@ -43,6 +43,16 @@ impl PinContextPolicy {
     pub fn is_enabled_for(&self, session_id: &str) -> bool {
         self.authorized_session_id.as_deref() == Some(session_id)
     }
+
+    pub fn permits_generated_op(
+        &self,
+        op: &MutationOp,
+        session_id: &str,
+        provider: ProviderKind,
+    ) -> bool {
+        !matches!(op, MutationOp::PinContext { .. })
+            || (self.is_enabled_for(session_id) && provider != ProviderKind::Gemini)
+    }
 }
 
 /// Applies all `Committed` mutations from `rules` deterministically onto a raw provider JSON payload.

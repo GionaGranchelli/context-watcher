@@ -255,22 +255,33 @@ pub async fn handle_proxy_request(
                         seq,
                         &turn.nodes,
                         Some(&turn),
-                        if active {
-                            &mut outbound
-                        } else {
-                            &mut eval_payload
-                        },
+                        &mut eval_payload,
                         &pin_policy,
                     );
-                    if active {
-                        for rule in report.generated_mutations {
-                            if let Err(error) = state.store.save_mutation(&rule) {
+                    if active && !report.generated_mutations.is_empty() {
+                        let creation = match state.store.save_generated_mutations_at_revision(
+                            &session_id,
+                            None,
+                            &report.generated_mutations,
+                        ) {
+                            Ok(report) => report,
+                            Err(error) => {
                                 return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
                                     .into_response();
                             }
-                        }
-                        applied.extend(report.application.applied_rule_ids);
-                        skipped_mutations.extend(report.application.skipped_rules);
+                        };
+                        let application = apply_mutations_to_payload_with_policy(
+                            &mut outbound,
+                            provider,
+                            &creation.created,
+                            seq,
+                            &state
+                                .store
+                                .get_pin_context_policy(&session_id)
+                                .unwrap_or_default(),
+                        );
+                        applied.extend(application.applied_rule_ids);
+                        skipped_mutations.extend(application.skipped_rules);
                     }
                     if !report.shadow_decisions.is_empty() {
                         let cache_obs = cw_core::policy::classify_cache_state(

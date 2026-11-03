@@ -230,6 +230,14 @@ pub fn run_lint(store: &CwStore, session: Option<String>, fix: bool) -> Result<(
     Ok(())
 }
 
+fn created_rule_estimate(creation: &cw_store::MutationCreationReport) -> u64 {
+    creation
+        .created
+        .iter()
+        .map(|rule| rule.estimated_saved_tokens.max(0) as u64)
+        .sum()
+}
+
 /// Applies or previews optimization plans for a single session or batch of sessions (`cw optimize`).
 #[allow(clippy::too_many_arguments)]
 pub fn run_optimize(
@@ -287,9 +295,10 @@ pub fn run_optimize(
             return Ok(());
         }
 
-        let mut sessions_compacted = 0usize;
+        let mut sessions_with_candidates = 0usize;
         let mut total_ops = 0usize;
-        let mut total_saved_tok = 0u64;
+        let mut total_plan_estimate = 0u64;
+        let mut total_created_estimate = 0u64;
         let mut total_synced = 0usize;
 
         for s in &target_sessions {
@@ -306,11 +315,12 @@ pub fn run_optimize(
             if plan.items.is_empty() {
                 continue;
             }
-            sessions_compacted += 1;
+            sessions_with_candidates += 1;
             total_ops += plan.items.len();
-            total_saved_tok += plan.saved_tokens as u64;
+            total_plan_estimate += plan.saved_tokens as u64;
 
             if !dry_run {
+                let mut proposed = Vec::new();
                 for item in &plan.items {
                     let rule = MutationRule {
                         id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
@@ -325,8 +335,20 @@ pub fn run_optimize(
                         estimated_kv_break_tokens: item.kv_break_tokens,
                         created_at: chrono::Utc::now(),
                     };
-                    store.save_mutation(&rule)?;
+                    proposed.push(rule);
                 }
+                let creation =
+                    store.save_generated_mutations_at_revision(&s.id, None, &proposed)?;
+                total_ops -= plan.items.len();
+                total_ops += creation.created.len();
+                total_created_estimate += created_rule_estimate(&creation);
+                println!(
+                    "Session {}: proposed {}, created {}, skipped {}. Measured savings unavailable.",
+                    s.id,
+                    proposed.len(),
+                    creation.created.len(),
+                    creation.skipped.len()
+                );
                 if !draft {
                     let _ = recompute_latest_turn_in_store(store, &s.id);
                     if sync_back && sync_mutations_to_transcript_on_disk(store, &s.id).is_ok() {
@@ -337,7 +359,7 @@ pub fn run_optimize(
         }
 
         println!(
-            "✅ BatchOptimize ({}) [strategy: '{}'] — Matched {} sessions, compacted {} sessions ({} operations, -{} tokens{}).",
+            "✅ BatchOptimize ({}) [strategy: '{}'] — Matched {} sessions, {} with proposals ({} {} operations, full-plan estimate {} tokens; created-rule estimate {}{}; measured savings unavailable).",
             if dry_run {
                 "DRY RUN"
             } else if draft {
@@ -347,9 +369,15 @@ pub fn run_optimize(
             },
             strat_id,
             target_sessions.len(),
-            sessions_compacted,
+            sessions_with_candidates,
             total_ops,
-            total_saved_tok,
+            if dry_run { "proposed" } else { "created" },
+            total_plan_estimate,
+            if dry_run {
+                "not evaluated (dry run)".to_string()
+            } else {
+                format!("{total_created_estimate} tokens")
+            },
             if total_synced > 0 {
                 format!(", synced {total_synced} transcripts to disk")
             } else {
@@ -446,6 +474,7 @@ pub fn run_optimize(
                 strat_id
             );
         };
+        let mut proposed = Vec::new();
         for item in &plan.items {
             let rule = MutationRule {
                 id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
@@ -460,25 +489,23 @@ pub fn run_optimize(
                 estimated_kv_break_tokens: item.kv_break_tokens,
                 created_at: chrono::Utc::now(),
             };
-            store.save_mutation(&rule)?;
+            proposed.push(rule);
         }
+        let creation = store.save_generated_mutations_at_revision(&sess_id, None, &proposed)?;
         if !draft {
             let updated_turn = recompute_latest_turn_in_store(store, &sess_id);
-            if let Some(mut t) = updated_turn {
-                if t.token_usage.saved_by_mutations == 0 && plan.saved_tokens > 0 {
-                    t.token_usage.saved_by_mutations = plan.saved_tokens;
-                }
-                if let Ok(Some(sess)) = store.get_session(&sess_id) {
-                    let pulse = cw_core::autopilot::generate_ambient_savings_pulse(
-                        &sess_id,
-                        &t,
-                        &sess.model,
-                        sess.provider,
-                        t.token_usage.saved_by_mutations as u64,
-                    );
-                    let _ = store.record_ambient_pulse(&pulse);
-                    println!("\n{}", pulse.formatted_message);
-                }
+            if let Some(t) = updated_turn
+                && let Ok(Some(sess)) = store.get_session(&sess_id)
+            {
+                let pulse = cw_core::autopilot::generate_ambient_savings_pulse(
+                    &sess_id,
+                    &t,
+                    &sess.model,
+                    sess.provider,
+                    t.token_usage.saved_by_mutations as u64,
+                );
+                let _ = store.record_ambient_pulse(&pulse);
+                println!("\n{}", pulse.formatted_message);
             }
             if sync_back {
                 let report = sync_mutations_to_transcript_on_disk(store, &sess_id)?;
@@ -486,11 +513,18 @@ pub fn run_optimize(
             }
         }
         println!(
-            "\n✅ {} {} optimization operations from '{}' on session {} (Est. saved: {} tok, Health: {} -> {}/100).",
+            "Proposed {}, created {}, skipped {}. Measured savings unavailable.",
+            proposed.len(),
+            creation.created.len(),
+            creation.skipped.len()
+        );
+        println!(
+            "\n✅ {} {} optimization operations from '{}' on session {} (created-rule estimate: {} tokens; full-plan estimate: {} tokens, health {} -> {}/100; measured savings unavailable).",
             if draft { "Staged" } else { "Committed" },
-            plan.items.len(),
+            creation.created.len(),
             plan.name,
             sess_id,
+            created_rule_estimate(&creation),
             plan.saved_tokens,
             plan.health_score_before,
             plan.health_score_after
@@ -963,5 +997,73 @@ mod tests {
             project_label_from_workspace(Some("/home/user/Development/my-project/")),
             "my-project"
         );
+    }
+    fn consent_filtered_estimate_fixture(partial: bool) -> cw_store::MutationCreationReport {
+        let store = CwStore::open_in_memory().unwrap();
+        store
+            .upsert_session(&cw_core::ir::Session {
+                id: "estimate-session".into(),
+                parent_session_id: None,
+                harness: HarnessKind::GenericProxy,
+                workspace_root: None,
+                model: "offline".into(),
+                provider: cw_core::ir::ProviderKind::OpenAI,
+                title: None,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })
+            .unwrap();
+        let rule = |id: &str, op, estimate| MutationRule {
+            id: id.into(),
+            session_id: "estimate-session".into(),
+            op,
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: estimate,
+            estimated_kv_break_tokens: 0,
+            created_at: chrono::Utc::now(),
+        };
+        let mut proposed = vec![rule(
+            "rejected-pin",
+            MutationOp::PinContext {
+                label: "pin".into(),
+                content: "Preserve API.".into(),
+                source_node_id: None,
+            },
+            700,
+        )];
+        if partial {
+            proposed.push(rule(
+                "dedupe",
+                MutationOp::ShadowDedupe { file_path: None },
+                100,
+            ));
+            proposed.push(rule(
+                "normalize",
+                MutationOp::NormalizePrefix {
+                    sort_tools_deterministically: true,
+                    relocate_dynamic_system_metadata: false,
+                },
+                200,
+            ));
+        }
+        store
+            .save_generated_mutations_at_revision("estimate-session", None, &proposed)
+            .unwrap()
+    }
+
+    #[test]
+    fn fully_rejected_plan_has_no_created_rule_estimate() {
+        let creation = consent_filtered_estimate_fixture(false);
+        assert_eq!(creation.skipped.len(), 1);
+        assert!(creation.created.is_empty());
+        assert_eq!(created_rule_estimate(&creation), 0);
+    }
+
+    #[test]
+    fn partially_accepted_plan_estimate_excludes_rejected_rules() {
+        let creation = consent_filtered_estimate_fixture(true);
+        assert_eq!(creation.skipped.len(), 1);
+        assert_eq!(creation.created.len(), 2);
+        assert_eq!(created_rule_estimate(&creation), 300);
     }
 }

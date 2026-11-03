@@ -46,7 +46,7 @@ pub fn check_and_apply_auto_heal(
         return false;
     };
 
-    let mut applied_any = false;
+    let mut proposed = Vec::new();
     for item in &plan.items {
         let rule = MutationRule {
             id: format!("ap_heal_{}", &uuid::Uuid::new_v4().to_string()[..8]),
@@ -57,11 +57,12 @@ pub fn check_and_apply_auto_heal(
             estimated_kv_break_tokens: item.kv_break_tokens,
             created_at: Utc::now(),
         };
-        if store.save_mutation(&rule).is_ok() {
-            applied_any = true;
-        }
+        proposed.push(rule);
     }
 
+    let applied_any = store
+        .save_generated_mutations_at_revision(session_id, None, &proposed)
+        .is_ok_and(|report| !report.created.is_empty());
     if applied_any {
         let all_mutations = store.list_mutations(session_id).unwrap_or_default();
         let mut cloned = payload.clone();

@@ -11,15 +11,17 @@ export function strategyConfirmation({ status, name, result }: {
   result: unknown;
 }): string {
   if (typeof result !== 'object' || result === null ||
-      !('created_count' in result) || !('applied_count' in result) ||
+      !('proposed_count' in result) || !('created_count' in result) || !('applied_count' in result) ||
       !('estimated_saved_tokens' in result)) {
     throw new Error('Incomplete strategy response');
   }
+  const proposed = count(result.proposed_count);
   const created = count(result.created_count);
   const preview = count(result.applied_count);
   const estimate = count(result.estimated_saved_tokens);
   const action = status === 'draft' ? 'Staged' : 'Created';
-  return `${action} ${created} ${status} ${created === 1 ? 'rule' : 'rules'} from "${name}". ` +
+  return `Proposed ${proposed} ${proposed === 1 ? 'rule' : 'rules'} from "${name}". ` +
+    `${action} ${created} ${status} ${created === 1 ? 'rule' : 'rules'}. ` +
     `${preview} eligible in the current preview. ` +
     `Estimated token reduction from created rules: ${estimate.toLocaleString()} tokens. ` +
     'Measured savings: unavailable.';

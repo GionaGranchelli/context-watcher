@@ -1,5 +1,9 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## CW-121B: Consent-aware creation
+
+[Creation contract, activation preview, and path inventory](docs/CW-121B-CONSENT-AWARE-CREATION.md). Offline core/store/API tests cover disabled/default and legacy policies, opt-in and revocation, non-pin preservation, manual inactive staging, transactional stale-grant and session protections, Gemini blocking, and inspectable activation scope. 265 Rust tests passed, 19 ignored; five web reporting tests, Svelte check/build, Clippy/formatting, and offline runner checks passed. Reporting distinguishes proposals from creation and measured savings. No inference, model-server access, historical rewrite, or production changes.
+
 ## CW-121A: PinContext application consent
 
 See [policy contract and activation inventory](docs/CW-121A-PINCONTEXT-POLICY.md). The committed-pin regression failed before the runtime guard. Deterministic coverage verifies default-off, explicit opt-in, revocation, legacy rules, unchanged pruning, scoped consent, stored policy events, and application/abstention accounting. Validation: 257 Rust tests passed, 19 ignored; workspace Clippy and formatting passed; 15 Python admission tests and the offline fixture passed. This revision performs no provider inference or server changes. Broader activation UX and live-runner migration remain unqualified.

@@ -1,11 +1,8 @@
 {
-  "status": "BLOCKED_WITH_EVIDENCE",
-  "current_blocker": "Intended treatment invalidated by tool-output pin injection",
-  "runtime_busy_blocker": "RESOLVED: exclusive window and equal initial cache verified",
-  "real_pair": "COMPLETED_BUT_INVALID_TREATMENT",
-  "local_fix": "SUPPORTED_USER_TEXT_TAIL_GUARD_APPLIED",
-  "patched_real_pair": "NOT_EXECUTED",
-  "authoritative_report": "docs/CW-104B-SMOKE-RESULTS.md",
+  "status": "READY_FOR_FULL_LOCAL_CAMPAIGN",
+  "meaning": "Readiness gates complete, not product-value qualification or campaign authorization",
+  "current_evidence": "smoke-20261103T140929Z-audit.json",
+  "earlier_invalid_runs": "Retained; do not pool with the patched pair",
   "full_campaign": "NOT_EXECUTED",
-  "goal_achieved": false
+  "human_review_and_merge": "Pending; no self-merge"
 }

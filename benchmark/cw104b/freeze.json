@@ -22,7 +22,9 @@
     "fixtures/f1/math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969"
   },
   "history_sha256": "0134917afb850953bba07dece1f71e6ce26c5f6ed48e96f4a3a51f6513becdda",
-  "execution_status": "BLOCKED_TOOL_OUTPUT_PIN_DEFECT_FIXED_OFFLINE_LIVE_REQUALIFICATION_REQUIRED",
+  "execution_status": "READY_FOR_FULL_LOCAL_CAMPAIGN_PATCHED_SMOKE_VERIFIED",
   "cache_alignment_revision": "Neutral suffix before every matched cache check and coding arm; tasks and pins unchanged",
-  "post_run_implementation_change": "Narrow user-tail guard and string-aware verifier; original live artifacts retain their recorded implementation context"
+  "post_run_implementation_change": "Narrow user-tail guard and string-aware verifier; original live artifacts retain their recorded implementation context",
+  "qualified_smoke": "smoke-20261103T140929Z-audit.json",
+  "product_value": "NOT_ESTABLISHED"
 }

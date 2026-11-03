@@ -1,6 +1,6 @@
 # CW-104B local cache qualification
 
-Status: tiny and long-history initial cache reuse VERIFIED after neutral-suffix alignment; product qualification BLOCKED by tool-output pin mutation. Read-only runtime inspection and bounded diagnostic probes were performed. No cache reset or server change was performed.
+Status: tiny reuse, equal long-history initial reuse, and one patched matched smoke VERIFIED for the recorded local runtime. Broader production behavior and product value remain unqualified. Read-only runtime inspection and bounded diagnostic probes were performed. No cache reset or server change was performed.
 
 The recovered CW-104A snapshot reported conversation caching disabled and zero reuse. The current runtime differs: version 0.1.44.1 reports `conversation_cache.enabled=true`, an 8,192 MiB budget, four slots, four parked entries, four restores, and 125,052 reused tokens across seven of eleven requests. The live engine was idle with no queued requests at the observed snapshot. This is current server telemetry, not controlled CW-104B experimental evidence. Who changed the configuration, when it changed, and whether other users own the cached entries are NOT_VERIFIED.
 
@@ -35,3 +35,7 @@ Evidence: `.audit/cw104b/long-prefix-probe.json` and `long-prefix-probe-postfail
 ## Reserved-window outcome
 
 After the user reserved Strata, equal first-coding-request reuse was measured at 27,929 tokens in each arm. The initial cache-alignment gate is therefore verified for this frozen history/runtime. The original exact-question warm-up attempt is retained as failed preparation. Product qualification remains blocked because five M2 follow-ups pin tool-output strings, destabilizing later request prefixes. The implementation is fixed locally and verified offline; no replacement pair ran. See `CW-104B-SMOKE-RESULTS.md` for the authoritative current verdict and complete measurements.
+
+## Patched smoke qualification
+
+After separate user authorization, one patched pair passed strict pin-location and full-wire audits. Initial reuse was exactly 27,929 tokens in both arms. Actual coding reused-token totals were M1 142,735 / M2 171,395 across five/six requests, agreeing with provider usage. There were no tool-output pins. The phase lasted 208.42 seconds and the server returned idle. These observations qualify this local cache setup and initial-state control; larger context bands and general optimization value remain unqualified. See the current section of `CW-104B-SMOKE-RESULTS.md`.

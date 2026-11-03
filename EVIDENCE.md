@@ -4,7 +4,7 @@
 
 All 12 corrected CW-104A coding attempts finished. Recovery from per-run records yields six matched pairs; five have complete usage and clean transport. Their coding-only totals are M1 2,840.34 seconds / 426,553 input tokens and M2 2,385.39 seconds / 358,228 input tokens. These descriptive differences do not establish causality or a reliable performance advantage. The remaining pair retains its transport failures and missing usage. See `docs/CW-104A-RECOVERED-RESULTS.md`.
 
-The user enabled server caching after CW-104A. Current enabled-cache counters must not be attributed to the historical uncached runs. Reserved-window initial reuse is now verified at 27,929 tokens per arm. One genuine pair completed, but tool-output pin mutation invalidates intended treatment. The local fix is deterministically checked; no replacement pair has run. See `docs/CW-104B-SMOKE-RESULTS.md`.
+The user enabled server caching after CW-104A. Current enabled-cache counters must not be attributed to the historical uncached runs. Reserved-window initial reuse is now verified at 27,929 tokens per arm. The first genuine pair had invalid tool-output pinning. After a local fix and separate authorization, the replacement pair passed strict treatment/cache/acceptance gates; M2 used more time and tokens. See `docs/CW-104B-SMOKE-RESULTS.md`.
 
 This document establishes the empirical justification, real-world benchmark data, and core value claims for **contextWatcher (`cw`)** prior to general availability.
 
@@ -177,3 +177,5 @@ The frozen initial study is six matched F1/F3 M1/M2 pairs (12 synthetic offline 
 Historical CW-104B pre-reservation long-history gate: `.audit/cw104b/committed-pin-mock-preflight.json` confirms exact expected full-payload transformation with the frozen history. `.audit/cw104b/long-prefix-probe.json` preserves the stopped real diagnostic, with server recovery in `long-prefix-probe-postfailure.json`. Concurrent inference blocked cache equivalence; provider usage is NOT_AVAILABLE. No coding pair or cloud call ran.
 
 Current CW-104B verdict: BLOCKED_WITH_EVIDENCE due to tool-output pin mutation in the completed pair and all six recovered M2 arms. `docs/CW-104B-SMOKE-RESULTS.md` supersedes the preliminary qualification. Core regression failed before the guard; workspace tests, Clippy, formatting, and full native follow-up mock passed after it. No cloud calls or production server changes.
+
+Final CW-104B readiness: `.audit/cw104b/smoke-20261103T140929Z-audit.json` passes every gate, including string-aware pin location. Both arms pass public and independent acceptance; initial cached tokens are 27,929 each. M1/M2 coding time is 59.23/93.24 seconds, requests 5/6, input 144,272/174,188, output 1,850/3,236. This single negative product-value observation does not establish a general effect. No full campaign, cloud call, server configuration change, or merge occurred.

@@ -1,0 +1,12 @@
+{
+  "run": "smoke-20261103T140929Z",
+  "git_head": "efbe2791d2f69dd070162c7bdd24dcb058e53251",
+  "cw_binary_sha256": "67d1b6be372368462d9b4708424c9473e89fa982e813c3383c0944b5e7fabf3e",
+  "omp_version": "omp/18.15.0",
+  "protocol_sha256": "51fe56dc0c9f35f0934d93e5e88e10dc8899bdf42fd85a78aea991b28e6aaf6f",
+  "loaded_weight_hash": "NOT_VERIFIED",
+  "seed_reproducibility": "NOT_VERIFIED: explicit seed transmitted; residual nondeterminism remains",
+  "thinking_wire": "preserve_thinking=true; no explicit enable_thinking=false in either arm",
+  "cloud_calls": 0,
+  "server_configuration_changes": 0
+}

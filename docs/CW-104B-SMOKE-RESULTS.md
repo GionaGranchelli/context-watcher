@@ -1,4 +1,48 @@
-# CW-104B reserved-window smoke result
+# CW-104B smoke results
+
+**READY_FOR_FULL_LOCAL_CAMPAIGN — experimental readiness only.** The separately authorized patched pair completed and passed all measurement, intervention, functional, and constraint gates. It shows no measured product benefit: both arms passed, while M2 used more time, requests, and input/output tokens. One pair cannot establish a reliable advantage or disadvantage across tasks. No full campaign is authorized or running.
+
+## Patched pair — 2026-11-03 14:09 UTC
+
+| Metric | M1 baseline | M2 PinContext | M2 minus M1 |
+| --- | ---: | ---: | ---: |
+| Coding wall seconds | 59.23 | 93.24 | +34.01 (+57.43%) |
+| Provider requests | 5 | 6 | +1.00 (+20.00%) |
+| Input tokens | 144,272 | 174,188 | +29,916.00 (+20.74%) |
+| Output tokens | 1,850 | 3,236 | +1,386.00 (+74.92%) |
+| Cached/reused tokens | 142,735 | 171,395 | +28,660.00 (+20.08%) |
+| Prefill milliseconds | 13,303.60 | 15,111.20 | +1,807.60 (+13.59%) |
+| Decode milliseconds | 43,815.20 | 75,460.60 | +31,645.40 (+72.22%) |
+| Tool calls | 8 | 7 | -1.00 (-12.50%) |
+| Tool errors | 0 | 0 | +0.00 |
+
+Both arms passed the original public tests and independent checks of missing/falsey cache behavior, writes to both stores, public signatures, and protected-file bytes. Both had zero compaction events, zero missing usage records, zero observed transport failures, and zero provider retries. The one observed pair therefore provides no correctness/reliability improvement. The fixtures and genuine historical-review reference are a narrow retention smoke test, not production workload qualification.
+
+The extra 34.01 coding seconds in M2 are largely accounted for by 31.65 seconds of additional decode time; prefill increased by 1.81 seconds. M2 generated 1,386 extra output tokens and made one extra provider request. The additional input is mainly consistent with repeating the existing context for that extra call, not a mechanical change in retained context. PinContext is append-only here and removed no historical tokens. This is an observed decomposition, not an isolated causal estimate of PinContext's runtime cost.
+
+## Validity and cache checks
+
+Both arms used the same initial source bytes, frozen early brief/history, static system prompt, tool definitions, local model, temperature 0/top-p 1/seed 104002, and CW transport. Only initial M2 received the exact committed directive. Full initial payload comparison passed; all proxy wire payloads match relay captures. The strict audit checks string-shaped content as well as text blocks. No pin occurs in any tool output, and original native transcripts remain unmodified by injected directives. M2's first tool-only continuation drops the transient initial user-tail overlay; subsequent tool-only requests preserve prior message content. This narrow implementation does not promise a persistent directive on every tool-only continuation.
+
+Actual initial provider contexts were 27,948 tokens (M1) and 27,992 (M2), with exactly 27,929 reused tokens in each. Neutral-suffix preparation gave equal initial reuse, corroborated by provider usage and server records. Within-arm cached reuse was measured rather than inferred from prefix text. The full phase, including mock checks, shared warm-up, and both arms, lasted 208.42 seconds, below the new 60-minute cap. Cache diagnostics and coding usage remain separate in the raw run. No independent model bootstrap was generated.
+
+The same server configuration was retained: enabled cache, 16,384 MiB budget, eight slots. Request counters advanced once per measured request with idle/empty boundaries. The server was idle after completion. No cloud calls, server configuration changes, cache clears, service restarts, or additional harness integrations occurred. GPU snapshots are point observations, not energy measurement. Full weight-file identity and seed reproducibility remain NOT_VERIFIED. Both arms transmitted the same thinking configuration; thinking was not proven disabled server-side.
+
+## Evidence and next decision
+
+Authoritative run: `.audit/cw104b/smoke-20261103T140929Z.json`; independent audit and raw hashes: `smoke-20261103T140929Z-audit.json`; implementation/model-config context: `patched-smoke-context.json`; prefix progression: `patched-prefix-progression.json`. Raw payloads, SSE, native transcripts, and completed workspaces are retained privately with hashes. Re-run the offline audit with:
+
+```sh
+python3 -B benchmark/cw104b/audit_smoke.py .audit/cw104b/smoke-20261103T140929Z.json
+```
+
+The audit exits nonzero for an invalid treatment. Default Rust tests, Clippy, formatting, and native follow-up mock checks already passed for the unchanged code fix; GitHub CI passed at `efbe279`. Ignored/live suites are not represented as default CI coverage.
+
+The prerequisite work is complete. The later two-family counterbalanced plan is recorded in `CW-104B-EXPERIMENT-PROTOCOL.md`; executing it remains a separate approval decision. Given equal correctness and worse resource use here, the next campaign should test genuinely discriminating early constraints rather than assume a benefit or expand infrastructure. Do not pool this valid patched pair with historical tool-pinned treatments.
+
+## Earlier unpatched attempt — preserved history
+
+The following records describe the earlier invalid attempt before the separately authorized patched pair. Their measurements and failures remain unchanged; their then-current stop status is superseded by the valid result above.
 
 **BLOCKED_WITH_EVIDENCE.** A genuine local M1/M2 coding pair completed with both tasks accepted, but the treatment was invalid: Context Watcher appended the pin to tool-output tails on all five M2 follow-ups. These results do not qualify the intended user-text-only PinContext treatment or establish product value. The defect is fixed and deterministically checked locally; no replacement live pair was launched.
 

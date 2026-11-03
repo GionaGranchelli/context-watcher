@@ -26,7 +26,7 @@ Primary outcome is independent success with every constraint satisfied. Secondar
 
 ## Current gates
 
-Recovery and independent acceptance audits are complete. Retrospective pin-location checks invalidate all six historical M2 treatments because tool-output tails were pinned. Tiny and long-history initial cache reuse are verified after neutral-suffix alignment. One genuine pair completed, but the same tool-output pin defect invalidates the intended treatment. The narrow local fix passes deterministic core and full native tool-follow-up mock checks. A replacement patched live pair has not run. Current outcome: BLOCKED_WITH_EVIDENCE; see `CW-104B-SMOKE-RESULTS.md`.
+READY_FOR_FULL_LOCAL_CAMPAIGN means the prerequisites and one separately authorized patched smoke pair passed. It does not establish product value or authorize the later campaign. Recovery preserves all six historical pairs and their invalid tool-pinning treatment. Tiny/cache-prefix probes, frozen-input equality, strict pin location, full wire agreement, complete usage, independent acceptance, and the 60-minute bound passed for the patched pair at 14:09 UTC. M2 was slower and used more tokens in that pair; both arms passed all task constraints. See `CW-104B-SMOKE-RESULTS.md`.
 
 ## Native initialization and request-shape preflight
 

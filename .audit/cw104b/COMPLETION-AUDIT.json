@@ -1,0 +1,22 @@
+{
+  "status": "READY_FOR_FULL_LOCAL_CAMPAIGN",
+  "requirements": {
+    "all_six_historical_pairs_recovered": true,
+    "historical_failures_and_invalid_treatments_preserved": true,
+    "cache_reuse_and_initial_state_verified": true,
+    "frozen_early_constraints_no_final_reminders": true,
+    "independent_functional_constraint_acceptance": true,
+    "patched_real_matched_pair_strict_audit": true,
+    "within_60_minutes": true,
+    "raw_archive_retained_and_verified": true,
+    "reviewable_code_and_evidence_update": true
+  },
+  "smoke_evidence": "smoke-20261103T140929Z-audit.json",
+  "raw_hashes_verified": 59,
+  "product_value": "NOT_ESTABLISHED: M2 was slower and used more tokens in this single pair",
+  "full_campaign": "NOT_AUTHORIZED_NOT_EXECUTED",
+  "cloud_calls": 0,
+  "server_changes": 0,
+  "merge": "NOT_PERFORMED",
+  "remaining_required_work_for_this_readiness_goal": []
+}

@@ -1,6 +1,0 @@
-{
-  "stage": "live post-edit workspace snapshot",
-  "acceptance_passed": true,
-  "tests_unchanged": true,
-  "output": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
-}

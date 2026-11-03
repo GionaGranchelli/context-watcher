@@ -1,9 +1,0 @@
-{
-  "prior-repository-review-history-v2.txt": true,
-  "run_corrected_coding-v2.py": true,
-  "pristine-fixture-manifest.json": true,
-  "corrected-sampling-config.json": true,
-  "corrected-m1-transport.json": true,
-  "executed_runner_matches_frozen_copy": true,
-  "workspace_started_from_frozen_fixture": true
-}

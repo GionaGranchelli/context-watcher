@@ -1,9 +1,0 @@
-{
-  "scope": "Live workspace after edit; agent not terminal",
-  "acceptance_passed": true,
-  "preserved_files": {
-    "store.py": true,
-    "test_cache_system.py": true
-  },
-  "output": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
-}

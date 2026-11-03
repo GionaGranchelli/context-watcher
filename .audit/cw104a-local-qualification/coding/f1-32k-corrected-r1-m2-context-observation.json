@@ -1,8 +1,0 @@
-{
-  "provider_prompt_tokens": 38012,
-  "prefill_tokens_per_second": 160.9,
-  "classification": "context-size calibration; actual 38K, not yet accepted as approximately-32K qualification",
-  "run_handle": 24319,
-  "status": "live_prompt_prefill",
-  "treatment_verified_in_capture": true
-}

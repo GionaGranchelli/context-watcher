@@ -1,0 +1,97 @@
+{
+  "cases": [
+    {
+      "family": "f1",
+      "case": "buggy",
+      "passed": false,
+      "violations": [
+        "runtime:ZeroDivisionError"
+      ],
+      "expected_result_confirmed": true
+    },
+    {
+      "family": "f1",
+      "case": "reference",
+      "passed": true,
+      "violations": [],
+      "expected_result_confirmed": true
+    },
+    {
+      "family": "f1",
+      "case": "protected",
+      "passed": false,
+      "violations": [
+        "protected:policy.txt"
+      ],
+      "expected_result_confirmed": true
+    },
+    {
+      "family": "f1",
+      "case": "signature",
+      "passed": false,
+      "violations": [
+        "public_signatures"
+      ],
+      "expected_result_confirmed": true
+    },
+    {
+      "family": "f1",
+      "case": "behavior",
+      "passed": false,
+      "violations": [
+        "decimal_division_type"
+      ],
+      "expected_result_confirmed": true
+    },
+    {
+      "family": "f3",
+      "case": "buggy",
+      "passed": false,
+      "violations": [
+        "none_not_cached",
+        "falsey_cached:0",
+        "falsey_cached:1",
+        "falsey_cached:2",
+        "runtime:KeyError"
+      ],
+      "expected_result_confirmed": true
+    },
+    {
+      "family": "f3",
+      "case": "reference",
+      "passed": true,
+      "violations": [],
+      "expected_result_confirmed": true
+    },
+    {
+      "family": "f3",
+      "case": "protected",
+      "passed": false,
+      "violations": [
+        "protected:policy.txt"
+      ],
+      "expected_result_confirmed": true
+    },
+    {
+      "family": "f3",
+      "case": "signature",
+      "passed": false,
+      "violations": [
+        "public_signatures"
+      ],
+      "expected_result_confirmed": true
+    },
+    {
+      "family": "f3",
+      "case": "behavior",
+      "passed": false,
+      "violations": [
+        "falsey_cached:0",
+        "falsey_cached:1",
+        "falsey_cached:2"
+      ],
+      "expected_result_confirmed": true
+    }
+  ],
+  "all_expected_results_confirmed": true
+}

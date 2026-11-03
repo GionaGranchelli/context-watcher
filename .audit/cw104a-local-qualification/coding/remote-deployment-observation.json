@@ -1,9 +1,0 @@
-{
-  "host_alias": "machinist",
-  "inspection_scope": "read-only repository AGENTS.md and podman ps; no model/server/hardware changes",
-  "container": "strata-gfx906-iq2-xs",
-  "image": "docker.io/mixa3607/rocm-gfx906:7.14-complete",
-  "port_binding": "0.0.0.0:8095 -> 8095/tcp",
-  "instructions_source": "~/Development/strata-gfx906/AGENTS.md",
-  "quantization_caution": "IQ2_XS model is documented as a mixed tensor quantization; filename does not prove every tensor uses one type. Loaded weight artifact hash and parameter count have not been independently verified."
-}

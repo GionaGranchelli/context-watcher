@@ -1,5 +1,11 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## CW-104B recovery status
+
+All 12 corrected CW-104A coding attempts finished. Recovery from per-run records yields six matched pairs; five have complete usage and clean transport. Their coding-only totals are M1 2,840.34 seconds / 426,553 input tokens and M2 2,385.39 seconds / 358,228 input tokens. These descriptive differences do not establish causality or a reliable performance advantage. The remaining pair retains its transport failures and missing usage. See `docs/CW-104A-RECOVERED-RESULTS.md`.
+
+The user enabled server caching after CW-104A. Current enabled-cache counters must not be attributed to the historical uncached runs. Reserved-window initial reuse is now verified at 27,929 tokens per arm. One genuine pair completed, but tool-output pin mutation invalidates intended treatment. The local fix is deterministically checked; no replacement pair has run. See `docs/CW-104B-SMOKE-RESULTS.md`.
+
 This document establishes the empirical justification, real-world benchmark data, and core value claims for **contextWatcher (`cw`)** prior to general availability.
 
 ---
@@ -167,3 +173,7 @@ PR #30 merged at `b127991`. Its final verifier requires a successfully applied s
 ## CW-120A offline readiness
 
 The frozen initial study is six matched F1/F3 M1/M2 pairs (12 synthetic offline rehearsal sessions), using seed `1202026` and three M1-first / three M2-first pairs. The offline report is explicitly synthetic; its modeled costs are not product results. Preset-solution acceptance and modeled M2 mutation/prefix values are labeled simulation-only; actual agent success and request transformation are not evaluated. The simulator's acceptance checks raise under `python -O`; optimized-mode regression tests cover both unexpected initial acceptance and failed final acceptance. Separate CW-118 mock-proxy tests remain independently referenced. CW-118 failure-inclusive accounting, pricing calculation, bootstrap, and resume tests are reused; CW-119C contributes the saved exact-egress evidence and bounded SpendGuard pattern. Since the study has no M0 arm, proxy overhead is reported as `NOT_EVALUATED`, not zero. The synthetic cache-write count is zero. For live Responses usage, uncached tokens must exclude both cached reads and cache writes before pricing; current SpendGuard does not yet price a cache-write bucket. No provider request was made. See [readiness plan](docs/CW-120A-PRODUCT-VALUE-READINESS.md), [gap analysis](docs/CW-120A-GAP-ANALYSIS.md), and [offline rehearsal](docs/cw120a-offline-readiness.json). A future run requires an extended offline-verified F1/F3 Codex runner, fresh authorization, and preflight model/pricing checks.
+
+Historical CW-104B pre-reservation long-history gate: `.audit/cw104b/committed-pin-mock-preflight.json` confirms exact expected full-payload transformation with the frozen history. `.audit/cw104b/long-prefix-probe.json` preserves the stopped real diagnostic, with server recovery in `long-prefix-probe-postfailure.json`. Concurrent inference blocked cache equivalence; provider usage is NOT_AVAILABLE. No coding pair or cloud call ran.
+
+Current CW-104B verdict: BLOCKED_WITH_EVIDENCE due to tool-output pin mutation in the completed pair and all six recovered M2 arms. `docs/CW-104B-SMOKE-RESULTS.md` supersedes the preliminary qualification. Core regression failed before the guard; workspace tests, Clippy, formatting, and full native follow-up mock passed after it. No cloud calls or production server changes.

@@ -1,0 +1,11 @@
+{
+  "original_sha256": {
+    "tool-tail-regression-red.log": "973bebd4099fd8a31e323b199ed43af742156852eaefe9351e87324630e517f5",
+    "smoke-20261103T134136Z.json": "fdaf50ec4f99d8c1abed43d1f8ef0f0122de42c75bf33787da617aa06094d044"
+  },
+  "substitutions": {
+    "owner_home": "<user-home>",
+    "temporary_qualification_home": "<qualification-home>"
+  },
+  "originals_retained_privately": true
+}

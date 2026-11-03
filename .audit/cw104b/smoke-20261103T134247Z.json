@@ -1,0 +1,231 @@
+{
+  "status": "BLOCKED_WITH_EVIDENCE",
+  "started_utc": "20261103T134247Z",
+  "arms": [],
+  "gate_requests": [
+    {
+      "label": "warmup",
+      "elapsed_seconds": 51.93348486199102,
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "usage": {
+        "prompt_tokens": 27948,
+        "completion_tokens": 8,
+        "total_tokens": 27956,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "server_request": {
+        "projection": null,
+        "time": 1793713369.7551072,
+        "duration_s": 51.6,
+        "finish": "length",
+        "prompt_tokens": 27948,
+        "reused": 0,
+        "output_tokens": 8,
+        "prompt_total": 27948,
+        "prompt_read": 27948,
+        "reasoning_recoveries": 0,
+        "reasoning_repeat_coverage": 0.0,
+        "engine_generated": 9,
+        "prompt_ms": 51373.6,
+        "decode_ms": 239.3,
+        "decode_tok_s": 37.6,
+        "hit_rate": null,
+        "pcie_share": null,
+        "ram_blobs": 0,
+        "file_blobs": 0,
+        "file_mb": 0,
+        "drafts_offered": 0,
+        "drafts_accepted": 0
+      }
+    },
+    {
+      "label": "matched-m2",
+      "elapsed_seconds": 1.6796223300043494,
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "usage": {
+        "prompt_tokens": 27992,
+        "completion_tokens": 8,
+        "total_tokens": 28000,
+        "prompt_tokens_details": {
+          "cached_tokens": 27929
+        }
+      },
+      "server_request": {
+        "projection": null,
+        "time": 1793713422.0338976,
+        "duration_s": 1.2,
+        "finish": "length",
+        "prompt_tokens": 27992,
+        "reused": 27929,
+        "output_tokens": 8,
+        "prompt_total": 27992,
+        "prompt_read": 63,
+        "reasoning_recoveries": 0,
+        "reasoning_repeat_coverage": 0.0,
+        "engine_generated": 9,
+        "prompt_ms": 929.4,
+        "decode_ms": 250.5,
+        "decode_tok_s": 35.9,
+        "hit_rate": null,
+        "pcie_share": null,
+        "ram_blobs": 0,
+        "file_blobs": 0,
+        "file_mb": 0,
+        "drafts_offered": 0,
+        "drafts_accepted": 0
+      }
+    },
+    {
+      "label": "matched-m1",
+      "elapsed_seconds": 0.8204943770106183,
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "usage": {
+        "prompt_tokens": 27948,
+        "completion_tokens": 8,
+        "total_tokens": 27956,
+        "prompt_tokens_details": {
+          "cached_tokens": 27929
+        }
+      },
+      "server_request": {
+        "projection": null,
+        "time": 1793713423.4635756,
+        "duration_s": 0.6,
+        "finish": "length",
+        "prompt_tokens": 27948,
+        "reused": 27929,
+        "output_tokens": 8,
+        "prompt_total": 27948,
+        "prompt_read": 19,
+        "reasoning_recoveries": 0,
+        "reasoning_repeat_coverage": 0.0,
+        "engine_generated": 9,
+        "prompt_ms": 391.3,
+        "decode_ms": 238.8,
+        "decode_tok_s": 37.7,
+        "hit_rate": null,
+        "pcie_share": null,
+        "ram_blobs": 0,
+        "file_blobs": 0,
+        "file_mb": 0,
+        "drafts_offered": 0,
+        "drafts_accepted": 0
+      }
+    }
+  ],
+  "requests": [
+    {
+      "arm": "m1",
+      "index": 0,
+      "request_sha256": "3a919a16ac6201f41c524861a04d2d698b817cff701e5b94cf2bfbc4a7d63be1",
+      "pin_blocks": 0,
+      "verified_initial_ledger": [],
+      "status": "DISPATCHED",
+      "elapsed_seconds": 4.42261351000343,
+      "usage": {
+        "prompt_tokens": 27948,
+        "completion_tokens": 130,
+        "total_tokens": 28078,
+        "prompt_tokens_details": {
+          "cached_tokens": 27943
+        }
+      },
+      "response_models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "finish_reasons": [
+        "tool_calls"
+      ],
+      "server_request": {
+        "projection": null,
+        "time": 1793713425.0290983,
+        "duration_s": 4.2,
+        "finish": "stop",
+        "prompt_tokens": 27948,
+        "reused": 27943,
+        "output_tokens": 130,
+        "prompt_total": 27948,
+        "prompt_read": 5,
+        "reasoning_recoveries": 0,
+        "reasoning_repeat_coverage": 0.0,
+        "engine_generated": 130,
+        "prompt_ms": 1055.2,
+        "decode_ms": 3180.9,
+        "decode_tok_s": 40.9,
+        "hit_rate": null,
+        "pcie_share": null,
+        "ram_blobs": 0,
+        "file_blobs": 0,
+        "file_mb": 0,
+        "drafts_offered": 35,
+        "drafts_accepted": 23
+      },
+      "cache_after": {
+        "enabled": true,
+        "budget_mib": 16384,
+        "slots": 8,
+        "parked": 2,
+        "bytes": 2769079864,
+        "evictions": 0,
+        "parks": 2,
+        "restores": 0,
+        "last_event": "parked",
+        "last_tokens": 27956,
+        "last_at": 1793713426.9241745,
+        "requests": 7,
+        "requests_reused": 5,
+        "reused_tokens": 214977,
+        "prompt_tokens": 306578,
+        "last_reused": 27943,
+        "last_prompt": 27948
+      }
+    }
+  ],
+  "raw_evidence": "smoke-20261103T134247Z",
+  "hard_cap_seconds": 3600,
+  "runtime_before": {
+    "time": 1793713367.0289996,
+    "live": {
+      "state": "idle",
+      "queued": 0,
+      "phase": null,
+      "prompt_tokens": null,
+      "prompt_read": null,
+      "prompt_total": null,
+      "generated": null,
+      "max_tokens": null,
+      "elapsed_s": null,
+      "tok_s": null,
+      "tok_s_mean": null,
+      "prefill_tok_s_mean": null,
+      "tok_s_window_s": null
+    },
+    "conversation_cache": {
+      "enabled": true,
+      "budget_mib": 16384,
+      "slots": 8,
+      "parked": 0,
+      "bytes": 0,
+      "evictions": 0,
+      "parks": 0,
+      "restores": 0,
+      "last_event": null,
+      "last_tokens": null,
+      "last_at": null,
+      "requests": 3,
+      "requests_reused": 2,
+      "reused_tokens": 131176,
+      "prompt_tokens": 194742,
+      "last_reused": 65985,
+      "last_prompt": 66095
+    }
+  },
+  "mock_full_request_verified": true,
+  "gate_cached_tokens": 27929,
+  "fatal": "RuntimeError: Earlier request failed; further dispatch forbidden",
+  "error": "RuntimeError: RuntimeError: Earlier request failed; further dispatch forbidden",
+  "phase_seconds": 62.840495104988804,
+  "owned_processes_stopped": true
+}

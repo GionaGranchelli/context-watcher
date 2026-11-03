@@ -1,0 +1,67 @@
+{
+  "version": "CW-104B-1",
+  "execution_status": "GATED_OMP_CACHE_EQUIVALENCE_NOT_VERIFIED",
+  "smoke_family": "f3",
+  "families": {
+    "f1": {
+      "opening_brief": "Repair division by zero to return the supplied fallback and safe_mean([]) to return float 0.0. Preserve public signatures and valid-input numeric types, including Decimal. Do not modify test_math_ops.py or policy.txt.",
+      "pin": "Preserve public signatures and valid-input numeric types, including Decimal. Do not modify test_math_ops.py or policy.txt."
+    },
+    "f3": {
+      "opening_brief": "Implement CachedStore: get caches non-None backing-store values, including falsey values; missing values must be fetched again. put updates both stores. Preserve public signatures. Do not modify store.py, test_cache_system.py, or policy.txt.",
+      "pin": "Preserve public signatures. Do not modify store.py, test_cache_system.py, or policy.txt."
+    }
+  },
+  "final_task": "Implement the change requested in the opening brief.",
+  "history_sha256": "0134917afb850953bba07dece1f71e6ce26c5f6ed48e96f4a3a51f6513becdda",
+  "history_source": "Actual archived repository-review record, anonymized with documented path substitutions; no invented assistant/tool events and no target fixture solution. Stored privately; supplied by hash.",
+  "fixture_hashes": {
+    "fixtures/f3/cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918",
+    "fixtures/f3/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+    "fixtures/f3/test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+    "fixtures/f3/store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+    "fixtures/f1/test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7",
+    "fixtures/f1/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+    "fixtures/f1/math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969"
+  },
+  "sampling": {
+    "temperature": 0,
+    "top_p": 1,
+    "seed": 104002
+  },
+  "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+  "context_band": [
+    16384,
+    32768
+  ],
+  "history_contract": "Exactly identical frozen user history in both arms; no independently generated model bootstrap. Before dispatch, compare unmutated message arrays and non-message fields. Reject unexplained differences.",
+  "cache_contract": "Use verified equal declared-prefix warm state in both arms; direct-API A/B/A evidence is insufficient for OMP. Do not clear shared cache or change server configuration.",
+  "transport": "Same CW proxy for both modes; no committed M1 rule; exactly one committed relevant M2 rule.",
+  "tools": [
+    "read",
+    "edit",
+    "write",
+    "grep",
+    "glob"
+  ],
+  "smoke_order": [
+    "m1",
+    "m2"
+  ],
+  "hard_smoke_phase_cap_seconds": 3600,
+  "inference_authorization": "Only one matched smoke pair after all gates pass; never start 12-attempt campaign automatically.",
+  "primary_metric": "Independent functional and constraint acceptance; no pass unless all checks pass.",
+  "missing_metrics": "NOT_AVAILABLE",
+  "stop_conditions": [
+    "model mismatch",
+    "unexplained request difference",
+    "usage missing",
+    "pin or ledger inconsistency",
+    "cache-state mismatch",
+    "runtime unhealthy or concurrent interference",
+    "60-minute total phase cap"
+  ],
+  "later_campaign": "Plan only after valid smoke; later execution needs separate approval.",
+  "native_session_initialization": "User-only saved OMP session plus final request; no invented assistant/tool events. Offline import preserves identity.",
+  "cache_boundary": "Whole-message boundary after shared opening/history user message; character offsets are unsupported for OMP text arrays."
+}

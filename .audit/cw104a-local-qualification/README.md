@@ -1,5 +1,9 @@
-# CW-104A local qualification evidence
+# Archived CW-104A evidence
 
-This evidence bundle contains sanitized per-cell runner JSON, selected M2 verification/reconciliation artifacts, a filtered local Strata usage/cache snapshot, and the 15 OMP JSONL transcripts compressed in `omp-transcripts.tar.gz`. `transcript-sha256sums.txt` lists the source transcript hashes; `sha256sums.txt` covers the bundle files. The raw context corpora, local configs/credentials, database files, and full proxy captures are intentionally excluded.
+The original raw bundle was removed from the review tree after verification against a secure local archive. No historical observation was rewritten. The archive contains all original files, raw transcripts, wire payloads, and failed attempts.
 
-The Strata snapshot was collected read-only at 2026-11-03T04:09:21Z. The decision log records actions and known corrections.
+Archive SHA-256: `67639549b81d5175035b885aa61848bb5d661eb44ff4457d8a82745e5635bf35`
+
+Per-file original hashes: `.audit/cw104b/original-file-sha256.json`. The archive is retained in the owner-local contextWatcher evidence vault with directory mode 0700 and archive mode 0600. It is not committed because it contains private paths and conversation/wire payloads.
+
+Authoritative recovered comparisons: `docs/CW-104A-RECOVERED-RESULTS.md` and `.audit/cw104b/recovered-results.json`. The recovered aggregate preserves failed dispatches and incomplete usage explicitly. Reproducing raw-message audits requires the original archive supplied securely by its owner.

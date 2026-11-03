@@ -1,0 +1,8 @@
+{
+  "files_scanned": 60,
+  "known_credential_matches": 0,
+  "scope": "Configured local credential only; not certification of all possible secrets",
+  "raw_evidence_private": true,
+  "current_treatment_status": "INVALID_TOOL_PINS",
+  "patched_live_pair": "NOT_EXECUTED"
+}

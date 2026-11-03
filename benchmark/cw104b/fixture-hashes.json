@@ -1,0 +1,9 @@
+{
+  "fixtures/f3/cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918",
+  "fixtures/f3/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+  "fixtures/f3/test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+  "fixtures/f3/store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+  "fixtures/f1/test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7",
+  "fixtures/f1/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+  "fixtures/f1/math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969"
+}

@@ -1,0 +1,1489 @@
+{
+  "files": 327,
+  "decoded_payloads_scanned": 390,
+  "archive_layers_scanned": 123,
+  "errors": [],
+  "known_credential_matching_payloads": 0,
+  "findings": [
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!128k-direct-short-m1/2026-11-03T03-01-47-988Z_01a19f5b-1154-7384-a2b6-0cd3a8dc4e12.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!128k-direct-short-m2/2026-11-03T03-29-46-822Z_01a19f74-af46-73c7-9ae9-d505af565379.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!128k-short-m1/2026-11-03T02-27-59-691Z_01a19f3c-1e4b-74d6-b611-a8848c0d7bb6.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!128k-short-m2/2026-11-03T02-58-23-632Z_01a19f57-f310-75c1-bf1b-479f7df5f93d.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!32k-long-m1/2026-11-02T23-53-43-236Z_01a19eae-e044-7073-b39e-27e53a154af0.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!32k-long-m2/2026-11-03T00-08-02-002Z_01a19ebb-fad2-76f7-88d0-0a38c16e1edd.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!32k-short-m1/2026-11-02T23-27-05-428Z_01a19e96-7ed4-73f8-b053-1efbeb8744b8.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!32k-short-m1/2026-11-02T23-31-23-082Z_01a19e9a-6d4a-726c-a032-a3e6b0941e1f.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!32k-short-m2/2026-11-02T23-38-25-876Z_01a19ea0-e0d4-70ef-9125-683738e934d7.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!32k-short-m2/2026-11-02T23-46-06-624Z_01a19ea7-e8a0-77e9-84e3-68abd4802a92.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!64k-short-m1/2026-11-03T00-59-03-041Z_01a19eea-b001-701b-a7c8-4626d5a7d635.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!64k-short-m2/2026-11-03T00-23-42-325Z_01a19eca-53f5-71b8-96f1-73c5c79ecb6d.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!64k-short-m2/2026-11-03T00-46-11-236Z_01a19ede-e924-732c-9a5e-9c3ad7570f8f.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!92k-short-m1/2026-11-03T01-46-51-270Z_01a19f16-7406-73c6-bbfe-466c2031c974.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "omp-transcripts.tar.gz!gzip!92k-short-m2/2026-11-03T02-06-33-616Z_01a19f28-7e90-71f1-bde0-520e079f80da.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r2-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r3-m1-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/repeat-results.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r3-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/run_corrected_coding-v1.py",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r1-m1-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r2-m2-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r1-m2-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r2-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r3-m2-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/prior-repository-review-history-v2.txt",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/queue-f1-v2-m1.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r2-m1-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r1-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r3-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r3-m2-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/run_corrected_coding-v2.py",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/source-gguf-metadata.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/independent-acceptance.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/initial-transcript-index.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/queue_corrected_campaign.py",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/verify_coding_transform.py",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r1-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r1-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r3-m1-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/container-device-and-mount-observation.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-corrected-r1-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/verify_coding_transform-before-scrub-fix.py",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r1-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r2-m2-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/prior-repository-review-history.txt",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r3-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r2-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r2-m1-queue.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/queue-f1-v2-m2.stdout",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/read_gguf_metadata.py",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/capture_corrected_coding.py",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/f3-32k-v2-r3-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp/sessions/2026-11-02T21-53-16-484Z_01a19e40-9ac4-7339-a5b5-47a58405d258.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m2/f3-sessions/2026-11-02T22-28-54-948Z_01a19e61-3c24-7623-b35c-a8c19bd05a14.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m2/sessions-run2/2026-11-02T22-11-43-865Z_01a19e51-8079-740e-8f17-dcc3fdaadbe2.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m2/sessions/2026-11-02T22-03-18-089Z_01a19e49-c8c9-77c8-95b8-cb5af1c978a8.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m2/sessions/2026-11-02T22-01-38-343Z_01a19e48-4327-7263-9239-fdca7ef65a57.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m2/sessions/2026-11-02T21-57-25-448Z_01a19e44-6748-75bf-bfde-5f24366b4b70.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m2/repeat-sessions/f3-r3-m2/2026-11-02T23-09-07-332Z_01a19e86-0b84-73e7-a44c-1ca34df9ad02.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m2/repeat-sessions/f3-r2-m2/2026-11-02T22-53-28-418Z_01a19e77-b7e2-77c3-8573-39b3c17254e7.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m2/repeat-sessions/f1-r3-m2/2026-11-02T22-44-51-489Z_01a19e6f-d4a1-73b3-bac8-7b441396c61d.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m2/repeat-sessions/f1-r2-m2/2026-11-02T22-41-11-414Z_01a19e6c-78f6-76c3-ad46-04f75459ddbb.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m1/f3-sessions/2026-11-02T22-23-57-489Z_01a19e5c-b231-7079-8ed8-52a1cf6d7dac.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m1/sessions/2026-11-02T22-17-59-979Z_01a19e57-3dab-7764-982f-f606ff17d79c.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m1/repeat-sessions/f3-r3-m1/2026-11-02T23-03-48-996Z_01a19e81-3004-73de-bba2-a9a55f13a14a.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m1/repeat-sessions/f3-r2-m1/2026-11-02T22-57-33-974Z_01a19e7b-7716-7173-a81a-7f3dd6f7064c.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m1/repeat-sessions/f1-r3-m1/2026-11-02T22-47-53-404Z_01a19e72-9b3c-766e-94f6-21bf6533630a.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/coding-transcripts-and-workspaces.tar.gz!gzip!omp-m1/repeat-sessions/f1-r2-m1/2026-11-02T22-34-35-397Z_01a19e66-6e05-751f-86ca-5a032c1a0874.jsonl",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/f1-32k-v2-r2-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/128k-long-followup-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/128k-short-m2.attempt-1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/32k-long-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/64k-long-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/64k-short-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/92k-long-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/92k-short-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/32k-short-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/92k-long-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/128k-direct-short-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/32k-long-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/128k-short-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/128k-long-m1.attempt-1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/92k-short-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/32k-short-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/128k-direct-short-m2.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/64k-long-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/128k-long-followup-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "per-cell/64k-short-m1.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m2/turn_f91d072c4249490ab35177942a9b1b12.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m2/turn_168f03d7a57f4034a3aa669b805a3b3d.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m2/turn_283ec79c7cd94138a3966e096fa06399.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m2/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m2/turn_e1dc6d5cd21f4e739195c23e5e244272.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m2/turn_69cab5a95460415f9a0fa24200691d54.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m2/turn_5ef9d0192e464659ae840a210e337251.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m2/turn_4eaa91038b034a408eb0579a868f3ece.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m2/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_8166e4f5aa0f4c1b9309c3c48d82cd76.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_4725bed606d94738b5d118f088478c95.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_a264787574864dee905168682c0a0b4c.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_ecfe328f794d4790a996b61b5652caeb.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_66dd6eb477b9440bbaebf34847640457.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_4a3d86279d744d458d9d67fa60c195a6.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_230be14c6eee440497f229e92358c868.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_79d6fe7411b2443682c1a6af4b0445b7.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_f4efe3f269a94310b53e30c2bd061961.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_ebe4f0ab3b7d45d9993f2eadd65fb01e.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_f9675638c47b495190dd7a5cc7183009.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/turn_876d3e92a743490cbfb0891f7157b89d.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m1/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m2/turn_df3f9ef184ec445899f7085b4bb35517.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m2/turn_c804439589ac43f0ad0fee7986ebbc57.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m2/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m2/turn_02bca3bd9f794511b438c744648042b5.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m2/turn_b6196d832c544822945b4d64a552da31.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m2/turn_7adfe56b3ca9431d8780608960be2ee1.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m2/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m2/turn_0cbc77c740a54b1fbbcc8a8a333ed4d4.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m2/turn_621c6d7103cc4b0186e4014b7062acaa.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/turn_b89d9e07649e41ac8bba5e286e184ddf.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/turn_4501e576bb874dcabdcfcb3a7d267e74.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/turn_ea91a8add63c4d52a7068fadf50f5635.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/turn_77ca15c2d91442dfb9f49958c741c52e.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/turn_46ae9231d2004220bbcd26b7f4c95a07.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/turn_f5a727ba18174cae81d1c8a34e7f0b3d.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/turn_1fd24dfa4a5d43dd815c436aec3cf973.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/turn_b7e4a2ac19304179a313aecbd10b0388.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r1-m2/turn_286a1c9a527c4cdd96fb8cefb97461ec.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/turn_6f3a2c3ffd004cf8bccfda762f069268.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/turn_91d17ca6344b4047acd97ad39dfa993d.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/turn_84daadd5737849d2b8bf793b8f92cfe5.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/turn_09a5b58de7274f09ba86bf50dfe77286.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/turn_f2094aa5289c410caa91101c1d2c024a.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/turn_3d569fff909645eb8c567a5c545ff34e.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/turn_324388558268414a896bad8a83c67aa0.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/turn_471d7356fd6141469c00f4ad39967abb.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/turn_e8126177e7d8496f9875f6f8ca616192.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m1/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m1/turn_240d216c6b664819838b7836896b6bd7.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m1/turn_156bc1276295496d987b5ed8d9463442.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m1/turn_09668043308c4206a11fa3835bd984f4.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m1/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m1/turn_69812927768c4ec78b258d20b5f39d3a.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m1/turn_333a1c1a89f04d7ba40aa5d0db7308f7.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m1/turn_d9358dcb88c845a6b1f91ea91a8250d0.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m1/turn_b22782639ab14ff3bcb52e91f5dfd765.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m1/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m2/turn_ad1df037ec264d0f9f69921c341ff093.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m2/turn_c96de75f04ac4b9fa6462b67607cc16a.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m2/turn_4c2b8aa577934694b95c4da60134164a.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m2/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m2/turn_19ac00c4e28e486eb40a1082f1591471.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m2/turn_b99d65b09ee748d6861d4bc245bd50f5.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m2/turn_e313ff27f5d948d79ae35679ea9d720a.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m2/turn_8ec71cb635b242e5939048237e2409af.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r3-m2/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m2/turn_c91376072908409f98adc13ba43cf1b6.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m2/turn_e237ba0e46c24e55abc500bcc4ab4347.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m2/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m2/turn_ad65e2995f2942efa701fe6b940c2875.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m2/turn_fd95ba00e0504c89aceb016da543fa81.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m2/turn_4d0cd220a52e45699680d22d3c48c7be.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m2/turn_f00dbb2f61494eaeae91a990acd420fb.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m2/turn_558ba5f9d5d943dda4c6bd1e028bb124.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r2-m2/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_bd994885546446fe9230f2099c65f6c6.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_8f421b3f8285430cbad89599cb18079a.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_a33eca97eaec4860a703bc68d4d57e9f.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_2fdc20b8ee27426888c422b897ce80b9.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_98f4ef58eb2e471eb0711e3dae0a34da.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_273a78e53d224a40af8f11c232af9298.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_485e54950c4e4836aafe7e5bcb1965c6.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_4fefe097028f4913b761c51226cc07a8.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_d58a116b4a664dfa9933fd8a0b1cecd9.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/turn_0394954ef28a4f6b8d6594d38088fc55.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-corrected-r1-m2/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/turn_954a456b995347bbb89ce0ed84a43822.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/turn_8055800a3ed545b2abe358b1ecdd9cad.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/turn_8f806532c6b14d4cbee3ed1d25a17f30.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/turn_f37893d4087d406caeeacf5882801ef2.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/turn_31fa0c0445924fe6a336ccd293886777.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/turn_456e402e9281498fa00019f9e06c939b.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/turn_23de02f074fc47be9364f6e54a81059a.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/turn_49e0501fe6714b51808cf42b82fce4e2.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r2-m1/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m1/turn_fa7ee744cb924638840e09df39ff6dd6.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m1/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m1/turn_4c188f59a2ea4348ae38368df63565fe.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m1/turn_8ac1cf86e2c346de9cf663d2b1ce1b98.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m1/turn_3d4b5d1083594506b3ab975a6a8c8c4b.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m1/turn_edec8fad959a450cb1cafcd93369f1bd.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m1/turn_340d40cd3cca4bc9b908220ad3186ad0.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m1/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/turn_5ea45bec02b04bcd996aea4b0288f61c.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/turn_61d78fb4a59f40108801ce3ed70337e4.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/turn_d4b0d2c3888548bfbd8ff4f82334f5cf.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/turn_29059585f3124909b5031be2ce6b1023.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/turn_8b466b40672442f291c21d1b83d86909.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/turn_5da2e7bc9941481495dd6794904271de.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/turn_f81dc92c7400495ca2e2493326adc901.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/turn_9c1af4d38115419f847c6f3045788677.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f3-32k-v2-r3-m1/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/turn_b05efdd6b8684b4d982fbb91bc1a1cf6.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/turn_7cb999c939ac4f4d9cfbc16f235ca38f.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/turn_ade5de346c124da6b01e0ee61ec4df0a.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/turn_695ef733e9624689bc1377042cac0e1d.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/turn_3a81b93a7d9b451d90269e3b51ffba38.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/summary.json",
+      "categories": [
+        "PRIVATE_PATHS"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/turn_2473d33197e94a7f94013fc463426d30.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/turn_0f3d765bf7d540d9a18eba3dc4062e21.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/turn_f446d535868c47efaeb9e4903443c44d.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/turn_935f604c784241949c9e857201344c39.json.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    },
+    {
+      "artifact": "coding/live-evidence/f1-32k-v2-r1-m2/transcript-snapshot.jsonl.gz!gzip",
+      "categories": [
+        "PRIVATE_PATHS",
+        "CONVERSATION_OR_WIRE_PAYLOAD"
+      ]
+    }
+  ],
+  "limits": "Known credentials and narrow patterns only; not certification that all possible secrets are absent. Raw conversations and private paths require reduction before review.",
+  "vault_archive_sha256": "67639549b81d5175035b885aa61848bb5d661eb44ff4457d8a82745e5635bf35"
+}

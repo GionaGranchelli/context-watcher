@@ -74,7 +74,7 @@ Only the named local endpoint may be used. No cloud fallback, provider spend, pr
 
 ## Explicit go and no-go decisions
 
-**Go for the narrow correctness review.** PR #33 can be reviewed on its own tests and contract. Product improvement is not a merge prerequisite for that safety fix. Only a human can approve and merge it.
+**Correctness fix merged separately.** The human reviewer merged PR #33 after its focused review and tests. Product improvement was not a merge prerequisite for that safety fix. This merge does not qualify persistent exposure or authorize the pilot.
 
 **No-go for inference now.** Before a pilot request can be approved, all these offline facts must be demonstrated:
 

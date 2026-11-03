@@ -60,13 +60,28 @@ pub async fn get_policy(State(state): State<DaemonState>, Path(id): Path<String>
             }
             report
         });
-        let pins:Vec<_>=rules.iter().filter_map(|rule| {
-            let cw_core::ir::MutationOp::PinContext {label,content,..}=&rule.op else {return None};
-            Some(json!({"rule_id":rule.id,"label":label,"content":content,"status":rule.status,
-                "eligible_in_latest_request_preview_after_opt_in":preview.as_ref().map(|report|report.applied_rule_ids.contains(&rule.id)),
-                "currently_authorized":policy.is_enabled_for(&id) && session.provider!=cw_core::ir::ProviderKind::Gemini && rule.status==cw_core::ir::MutationStatus::Committed,
-            }))
-        }).collect();
+        let pins: Vec<_> = rules
+            .iter()
+            .filter_map(|rule| {
+                let cw_core::ir::MutationOp::PinContext { label, content, .. } = &rule.op else {
+                    return None;
+                };
+                let eligible_after_opt_in = preview
+                    .as_ref()
+                    .map(|report| report.applied_rule_ids.contains(&rule.id));
+                let currently_authorized = policy.is_enabled_for(&id)
+                    && session.provider != cw_core::ir::ProviderKind::Gemini
+                    && rule.status == cw_core::ir::MutationStatus::Committed;
+                Some(json!({
+                    "rule_id": rule.id,
+                    "label": label,
+                    "content": content,
+                    "status": rule.status,
+                    "eligible_in_latest_request_preview_after_opt_in": eligible_after_opt_in,
+                    "currently_authorized": currently_authorized,
+                }))
+            })
+            .collect();
         let may_generate = config.enabled
             && !(config.shadow_policy.enabled && config.shadow_policy.strict_shadow_only)
             && (config.auto_cache_safe_pin || config.auto_heal_low_health)

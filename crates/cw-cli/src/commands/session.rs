@@ -230,6 +230,14 @@ pub fn run_lint(store: &CwStore, session: Option<String>, fix: bool) -> Result<(
     Ok(())
 }
 
+fn created_rule_estimate(creation: &cw_store::MutationCreationReport) -> u64 {
+    creation
+        .created
+        .iter()
+        .map(|rule| rule.estimated_saved_tokens.max(0) as u64)
+        .sum()
+}
+
 /// Applies or previews optimization plans for a single session or batch of sessions (`cw optimize`).
 #[allow(clippy::too_many_arguments)]
 pub fn run_optimize(
@@ -289,7 +297,8 @@ pub fn run_optimize(
 
         let mut sessions_with_candidates = 0usize;
         let mut total_ops = 0usize;
-        let mut total_saved_tok = 0u64;
+        let mut total_plan_estimate = 0u64;
+        let mut total_created_estimate = 0u64;
         let mut total_synced = 0usize;
 
         for s in &target_sessions {
@@ -308,7 +317,7 @@ pub fn run_optimize(
             }
             sessions_with_candidates += 1;
             total_ops += plan.items.len();
-            total_saved_tok += plan.saved_tokens as u64;
+            total_plan_estimate += plan.saved_tokens as u64;
 
             if !dry_run {
                 let mut proposed = Vec::new();
@@ -332,6 +341,7 @@ pub fn run_optimize(
                     store.save_generated_mutations_at_revision(&s.id, None, &proposed)?;
                 total_ops -= plan.items.len();
                 total_ops += creation.created.len();
+                total_created_estimate += created_rule_estimate(&creation);
                 println!(
                     "Session {}: proposed {}, created {}, skipped {}. Measured savings unavailable.",
                     s.id,
@@ -349,7 +359,7 @@ pub fn run_optimize(
         }
 
         println!(
-            "✅ BatchOptimize ({}) [strategy: '{}'] — Matched {} sessions, {} with proposals ({} {} operations, estimated plan reduction {} tokens{}; measured savings unavailable).",
+            "✅ BatchOptimize ({}) [strategy: '{}'] — Matched {} sessions, {} with proposals ({} {} operations, full-plan estimate {} tokens; created-rule estimate {}{}; measured savings unavailable).",
             if dry_run {
                 "DRY RUN"
             } else if draft {
@@ -362,7 +372,12 @@ pub fn run_optimize(
             sessions_with_candidates,
             total_ops,
             if dry_run { "proposed" } else { "created" },
-            total_saved_tok,
+            total_plan_estimate,
+            if dry_run {
+                "not evaluated (dry run)".to_string()
+            } else {
+                format!("{total_created_estimate} tokens")
+            },
             if total_synced > 0 {
                 format!(", synced {total_synced} transcripts to disk")
             } else {
@@ -504,11 +519,12 @@ pub fn run_optimize(
             creation.skipped.len()
         );
         println!(
-            "\n✅ {} {} optimization operations from '{}' on session {} (Est. saved: {} tok, Health: {} -> {}/100).",
+            "\n✅ {} {} optimization operations from '{}' on session {} (created-rule estimate: {} tokens; full-plan estimate: {} tokens, health {} -> {}/100; measured savings unavailable).",
             if draft { "Staged" } else { "Committed" },
             creation.created.len(),
             plan.name,
             sess_id,
+            created_rule_estimate(&creation),
             plan.saved_tokens,
             plan.health_score_before,
             plan.health_score_after
@@ -981,5 +997,73 @@ mod tests {
             project_label_from_workspace(Some("/home/user/Development/my-project/")),
             "my-project"
         );
+    }
+    fn consent_filtered_estimate_fixture(partial: bool) -> cw_store::MutationCreationReport {
+        let store = CwStore::open_in_memory().unwrap();
+        store
+            .upsert_session(&cw_core::ir::Session {
+                id: "estimate-session".into(),
+                parent_session_id: None,
+                harness: HarnessKind::GenericProxy,
+                workspace_root: None,
+                model: "offline".into(),
+                provider: cw_core::ir::ProviderKind::OpenAI,
+                title: None,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            })
+            .unwrap();
+        let rule = |id: &str, op, estimate| MutationRule {
+            id: id.into(),
+            session_id: "estimate-session".into(),
+            op,
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: estimate,
+            estimated_kv_break_tokens: 0,
+            created_at: chrono::Utc::now(),
+        };
+        let mut proposed = vec![rule(
+            "rejected-pin",
+            MutationOp::PinContext {
+                label: "pin".into(),
+                content: "Preserve API.".into(),
+                source_node_id: None,
+            },
+            700,
+        )];
+        if partial {
+            proposed.push(rule(
+                "dedupe",
+                MutationOp::ShadowDedupe { file_path: None },
+                100,
+            ));
+            proposed.push(rule(
+                "normalize",
+                MutationOp::NormalizePrefix {
+                    sort_tools_deterministically: true,
+                    relocate_dynamic_system_metadata: false,
+                },
+                200,
+            ));
+        }
+        store
+            .save_generated_mutations_at_revision("estimate-session", None, &proposed)
+            .unwrap()
+    }
+
+    #[test]
+    fn fully_rejected_plan_has_no_created_rule_estimate() {
+        let creation = consent_filtered_estimate_fixture(false);
+        assert_eq!(creation.skipped.len(), 1);
+        assert!(creation.created.is_empty());
+        assert_eq!(created_rule_estimate(&creation), 0);
+    }
+
+    #[test]
+    fn partially_accepted_plan_estimate_excludes_rejected_rules() {
+        let creation = consent_filtered_estimate_fixture(true);
+        assert_eq!(creation.skipped.len(), 1);
+        assert_eq!(creation.created.len(), 2);
+        assert_eq!(created_rule_estimate(&creation), 300);
     }
 }

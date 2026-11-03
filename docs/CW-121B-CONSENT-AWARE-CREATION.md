@@ -14,6 +14,8 @@ The proxy evaluates proposals on a copy, saves only authorized derived rules, th
 
 Revocation stops subsequent automatic creation and leaves stored rules intact. As in CW-121A, this does not cancel an application already running with its policy snapshot. Gemini automatic pin creation is blocked even with consent. Manual Gemini rules can be inspected but do not become eligible for reinforcement.
 
+CLI created-rule reduction estimates sum only nonnegative per-rule estimates from successful creations. Full-plan estimates are labeled separately. Draft estimates do not imply application, and dry runs leave the created-rule estimate unevaluated. These hypothetical estimates are not measured savings or a guarantee of net reduction.
+
 ## Read-only activation preview
 
 The existing authenticated `GET /api/v1/sessions/:id/pin-context-policy` now also returns:
@@ -36,7 +38,7 @@ Preview uses the latest turn's normalization provider, falling back to session m
 | Harness import auto-heal | Automatic; transactional derived-write gate | Existing source-transcript and pin-disabled disk behavior retained |
 | Core optimizer/preset construction and lint suggestions | Proposals only, no persistence | Candidates are not authorization or application |
 | REST `/optimize`, with preset, selected items, or lint suggestions | Derived creation; gate applies to draft and committed requests | `proposed_count`, `created_count`, `committed_count`, `creation_skipped_rules`, and preview-only `applied_count` |
-| CLI optimize, batch optimize, and aliases | Derived creation; shared transactional gate | Actual creation/skips reported separately from plan estimates; no hypothetical value substituted for measured/preview tokens |
+| CLI optimize, batch optimize, and aliases | Derived creation; shared transactional gate | Actual creation/skips and created-rule estimates are separate from full-plan estimates; no hypothetical value is substituted for measured/preview tokens |
 | TUI strategy execution | Derived creation; shared transactional gate | Proposed/created/skipped counts; no claimed measured savings |
 | Web strategy actions | REST derived creation | Confirmations distinguish proposals, creation/staging, preview eligibility, and unavailable measured savings |
 | MCP `cw_optimize_strategy` | REST derived creation | Uses the same gate and response fields |
@@ -58,11 +60,12 @@ Manual means an explicit PinContext command or payload with pin content, not cho
 - `configured_automatic_creation_requires_consent_and_stops_after_revocation`: actual proxy dry-run path and SQLite verify no default creation, one opted-in generation, no further generation after revocation, original request preservation, and read-only activation preview with labels/content and future-policy disclosure.
 - `manual_draft_is_inspectable_inactive_and_never_grants_consent`: authenticated manual staging, preview visibility, and no application/grant.
 - `activation_preview_uses_effective_turn_provider_with_session_fallback` covers provider precedence for mutation and validation, stateful OpenAI/compatible differences, and missing-provider fallback.
+- CLI regressions `fully_rejected_plan_has_no_created_rule_estimate` and `partially_accepted_plan_estimate_excludes_rejected_rules` use real consent-filtered creation results. Rejected estimates cannot contribute to the created-rule total.
 - Strategy API regressions cover both draft and committed consent-blocked proposals. Five web confirmation tests distinguish proposals and creation from preview application and measured savings.
 
 Run `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, and `cd web && npm test && npm run check && npm run build`. The existing default smoke runner is offline only; refreshing its current source hashes does not qualify a live runner or change historical observations.
 
-Validation: 263 Rust tests passed, 19 ignored. Five web confirmation tests, Svelte check/build, workspace Clippy/formatting, 15 runner-admission tests, and the offline lifecycle preflight passed. No live-provider or model-server tests ran. Browser/terminal interaction testing and broader activation workflows were not executed. Historical evidence and the original freeze remain unchanged.
+Validation: 265 Rust tests passed, 19 ignored. Five web confirmation tests, Svelte check/build, workspace Clippy/formatting, 15 runner-admission tests, and the offline lifecycle preflight passed. No live-provider or model-server tests ran. Browser/terminal interaction testing and broader activation workflows were not executed. Historical evidence and the original freeze remain unchanged.
 
 ## CW-121C remaining scope
 

@@ -1,0 +1,575 @@
+{
+  "runs": {
+    "f3-32k-v2-r2-m1": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 177.02355559899297,
+      "coding_seconds": 435.5440860939998,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 5,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 5
+          },
+          "known_input_tokens": 24215,
+          "known_output_tokens": 1211,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 2,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 2
+          },
+          "known_input_tokens": 64978,
+          "known_output_tokens": 1310,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 7,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 7
+          },
+          "known_input_tokens": 89193,
+          "known_output_tokens": 2521,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f3-32k-v2-r3-m2": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 177.12269218098663,
+      "coding_seconds": 438.3754750049993,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 5,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 5
+          },
+          "known_input_tokens": 23976,
+          "known_output_tokens": 1272,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 2,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 2
+          },
+          "known_input_tokens": 65317,
+          "known_output_tokens": 1194,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 7,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 7
+          },
+          "known_input_tokens": 89293,
+          "known_output_tokens": 2466,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f1-32k-v2-r2-m1": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 168.71402107000176,
+      "coding_seconds": 642.9749261480029,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 5,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 5
+          },
+          "known_input_tokens": 23521,
+          "known_output_tokens": 1158,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 3,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 3
+          },
+          "known_input_tokens": 97788,
+          "known_output_tokens": 1498,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 8,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 8
+          },
+          "known_input_tokens": 121309,
+          "known_output_tokens": 2656,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f3-32k-v2-r1-m1": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 184.41618647100404,
+      "coding_seconds": 524.3806117060012,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 5,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 5
+          },
+          "known_input_tokens": 24036,
+          "known_output_tokens": 1525,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 7,
+          "missing_usage_records": 5,
+          "outcomes": {
+            "completed": 2,
+            "stream_error": 1,
+            "upstream_error": 4
+          },
+          "known_input_tokens": 65858,
+          "known_output_tokens": 1553,
+          "complete_usage": false
+        },
+        "session": {
+          "dispatches": 12,
+          "missing_usage_records": 5,
+          "outcomes": {
+            "completed": 7,
+            "stream_error": 1,
+            "upstream_error": 4
+          },
+          "known_input_tokens": 89894,
+          "known_output_tokens": 3078,
+          "complete_usage": false
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f1-32k-v2-r3-m1": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 218.6068934169889,
+      "coding_seconds": 685.6559415270021,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 6,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 6
+          },
+          "known_input_tokens": 30017,
+          "known_output_tokens": 1512,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 3,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 3
+          },
+          "known_input_tokens": 102691,
+          "known_output_tokens": 1973,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 9,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 9
+          },
+          "known_input_tokens": 132708,
+          "known_output_tokens": 3485,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f1-32k-v2-r1-m1": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 135.64387603300565,
+      "coding_seconds": 442.37376556699746,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 4,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 4
+          },
+          "known_input_tokens": 18043,
+          "known_output_tokens": 1031,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 2,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 2
+          },
+          "known_input_tokens": 64119,
+          "known_output_tokens": 1779,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 6,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 6
+          },
+          "known_input_tokens": 82162,
+          "known_output_tokens": 2810,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f1-32k-v2-r1-m2": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 213.0028082219942,
+      "coding_seconds": 651.2975530620024,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 6,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 6
+          },
+          "known_input_tokens": 29436,
+          "known_output_tokens": 1435,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 3,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 3
+          },
+          "known_input_tokens": 98867,
+          "known_output_tokens": 1436,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 9,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 9
+          },
+          "known_input_tokens": 128303,
+          "known_output_tokens": 2871,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f3-32k-v2-r1-m2": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 228.00233814200328,
+      "coding_seconds": 680.8406376459898,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 6,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 6
+          },
+          "known_input_tokens": 29760,
+          "known_output_tokens": 1752,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 3,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 3
+          },
+          "known_input_tokens": 101153,
+          "known_output_tokens": 2012,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 9,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 9
+          },
+          "known_input_tokens": 130913,
+          "known_output_tokens": 3764,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f1-32k-v2-r3-m2": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 178.63950497700716,
+      "coding_seconds": 439.6288866870018,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 5,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 5
+          },
+          "known_input_tokens": 23539,
+          "known_output_tokens": 1356,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 2,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 2
+          },
+          "known_input_tokens": 64936,
+          "known_output_tokens": 1428,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 7,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 7
+          },
+          "known_input_tokens": 88475,
+          "known_output_tokens": 2784,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f3-32k-v2-r2-m2": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 177.12434992199996,
+      "coding_seconds": 434.8428286069975,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 5,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 5
+          },
+          "known_input_tokens": 23990,
+          "known_output_tokens": 1222,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 2,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 2
+          },
+          "known_input_tokens": 65079,
+          "known_output_tokens": 1330,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 7,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 7
+          },
+          "known_input_tokens": 89069,
+          "known_output_tokens": 2552,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f3-32k-v2-r3-m1": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 170.62515751500905,
+      "coding_seconds": 633.7925087790063,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 5,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 5
+          },
+          "known_input_tokens": 23118,
+          "known_output_tokens": 1172,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 3,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 3
+          },
+          "known_input_tokens": 96977,
+          "known_output_tokens": 1238,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 8,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 8
+          },
+          "known_input_tokens": 120095,
+          "known_output_tokens": 2410,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f1-32k-v2-r2-m2": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "bootstrap_seconds": 171.11976462200982,
+      "coding_seconds": 421.2487479620031,
+      "scopes": {
+        "bootstrap": {
+          "dispatches": 5,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 5
+          },
+          "known_input_tokens": 23575,
+          "known_output_tokens": 1024,
+          "complete_usage": true
+        },
+        "coding": {
+          "dispatches": 2,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 2
+          },
+          "known_input_tokens": 64029,
+          "known_output_tokens": 958,
+          "complete_usage": true
+        },
+        "session": {
+          "dispatches": 7,
+          "missing_usage_records": 0,
+          "outcomes": {
+            "completed": 7
+          },
+          "known_input_tokens": 87604,
+          "known_output_tokens": 1982,
+          "complete_usage": true
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    }
+  },
+  "pairs": [
+    {
+      "family": "f1",
+      "rep": 1,
+      "clean_transport": true,
+      "both_acceptance": true,
+      "m2_minus_m1_seconds": 208.92378749500494,
+      "m2_minus_m1_input": 34748
+    },
+    {
+      "family": "f1",
+      "rep": 2,
+      "clean_transport": true,
+      "both_acceptance": true,
+      "m2_minus_m1_seconds": -221.72617818599974,
+      "m2_minus_m1_input": -33759
+    },
+    {
+      "family": "f1",
+      "rep": 3,
+      "clean_transport": true,
+      "both_acceptance": true,
+      "m2_minus_m1_seconds": -246.02705484000035,
+      "m2_minus_m1_input": -37755
+    },
+    {
+      "family": "f3",
+      "rep": 1,
+      "clean_transport": false,
+      "both_acceptance": true,
+      "m2_minus_m1_seconds": 156.46002593998855,
+      "m2_minus_m1_input": "NOT_AVAILABLE"
+    },
+    {
+      "family": "f3",
+      "rep": 2,
+      "clean_transport": true,
+      "both_acceptance": true,
+      "m2_minus_m1_seconds": -0.7012574870022945,
+      "m2_minus_m1_input": 101
+    },
+    {
+      "family": "f3",
+      "rep": 3,
+      "clean_transport": true,
+      "both_acceptance": true,
+      "m2_minus_m1_seconds": -195.417033774007,
+      "m2_minus_m1_input": -31660
+    }
+  ],
+  "clean_transport_totals": {
+    "m1_seconds": 2840.3412281150086,
+    "m2_seconds": 2385.393491323004,
+    "m1_input": 426553,
+    "m2_input": 358228
+  },
+  "usage_note": "Known token counts are lower bounds when missing records exist. Historical artifacts have not been overwritten."
+}

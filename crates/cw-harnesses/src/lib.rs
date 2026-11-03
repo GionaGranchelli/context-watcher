@@ -93,7 +93,7 @@ mod tests {
 
         let sess_id =
             import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
-        assert!(sess_id.starts_with("omp_01a16530-b4a"));
+        assert_eq!(sess_id, "omp_01a16530-b4a1-71cb-b159-96200fb07f14");
         let sess = store.get_session(&sess_id).unwrap().unwrap();
         assert_eq!(sess.harness, HarnessKind::Omp);
         assert_eq!(
@@ -120,6 +120,73 @@ mod tests {
         assert!(has_tool_res, "ToolResult node should exist in IR");
 
         let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_import_omp_session_binding_identifiers() {
+        let directory = std::env::temp_dir().join(format!("cw_omp_ids_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        // A valid authoritative header must not depend on this fallback filename.
+        let transcript = directory.join("not a binding identifier.jsonl");
+        let valid = [
+            (
+                "01a16530-b4a1-71cb-b159-96200fb07f14".to_string(),
+                "omp_01a16530-b4a1-71cb-b159-96200fb07f14".to_string(),
+            ),
+            ("a".repeat(124), format!("omp_{}", "a".repeat(124))),
+        ];
+        for (id, expected) in valid {
+            let store = CwStore::open_in_memory().unwrap();
+            let content = format!(
+                "{}\n{}\n",
+                serde_json::json!({"type":"session","id":id}),
+                serde_json::json!({"type":"message","message":{"role":"user","content":"hello"}})
+            );
+            fs::write(&transcript, &content).unwrap();
+            assert_eq!(
+                import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None)
+                    .unwrap(),
+                expected
+            );
+            assert!(store.get_session(&expected).unwrap().is_some());
+            assert_eq!(fs::read_to_string(&transcript).unwrap(), content);
+        }
+        for id in [
+            serde_json::json!("a".repeat(125)),
+            serde_json::json!("bad/id"),
+            serde_json::json!("bad id"),
+            serde_json::json!("é"),
+            serde_json::json!(""),
+            serde_json::json!(42),
+        ] {
+            for header in [
+                serde_json::json!({"type":"session","id":id.clone()}),
+                serde_json::json!({"type":"session_meta","payload":{"session_id":id}}),
+            ] {
+                let store = CwStore::open_in_memory().unwrap();
+                fs::write(&transcript, format!("{}\n{}\n", header, serde_json::json!({"type":"message","message":{"role":"user","content":"hello"}}))).unwrap();
+                assert!(
+                    import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None)
+                        .is_err(),
+                    "unsupported native ID must be rejected"
+                );
+                assert!(store.list_sessions().unwrap().is_empty());
+            }
+        }
+        let store = CwStore::open_in_memory().unwrap();
+        fs::write(&transcript, "{\"role\":\"user\",\"content\":\"hello\"}\n").unwrap();
+        assert!(
+            import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).is_err()
+        );
+        assert!(store.list_sessions().unwrap().is_empty());
+        let fallback =
+            directory.join("2026-11-03T00-00-00Z_01a16530-b4a1-71cb-b159-96200fb07f14.jsonl");
+        fs::copy(&transcript, &fallback).unwrap();
+        assert_eq!(
+            import_generic_jsonl_transcript(&fallback, HarnessKind::Omp, &store, None).unwrap(),
+            "omp_01a16530-b4a1-71cb-b159-96200fb07f14"
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

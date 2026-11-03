@@ -1,0 +1,39 @@
+{
+  "probe_type": "read-only metrics GET; zero inference",
+  "server_time": 1793699550.4443808,
+  "cache": {
+    "enabled": true,
+    "budget_mib": 8192,
+    "slots": 4,
+    "parked": 4,
+    "bytes": 1767332048,
+    "evictions": 0,
+    "parks": 8,
+    "restores": 4,
+    "last_event": "restored",
+    "last_tokens": 25143,
+    "last_at": 1793699469.6279502,
+    "requests": 11,
+    "requests_reused": 7,
+    "reused_tokens": 125052,
+    "prompt_tokens": 152941,
+    "last_reused": 26632,
+    "last_prompt": 26842
+  },
+  "live": {
+    "state": "idle",
+    "queued": 0,
+    "phase": null,
+    "prompt_tokens": null,
+    "prompt_read": null,
+    "prompt_total": null,
+    "generated": null,
+    "max_tokens": null,
+    "elapsed_s": null,
+    "tok_s": null,
+    "tok_s_mean": null,
+    "prefill_tok_s_mean": null,
+    "tok_s_window_s": null
+  },
+  "engine_version": "0.1.44.1"
+}

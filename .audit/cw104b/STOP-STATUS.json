@@ -1,0 +1,8 @@
+{
+  "status": "READY_FOR_FULL_LOCAL_CAMPAIGN",
+  "meaning": "Readiness gates complete, not product-value qualification or campaign authorization",
+  "current_evidence": "smoke-20261103T140929Z-audit.json",
+  "earlier_invalid_runs": "Retained; do not pool with the patched pair",
+  "full_campaign": "NOT_EXECUTED",
+  "human_review_and_merge": "Pending; no self-merge"
+}

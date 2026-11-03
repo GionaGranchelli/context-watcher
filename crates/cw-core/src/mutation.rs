@@ -818,6 +818,21 @@ pub fn is_protected_tool_result(
 }
 
 fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)]) -> bool {
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array)
+        && !messages.last().is_some_and(|message| {
+            message.get("role").and_then(Value::as_str) == Some("user")
+                && match message.get("content") {
+                    Some(Value::String(_)) => true,
+                    Some(Value::Array(blocks)) => blocks.iter().all(|block| {
+                        block.get("type").and_then(Value::as_str) == Some("text")
+                            && block.get("text").is_some_and(Value::is_string)
+                    }),
+                    _ => false,
+                }
+        })
+    {
+        return false;
+    }
     let mut block = String::from("\n<cw_pinned_context>\n");
     for (label, content) in pinned {
         block.push_str(&format!("- [{label}]: {content}\n"));
@@ -973,6 +988,42 @@ mod tests {
             estimated_saved_tokens: 0,
             estimated_kv_break_tokens: 0,
             created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn pin_abstains_on_non_user_and_tool_result_message_tails() {
+        let tails = [
+            json!({"role":"tool", "tool_call_id":"call-1", "content":"tool output"}),
+            json!({"role":"toolResult", "toolCallId":"call-1", "content":[{"type":"text","text":"native tool output"}]}),
+            json!({"role":"assistant", "content":"assistant output"}),
+            json!({"role":"system", "content":"system instructions"}),
+            json!({"role":"unknown", "content":"opaque output"}),
+            json!({"role":"user", "content":[{"type":"tool_result","tool_use_id":"call-1","content":"tool output"}]}),
+        ];
+        for tail in tails {
+            let mut payload = json!({"messages":[tail]});
+            let original = payload.clone();
+            let report =
+                apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+            assert_eq!(payload, original, "unsupported tail must remain unchanged");
+            assert!(report.applied_rule_ids.is_empty());
+        }
+    }
+
+    #[test]
+    fn pin_preserves_supported_user_text_message_shapes() {
+        for content in [
+            json!("question"),
+            json!([{"type":"text","text":"question"}]),
+        ] {
+            let mut payload =
+                json!({"messages":[{"role":"user","content":content}], "extra":"preserve"});
+            let report =
+                apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+            assert_eq!(report.applied_rule_ids, ["pin-1"]);
+            assert_eq!(payload["extra"], "preserve");
+            assert!(contains_text(&payload["messages"][0], "retain this"));
         }
     }
 

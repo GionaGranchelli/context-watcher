@@ -1,0 +1,180 @@
+{
+  "source": "smoke-20261103T140929Z.json",
+  "arms": {
+    "m1": {
+      "acceptance": {
+        "family": "f3",
+        "passed": true,
+        "violations": []
+      },
+      "public_tests_passed": true,
+      "public_test_diagnostic": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n",
+      "coding_wall_seconds": 59.22740735700063,
+      "requests": 5,
+      "input_tokens": 144272,
+      "output_tokens": 1850,
+      "cached_tokens": 142735,
+      "server_reused_tokens": 142735,
+      "prefill_ms": 13303.6,
+      "decode_ms": 43815.2,
+      "tool_calls": 8,
+      "tool_errors": 0,
+      "tool_names": {
+        "glob": 1,
+        "grep": 2,
+        "read": 4,
+        "write": 1
+      },
+      "compaction_events": 0,
+      "first_cached_tokens": 27929,
+      "missing_usage_records": 0,
+      "transport_failures": 0,
+      "retry_count": 0,
+      "original_transcript_pin_absent": true,
+      "end_to_end_arm_seconds": 59.22740735700063
+    },
+    "m2": {
+      "acceptance": {
+        "family": "f3",
+        "passed": true,
+        "violations": []
+      },
+      "public_tests_passed": true,
+      "public_test_diagnostic": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n",
+      "coding_wall_seconds": 93.23883322400798,
+      "requests": 6,
+      "input_tokens": 174188,
+      "output_tokens": 3236,
+      "cached_tokens": 171395,
+      "server_reused_tokens": 171395,
+      "prefill_ms": 15111.2,
+      "decode_ms": 75460.6,
+      "tool_calls": 7,
+      "tool_errors": 0,
+      "tool_names": {
+        "glob": 1,
+        "read": 4,
+        "write": 1,
+        "grep": 1
+      },
+      "compaction_events": 0,
+      "first_cached_tokens": 27929,
+      "missing_usage_records": 0,
+      "transport_failures": 0,
+      "retry_count": 0,
+      "original_transcript_pin_absent": true,
+      "end_to_end_arm_seconds": 93.23883322400798
+    }
+  },
+  "pair_differences": {
+    "coding_wall_seconds": {
+      "absolute_m2_minus_m1": 34.01142586700735,
+      "relative_percent": 57.42514721605018
+    },
+    "requests": {
+      "absolute_m2_minus_m1": 1,
+      "relative_percent": 20.0
+    },
+    "input_tokens": {
+      "absolute_m2_minus_m1": 29916,
+      "relative_percent": 20.735832316735056
+    },
+    "output_tokens": {
+      "absolute_m2_minus_m1": 1386,
+      "relative_percent": 74.91891891891892
+    },
+    "cached_tokens": {
+      "absolute_m2_minus_m1": 28660,
+      "relative_percent": 20.07916768837356
+    },
+    "prefill_ms": {
+      "absolute_m2_minus_m1": 1807.6000000000004,
+      "relative_percent": 13.587299678282571
+    },
+    "decode_ms": {
+      "absolute_m2_minus_m1": 31645.40000000001,
+      "relative_percent": 72.22470740747505
+    },
+    "tool_calls": {
+      "absolute_m2_minus_m1": -1,
+      "relative_percent": -12.5
+    },
+    "tool_errors": {
+      "absolute_m2_minus_m1": 0,
+      "relative_percent": "NOT_AVAILABLE"
+    }
+  },
+  "checks": {
+    "no_pin_in_tool_or_other_ineligible_content": true,
+    "both_acceptance": true,
+    "equal_initial_cache": true,
+    "full_mock_payload_equivalence": true,
+    "full_proxy_wire_equivalence": true,
+    "first_m2_applied_rule_verified": true,
+    "within_original_60_minutes": true
+  },
+  "statistics": "One matched pair; no reliable effect-size or reliability claim.",
+  "pin_location_violations": [],
+  "status": "READY_FOR_FULL_LOCAL_CAMPAIGN",
+  "raw_file_hashes": {
+    "m2-2-response.sse": "86eb5888278c915eee4cce258458147c0f5331ba5a591805d79102f299ed5d3c",
+    "m1-3-response.sse": "bf2aa0fa350994bfd3b4b3df0992ffdc510eebe4fbf9a3c58f79b416b2938c51",
+    "m2-5-response.sse": "969ab3b06b93ad1f7c3725b8f0c81f7c9cca497eb4ff58e6f43ff1eafa61747d",
+    "mockm2-stdout": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87",
+    "mockm2-stderr": "dfef4c342f986ab93a9e0bb90f2d88c3bf25b2455853253d31ef95c1c55192a7",
+    "mock-m1-seed.jsonl": "2555d5798e0c3f9d6aa9c1fbedecef3860aff5dbf2072d7ca0ac80ced1a63043",
+    "mockm1-stdout": "a12b7cb43c9d9134b5bb1b35e9096b66775d9e92e7611d1cc92b02edd6782a87",
+    "mockm2-hooks.jsonl": "7c8ea4969658af3eb5bd0c9b8236a26856b65a177ef53e8db27837fb9e04ff4d",
+    "m2-0-response.sse": "54adc04ff6b35edbc958bc5a9ea2f99910209d17c277484bd5efb660da9579a0",
+    "codingm1-stdout": "a0788dd193a78523ddf092c5df5c031e9bb1f8ee2a25b5d652c88e5d534a6456",
+    "store.db-wal": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m1-1-response.sse": "0aac32cab75b07a65eb7f631b2f67aab331e48219bad7f4760b664c216d6c49f",
+    "coding-m2-seed.jsonl": "9e208f454791b0b2ed1ff1ee847558a51313a664477226d8d1e8660bb191d8ac",
+    "m1-2-response.sse": "e6885ec4ab75e93e0cba4eb7ab9d0aaec45b6f29b1ce3cde2493a2edbfd13c0f",
+    "m2-4-request.json": "529056b87802931f9b38dec2016dc18fc7ab7c2dea85034e3fd8895e8e09b2a4",
+    "mock-payloads.json": "40aa5790a333f6866bd96f8d048a151ba10981c05d86054f515e7f4fde98aa45",
+    "m2-4-response.sse": "fdd1b08214edab52422b46efe1576a7be5d7a2ac842f2ca2dfefb44ceaef654e",
+    "codingm2-stdout": "fe1fa5f0f1840a8f712de9cf84a51dbee8236c4107f2516cbeca2583a09d905b",
+    "codingm1-stderr": "dfef4c342f986ab93a9e0bb90f2d88c3bf25b2455853253d31ef95c1c55192a7",
+    "control-token": "e0484db068511ce7b331678e14a444a48dd39ea01c2ea65b6bc59cb119407978",
+    "m2-5-request.json": "ce3e18ca74634b37952604e756271589b307d080ae7725da55cb368856c2ca2b",
+    "m1-4-response.sse": "59dcde5ba1bec94154ef2199743666b3578f8b71b5806bc32fc2c9b3a1a837b5",
+    "store.db": "2f62c9925ba66c3f847a5cbdf48988f6a403b3a669121fb67fbd68dc5fa8f3d8",
+    "m2-0-request.json": "42acfa3aafb79ad9978abef116129a08eeb49bffdb030a927ae5c5021afdfc99",
+    "m2-1-request.json": "e5bc8cfe5bf50fd386f61a3fada6da53aef7a63f41502f0fcbe0239373c961fc",
+    "mockm1-hooks.jsonl": "542993f4b161f1e42b19f50504e9d2e10fc368adcd8672627cb4798fd2c787b2",
+    "mockm1-stderr": "dfef4c342f986ab93a9e0bb90f2d88c3bf25b2455853253d31ef95c1c55192a7",
+    "m2-2-request.json": "a2f3c507e3747a5d54b7eaebd5c1049c18e8c3f590412c0a47e68503c693415c",
+    "m1-4-request.json": "68fae6311256855880e56e1a19c70eff17de1b5db8673ac1d8d566539f826939",
+    "codingm2-stderr": "dfef4c342f986ab93a9e0bb90f2d88c3bf25b2455853253d31ef95c1c55192a7",
+    "m2-1-response.sse": "b9816ba101ff80cf0e851a0f1537f9dfe98fe83418727436ea16666fd2070a2a",
+    "m1-1-request.json": "b60985329b915d08b594ad27ef6db829038bf632d2b0e24b92b2c6f5ed14ffe0",
+    "m2-3-request.json": "466a7b94859a80d57ba95443ede3953b58c550ed718f0b9bec21fd8f9c44f125",
+    "coding-m1-seed.jsonl": "7e7b493058af7e57958423c01d234acb7ac6e2ac2e8dc7fe6e58f5a3b85aed63",
+    "codingm1-hooks.jsonl": "82dcef27744543ffe8bc803cebad2923ac74b3adfc2eff88ab96cae2d25e0894",
+    "m1-3-request.json": "438013348bd93420c7552b68d25658b110ddc42b697543c4a598789fd2c5279f",
+    "m1-0-request.json": "9c98a70478f1fe23fcbcc99f946c693931bd6c46a862de01b0082fa87710c5ff",
+    "m1-2-request.json": "ed01e524dbeeaf980b96aa9692d3ca977aad70fb72ba49920d897352e43bf395",
+    "codingm2-hooks.jsonl": "d8b47a8c221336e862d888ff4c28ec95d4d59b2cb9eed81453e6e91a4466c8e0",
+    "m2-3-response.sse": "cc9cf5b5ccd8b8ff41e92ad07002f8920121a0f9c5d2d178fd01cbfdbcd3e6a2",
+    "m1-0-response.sse": "c68196aa1f9035be84b33d05bbef4406a45b70f5343b955ae83b2f61c36d499e",
+    "mock-m2-seed.jsonl": "67de40c6612381a0cf435306c844e26ddb66fc28cbe23dfd25c4fc7128f33758",
+    "store.db-shm": "fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb",
+    "mock-m2-workspace/cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918",
+    "mock-m2-workspace/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+    "mock-m2-workspace/test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+    "mock-m2-workspace/store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+    "coding-m2-workspace/cache.py": "d983c8e29ce31805b30607da946238a318b773753338c93ac1f516b5a26e586a",
+    "coding-m2-workspace/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+    "coding-m2-workspace/test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+    "coding-m2-workspace/store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+    "mock-m1-workspace/cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918",
+    "mock-m1-workspace/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+    "mock-m1-workspace/test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+    "mock-m1-workspace/store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+    "coding-m1-workspace/cache.py": "29e4562ee9c73e2b5e5f5f70043df1f4e8da6cae9d72d3dc07a0f7a3b144258e",
+    "coding-m1-workspace/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+    "coding-m1-workspace/test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+    "coding-m1-workspace/store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3"
+  }
+}

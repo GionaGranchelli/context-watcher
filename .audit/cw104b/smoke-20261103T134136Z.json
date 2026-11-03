@@ -1,0 +1,17 @@
+{
+  "status": "BLOCKED_WITH_EVIDENCE",
+  "started_utc": "20261103T134136Z",
+  "arms": [],
+  "gate_requests": [],
+  "requests": [],
+  "raw_evidence": "smoke-20261103T134136Z",
+  "hard_cap_seconds": 3600,
+  "runtime_before": {
+    "time": null,
+    "live": null,
+    "conversation_cache": null
+  },
+  "error": "Error: [('<qualification-home>/home/.omp/natives/18.15.0/pi_natives.linux-x64-modern.node', '<user-home>/.local/share/context-watcher/cw104b-evidence-vault/smoke-20261103T134136Z/home/.omp/natives/18.15.0/pi_natives.linux-x64-modern.node', \"[Errno 18] Invalid cross-device link: '<qualification-home>/home/.omp/natives/18.15.0/pi_natives.linux-x64-modern.node' -> '<user-home>/.local/share/context-watcher/cw104b-evidence-vault/smoke-20261103T134136Z/home/.omp/natives/18.15.0/pi_natives.linux-x64-modern.node'\")]",
+  "phase_seconds": 0.5034360630088486,
+  "owned_processes_stopped": true
+}

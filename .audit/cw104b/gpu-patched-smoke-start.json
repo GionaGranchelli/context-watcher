@@ -1,0 +1,5 @@
+{
+  "exit_code": 0,
+  "stdout": "{\"card0\": {\"Temperature (Sensor edge) (C)\": \"40.0\", \"Temperature (Sensor junction) (C)\": \"49.0\", \"Temperature (Sensor memory) (C)\": \"40.0\", \"Current Socket Graphics Package Power (W)\": \"24.0\", \"VRAM Total Memory (B)\": \"34342961152\", \"VRAM Total Used Memory (B)\": \"23303647232\"}, \"card1\": {\"Temperature (Sensor edge) (C)\": \"24.0\", \"Temperature (Sensor junction) (C)\": \"25.0\", \"Temperature (Sensor memory) (C)\": \"20.0\", \"Average Graphics Package Power (W)\": \"8.0\", \"VRAM Total Memory (B)\": \"17095983104\", \"VRAM Total Used Memory (B)\": \"375574528\"}, \"card2\": {\"Temperature (Sensor edge) (C)\": \"36.0\", \"Temperature (Sensor junction) (C)\": \"45.0\", \"Temperature (Sensor memory) (C)\": \"38.0\", \"Current Socket Graphics Package Power (W)\": \"163.0\", \"VRAM Total Memory (B)\": \"34342961152\", \"VRAM Total Used Memory (B)\": \"24336949248\"}}\n",
+  "stderr": "WARNING: AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status\n\n"
+}

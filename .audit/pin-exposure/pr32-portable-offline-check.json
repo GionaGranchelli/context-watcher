@@ -1,0 +1,25 @@
+{
+  "status": "OFFLINE_FIXTURE_PASS",
+  "started_utc": "20261103T163210Z",
+  "run_id": "smoke-20261103T163210Z-ec1ee0aa",
+  "mode": "offline-fixture",
+  "authorization": {
+    "record_valid": false,
+    "consumed": false
+  },
+  "inference_calls": 0,
+  "provider_requests_admitted": 0,
+  "runner_freeze_sha256": "70ece115ac6b83bfec488e8e090449e7b2a17dbd0379471fd85746998541b3c2",
+  "fixture_sha256": "1203d206777a8171f6f1285d1f5f70e4da8e6a8e335c0e9e4d76fce801c23d23",
+  "verification_scope": "Sanitized in-process API lifecycle; not native OMP or private historical replay",
+  "verification_command": [
+    "cargo",
+    "test",
+    "--locked",
+    "-p",
+    "cw-proxy",
+    "--test",
+    "pin_lifecycle"
+  ],
+  "verification_exit": 0
+}

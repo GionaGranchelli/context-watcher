@@ -10,6 +10,17 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, broadcast, oneshot};
 use uuid::Uuid;
 
+const DEFAULT_UPSTREAM_TIMEOUT_SECS: u64 = 300;
+const MAX_UPSTREAM_TIMEOUT_SECS: u64 = 3600;
+
+fn upstream_timeout(raw: Option<&str>) -> Duration {
+    let seconds = raw
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| (1..=MAX_UPSTREAM_TIMEOUT_SECS).contains(seconds))
+        .unwrap_or(DEFAULT_UPSTREAM_TIMEOUT_SECS);
+    Duration::from_secs(seconds)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum WsEvent {
@@ -94,9 +105,12 @@ pub struct DaemonState {
 impl DaemonState {
     pub fn new(store: CwStore) -> Self {
         let (ws_tx, _) = broadcast::channel(256);
+        // Large local-model prompts can need longer than the default five-minute bound.
         let http_client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(300))
+            .timeout(upstream_timeout(
+                std::env::var("CW_UPSTREAM_TIMEOUT_SECS").ok().as_deref(),
+            ))
             .build()
             .unwrap_or_default();
 
@@ -129,5 +143,36 @@ impl DaemonState {
 
     pub fn broadcast(&self, ev: WsEvent) {
         let _ = self.ws_tx.send(ev);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DEFAULT_UPSTREAM_TIMEOUT_SECS, MAX_UPSTREAM_TIMEOUT_SECS, upstream_timeout};
+    use std::time::Duration;
+
+    #[test]
+    fn upstream_timeout_keeps_default_and_accepts_bounded_override() {
+        assert_eq!(
+            upstream_timeout(None),
+            Duration::from_secs(DEFAULT_UPSTREAM_TIMEOUT_SECS)
+        );
+        assert_eq!(upstream_timeout(Some("1800")), Duration::from_secs(1800));
+        assert_eq!(
+            upstream_timeout(Some("0")),
+            Duration::from_secs(DEFAULT_UPSTREAM_TIMEOUT_SECS)
+        );
+        assert_eq!(
+            upstream_timeout(Some("3601")),
+            Duration::from_secs(DEFAULT_UPSTREAM_TIMEOUT_SECS)
+        );
+        assert_eq!(
+            upstream_timeout(Some("invalid")),
+            Duration::from_secs(DEFAULT_UPSTREAM_TIMEOUT_SECS)
+        );
+        assert_eq!(
+            upstream_timeout(Some(&MAX_UPSTREAM_TIMEOUT_SECS.to_string())),
+            Duration::from_secs(MAX_UPSTREAM_TIMEOUT_SECS)
+        );
     }
 }

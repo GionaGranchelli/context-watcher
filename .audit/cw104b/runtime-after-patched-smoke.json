@@ -1,0 +1,38 @@
+{
+  "time": 1793715269.2603796,
+  "live": {
+    "state": "idle",
+    "queued": 0,
+    "phase": null,
+    "prompt_tokens": null,
+    "prompt_read": null,
+    "prompt_total": null,
+    "generated": null,
+    "max_tokens": null,
+    "elapsed_s": null,
+    "tok_s": null,
+    "tok_s_mean": null,
+    "prefill_tok_s_mean": null,
+    "tok_s_window_s": null
+  },
+  "conversation_cache": {
+    "enabled": true,
+    "budget_mib": 16384,
+    "slots": 8,
+    "parked": 8,
+    "bytes": 8863737304,
+    "evictions": 1,
+    "parks": 15,
+    "restores": 2,
+    "last_event": "restored",
+    "last_tokens": 27943,
+    "last_at": 1793715090.6429987,
+    "requests": 42,
+    "requests_reused": 40,
+    "reused_tokens": 1152333,
+    "prompt_tokens": 1310243,
+    "last_reused": 30501,
+    "last_prompt": 30839
+  },
+  "requests_kept": 42
+}

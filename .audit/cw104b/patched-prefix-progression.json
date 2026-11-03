@@ -1,0 +1,83 @@
+{
+  "run": "smoke-20261103T140929Z.json",
+  "requests": [
+    {
+      "arm": "m1",
+      "request": 0,
+      "cached_tokens": 27929,
+      "previous_request_messages_preserved": "INITIAL",
+      "pin_blocks": 0
+    },
+    {
+      "arm": "m1",
+      "request": 1,
+      "cached_tokens": 27943,
+      "previous_request_messages_preserved": true,
+      "pin_blocks": 0
+    },
+    {
+      "arm": "m1",
+      "request": 2,
+      "cached_tokens": 28589,
+      "previous_request_messages_preserved": true,
+      "pin_blocks": 0
+    },
+    {
+      "arm": "m1",
+      "request": 3,
+      "cached_tokens": 28936,
+      "previous_request_messages_preserved": true,
+      "pin_blocks": 0
+    },
+    {
+      "arm": "m1",
+      "request": 4,
+      "cached_tokens": 29338,
+      "previous_request_messages_preserved": true,
+      "pin_blocks": 0
+    },
+    {
+      "arm": "m2",
+      "request": 0,
+      "cached_tokens": 27929,
+      "previous_request_messages_preserved": "INITIAL",
+      "pin_blocks": 1
+    },
+    {
+      "arm": "m2",
+      "request": 1,
+      "cached_tokens": 27943,
+      "previous_request_messages_preserved": false,
+      "pin_blocks": 0
+    },
+    {
+      "arm": "m2",
+      "request": 2,
+      "cached_tokens": 28113,
+      "previous_request_messages_preserved": true,
+      "pin_blocks": 0
+    },
+    {
+      "arm": "m2",
+      "request": 3,
+      "cached_tokens": 28346,
+      "previous_request_messages_preserved": true,
+      "pin_blocks": 0
+    },
+    {
+      "arm": "m2",
+      "request": 4,
+      "cached_tokens": 28563,
+      "previous_request_messages_preserved": true,
+      "pin_blocks": 0
+    },
+    {
+      "arm": "m2",
+      "request": 5,
+      "cached_tokens": 30501,
+      "previous_request_messages_preserved": true,
+      "pin_blocks": 0
+    }
+  ],
+  "note": "M2 drops the appended user-tail directive on the first tool-only follow-up; subsequent tool-only requests preserve earlier message content. No pin is appended to tool output."
+}

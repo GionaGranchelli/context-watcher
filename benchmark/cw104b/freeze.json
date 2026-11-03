@@ -1,0 +1,30 @@
+{
+  "version": "CW-104B-1",
+  "files": {
+    "selfcheck_acceptance.py": "2499fd1f37bdc1b3f2f3b4bb59669266291798fd2b860c2ba1c5850451106c0b",
+    "pin_mock_preflight.py": "49fe472d9d1642f089e2a3ae839e07133b2a2b1f5f23d366800f91dbe90c8eb3",
+    "audit_smoke.py": "7cf8573b2458a023e257fd1ea8f13a17e6ad4defcda1df2f630e7e7ba543f83f",
+    "request_options.js": "05deb68b9cc718ed9a6fe454d989ccefff1c728deda913f1dba86c810066de97",
+    "smoke.py": "8e83bbf30d723e12b60a1828c48cde38b892c41d68ec2c25382b1e4a9a6d2064",
+    "protocol.json": "51fe56dc0c9f35f0934d93e5e88e10dc8899bdf42fd85a78aea991b28e6aaf6f",
+    "acceptance.py": "26ebdd3f01915d144b13ebee09b9d95f9456879e941bfdb980e7e3461cb67df4",
+    "long_prefix_probe.py": "3cb175e90f2d15f12dab06131782a010534f36683b0d34c51e856646340f2b09",
+    "replay_matrix_case.py": "2501f6c583a0a656af3d298b44611b2055d6440c8ba75c04109b467ed8f3df28",
+    "mock_preflight.py": "a775e94a6e62e1ea69de0bcd52b9f50d751705bdb6788cda83d0e931edf5ff77",
+    "fixture-hashes.json": "837ea9fa869b57cc840c17ec2f2928413175e0ccda05f9424e6dcc9119b2943e",
+    "recover.py": "900c7b4162f91990624e578f7f5b136c250050fbf62de6b84ee1da4b8b966db8",
+    "fixtures/f3/cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918",
+    "fixtures/f3/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+    "fixtures/f3/test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+    "fixtures/f3/store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+    "fixtures/f1/test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7",
+    "fixtures/f1/policy.txt": "0bd23ea428607f0eaf5164e9c5a6db6cbe4167ed0ea9a65a2e62edcc1b6503db",
+    "fixtures/f1/math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969"
+  },
+  "history_sha256": "0134917afb850953bba07dece1f71e6ce26c5f6ed48e96f4a3a51f6513becdda",
+  "execution_status": "READY_FOR_FULL_LOCAL_CAMPAIGN_PATCHED_SMOKE_VERIFIED",
+  "cache_alignment_revision": "Neutral suffix before every matched cache check and coding arm; tasks and pins unchanged",
+  "post_run_implementation_change": "Narrow user-tail guard and string-aware verifier; original live artifacts retain their recorded implementation context",
+  "qualified_smoke": "smoke-20261103T140929Z-audit.json",
+  "product_value": "NOT_ESTABLISHED"
+}

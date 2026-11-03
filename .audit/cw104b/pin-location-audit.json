@@ -1,0 +1,77 @@
+{
+  "requests": [
+    {
+      "request_file": "m2-0-request.json",
+      "pin_locations": [
+        {
+          "message": 2,
+          "role": "user",
+          "shape": "list",
+          "exact_pin_text_present": true,
+          "in_tail": true
+        }
+      ]
+    },
+    {
+      "request_file": "m2-1-request.json",
+      "pin_locations": [
+        {
+          "message": 5,
+          "role": "tool",
+          "shape": "str",
+          "exact_pin_text_present": true,
+          "in_tail": true
+        }
+      ]
+    },
+    {
+      "request_file": "m2-2-request.json",
+      "pin_locations": [
+        {
+          "message": 10,
+          "role": "tool",
+          "shape": "str",
+          "exact_pin_text_present": true,
+          "in_tail": true
+        }
+      ]
+    },
+    {
+      "request_file": "m2-3-request.json",
+      "pin_locations": [
+        {
+          "message": 12,
+          "role": "tool",
+          "shape": "str",
+          "exact_pin_text_present": true,
+          "in_tail": true
+        }
+      ]
+    },
+    {
+      "request_file": "m2-4-request.json",
+      "pin_locations": [
+        {
+          "message": 14,
+          "role": "tool",
+          "shape": "str",
+          "exact_pin_text_present": true,
+          "in_tail": true
+        }
+      ]
+    },
+    {
+      "request_file": "m2-5-request.json",
+      "pin_locations": [
+        {
+          "message": 16,
+          "role": "tool",
+          "shape": "str",
+          "exact_pin_text_present": true,
+          "in_tail": true
+        }
+      ]
+    }
+  ],
+  "status": "INVALID_TREATMENT_TOOL_OUTPUT_MUTATION"
+}

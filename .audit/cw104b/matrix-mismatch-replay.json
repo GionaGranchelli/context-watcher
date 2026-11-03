@@ -1,0 +1,16 @@
+{
+  "turn": "turn_2853e5539eda4e8bb1f2eb11fd17037c",
+  "kind": "isolated offline transform replay; no provider request",
+  "request_equals_egress": true,
+  "exact_full_payload_replay": true,
+  "applied_rules": [
+    "mut_d60dfe66"
+  ],
+  "historical_literal_pin_tags_preserved": 8,
+  "removed_standalone_blocks": 1,
+  "original_broad_verifier_source": "NOT_AVAILABLE",
+  "raw_sha256": [
+    "64c96298cc1616579b8d163623c345f60918dd45743cb63fd9b67028b953c8b8",
+    "64c96298cc1616579b8d163623c345f60918dd45743cb63fd9b67028b953c8b8"
+  ]
+}

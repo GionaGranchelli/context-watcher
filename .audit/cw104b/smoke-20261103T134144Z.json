@@ -1,0 +1,17 @@
+{
+  "status": "MOCK_GATES_PASSED_NO_INFERENCE",
+  "started_utc": "20261103T134144Z",
+  "arms": [],
+  "gate_requests": [],
+  "requests": [],
+  "raw_evidence": "smoke-20261103T134144Z",
+  "hard_cap_seconds": 3600,
+  "runtime_before": {
+    "time": null,
+    "live": null,
+    "conversation_cache": null
+  },
+  "mock_full_request_verified": true,
+  "phase_seconds": 2.770913421001751,
+  "owned_processes_stopped": true
+}

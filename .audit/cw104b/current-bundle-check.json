@@ -1,0 +1,8 @@
+{
+  "files_scanned": 70,
+  "known_credential_matches": 0,
+  "scope": "Configured local credential only, not exhaustive secret certification",
+  "raw_hashes_verified": 59,
+  "current_treatment_status": "VALID_PATCHED_PAIR",
+  "product_value": "NOT_ESTABLISHED"
+}

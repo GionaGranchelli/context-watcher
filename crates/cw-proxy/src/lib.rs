@@ -103,6 +103,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_context_transform_preserves_omp_tool_tail() {
+        use chrono::Utc;
+        use cw_core::ir::{HarnessKind, MutationOp, MutationRule, MutationStatus, Session};
+
+        let store = CwStore::open_in_memory().unwrap();
+        let session_id = "omp_tool_tail";
+        store
+            .upsert_session(&Session {
+                id: session_id.into(),
+                parent_session_id: None,
+                harness: HarnessKind::Omp,
+                workspace_root: None,
+                model: "offline-model".into(),
+                provider: ProviderKind::OpenAI,
+                title: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            })
+            .unwrap();
+        store
+            .save_mutations_at_revision(
+                session_id,
+                None,
+                &[MutationRule {
+                    id: "pin-omp".into(),
+                    session_id: session_id.into(),
+                    op: MutationOp::PinContext {
+                        label: "policy".into(),
+                        content: "Preserve the public API.".into(),
+                        source_node_id: None,
+                    },
+                    status: MutationStatus::Committed,
+                    estimated_saved_tokens: 0,
+                    estimated_kv_break_tokens: 0,
+                    created_at: Utc::now(),
+                }],
+            )
+            .unwrap();
+        let state = DaemonState::new(store);
+        let token = state.control_token.clone();
+        let messages = json!([
+            {"role":"user", "content":[{"type":"text", "text":"Read the source."}]},
+            {"role":"assistant", "content":[{
+                "type":"toolCall", "id":"read-1", "name":"read", "arguments":{"path":"cache.py"}
+            }]},
+            {"role":"toolResult", "toolCallId":"read-1", "toolName":"read", "isError":false,
+             "content":[{"type":"text", "text":"original tool output\nwith newlines"}],
+             "details":{"preserve":"all fields"}}
+        ]);
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/sessions/{session_id}/transform"))
+            .header("host", "127.0.0.1")
+            .header("x-cw-control-token", token)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&json!({"messages":messages, "provider":"openai"})).unwrap(),
+            ))
+            .unwrap();
+        let response = build_api_router(state).oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap())
+                .unwrap();
+        assert_eq!(
+            body,
+            json!({"status":"ok", "messages":messages, "applied_rules":[], "saved_tokens":0})
+        );
+    }
+
+    #[tokio::test]
     async fn test_proxy_dry_run_and_api_mutations_and_replay() {
         let store = CwStore::open_in_memory().unwrap();
         let state = DaemonState::new(store);

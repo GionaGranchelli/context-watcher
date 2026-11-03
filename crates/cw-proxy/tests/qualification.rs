@@ -636,6 +636,9 @@ async fn test_core_contract_ac2_committed_overlay_on_next_model_request() {
             created_at: now,
         })
         .unwrap();
+    f.store
+        .set_pin_context_policy(session_id, true, true)
+        .unwrap();
 
     // Turn 2: verify committed overlay is applied to outbound payload sent to upstream
     let payload2 = json!({
@@ -705,6 +708,9 @@ async fn test_core_contract_ac2_context_transform_api() {
     };
     f.store
         .save_mutations_at_revision(session_id, None, &[pin])
+        .unwrap();
+    f.store
+        .set_pin_context_policy(session_id, true, true)
         .unwrap();
 
     let transform_url = format!(
@@ -798,6 +804,9 @@ async fn test_core_contract_ac3_zero_duplicate_mutation_injection() {
             created_at: Utc::now(),
         })
         .unwrap();
+    f.store
+        .set_pin_context_policy(session_id, true, true)
+        .unwrap();
 
     // Send Turn 2
     let payload2 = json!({
@@ -887,6 +896,9 @@ async fn test_core_contract_ac4_tool_call_result_pairing_preserved_under_active_
             estimated_kv_break_tokens: 0,
             created_at: Utc::now(),
         })
+        .unwrap();
+    f.store
+        .set_pin_context_policy(session_id, true, true)
         .unwrap();
 
     let payload = json!({
@@ -998,6 +1010,9 @@ async fn test_core_contract_ac5_signed_request_byte_for_byte_fidelity() {
             estimated_kv_break_tokens: 0,
             created_at: now,
         })
+        .unwrap();
+    f.store
+        .set_pin_context_policy(session_id, true, true)
         .unwrap();
 
     // Anthropic payload with cryptographic thinking signature
@@ -1150,6 +1165,9 @@ async fn test_core_contract_ac7_original_transcripts_untouched_bit_for_bit() {
             estimated_kv_break_tokens: 0,
             created_at: Utc::now(),
         })
+        .unwrap();
+    f.store
+        .set_pin_context_policy(&agy_session_id, true, true)
         .unwrap();
 
     // 3. Perform proxy requests with committed overlay
@@ -1432,6 +1450,7 @@ async fn test_harness_binary_codex_cli_multiturn_overlay_reapplication() {
             created_at: Utc::now(),
         })
         .unwrap();
+    f.store.set_pin_context_policy(&sid, true, true).unwrap();
 
     // Turn 2 Execution with identical session ID
     let output2 = tokio::task::spawn_blocking({
@@ -1636,6 +1655,9 @@ async fn test_harness_binary_codex_cli_native_resume_three_turn_qualification() 
             estimated_kv_break_tokens: 0,
             created_at: Utc::now(),
         })
+        .unwrap();
+    f.store
+        .set_pin_context_policy(&cw_session_id, true, true)
         .unwrap();
 
     // Turn 2 Execution: Codex resumes the existing native session using `codex exec resume <thread_id>`
@@ -2124,6 +2146,7 @@ async fn test_harness_binary_codex_cli_session_isolation() {
             created_at: Utc::now(),
         })
         .unwrap();
+    f.store.set_pin_context_policy(&sid_a, true, true).unwrap();
 
     // 3. Run Session B Turn 1 with independent session ID and CODEX_HOME
     let temp_home_b = std::env::temp_dir().join(format!("codex_home_b_{}", uuid::Uuid::new_v4()));
@@ -2401,6 +2424,7 @@ async fn test_harness_binary_hermes_middleware_session_binding() {
                 created_at: now,
             })
             .unwrap();
+        f.store.set_pin_context_policy(sid, true, true).unwrap();
     }
 
     let override_uuid_a = uuid::Uuid::new_v4().to_string();
@@ -2913,6 +2937,9 @@ async fn test_harness_binary_omp_native_runtime_overlay_reapplication() {
     f.store
         .save_mutations_at_revision(&canonical_sid, None, &[pin])
         .unwrap();
+    f.store
+        .set_pin_context_policy(&canonical_sid, true, true)
+        .unwrap();
 
     // Turn 2: Native OMP Resume (`omp -r <session_uuid>`).
     // Native extension's `context` hook intercepts resumed messages, queries /transform using canonical_sid,
@@ -3267,6 +3294,7 @@ async fn test_live_continuation_real_codex_multiturn() {
             created_at: Utc::now(),
         })
         .unwrap();
+    store.set_pin_context_policy(&sid, true, true).unwrap();
 
     // Turn 2: Native Resume to add multiply function
     let output2 = tokio::task::spawn_blocking({

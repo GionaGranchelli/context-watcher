@@ -14,10 +14,10 @@ use axum::{
 use chrono::Utc;
 use cw_core::{
     analyze_turn_from_payload,
-    autopilot::evaluate_autopilot_policies,
+    autopilot::evaluate_autopilot_policies_with_policy,
     ir::{HarnessKind, ProviderKind, Session},
     local_llm::strip_internal_cw_fields,
-    mutation::{apply_mutations_to_payload, evaluate_firewall, has_signed_content},
+    mutation::{apply_mutations_to_payload_with_policy, evaluate_firewall, has_signed_content},
     normalizer::detect_provider,
     validator::validate_protocol_invariants,
 };
@@ -202,6 +202,10 @@ pub async fn handle_proxy_request(
             let mut outbound = raw.clone();
             let mut applied = Vec::new();
             let mut skipped_mutations = Vec::new();
+            let pin_policy = state
+                .store
+                .get_pin_context_policy(&session_id)
+                .unwrap_or_default();
             if active {
                 let rules = match state.store.list_mutations(&session_id) {
                     Ok(rules) => rules,
@@ -210,7 +214,13 @@ pub async fn handle_proxy_request(
                             .into_response();
                     }
                 };
-                let report = apply_mutations_to_payload(&mut outbound, provider, &rules, seq);
+                let report = apply_mutations_to_payload_with_policy(
+                    &mut outbound,
+                    provider,
+                    &rules,
+                    seq,
+                    &pin_policy,
+                );
                 applied = report.applied_rule_ids;
                 skipped_mutations = report.skipped_rules;
             }
@@ -237,7 +247,7 @@ pub async fn handle_proxy_request(
             if let Ok(Ok((mut turn, _))) = analyzed {
                 if active || cfg.shadow_policy.enabled {
                     let mut eval_payload = outbound.clone();
-                    let report = evaluate_autopilot_policies(
+                    let report = evaluate_autopilot_policies_with_policy(
                         &cfg,
                         &session_id,
                         &session.model,
@@ -250,6 +260,7 @@ pub async fn handle_proxy_request(
                         } else {
                             &mut eval_payload
                         },
+                        &pin_policy,
                     );
                     if active {
                         for rule in report.generated_mutations {
@@ -257,8 +268,9 @@ pub async fn handle_proxy_request(
                                 return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
                                     .into_response();
                             }
-                            applied.push(rule.id);
                         }
+                        applied.extend(report.application.applied_rule_ids);
+                        skipped_mutations.extend(report.application.skipped_rules);
                     }
                     if !report.shadow_decisions.is_empty() {
                         let cache_obs = cw_core::policy::classify_cache_state(

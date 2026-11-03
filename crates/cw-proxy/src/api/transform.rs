@@ -85,7 +85,14 @@ pub async fn api_transform_context(
         .map(|t| t.sequence_number + 1)
         .unwrap_or(1);
 
-    let report = cw_core::mutation::apply_mutations_to_payload(&mut payload, provider, &rules, seq);
+    let policy = state.store.get_pin_context_policy(&id).unwrap_or_default();
+    let report = cw_core::mutation::apply_mutations_to_payload_with_policy(
+        &mut payload,
+        provider,
+        &rules,
+        seq,
+        &policy,
+    );
 
     // Run Pre-Forward Validation Gate
     if let Err(gate_err) = cw_core::validator::validate_protocol_invariants(&payload, provider) {
@@ -110,6 +117,7 @@ pub async fn api_transform_context(
             "status": "ok",
             "messages": final_messages,
             "applied_rules": report.applied_rule_ids,
+            "skipped_rules": report.skipped_rules,
             "saved_tokens": report.saved_tokens,
         })),
     )

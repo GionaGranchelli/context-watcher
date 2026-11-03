@@ -141,6 +141,9 @@ mod tests {
                 }],
             )
             .unwrap();
+        store
+            .set_pin_context_policy(session_id, true, true)
+            .unwrap();
         let state = DaemonState::new(store);
         let token = state.control_token.clone();
         let messages = json!([
@@ -169,7 +172,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             body,
-            json!({"status":"ok", "messages":messages, "applied_rules":[], "saved_tokens":0})
+            json!({"status":"ok", "messages":messages, "applied_rules":[], "skipped_rules":[{"rule_id":"pin-omp","reason":"PinContextTailIneligible"}], "saved_tokens":0})
         );
     }
 

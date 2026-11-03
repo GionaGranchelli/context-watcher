@@ -1,5 +1,9 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## CW-121A: PinContext application consent
+
+See [policy contract and activation inventory](docs/CW-121A-PINCONTEXT-POLICY.md). The committed-pin regression failed before the runtime guard. Deterministic coverage verifies default-off, explicit opt-in, revocation, legacy rules, unchanged pruning, scoped consent, stored policy events, and application/abstention accounting. Validation: 257 Rust tests passed, 19 ignored; workspace Clippy and formatting passed; 15 Python admission tests and the offline fixture passed. This revision performs no provider inference or server changes. Broader activation UX and live-runner migration remain unqualified.
+
 ## PR #32 runner admission and identifier hardening
 
 The runner now defaults to a sanitized in-process API fixture that can run from a normal checkout without OMP, PyYAML, provider credentials, a LAN endpoint, or private history. Live mode requires an affirmative flag and a current, single-use approval document recorded in the manifest. The endpoint/profile/evidence/history locations are explicit owner inputs; private historical replay remains owner-only, and the new fixture does not independently reproduce the historical measurements. Historical direct probe entrypoints are retired.

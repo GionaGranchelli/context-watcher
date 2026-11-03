@@ -1,6 +1,8 @@
 use chrono::Utc;
 use cw_core::{
-    analyze_turn_from_payload, ir::*, mutation::apply_mutations_to_payload,
+    analyze_turn_from_payload,
+    ir::*,
+    mutation::{apply_mutations_to_payload, apply_mutations_to_payload_with_policy},
     normalizer::parse_request_to_nodes,
 };
 use serde_json::{Value, json};
@@ -20,7 +22,13 @@ fn rule(op: MutationOp) -> MutationRule {
 fn signed_requests_and_no_rule_requests_are_opaque() {
     let mut payload = json!({"messages":[{"role":"user","content":"literal <cw_pinned_context>\\nkeep this\\n</cw_pinned_context>"}]});
     let original = payload.clone();
-    apply_mutations_to_payload(&mut payload, ProviderKind::Anthropic, &[], 1);
+    apply_mutations_to_payload_with_policy(
+        &mut payload,
+        ProviderKind::Anthropic,
+        &[],
+        1,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in("s"),
+    );
     assert_eq!(payload, original);
     payload["messages"].as_array_mut().unwrap().push(json!({"role":"assistant","content":[{"type":"thinking","thinking":"signed text","signature":"opaque"}]}));
     let original = payload.clone();
@@ -29,7 +37,13 @@ fn signed_requests_and_no_rule_requests_are_opaque() {
         content: "added".into(),
         source_node_id: None,
     });
-    apply_mutations_to_payload(&mut payload, ProviderKind::Anthropic, &[r], 1);
+    apply_mutations_to_payload_with_policy(
+        &mut payload,
+        ProviderKind::Anthropic,
+        &[r],
+        1,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in("s"),
+    );
     assert_eq!(payload, original);
 }
 #[test]
@@ -385,9 +399,21 @@ fn pins_with_quotes_and_backslashes_are_idempotent() {
         content: "Use \"C:\\files\"".into(),
         source_node_id: None,
     })];
-    apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &rules, 1);
+    apply_mutations_to_payload_with_policy(
+        &mut payload,
+        ProviderKind::OpenAI,
+        &rules,
+        1,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in("s"),
+    );
     let first = payload.clone();
-    apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &rules, 1);
+    apply_mutations_to_payload_with_policy(
+        &mut payload,
+        ProviderKind::OpenAI,
+        &rules,
+        1,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in("s"),
+    );
     assert_eq!(payload, first);
 }
 

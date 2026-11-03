@@ -534,11 +534,12 @@ fn verify_m2_treatment(store: &CwStore, sid: &str, first_t2_seq: u32, rule_id: &
                 eligible_requests += 1;
                 let mut expected_egress = raw.clone();
                 let expected_report = committed_rule.as_ref().map(|rule| {
-                    cw_core::mutation::apply_mutations_to_payload(
+                    cw_core::mutation::apply_mutations_to_payload_with_policy(
                         &mut expected_egress,
                         ProviderKind::OpenAI,
                         std::slice::from_ref(rule),
                         t.sequence_number,
+                        &store.get_pin_context_policy(sid).unwrap_or_default(),
                     )
                 });
                 let expected_applied = expected_report
@@ -785,14 +786,18 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
         created_at: now,
     };
     store.save_mutation(&rule).unwrap();
+    store
+        .set_pin_context_policy(session_id, true, true)
+        .unwrap();
 
     let eligible_raw = json!({"model":"gpt-4o-mini","previous_response_id":"resp_1","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}]});
     let mut eligible_egress = eligible_raw.clone();
-    let report = cw_core::mutation::apply_mutations_to_payload(
+    let report = cw_core::mutation::apply_mutations_to_payload_with_policy(
         &mut eligible_egress,
         ProviderKind::OpenAI,
         &[rule],
         1,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in(session_id),
     );
     let mut eligible_turn = cw_core::analyze_turn_from_payload(
         "turn_1".into(),
@@ -820,7 +825,7 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
         .unwrap();
 
     let tool_raw = json!({"model":"gpt-4o-mini","previous_response_id":"resp_1","input":[{"type":"function_call_output","call_id":"call_1","output":"done"}]});
-    let tool_report = cw_core::mutation::apply_mutations_to_payload(
+    let tool_report = cw_core::mutation::apply_mutations_to_payload_with_policy(
         &mut tool_raw.clone(),
         ProviderKind::OpenAI,
         &[MutationRule {
@@ -837,6 +842,7 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
             created_at: now,
         }],
         2,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in(session_id),
     );
     let mut tool_turn = cw_core::analyze_turn_from_payload(
         "turn_2".into(),
@@ -1039,11 +1045,12 @@ fn m2_treatment_verifier_accepts_only_real_eligible_mutation_and_safe_abstention
         .find(|rule| rule.id == "pin-verifier")
         .unwrap();
     let mut suffix_egress = suffix_raw.clone();
-    let suffix_report = cw_core::mutation::apply_mutations_to_payload(
+    let suffix_report = cw_core::mutation::apply_mutations_to_payload_with_policy(
         &mut suffix_egress,
         ProviderKind::OpenAI,
         &[rule],
         3,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in(session_id),
     );
     let mut suffix_turn = cw_core::analyze_turn_from_payload(
         "turn_3".into(),

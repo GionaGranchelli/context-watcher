@@ -14,7 +14,7 @@ use cw_core::{
     local_llm::{
         CostAndPerfReport, LocalModelAnalysis, analyze_local_model_kv, calculate_cost_and_perf,
     },
-    mutation::apply_mutations_to_payload,
+    mutation::apply_mutations_to_payload_with_policy,
     normalizer::detect_provider,
     optimizer::OptimizationStrategyPlan,
     radix::{RadixGraph, build_radix_graph},
@@ -292,8 +292,13 @@ pub async fn api_fork_replay(
         }
     }
 
-    let mut_report =
-        apply_mutations_to_payload(&mut payload, provider, &rules, source_turn.sequence_number);
+    let mut_report = apply_mutations_to_payload_with_policy(
+        &mut payload,
+        provider,
+        &rules,
+        source_turn.sequence_number,
+        &state.store.get_pin_context_policy(&id).unwrap_or_default(),
+    );
     let fork_turn_id = format!(
         "fork_{}_{}",
         source_turn.sequence_number,
@@ -314,6 +319,8 @@ pub async fn api_fork_replay(
         Ok((mut fork_turn, _)) => {
             fork_turn.outcome = Some("preview".into());
             fork_turn.token_usage.saved_by_mutations = mut_report.saved_tokens;
+            fork_turn.applied_mutation_ids = mut_report.applied_rule_ids;
+            fork_turn.skipped_mutations = mut_report.skipped_rules;
             Json(json!({
                 "preview": true,
                 "upstream_executed": false,
@@ -384,8 +391,16 @@ pub async fn api_ingest_payload(
         .store
         .list_mutations(&req.session_id)
         .unwrap_or_default();
-    let mut_report =
-        apply_mutations_to_payload(&mut mutated_payload, provider, &active_mutations, seq_num);
+    let mut_report = apply_mutations_to_payload_with_policy(
+        &mut mutated_payload,
+        provider,
+        &active_mutations,
+        seq_num,
+        &state
+            .store
+            .get_pin_context_policy(&req.session_id)
+            .unwrap_or_default(),
+    );
 
     let turn_id = format!("turn_{}_{}", req.session_id, seq_num);
     match analyze_turn_from_payload(
@@ -401,6 +416,8 @@ pub async fn api_ingest_payload(
     ) {
         Ok((mut turn, file_states)) => {
             turn.token_usage.saved_by_mutations = mut_report.saved_tokens;
+            turn.applied_mutation_ids = mut_report.applied_rule_ids;
+            turn.skipped_mutations = mut_report.skipped_rules;
             turn.outcome = Some("imported".into());
             if let Err(error) = state
                 .store

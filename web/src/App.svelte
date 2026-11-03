@@ -1,5 +1,6 @@
 <script lang="ts">
   import { hierarchy, treemap } from 'd3-hierarchy';
+  import { strategyConfirmation } from './lib/strategyConfirmation';
   import HelpTip from './lib/HelpTip.svelte';
   import MarkdownText from './lib/MarkdownText.svelte';
   import type {
@@ -1202,6 +1203,7 @@
 
   async function executeSelectedStrategy(status: 'committed' | 'draft' = 'committed') {
     if (!activeSessionId || !activeStrategyPlan) return;
+    const strategyName = activeStrategyPlan.name;
     const selectedIds = checkedStrategyItems.map((i) => i.item_id);
     if (selectedIds.length === 0) return;
     const res = await apiFetch(`/api/v1/sessions/${activeSessionId}/optimize`, {
@@ -1215,10 +1217,7 @@
     });
     if (res.ok) {
       const result = await res.json();
-      statusBanner =
-        status === 'draft'
-          ? `Staged ${result.applied_count} optimizations from "${activeStrategyPlan.name}" (~${result.estimated_saved_tokens.toLocaleString()} tok).`
-          : `Applied ${result.applied_count} optimizations from "${activeStrategyPlan.name}" — saved ~${result.estimated_saved_tokens.toLocaleString()} tokens.`;
+      statusBanner = strategyConfirmation({ status, name: strategyName, result });
       await fetchSessionGraph(activeSessionId);
     }
   }

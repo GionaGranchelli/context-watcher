@@ -2,7 +2,9 @@ use crate::ir::{
     ContextNode, ContextTurn, MutationOp, MutationRule, MutationStatus, NodeKind, ProviderKind,
 };
 use crate::local_llm::detect_local_engine;
-use crate::mutation::apply_mutations_to_payload;
+use crate::mutation::{
+    MutationApplicationReport, PinContextPolicy, apply_mutations_to_payload_with_policy,
+};
 use crate::optimizer::{build_optimization_plans, resolve_strategy_alias};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -64,6 +66,8 @@ pub struct AutoPilotReport {
     pub triggered_policies: Vec<String>,
     pub generated_mutations: Vec<MutationRule>,
     pub spilled_log_files: Vec<String>,
+    #[serde(default)]
+    pub application: MutationApplicationReport,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shadow_decisions: Vec<crate::policy::PolicyDecision>,
 }
@@ -80,6 +84,31 @@ pub fn evaluate_autopilot_policies(
     nodes: &[ContextNode],
     turn: Option<&ContextTurn>,
     payload: &mut Value,
+) -> AutoPilotReport {
+    evaluate_autopilot_policies_with_policy(
+        config,
+        session_id,
+        model,
+        provider,
+        turn_seq,
+        nodes,
+        turn,
+        payload,
+        &PinContextPolicy::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_autopilot_policies_with_policy(
+    config: &AutoPilotConfig,
+    session_id: &str,
+    model: &str,
+    provider: ProviderKind,
+    turn_seq: u32,
+    nodes: &[ContextNode],
+    turn: Option<&ContextTurn>,
+    payload: &mut Value,
+    pin_policy: &PinContextPolicy,
 ) -> AutoPilotReport {
     if !config.enabled && !config.shadow_policy.enabled {
         return AutoPilotReport::default();
@@ -237,7 +266,13 @@ pub fn evaluate_autopilot_policies(
     }
 
     if !report.generated_mutations.is_empty() && !suppress_mutations {
-        apply_mutations_to_payload(payload, provider, &report.generated_mutations, turn_seq);
+        report.application = apply_mutations_to_payload_with_policy(
+            payload,
+            provider,
+            &report.generated_mutations,
+            turn_seq,
+            pin_policy,
+        );
     }
 
     report

@@ -2,6 +2,8 @@
 
 **Status:** Roadmap decision / planned implementation and qualification, 2026-11-03. This document does not assert that the requested behavior is already enforced. No model runs, cloud spending, server changes, production mutations, or merges are authorized by this plan.
 
+CW-121A implements the [central session-consent boundary](CW-121A-PINCONTEXT-POLICY.md) in this revision. Activation interfaces, content/scope disclosure, and policy-aware automatic rule creation remain CW-121B/C work. The full target policy below is not yet complete.
+
 ## Product decision
 
 Context-Watcher's primary product is **cache-aware, deterministic context reduction for coding agents**, with independent task correctness and provider-/local-engine efficiency as the success measures. PinContext is *not* a proven performance optimization and must not be treated as a prerequisite for core value.

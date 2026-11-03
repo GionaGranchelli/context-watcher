@@ -165,6 +165,9 @@ async fn authenticated_session_headers_apply_overlay_and_are_not_forwarded_upstr
             created_at: now,
         })
         .unwrap();
+    store
+        .set_pin_context_policy("r7_native_session", true, true)
+        .unwrap();
     let mut state = DaemonState::new(store.clone());
     state.openai_upstream = url;
     let token = state.control_token.clone();
@@ -246,6 +249,9 @@ async fn signed_anthropic_payload_is_forwarded_unchanged_with_committed_overlay(
             estimated_kv_break_tokens: 0,
             created_at: now,
         })
+        .unwrap();
+    store
+        .set_pin_context_policy("signed_session", true, true)
         .unwrap();
     let mut state = DaemonState::new(store.clone());
     state.anthropic_upstream = url;
@@ -778,6 +784,9 @@ async fn strict_shadow_mode_prevents_committed_mutations_and_forwards_original_p
             estimated_kv_break_tokens: 0,
             created_at: now,
         })
+        .unwrap();
+    store
+        .set_pin_context_policy(session_id, true, true)
         .unwrap();
     let mut state = DaemonState::new(store.clone());
     state.openai_upstream = url;

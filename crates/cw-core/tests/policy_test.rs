@@ -1,7 +1,7 @@
 use chrono::Utc;
 use cw_core::{
     analyze_turn_from_payload,
-    autopilot::{AutoPilotConfig, evaluate_autopilot_policies},
+    autopilot::{AutoPilotConfig, evaluate_autopilot_policies_with_policy},
     ir::*,
     optimizer::{OptimizationCandidateItem, OptimizationStrategyPlan},
     policy::*,
@@ -633,7 +633,7 @@ fn test_policy_11_feature_flag_disabled_leaves_behavior_unchanged() {
         ..Default::default()
     };
 
-    let report = evaluate_autopilot_policies(
+    let report = evaluate_autopilot_policies_with_policy(
         &config,
         &turn.session_id,
         "gpt-4o-mini",
@@ -642,6 +642,7 @@ fn test_policy_11_feature_flag_disabled_leaves_behavior_unchanged() {
         &turn.nodes,
         Some(&turn),
         &mut payload,
+        &cw_core::mutation::PinContextPolicy::default(),
     );
 
     assert!(report.triggered_policies.is_empty());
@@ -671,7 +672,7 @@ fn test_policy_12_shadow_mode_enabled_records_decisions_without_mutations() {
         ..Default::default()
     };
 
-    let report = evaluate_autopilot_policies(
+    let report = evaluate_autopilot_policies_with_policy(
         &config,
         &turn.session_id,
         "gpt-4o-mini",
@@ -680,6 +681,7 @@ fn test_policy_12_shadow_mode_enabled_records_decisions_without_mutations() {
         &turn.nodes,
         Some(&turn),
         &mut payload,
+        &cw_core::mutation::PinContextPolicy::default(),
     );
 
     // Decisions must be recorded
@@ -971,7 +973,7 @@ fn test_policy_strict_shadow_only_suppresses_active_mutations() {
         ..Default::default()
     };
 
-    let report = evaluate_autopilot_policies(
+    let report = evaluate_autopilot_policies_with_policy(
         &config,
         &turn.session_id,
         "gpt-4o-mini",
@@ -980,6 +982,7 @@ fn test_policy_strict_shadow_only_suppresses_active_mutations() {
         &turn.nodes,
         Some(&turn),
         &mut payload,
+        &cw_core::mutation::PinContextPolicy::default(),
     );
 
     // Shadow decisions recorded
@@ -1214,4 +1217,59 @@ fn test_policy_plan_rebuilding_and_cold_cache_no_benefit_reason_codes() {
         zero_decision.reason_code,
         DecisionReasonCode::NoDemonstrableBenefit
     );
+}
+
+#[test]
+fn configured_auto_pin_cannot_bypass_reinforcement_consent_or_claim_application() {
+    let original = json!({"system":"<RULE[AGENTS.md]>Preserve the public API.</RULE[AGENTS.md]>","messages":[{"role":"user","content":"Implement the task."}]});
+    let mut nodes =
+        cw_core::normalizer::parse_request_to_nodes(&original, ProviderKind::Anthropic, 1).unwrap();
+    for node in &mut nodes {
+        node.attention_salience = 0.1;
+    }
+    let config = AutoPilotConfig {
+        enabled: true,
+        auto_cache_safe_pin: true,
+        pin_min_context_tokens: 0,
+        auto_diet_at_breakpoint: false,
+        local_model_window_guard: false,
+        auto_heal_low_health: false,
+        ..Default::default()
+    };
+    let mut disabled = original.clone();
+    let report = evaluate_autopilot_policies_with_policy(
+        &config,
+        "session-auto",
+        "offline-model",
+        ProviderKind::Anthropic,
+        1,
+        &nodes,
+        None,
+        &mut disabled,
+        &cw_core::mutation::PinContextPolicy::default(),
+    );
+    assert!(
+        !report.generated_mutations.is_empty(),
+        "fixture must generate an actual pin"
+    );
+    assert_eq!(disabled, original);
+    assert!(report.application.applied_rule_ids.is_empty());
+    assert_eq!(
+        report.application.skipped_rules[0].reason,
+        "PinContextOptInRequired"
+    );
+    let mut enabled = original.clone();
+    let report = evaluate_autopilot_policies_with_policy(
+        &config,
+        "session-auto",
+        "offline-model",
+        ProviderKind::Anthropic,
+        1,
+        &nodes,
+        None,
+        &mut enabled,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in("session-auto"),
+    );
+    assert_ne!(enabled, original);
+    assert_eq!(report.application.applied_rule_ids.len(), 1);
 }

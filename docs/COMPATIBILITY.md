@@ -2,11 +2,13 @@
 
 This is the current safety contract. Fixture coverage is narrower than full real-provider qualification. Generic HTTP compatibility does not establish native transcript support.
 
+PinContext reinforcement is default-off at the mutation application boundary. Committed rules, including legacy and automatically generated pins, require separate explicit session consent. Revocation leaves stored rules intact. The authenticated policy endpoint, audit behavior, and remaining CW-121B/C activation work are described in [CW-121A](CW-121A-PINCONTEXT-POLICY.md). This does not implement protection from pruning or sustained pin exposure.
+
 | Input / operation | Observe | Active proxy mutation | Transcript export | In-place replacement |
 |---|---|---|---|---|
 | OpenAI Chat, known unsigned text shapes | Raw bytes and analysis | Explicit authenticated session; opt-in | Through supported harness adapter | Unsupported |
 | OpenAI Responses, stateless text and function items | Raw bytes and known-item analysis | Known unsigned text only when the client sends authenticated session headers | Adapter dependent | Unsupported |
-| OpenAI Responses `previous_response_id` + supported user-text tail + committed `PinContext` | Raw bytes; partial local view | Narrow tail append only; authenticated session and explicit committed rule required; user item `type` must be absent or exactly `"message"` | Unsupported | Unsupported |
+| OpenAI Responses `previous_response_id` + supported user-text tail + committed `PinContext` | Raw bytes; partial local view | Narrow tail append only; authenticated session, explicit reinforcement consent, and committed rule required; user item `type` must be absent or exactly `"message"` | Unsupported | Unsupported |
 | Stateful non-OpenAI requests; mixed `messages` and `input`; invalid/unknown item types; tool-only tails; historical Prune/Fold/Dedupe/Normalize; any non-null `conversation` reference | Raw bytes; partial local view | Abstain and preserve request | Unsupported | Unsupported |
 | Anthropic known text/tool blocks | Raw bytes and analysis | Unsigned known shapes only | Exact tool-result mappings | Unsupported |
 | Gemini known text/function blocks | Raw bytes and analysis | No authenticated session headers from `cw wrap`; observation only | Adapter dependent | Unsupported |
@@ -20,7 +22,7 @@ This is the current safety contract. Fixture coverage is narrower than full real
 | Hermes SQLite | Explicit import | Authenticated `cw wrap hermes` proxy path for built-in DeepSeek; other Hermes routes unverified | No native DB write-back | Unsupported |
 | Aider Markdown | Unsupported native import | Generic proxy observation only | Unsupported | Unsupported |
 
-Active Gemini `PinContext` on `contents` is not qualified. The current helper can append a text part to a function-response or model tail; the separate eligibility guard is tracked in [issue #35](https://github.com/GionaGranchelli/context-watcher/issues/35). The messages-path fix in PR #33 does not cover this path. Gemini wrapper observation-only behavior remains unchanged.
+Active Gemini `PinContext` on `contents` is blocked at the application boundary, even with session consent. The underlying helper is not qualified for function-response or model tails; the separate eligibility guard is tracked in [issue #35](https://github.com/GionaGranchelli/context-watcher/issues/35). The messages-path fix in PR #33 does not cover this path. Gemini wrapper observation-only behavior remains unchanged.
 
 The messages guard currently accepts empty user strings and empty text arrays. Nonempty-text eligibility is not established by that guard; its contract and hardening tests are tracked in [issue #36](https://github.com/GionaGranchelli/context-watcher/issues/36). This follow-up does not reopen the demonstrated OMP tool-tail fix.
 

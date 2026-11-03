@@ -39,7 +39,7 @@ The disappearance occurs before Strata receives the next JSON request. A cache s
 
 ## The correctness fix has its own review
 
-[Draft PR #33](https://github.com/GionaGranchelli/context-watcher/pull/33) extracts the guard and tests from PR #32 onto `main`. It contains two files and 60 added lines, with no benchmark runner or evidence bundle. The isolated checkout passed 83 `cw-core` tests, core Clippy with warnings denied, and formatting. GitHub CI also passed for that isolated branch. No merge occurred.
+[PR #33](https://github.com/GionaGranchelli/context-watcher/pull/33) extracts the guard and tests from PR #32 onto `main`. The initial extraction contained two files and 60 added lines. It now also includes a focused endpoint regression, for three files and 131 added lines, with no benchmark runner or evidence bundle. The isolated checkout passed 83 `cw-core` tests, core Clippy with warnings denied, and formatting. GitHub CI also passed for that isolated branch. No merge occurred.
 
 The review covered the only call to the injection helper, committed-rule filtering, whole-payload eligibility, signed-content abstention, the transform endpoint, native hook fallback, and positive and negative tests. Within that narrow scope, no additional blocker was found. The guard prevents the observed provider `tool` and native `toolResult` mutations while retaining user-string and user-text-array injection. The old deduplication test now first asserts tool-tail abstention, then tests deduplication after a real user continuation.
 
@@ -84,3 +84,9 @@ python3 -B benchmark/pin_exposure/diagnose.py --output .audit/pin-exposure/trace
 ```
 
 That command requires the owner's private raw evidence vault. `--raw-dir` accepts a securely supplied copy. Missing or mismatched evidence fails the check. Reviewers without those files can run the hermetic API test and inspect the sanitized trace and source hashes, but cannot independently rehash the private wire captures. The same diagnostic rejects the earlier tool-pinned run rather than treating it as equivalent exposure.
+
+## Standalone correctness review follow-up
+
+The endpoint regression in `cw-proxy/src/lib.rs` registers a committed rule and sends native OMP `toolCall` and `toolResult` shapes through the actual authenticated transform router. It asserts the complete response, including all original message fields, `status: ok`, an empty applied-rule list, and zero saved tokens. The test failed against the pre-fix core because the API appended a block to the tool result, then passed with the existing guard restored. No new production guard logic was added. The updated PR passed CI and is ready for independent human review, with no approval or merge performed.
+
+The separate Gemini contents-tail vulnerability is tracked in [#35](https://github.com/GionaGranchelli/context-watcher/issues/35), and empty user-text eligibility in [#36](https://github.com/GionaGranchelli/context-watcher/issues/36). Neither broadens PR #33. After a human merges that PR, reconcile PR #32's overlapping correctness patch against the reviewed main branch. No merge or history rewrite has been performed. Evidence is in `.audit/pin-exposure/pr33-review-response.json`.

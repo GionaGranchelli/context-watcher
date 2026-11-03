@@ -1,0 +1,42 @@
+{
+  "review_scope": "PR #33 messages path only",
+  "endpoint_test": "tests::test_context_transform_preserves_omp_tool_tail",
+  "narrow_head": "60df4c3abfb1d0f2c62efa72c41a643b5c219c4d",
+  "red": {
+    "core_source": "origin/main:e4c6e13",
+    "exit": 101,
+    "observed": "API appended a pin block inside native toolResult and returned applied_rules=[pin-omp]"
+  },
+  "green": {
+    "guard": "restored unchanged from a6c0489",
+    "isolated_proxy_lib_tests_passed": 18,
+    "evidence_branch_proxy_lib_tests_passed": 19,
+    "clippy_proxy_all_targets": "PASS",
+    "format": "PASS"
+  },
+  "regression_assertion": "Exact complete response: status=ok, original messages, applied_rules=[], saved_tokens=0",
+  "new_inference_calls": 0,
+  "production_guard_changed": false,
+  "separate_followups": {
+    "gemini_P1": "https://github.com/GionaGranchelli/context-watcher/issues/35",
+    "empty_text_P2": "https://github.com/GionaGranchelli/context-watcher/issues/36"
+  },
+  "pr32_reconciliation": "Deferred until independent approval and human merge of PR #33; no history rewrite or merge performed",
+  "source_sha256": {
+    "crates/cw-proxy/src/lib.rs": "e5812c5615008fcff0b89f7322c3ed3f159ede054c531969953d3882dd748936"
+  },
+  "full_red_output_sha256": "3dce740639c12e7ba9597f1e442c94eb468e009ec8a8120b94830c083d4c3e87",
+  "github_ci": {
+    "run_id": 41662331064,
+    "conclusion": "success"
+  },
+  "pr_state": {
+    "draft": false,
+    "approved_by_agent": false,
+    "merged": false
+  },
+  "tracking_docs_sha256": {
+    "docs/COMPATIBILITY.md": "569681df74689ef4c9547aae435518ab19d17aabe7810b2acba1e9bd0bdea905",
+    "docs/PINCONTEXT-EXPOSURE-DIAGNOSIS.md": "57da0ed44f0c1b10e1f2c5d470806ae656d53a463150112c12b6f7680486e71d"
+  }
+}

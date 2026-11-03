@@ -20,7 +20,7 @@ The loopback control API requires the existing control credential and origin che
 - `POST` to the same route with `{"enabled":true,"acknowledge_risk":true}` explicitly enables reinforcement for that session.
 - `POST` with `{"enabled":false}` revokes it without deleting or changing any mutation rule.
 
-An enable request without explicit risk acknowledgement is rejected. Unknown request fields are rejected. Review `GET /api/v1/sessions/:id/mutations` before opting in; those rule contents are what the policy permits. Audit events identify control operations and their timestamps, not independently verified human identities. Broader clients and user-facing controls remain CW-121B/C work. CW-121B must make automatic creation policy-aware and show pin contents and scope before consent, including which stored pins would become active.
+An enable request without explicit risk acknowledgement is rejected. Enabling a terminated session returns HTTP 409 with a JSON error identifying session termination and a separate risk warning; further acknowledgement cannot reopen it. Unknown request fields are rejected. Review `GET /api/v1/sessions/:id/mutations` before opting in; those rule contents are what the policy permits. Audit events identify control operations and their timestamps, not independently verified human identities. Broader clients and user-facing controls remain CW-121B/C work. CW-121B must make automatic creation policy-aware and show pin contents and scope before consent, including which stored pins would become active.
 
 PinContext can add tokens, increase local latency or cloud cost, disturb cache reuse, and change agent behavior. Its benefits remain unproven. Reinforcement is not protection from pruning. No new Protect from Pruning feature is implemented.
 
@@ -58,6 +58,6 @@ python3 -B -m unittest discover -s benchmark/cw104b -p test_smoke.py
 python3 -B benchmark/cw104b/smoke.py --manifest-dir /tmp/cw121a-offline-check
 ```
 
-Local validation: 256 Rust tests passed, 19 ignored; workspace Clippy and formatting passed. All 15 Python runner-admission tests and the default offline preflight passed. The ignored suites, live-provider execution, and production server behavior were not run.
+Local validation: 257 Rust tests passed, 19 ignored; workspace Clippy and formatting passed. All 15 Python runner-admission tests and the default offline preflight passed. The ignored suites, live-provider execution, and production server behavior were not run.
 
 The default smoke command runs the offline API fixture only. Its current source freeze is refreshed to cover this policy revision; historical result manifests and the original CW-104B freeze remain unchanged. This is not live-runner requalification. Existing PinContext inference runners need an explicit policy-aware activation design before reuse. No pin-persistence or benchmark campaign is implemented.

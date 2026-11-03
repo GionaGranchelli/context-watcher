@@ -20,6 +20,8 @@ pub enum StoreError {
         "PinContext reinforcement requires explicit risk acknowledgement and an active, valid session ID"
     )]
     PinContextConsentRequired,
+    #[error("Cannot enable PinContext reinforcement for a terminated session")]
+    PinContextSessionTerminated,
     #[error("Session changed; refresh the plan before applying it")]
     Conflict,
     #[error("I/O error: {0}")]
@@ -484,7 +486,7 @@ impl CwStore {
                 |row| row.get::<_, bool>(0),
             )?
         {
-            return Err(StoreError::PinContextConsentRequired);
+            return Err(StoreError::PinContextSessionTerminated);
         }
         conn.execute(
             "INSERT INTO pin_context_policy_events(session_id,enabled,risk_acknowledged,changed_at) VALUES (?1,?2,?3,?4)",

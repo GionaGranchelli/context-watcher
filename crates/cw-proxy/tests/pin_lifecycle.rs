@@ -424,3 +424,51 @@ async fn strategy_draft_and_inactive_commit_report_creation_separately_from_appl
         assert_eq!(store.get_turn_raw_payload(&turn.id).unwrap().unwrap(), raw);
     }
 }
+
+#[tokio::test]
+async fn terminated_session_consent_conflict_is_json_and_explains_the_cause() {
+    let (app, token, store) = fixture();
+    store
+        .mark_session_terminated(SESSION, Some("offline-test"))
+        .unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/sessions/{SESSION}/pin-context-policy"))
+                .header("host", "127.0.0.1")
+                .header("x-cw-control-token", &token)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"enabled":true,"acknowledge_risk":true}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap()).unwrap();
+    assert_eq!(
+        body["error"],
+        "Cannot enable PinContext reinforcement for a terminated session"
+    );
+    assert!(
+        body["risk_warning"]
+            .as_str()
+            .unwrap()
+            .contains("cloud cost")
+    );
+    assert!(
+        store
+            .list_pin_context_policy_events(SESSION)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        set_policy(&app, &token, json!({"enabled":false})).await["enabled"],
+        false
+    );
+}

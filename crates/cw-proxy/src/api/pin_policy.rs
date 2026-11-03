@@ -50,8 +50,15 @@ pub async fn set_policy(
         .set_pin_context_policy(&id, req.enabled, req.acknowledge_risk)
     {
         Ok(()) => {}
-        Err(cw_store::StoreError::PinContextConsentRequired) => {
-            return (StatusCode::CONFLICT, RISK_WARNING).into_response();
+        Err(
+            error @ (cw_store::StoreError::PinContextConsentRequired
+            | cw_store::StoreError::PinContextSessionTerminated),
+        ) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({"error":error.to_string(), "risk_warning":RISK_WARNING})),
+            )
+                .into_response();
         }
         Err(_) => return StatusCode::SERVICE_UNAVAILABLE.into_response(),
     }

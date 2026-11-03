@@ -4,6 +4,15 @@ use std::{
     path::PathBuf,
 };
 
+/// Canonical IDs carried in authenticated `x-cw-session-id` headers.
+pub fn is_valid_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
 pub fn token_path() -> PathBuf {
     std::env::var_os("CW_CONTROL_TOKEN_FILE")
         .map(PathBuf::from)
@@ -78,4 +87,24 @@ fn validate(token: String) -> io::Result<String> {
         ));
     }
     Ok(token)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn authenticated_session_id_contract() {
+        for valid in ["omp_123-ABC".to_string(), "a".repeat(128)] {
+            assert!(super::is_valid_session_id(&valid));
+        }
+        for invalid in [
+            "".to_string(),
+            "a".repeat(129),
+            "bad/id".into(),
+            "bad id".into(),
+            "é".into(),
+            "bad\nheader".into(),
+        ] {
+            assert!(!super::is_valid_session_id(&invalid));
+        }
+    }
 }

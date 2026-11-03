@@ -112,13 +112,7 @@ pub async fn handle_proxy_request(
                 )
                     .into_response();
             }
-            if explicit.is_some_and(|id| {
-                id.is_empty()
-                    || id.len() > 128
-                    || !id
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
-            }) {
+            if explicit.is_some_and(|id| !cw_core::control::is_valid_session_id(id)) {
                 return (StatusCode::BAD_REQUEST, "Invalid cw session ID").into_response();
             }
             let is_conversation_payload = raw.get("messages").is_some()

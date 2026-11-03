@@ -1,0 +1,58 @@
+{
+  "tag": "128k-direct-short-m2",
+  "mode": "m2",
+  "status": "complete",
+  "seed_rc": 0,
+  "seed_seconds": 15.67,
+  "transcript": "/tmp/cw104a-local-qual/context-runs/128k-direct-short-m2/2026-11-03T03-29-46-822Z_01a19f74-af46-73c7-9ae9-d505af565379.jsonl",
+  "import_rc": 0,
+  "pin_rc": 0,
+  "cw_session": "omp_01a19f74-af46-73c7-9ae9-d505af565379",
+  "request_rc": 0,
+  "request_seconds": 1598.87,
+  "responses": [
+    {
+      "input": 2112,
+      "output": 96,
+      "cacheRead": 0,
+      "stop": "stop",
+      "answer": "Session initialized. Read-only, source-grounded. Working directory: `/tmp/cw104a-local-qual/audit-workspace`. Standing by for the next prompt."
+    },
+    {
+      "input": 123609,
+      "output": 642,
+      "cacheRead": 0,
+      "stop": "stop",
+      "answer": "**Regression test:** `test_import_omp_transcript` \u2014 `crates/cw-harnesses/src/lib.rs` (`mod tests`).\n\nEvidence: it imports an OMP JSONL whose `session` line carries the full UUID `01a16530-b4a1-71cb-b159-96200fb07f14` and asserts `assert_eq!(sess_id, \"omp_01a16530-b4a1-71cb-b159-96200fb07f14\")` \u2014 the complete UUID, not a truncated prefix.\n\n**Helper:** `imported_session_id(harness: HarnessKind, id: &str) -> String` \u2014 `crates/cw-harnesses/src/adapters/generic.rs`.\n\nBehavior: `harness == HarnessKind::Omp` \u2192 ID passed through unchanged; every other harness \u2192 truncated at the 12th char (`id.char_indices().nth(12)`), then prefixed `format!(\"{}_{}\", harness.as_str(), id)`. The OMP branch is exactly what the test pins.\n\nNote on scope: the test proves OMP preservation only; the truncation branch for non-OMP harnesses is not exercised by any supplied test \u2014 that half of `imported_session_id` is unverified by the supplied source."
+    }
+  ],
+  "total_input_tokens": 125721,
+  "total_cached_tokens": 0,
+  "acceptance_passed": true,
+  "rule_verified": true,
+  "egress_captures": [
+    {
+      "harness": "generic_proxy",
+      "request_equals_egress": true,
+      "sha256": "64c96298cc1616579b8d163623c345f60918dd45743cb63fd9b67028b953c8b8",
+      "egress_bytes": 487101,
+      "pin_occurrences": 1,
+      "pin_in_tail": true
+    },
+    {
+      "harness": "generic_proxy",
+      "request_equals_egress": true,
+      "sha256": "6139271c5231735e50e9a32c034bc729e1ef76485eab70136f81ee864ffd3650",
+      "egress_bytes": 490900,
+      "pin_occurrences": 1,
+      "pin_in_tail": true
+    }
+  ],
+  "egress_verified": true,
+  "initial_single_capture_predicate": false,
+  "verification_artifact_path": "/tmp/cw104a-local-qual/context-runs/128k-direct-short-m2-verification.json",
+  "verification_note": "Two provider-bound egresses carried the pin once in the tail and matched request-to-egress. The OMP transcript lacks the pin; transform API replay returned the committed rule ID and exactly reproduced one full-context egress. Proxy applied_mutation_ids are empty because OMP extension transformed before the generic proxy.",
+  "strata_task_plus_compaction_input_tokens": 248221,
+  "strata_task_plus_compaction_output_tokens": 1706,
+  "usage_reconciliation": "/tmp/cw104a-local-qual/context-runs/128k-token-reconciliation.json"
+}

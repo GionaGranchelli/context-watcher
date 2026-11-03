@@ -1,0 +1,27 @@
+Inspected both files; no changes made.
+
+**math_ops.py** (2 public functions, no imports, no guards):
+
+- `divide_or_fallback(a, b, fallback=0.0)` — body is `return a / b`. The `fallback` parameter is accepted but never read. Valid `b` → correct quotient (`10, 2` → `5.0`). `b == 0` → `ZeroDivisionError`, never the fallback.
+- `safe_mean(numbers)` — body is `sum(numbers) / len(numbers)`. Non-empty → correct mean (`[1,2,3]` → `2.0`). Empty → `ZeroDivisionError` from `len(numbers) == 0`, never `0.0`.
+
+**test_math_ops.py** — `unittest`, imports both functions, 4 assertions:
+
+| Assertion | Current result |
+|---|---|
+| `divide_or_fallback(10, 2) == 5.0` | passes |
+| `divide_or_fallback(10, 0, fallback=99.0) == 99.0` | fails — raises `ZeroDivisionError` |
+| `safe_mean([1,2,3]) == 2.0` | passes |
+| `safe_mean([]) == 0.0` | fails — raises `ZeroDivisionError` |
+
+The two failing assertions are the only place the fallback contract is stated; the implementation has no corresponding code. `[INFERENCE]` — no shell tool available in this session, so failures are read from the source, not executed.
+
+**Callers:** grep across the workspace shows the only references to these symbols are the import and assertions in `test_math_ops.py`. No other module depends on them, so a guard-only change has no blast radius.
+
+**Fix shape for the next turn** (constraints: signatures fixed, valid-input behavior fixed, tests untouched):
+
+- `divide_or_fallback`: return `fallback` when `b == 0`, else `a / b`. `b == 0` covers both `0` and `0.0`, the two inputs that raise today.
+- `safe_mean`: return `0.0` when `numbers` is empty, else `sum(numbers) / len(numbers)`. No new parameter — adding a `fallback` kwarg would change the public signature, so the empty-case value stays literal `0.0` to match the test.
+- Division semantics preserved for valid inputs: `/` stays true division, so `safe_mean` keeps returning `float` (`2.0`), and `divide_or_fallback` keeps returning `float` for int args.
+
+One open decision for the fix: whether `safe_mean` should accept any iterable (generator) — `sum()` + `len()` requires a sized container today; `len()` on a generator raises `TypeError`, not `ZeroDivisionError`. Current behavior is sized-container-only; I'd keep that rather than widen semantics unless you want generator support.

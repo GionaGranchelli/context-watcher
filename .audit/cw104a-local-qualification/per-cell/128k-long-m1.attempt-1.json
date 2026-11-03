@@ -1,0 +1,9 @@
+{
+  "tag": "128k-long-m1-attempt-1",
+  "status": "aborted_wrong_band",
+  "provider_prompt_tokens": 92213,
+  "provider_prompt_read_before_abort": 8448,
+  "elapsed_seconds": 50.9,
+  "reason": "The progressive OMP transcript produced only a 92,213-token provider prompt, below the requested 128k context band; stopped before completion and excluded.",
+  "source_transcript": "/tmp/cw104a-local-qual/context-runs/64k-short-m1/2026-11-03T00-59-03-041Z_01a19eea-b001-701b-a7c8-4626d5a7d635.jsonl"
+}

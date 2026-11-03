@@ -14,6 +14,18 @@ use std::{
 
 use crate::{auto_heal::check_and_apply_auto_heal, error::HarnessError};
 
+fn imported_session_id(harness: HarnessKind, id: &str) -> String {
+    let id = if harness == HarnessKind::Omp {
+        id
+    } else {
+        id.char_indices()
+            .nth(12)
+            .map(|(byte_offset, _)| &id[..byte_offset])
+            .unwrap_or(id)
+    };
+    format!("{}_{}", harness.as_str(), id)
+}
+
 /// Extracts plain text representation from Codex content field.
 pub(crate) fn extract_codex_content_text(val: Option<&Value>) -> String {
     let Some(v) = val else {
@@ -58,11 +70,7 @@ pub fn import_generic_jsonl_transcript(
     } else {
         stem
     };
-    let mut session_id = format!(
-        "{}_{}",
-        harness.as_str(),
-        id_slug.chars().take(12).collect::<String>()
-    );
+    let mut session_id = imported_session_id(harness, id_slug);
 
     let file = fs::File::open(path)?;
     let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
@@ -157,7 +165,7 @@ pub fn import_generic_jsonl_transcript(
             if let Some(id) = entry.get("id").and_then(|v| v.as_str())
                 && !id.is_empty()
             {
-                session_id = format!("{}_{}", harness.as_str(), &id[..id.len().min(12)]);
+                session_id = imported_session_id(harness, id);
             }
             if let Some(cwd) = entry.get("cwd").and_then(|v| v.as_str())
                 && !cwd.is_empty()
@@ -181,7 +189,7 @@ pub fn import_generic_jsonl_transcript(
                 if let Some(sid) = p.get("session_id").and_then(|v| v.as_str())
                     && !sid.is_empty()
                 {
-                    session_id = format!("{}_{}", harness.as_str(), &sid[..sid.len().min(12)]);
+                    session_id = imported_session_id(harness, sid);
                 }
                 if let Some(cwd) = p.get("cwd").and_then(|v| v.as_str())
                     && !cwd.is_empty()

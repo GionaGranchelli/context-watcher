@@ -1,0 +1,24 @@
+{
+  "classification": "38K calibration; excluded from corrected v2 paired results",
+  "terminal_process_exit": 0,
+  "task_seconds": 1272.8310534030024,
+  "independent_acceptance_passed": true,
+  "tests_unchanged": true,
+  "coding_requests": 5,
+  "actual_input_tokens": [
+    38012,
+    38758,
+    39165,
+    39356,
+    39642
+  ],
+  "total_coding_input_tokens": 194933,
+  "total_coding_output_tokens": 2375,
+  "all_single_pin": true,
+  "all_settings_match": true,
+  "all_request_egress_match": true,
+  "cached_tokens": 0,
+  "transform_preservation_status": "Initial unpinned-shape messages replay exactly; four already-pinned tool-follow-up messages replay unchanged. Raw pre-hook provider payload was not independently captured.",
+  "intervention_count_note": "Five requests carry one pin each; this does not prove five fresh mutation applications.",
+  "verifier_correction": "Removed only standalone injected block; previous broad regex wrongly removed literal markup examples from historical source text."
+}

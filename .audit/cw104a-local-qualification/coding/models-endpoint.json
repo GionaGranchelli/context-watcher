@@ -1,0 +1,29 @@
+{
+  "observed_at": "2026-11-03T04:48:54.912825+00:00",
+  "http_status": 200,
+  "endpoint": "http://192.168.1.156:8095/v1/models",
+  "response": {
+    "object": "list",
+    "data": [
+      {
+        "id": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+        "object": "model",
+        "status": {
+          "value": "loaded"
+        },
+        "meta": {
+          "n_ctx": 131072
+        },
+        "architecture": {
+          "input_modalities": [
+            "text",
+            "image"
+          ],
+          "output_modalities": [
+            "text"
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "F1": {
+    "latest_task_prompt": "Now implement the two requested edge cases: division by zero returns the supplied fallback, and safe_mean([]) returns 0.0. Preserve behavior for valid inputs and public function signatures. Do not edit tests. Make the source change and summarize it; tests will be run independently after you finish.",
+    "constraints_also_in_latest_prompt": true,
+    "interpretation": "The frozen task restates constraints near the tail, reducing the strength of a test for forgotten early constraints. Do not alter frozen prompts after observing results."
+  },
+  "F3": {
+    "latest_task_prompt": "Implement CachedStore so get caches non-None backing-store values and put updates both cache and backing store. Preserve the tested behavior and public method signatures. Do not edit tests. Make the source change and summarize it; tests will be run independently after you finish.",
+    "constraints_also_in_latest_prompt": true,
+    "interpretation": "The frozen task restates constraints near the tail, reducing the strength of a test for forgotten early constraints. Do not alter frozen prompts after observing results."
+  }
+}

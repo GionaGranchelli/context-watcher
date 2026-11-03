@@ -1,0 +1,28 @@
+{
+  "stage": "live coding prefill",
+  "actual_provider_prompt_tokens": 32746,
+  "target_band": [
+    28000,
+    36000
+  ],
+  "within_band": true,
+  "treatment_replay": [
+    {
+      "run": "f3-32k-v2-r1-m2",
+      "turn": "turn_1fd24dfa4a5d43dd815c436aec3cf973",
+      "session": "omp_01a19fd8-ce9b-7775-bf9f-8730fd53fcea",
+      "provider_input": null,
+      "committed_rule": "mut_98c7c076",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_98c7c076"
+      ],
+      "exact_transform_replay": true,
+      "replay_differences": []
+    }
+  ]
+}

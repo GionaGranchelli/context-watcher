@@ -1,0 +1,34 @@
+[
+  {
+    "profile": "cw104a-m1",
+    "setting": "temperature",
+    "requested": "0",
+    "set_exit": 0,
+    "readback": "0",
+    "get_exit": 0
+  },
+  {
+    "profile": "cw104a-m1",
+    "setting": "topP",
+    "requested": "1",
+    "set_exit": 0,
+    "readback": "1",
+    "get_exit": 0
+  },
+  {
+    "profile": "cw104a-m2",
+    "setting": "temperature",
+    "requested": "0",
+    "set_exit": 0,
+    "readback": "0",
+    "get_exit": 0
+  },
+  {
+    "profile": "cw104a-m2",
+    "setting": "topP",
+    "requested": "1",
+    "set_exit": 0,
+    "readback": "1",
+    "get_exit": 0
+  }
+]

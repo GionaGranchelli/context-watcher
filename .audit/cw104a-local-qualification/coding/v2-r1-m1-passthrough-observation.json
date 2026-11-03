@@ -1,0 +1,8 @@
+{
+  "tag": "f1-32k-v2-r1-m1",
+  "partial": true,
+  "captured_requests": 5,
+  "pin_absent_all": true,
+  "sampling_match_all": true,
+  "request_equals_egress_all": true
+}

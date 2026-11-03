@@ -1,0 +1,39 @@
+{
+  "tag": "64k-long-m2",
+  "band": "64k",
+  "interaction": "long_progressive",
+  "mode": "m2",
+  "resume_rc": 0,
+  "seconds": 402.74,
+  "transcript": "/tmp/cw104a-local-qual/context-runs/64k-short-m2/2026-11-03T00-46-11-236Z_01a19ede-e924-732c-9a5e-9c3ad7570f8f.jsonl",
+  "cw_session": "omp_01a19ede-e924-732c-9a5e-9c3ad7570f8f",
+  "stderr_tail": "Working...\n",
+  "turn_usage": {
+    "input": 61230,
+    "output": 1127,
+    "cacheRead": 0,
+    "duration_ms": 402054.371172,
+    "ttft_ms": 376404.70759400004,
+    "stop": "stop"
+  },
+  "acceptance_passed": true,
+  "answer": "**Behavior (helper `imported_session_id`, `crates/cw-harnesses/src/adapters/generic.rs`):**\n\n- **OMP:** `id` is used unchanged, then prefixed \u2192 `omp_<full id>`.\n- **Non-OMP:** `id` is truncated to its first 12 characters \u2014 `id.char_indices().nth(12)` yields the byte offset *after* 12 chars, so `&id[..byte_offset]` is exactly 12 chars; if the id has \u2264 12 chars, `nth(12)` is `None` and `unwrap_or(id)` keeps it whole. Result \u2192 `<harness.as_str()>_<truncated id>`.\n- The prefix uses the harness value *after* remapping: in `import_generic_jsonl_transcript` (`crates/cw-harnesses/src/adapters/generic.rs`), a `HarnessKind::Pi` transcript whose path contains `/.omp/` is reassigned to `HarnessKind::Omp`, so it takes the full-ID branch.\n- Call sites in `import_generic_jsonl_transcript`: the filename `id_slug` (Codex `rollout-\u2026` UUID suffix via `stem.get(28..)`, or the part after `_` from `split_once('_')`), the `type == \"session\"` entry's `id`, and `session_meta`/`turn_context` payload `session_id`.\n\n**Test evidence:** `test_import_omp_transcript` (`crates/cw-harnesses/src/lib.rs`) asserts `sess_id == \"omp_01a16530-b4a1-71cb-b159-96200fb07f14\"` \u2014 the full 36-char UUID survives, confirming the OMP branch.\n\n**Unverified:** the non-OMP 12-char truncation is supported only by the helper's source; no supplied test exercises a non-OMP session ID, so that branch has no test coverage in the supplied corpus.",
+  "rule_ids": [
+    "mut_36248ef5"
+  ],
+  "rule_verified": true,
+  "egress_captures": [
+    {
+      "proxy_session": "sess_e64906e1b4e847c9904f92bd4606a2b0",
+      "harness": "generic_proxy",
+      "turn_id": "turn_fbe4b9175bbb4c4e838e158a1fe1fc51",
+      "request_equals_egress": true,
+      "sha256": "3f4a6ec81c306a6bd2c014fa324c38909cbf21f23b287cf0eddae3cd734e9d75",
+      "egress_bytes": 245638,
+      "pin_occurrences": 1,
+      "pin_in_tail": true
+    }
+  ],
+  "egress_verified": true,
+  "status": "complete"
+}

@@ -1,0 +1,224 @@
+[
+  {
+    "tag": "f1-r2-m1",
+    "initial_reads": {
+      "math_ops.py": {
+        "sha256": "1f3eebd42a816c41e572628faf2691dd2fb2864b733fa3d72b0620834c8124b2",
+        "text": "# math_ops.py - initially buggy\ndef divide_or_fallback(a, b, fallback=0.0):\n    return a / b\n\ndef safe_mean(numbers):\n    return sum(numbers) / len(numbers)",
+        "timestamp": "2026-11-02T22:35:32.231Z"
+      },
+      "test_math_ops.py": {
+        "sha256": "75745230fe342aaf313f06a217d6ebe219b1ff19cf07f0bfc7970f65e61c30ed",
+        "text": "import unittest\nfrom math_ops import divide_or_fallback, safe_mean\n\nclass TestMathOps(unittest.TestCase):\n    def test_divide(self):\n        self.assertEqual(divide_or_fallback(10, 2), 5.0)\n        self.assertEqual(divide_or_fallback(10, 0, fallback=99.0), 99.0)\n\n    def test_mean(self):\n        self.assertEqual(safe_mean([1, 2, 3]), 2.0)\n        self.assertEqual(safe_mean([]), 0.0)\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:35:32.231Z"
+      }
+    },
+    "first_edit": "2026-11-02T22:38:21.435Z"
+  },
+  {
+    "tag": "f1-r3-m1",
+    "initial_reads": {
+      "math_ops.py": {
+        "sha256": "1f3eebd42a816c41e572628faf2691dd2fb2864b733fa3d72b0620834c8124b2",
+        "text": "# math_ops.py - initially buggy\ndef divide_or_fallback(a, b, fallback=0.0):\n    return a / b\n\ndef safe_mean(numbers):\n    return sum(numbers) / len(numbers)",
+        "timestamp": "2026-11-02T22:48:50.017Z"
+      },
+      "test_math_ops.py": {
+        "sha256": "75745230fe342aaf313f06a217d6ebe219b1ff19cf07f0bfc7970f65e61c30ed",
+        "text": "import unittest\nfrom math_ops import divide_or_fallback, safe_mean\n\nclass TestMathOps(unittest.TestCase):\n    def test_divide(self):\n        self.assertEqual(divide_or_fallback(10, 2), 5.0)\n        self.assertEqual(divide_or_fallback(10, 0, fallback=99.0), 99.0)\n\n    def test_mean(self):\n        self.assertEqual(safe_mean([1, 2, 3]), 2.0)\n        self.assertEqual(safe_mean([]), 0.0)\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:48:50.017Z"
+      }
+    },
+    "first_edit": "2026-11-02T22:52:27.472Z"
+  },
+  {
+    "tag": "f3-r2-m1",
+    "initial_reads": {
+      "store.py": {
+        "sha256": "40b7d3b66f229f2b31a230f45d3bb1c80aac5d73fbcdeb8c4b8750fa3a013867",
+        "text": "# store.py\nclass KeyValueStore:\n    def __init__(self):\n        self._data = {}\n    def put(self, k, v):\n        self._data[k] = v\n    def get(self, k):\n        return self._data.get(k)",
+        "timestamp": "2026-11-02T22:58:31.600Z"
+      },
+      "cache.py": {
+        "sha256": "85dfd3390211211406580456963c1e0a4d42b7c102b5eb6aae529abd4ef70922",
+        "text": "# cache.py - skeleton\nclass CachedStore:\n    def __init__(self, backing_store):\n        self.backing_store = backing_store\n        self.cache = {}\n    def get(self, k):\n        return None\n    def put(self, k, v):\n        pass",
+        "timestamp": "2026-11-02T22:58:31.601Z"
+      },
+      "test_cache_system.py": {
+        "sha256": "fe5abaf04e1fb961e5137ab7990ddf06516d5770d43de97c0c35bf02bf6b7fa3",
+        "text": "import unittest\nfrom store import KeyValueStore\nfrom cache import CachedStore\n\nclass TestCacheSystem(unittest.TestCase):\n    def test_cached_lookup(self):\n        backend = KeyValueStore()\n        backend.put('user_1', 'Alice')\n        cached = CachedStore(backend)\n        self.assertEqual(cached.get('user_1'), 'Alice')\n        backend.put('user_1', 'MutatedDirectly')\n        # Should still return cached value 'Alice'\n        self.assertEqual(cached.get('user_1'), 'Alice')\n\n    def test_put_updates_both(self):\n        backend = KeyValueStore()\n        cached = CachedStore(backend)\n        cached.put('key', 'val')\n        self.assertEqual(cached.get('key'), 'val')\n        self.assertEqual(backend.get('key'), 'val')\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:58:31.601Z"
+      }
+    },
+    "first_edit": "2026-11-02T23:02:50.712Z"
+  },
+  {
+    "tag": "f3-r3-m1",
+    "initial_reads": {
+      "store.py": {
+        "sha256": "40b7d3b66f229f2b31a230f45d3bb1c80aac5d73fbcdeb8c4b8750fa3a013867",
+        "text": "# store.py\nclass KeyValueStore:\n    def __init__(self):\n        self._data = {}\n    def put(self, k, v):\n        self._data[k] = v\n    def get(self, k):\n        return self._data.get(k)",
+        "timestamp": "2026-11-02T23:04:44.992Z"
+      },
+      "cache.py": {
+        "sha256": "85dfd3390211211406580456963c1e0a4d42b7c102b5eb6aae529abd4ef70922",
+        "text": "# cache.py - skeleton\nclass CachedStore:\n    def __init__(self, backing_store):\n        self.backing_store = backing_store\n        self.cache = {}\n    def get(self, k):\n        return None\n    def put(self, k, v):\n        pass",
+        "timestamp": "2026-11-02T23:04:44.993Z"
+      },
+      "test_cache_system.py": {
+        "sha256": "fe5abaf04e1fb961e5137ab7990ddf06516d5770d43de97c0c35bf02bf6b7fa3",
+        "text": "import unittest\nfrom store import KeyValueStore\nfrom cache import CachedStore\n\nclass TestCacheSystem(unittest.TestCase):\n    def test_cached_lookup(self):\n        backend = KeyValueStore()\n        backend.put('user_1', 'Alice')\n        cached = CachedStore(backend)\n        self.assertEqual(cached.get('user_1'), 'Alice')\n        backend.put('user_1', 'MutatedDirectly')\n        # Should still return cached value 'Alice'\n        self.assertEqual(cached.get('user_1'), 'Alice')\n\n    def test_put_updates_both(self):\n        backend = KeyValueStore()\n        cached = CachedStore(backend)\n        cached.put('key', 'val')\n        self.assertEqual(cached.get('key'), 'val')\n        self.assertEqual(backend.get('key'), 'val')\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T23:04:44.993Z"
+      }
+    },
+    "first_edit": "2026-11-02T23:08:01.179Z"
+  },
+  {
+    "tag": "f1-r2-m2",
+    "initial_reads": {
+      "math_ops.py": {
+        "sha256": "1f3eebd42a816c41e572628faf2691dd2fb2864b733fa3d72b0620834c8124b2",
+        "text": "# math_ops.py - initially buggy\ndef divide_or_fallback(a, b, fallback=0.0):\n    return a / b\n\ndef safe_mean(numbers):\n    return sum(numbers) / len(numbers)",
+        "timestamp": "2026-11-02T22:42:07.813Z"
+      },
+      "test_math_ops.py": {
+        "sha256": "75745230fe342aaf313f06a217d6ebe219b1ff19cf07f0bfc7970f65e61c30ed",
+        "text": "import unittest\nfrom math_ops import divide_or_fallback, safe_mean\n\nclass TestMathOps(unittest.TestCase):\n    def test_divide(self):\n        self.assertEqual(divide_or_fallback(10, 2), 5.0)\n        self.assertEqual(divide_or_fallback(10, 0, fallback=99.0), 99.0)\n\n    def test_mean(self):\n        self.assertEqual(safe_mean([1, 2, 3]), 2.0)\n        self.assertEqual(safe_mean([]), 0.0)\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:42:07.813Z"
+      }
+    },
+    "first_edit": "2026-11-02T22:43:15.451Z"
+  },
+  {
+    "tag": "f1-r3-m2",
+    "initial_reads": {
+      "math_ops.py": {
+        "sha256": "1f3eebd42a816c41e572628faf2691dd2fb2864b733fa3d72b0620834c8124b2",
+        "text": "# math_ops.py - initially buggy\ndef divide_or_fallback(a, b, fallback=0.0):\n    return a / b\n\ndef safe_mean(numbers):\n    return sum(numbers) / len(numbers)",
+        "timestamp": "2026-11-02T22:45:49.346Z"
+      },
+      "test_math_ops.py": {
+        "sha256": "75745230fe342aaf313f06a217d6ebe219b1ff19cf07f0bfc7970f65e61c30ed",
+        "text": "import unittest\nfrom math_ops import divide_or_fallback, safe_mean\n\nclass TestMathOps(unittest.TestCase):\n    def test_divide(self):\n        self.assertEqual(divide_or_fallback(10, 2), 5.0)\n        self.assertEqual(divide_or_fallback(10, 0, fallback=99.0), 99.0)\n\n    def test_mean(self):\n        self.assertEqual(safe_mean([1, 2, 3]), 2.0)\n        self.assertEqual(safe_mean([]), 0.0)\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:45:49.346Z"
+      }
+    },
+    "first_edit": "2026-11-02T23:19:00.059Z"
+  },
+  {
+    "tag": "f3-r2-m2",
+    "initial_reads": {
+      "store.py": {
+        "sha256": "40b7d3b66f229f2b31a230f45d3bb1c80aac5d73fbcdeb8c4b8750fa3a013867",
+        "text": "# store.py\nclass KeyValueStore:\n    def __init__(self):\n        self._data = {}\n    def put(self, k, v):\n        self._data[k] = v\n    def get(self, k):\n        return self._data.get(k)",
+        "timestamp": "2026-11-02T22:54:25.596Z"
+      },
+      "cache.py": {
+        "sha256": "85dfd3390211211406580456963c1e0a4d42b7c102b5eb6aae529abd4ef70922",
+        "text": "# cache.py - skeleton\nclass CachedStore:\n    def __init__(self, backing_store):\n        self.backing_store = backing_store\n        self.cache = {}\n    def get(self, k):\n        return None\n    def put(self, k, v):\n        pass",
+        "timestamp": "2026-11-02T22:54:25.597Z"
+      },
+      "test_cache_system.py": {
+        "sha256": "fe5abaf04e1fb961e5137ab7990ddf06516d5770d43de97c0c35bf02bf6b7fa3",
+        "text": "import unittest\nfrom store import KeyValueStore\nfrom cache import CachedStore\n\nclass TestCacheSystem(unittest.TestCase):\n    def test_cached_lookup(self):\n        backend = KeyValueStore()\n        backend.put('user_1', 'Alice')\n        cached = CachedStore(backend)\n        self.assertEqual(cached.get('user_1'), 'Alice')\n        backend.put('user_1', 'MutatedDirectly')\n        # Should still return cached value 'Alice'\n        self.assertEqual(cached.get('user_1'), 'Alice')\n\n    def test_put_updates_both(self):\n        backend = KeyValueStore()\n        cached = CachedStore(backend)\n        cached.put('key', 'val')\n        self.assertEqual(cached.get('key'), 'val')\n        self.assertEqual(backend.get('key'), 'val')\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:54:55.814Z"
+      }
+    },
+    "first_edit": "2026-11-02T23:22:26.446Z"
+  },
+  {
+    "tag": "f3-r3-m2",
+    "initial_reads": {
+      "store.py": {
+        "sha256": "40b7d3b66f229f2b31a230f45d3bb1c80aac5d73fbcdeb8c4b8750fa3a013867",
+        "text": "# store.py\nclass KeyValueStore:\n    def __init__(self):\n        self._data = {}\n    def put(self, k, v):\n        self._data[k] = v\n    def get(self, k):\n        return self._data.get(k)",
+        "timestamp": "2026-11-02T23:10:05.292Z"
+      },
+      "cache.py": {
+        "sha256": "85dfd3390211211406580456963c1e0a4d42b7c102b5eb6aae529abd4ef70922",
+        "text": "# cache.py - skeleton\nclass CachedStore:\n    def __init__(self, backing_store):\n        self.backing_store = backing_store\n        self.cache = {}\n    def get(self, k):\n        return None\n    def put(self, k, v):\n        pass",
+        "timestamp": "2026-11-02T23:10:05.292Z"
+      },
+      "test_cache_system.py": {
+        "sha256": "fe5abaf04e1fb961e5137ab7990ddf06516d5770d43de97c0c35bf02bf6b7fa3",
+        "text": "import unittest\nfrom store import KeyValueStore\nfrom cache import CachedStore\n\nclass TestCacheSystem(unittest.TestCase):\n    def test_cached_lookup(self):\n        backend = KeyValueStore()\n        backend.put('user_1', 'Alice')\n        cached = CachedStore(backend)\n        self.assertEqual(cached.get('user_1'), 'Alice')\n        backend.put('user_1', 'MutatedDirectly')\n        # Should still return cached value 'Alice'\n        self.assertEqual(cached.get('user_1'), 'Alice')\n\n    def test_put_updates_both(self):\n        backend = KeyValueStore()\n        cached = CachedStore(backend)\n        cached.put('key', 'val')\n        self.assertEqual(cached.get('key'), 'val')\n        self.assertEqual(backend.get('key'), 'val')\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T23:10:34.745Z"
+      }
+    },
+    "first_edit": "2026-11-02T23:11:11.160Z"
+  },
+  {
+    "tag": "f1-m1-run2",
+    "initial_reads": {
+      "math_ops.py": {
+        "sha256": "1f3eebd42a816c41e572628faf2691dd2fb2864b733fa3d72b0620834c8124b2",
+        "text": "# math_ops.py - initially buggy\ndef divide_or_fallback(a, b, fallback=0.0):\n    return a / b\n\ndef safe_mean(numbers):\n    return sum(numbers) / len(numbers)",
+        "timestamp": "2026-11-02T22:18:28.384Z"
+      },
+      "test_math_ops.py": {
+        "sha256": "75745230fe342aaf313f06a217d6ebe219b1ff19cf07f0bfc7970f65e61c30ed",
+        "text": "import unittest\nfrom math_ops import divide_or_fallback, safe_mean\n\nclass TestMathOps(unittest.TestCase):\n    def test_divide(self):\n        self.assertEqual(divide_or_fallback(10, 2), 5.0)\n        self.assertEqual(divide_or_fallback(10, 0, fallback=99.0), 99.0)\n\n    def test_mean(self):\n        self.assertEqual(safe_mean([1, 2, 3]), 2.0)\n        self.assertEqual(safe_mean([]), 0.0)\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:18:56.190Z"
+      }
+    },
+    "first_edit": "2026-11-02T22:21:41.575Z"
+  },
+  {
+    "tag": "f1-m2-run2",
+    "initial_reads": {
+      "math_ops.py": {
+        "sha256": "1f3eebd42a816c41e572628faf2691dd2fb2864b733fa3d72b0620834c8124b2",
+        "text": "# math_ops.py - initially buggy\ndef divide_or_fallback(a, b, fallback=0.0):\n    return a / b\n\ndef safe_mean(numbers):\n    return sum(numbers) / len(numbers)",
+        "timestamp": "2026-11-02T22:12:40.935Z"
+      },
+      "test_math_ops.py": {
+        "sha256": "75745230fe342aaf313f06a217d6ebe219b1ff19cf07f0bfc7970f65e61c30ed",
+        "text": "import unittest\nfrom math_ops import divide_or_fallback, safe_mean\n\nclass TestMathOps(unittest.TestCase):\n    def test_divide(self):\n        self.assertEqual(divide_or_fallback(10, 2), 5.0)\n        self.assertEqual(divide_or_fallback(10, 0, fallback=99.0), 99.0)\n\n    def test_mean(self):\n        self.assertEqual(safe_mean([1, 2, 3]), 2.0)\n        self.assertEqual(safe_mean([]), 0.0)\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:12:40.936Z"
+      }
+    },
+    "first_edit": "2026-11-02T22:15:42.943Z"
+  },
+  {
+    "tag": "f3-m1",
+    "initial_reads": {
+      "store.py": {
+        "sha256": "40b7d3b66f229f2b31a230f45d3bb1c80aac5d73fbcdeb8c4b8750fa3a013867",
+        "text": "# store.py\nclass KeyValueStore:\n    def __init__(self):\n        self._data = {}\n    def put(self, k, v):\n        self._data[k] = v\n    def get(self, k):\n        return self._data.get(k)",
+        "timestamp": "2026-11-02T22:24:58.785Z"
+      },
+      "cache.py": {
+        "sha256": "85dfd3390211211406580456963c1e0a4d42b7c102b5eb6aae529abd4ef70922",
+        "text": "# cache.py - skeleton\nclass CachedStore:\n    def __init__(self, backing_store):\n        self.backing_store = backing_store\n        self.cache = {}\n    def get(self, k):\n        return None\n    def put(self, k, v):\n        pass",
+        "timestamp": "2026-11-02T22:24:58.785Z"
+      },
+      "test_cache_system.py": {
+        "sha256": "fe5abaf04e1fb961e5137ab7990ddf06516d5770d43de97c0c35bf02bf6b7fa3",
+        "text": "import unittest\nfrom store import KeyValueStore\nfrom cache import CachedStore\n\nclass TestCacheSystem(unittest.TestCase):\n    def test_cached_lookup(self):\n        backend = KeyValueStore()\n        backend.put('user_1', 'Alice')\n        cached = CachedStore(backend)\n        self.assertEqual(cached.get('user_1'), 'Alice')\n        backend.put('user_1', 'MutatedDirectly')\n        # Should still return cached value 'Alice'\n        self.assertEqual(cached.get('user_1'), 'Alice')\n\n    def test_put_updates_both(self):\n        backend = KeyValueStore()\n        cached = CachedStore(backend)\n        cached.put('key', 'val')\n        self.assertEqual(cached.get('key'), 'val')\n        self.assertEqual(backend.get('key'), 'val')\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:24:58.786Z"
+      }
+    },
+    "first_edit": "2026-11-02T22:27:55.293Z"
+  },
+  {
+    "tag": "f3-m2",
+    "initial_reads": {
+      "store.py": {
+        "sha256": "40b7d3b66f229f2b31a230f45d3bb1c80aac5d73fbcdeb8c4b8750fa3a013867",
+        "text": "# store.py\nclass KeyValueStore:\n    def __init__(self):\n        self._data = {}\n    def put(self, k, v):\n        self._data[k] = v\n    def get(self, k):\n        return self._data.get(k)",
+        "timestamp": "2026-11-02T22:29:52.887Z"
+      },
+      "cache.py": {
+        "sha256": "85dfd3390211211406580456963c1e0a4d42b7c102b5eb6aae529abd4ef70922",
+        "text": "# cache.py - skeleton\nclass CachedStore:\n    def __init__(self, backing_store):\n        self.backing_store = backing_store\n        self.cache = {}\n    def get(self, k):\n        return None\n    def put(self, k, v):\n        pass",
+        "timestamp": "2026-11-02T22:29:52.888Z"
+      },
+      "test_cache_system.py": {
+        "sha256": "fe5abaf04e1fb961e5137ab7990ddf06516d5770d43de97c0c35bf02bf6b7fa3",
+        "text": "import unittest\nfrom store import KeyValueStore\nfrom cache import CachedStore\n\nclass TestCacheSystem(unittest.TestCase):\n    def test_cached_lookup(self):\n        backend = KeyValueStore()\n        backend.put('user_1', 'Alice')\n        cached = CachedStore(backend)\n        self.assertEqual(cached.get('user_1'), 'Alice')\n        backend.put('user_1', 'MutatedDirectly')\n        # Should still return cached value 'Alice'\n        self.assertEqual(cached.get('user_1'), 'Alice')\n\n    def test_put_updates_both(self):\n        backend = KeyValueStore()\n        cached = CachedStore(backend)\n        cached.put('key', 'val')\n        self.assertEqual(cached.get('key'), 'val')\n        self.assertEqual(backend.get('key'), 'val')\n\nif __name__ == '__main__':\n    unittest.main()",
+        "timestamp": "2026-11-02T22:29:52.888Z"
+      }
+    },
+    "first_edit": "2026-11-02T22:32:54.895Z"
+  }
+]

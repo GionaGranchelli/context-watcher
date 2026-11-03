@@ -1,0 +1,4 @@
+
+## Updated verified requirements
+
+PR #31 is merged and its merge commit is in current HEAD ancestry. All 12 original coding runs have matching visible prompts within pairs, matching pre-edit file contents within each family, identical pins committed before M2 task prompts, the same recorded model without fallback, preserved final tests/store contents and signatures, and independently passing baseline plus additional behavior checks. Their coding-task order was not fully counterbalanced, and they omitted explicit sampling fields. The corrected approximately-32K campaign is active; its first M2 task request has 32,358 provider tokens with temperature 0 and top-p 1. The runner/history/fixture freeze hashes match the executing attempt. Do not mark the original controlled experiment requirement complete from these partial corrected results.

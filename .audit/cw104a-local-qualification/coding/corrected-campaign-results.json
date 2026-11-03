@@ -1,0 +1,102 @@
+{
+  "runs": {
+    "f1-32k-v2-r2-m1": {
+      "status": "bootstrap_running",
+      "acceptance_passed": null,
+      "task_seconds": null,
+      "coding_dispatches": 0,
+      "outcomes": {},
+      "usage_complete": false,
+      "missing_usage_dispatches": 0,
+      "known_input_tokens": 0,
+      "known_output_tokens": 0,
+      "first_request_input_tokens": null,
+      "interpretation": "Known usage is a lower bound whenever usage_complete is false."
+    },
+    "f3-32k-v2-r1-m1": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "task_seconds": 524.3806117060012,
+      "coding_dispatches": 7,
+      "outcomes": {
+        "completed": 2,
+        "stream_error": 1,
+        "upstream_error": 4
+      },
+      "usage_complete": false,
+      "missing_usage_dispatches": 5,
+      "known_input_tokens": 65858,
+      "known_output_tokens": 1553,
+      "first_request_input_tokens": 32287,
+      "interpretation": "Known usage is a lower bound whenever usage_complete is false."
+    },
+    "f1-32k-v2-r1-m1": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "task_seconds": 442.37376556699746,
+      "coding_dispatches": 2,
+      "outcomes": {
+        "completed": 2
+      },
+      "usage_complete": true,
+      "missing_usage_dispatches": 0,
+      "known_input_tokens": 64119,
+      "known_output_tokens": 1779,
+      "first_request_input_tokens": 31376,
+      "interpretation": "Known usage is a lower bound whenever usage_complete is false."
+    },
+    "f1-32k-v2-r1-m2": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "task_seconds": 651.2975530620024,
+      "coding_dispatches": 3,
+      "outcomes": {
+        "completed": 3
+      },
+      "usage_complete": true,
+      "missing_usage_dispatches": 0,
+      "known_input_tokens": 98867,
+      "known_output_tokens": 1436,
+      "first_request_input_tokens": 32358,
+      "interpretation": "Known usage is a lower bound whenever usage_complete is false."
+    },
+    "f3-32k-v2-r1-m2": {
+      "status": "finished",
+      "acceptance_passed": true,
+      "task_seconds": 680.8406376459898,
+      "coding_dispatches": 3,
+      "outcomes": {
+        "completed": 3
+      },
+      "usage_complete": true,
+      "missing_usage_dispatches": 0,
+      "known_input_tokens": 101153,
+      "known_output_tokens": 2012,
+      "first_request_input_tokens": 32746,
+      "interpretation": "Known usage is a lower bound whenever usage_complete is false."
+    }
+  },
+  "completed_pairs": [
+    {
+      "family": "f1",
+      "rep": 1,
+      "both_acceptance_passed": true,
+      "clean_completed_dispatches_and_usage": true,
+      "m2_minus_m1_seconds": 208.92378749500494,
+      "m2_minus_m1_input_tokens": 34748,
+      "interpretation": "Single pair descriptive measurement; no general effect established."
+    },
+    {
+      "family": "f3",
+      "rep": 1,
+      "both_acceptance_passed": true,
+      "clean_completed_dispatches_and_usage": false,
+      "m2_minus_m1_seconds": 156.46002593998855,
+      "m2_minus_m1_input_tokens": null,
+      "interpretation": "Transport-affected or incomplete-usage pairs cannot establish clean treatment performance."
+    }
+  ],
+  "planned_pairs": 6,
+  "scope": "Frozen corrected v2 only; original and 38K calibration runs excluded. All failures retained.",
+  "status": "incomplete"
+}

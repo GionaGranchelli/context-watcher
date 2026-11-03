@@ -1,0 +1,27 @@
+Inspected all three files; no edits made. No shell available in this environment, so test outcomes below are static inference from the code, not an executed run.
+
+## store.py — `KeyValueStore`
+- `__init__(self)`: `self._data = {}`.
+- `put(self, k, v)`: unconditional overwrite, no return value.
+- `get(self, k)`: `self._data.get(k)` → `None` for absent keys (never raises `KeyError`).
+- No TTL, eviction, invalidation, or namespace. Plain dict-backed store; direct mutation is visible to every reader.
+
+## cache.py — `CachedStore` (skeleton, unimplemented)
+- `__init__(self, backing_store)`: keeps `self.backing_store` and `self.cache = {}`.
+- `get(self, k)`: `return None` — never touches `self.cache` or `self.backing_store`.
+- `put(self, k, v)`: `pass` — writes neither to cache nor to backend.
+- Net current behavior: the class is inert. It neither caches nor writes through; every `get` returns `None` regardless of state.
+
+## test_cache_system.py — pinned contract
+1. `test_cached_lookup`: read-through on miss (`cached.get('user_1') == 'Alice'` from a backend-only key), then a direct `backend.put` must **not** be observed — cache must be authoritative on hit. This forbids any read-through-on-hit, TTL refresh, or backend re-validation.
+2. `test_put_updates_both`: `put` must write through to backend *and* populate cache; `get` after `put` returns the value.
+
+Current status `[INFERENCE]`: both tests fail — `test_cached_lookup` at the first assertion (`None != 'Alice'`), `test_put_updates_both` at `cached.get('key')` (`None != 'val'`).
+
+## Constraints for the upcoming implementation
+- Preserve signatures exactly: `__init__(self, backing_store)`, `get(self, k)`, `put(self, k, v)`.
+- Preserve public attributes `backing_store` and `cache` (tests don't read them, but they're the observable surface; `cache` is a plain dict).
+- `get` must be cache-first, backend-fallback on miss, and populate cache on that miss; `put` must update both.
+- Miss sentinel: `None` is already the backend's "absent" marker, so a `k in self.cache` membership check — not truthiness — is required to distinguish "cached `None`" from "miss". Otherwise a cached `None` would cause repeated backend lookups and, combined with test 1's authority rule, is the only place semantics can drift.
+- No invalidation/eviction API exists; once populated, cache entries are permanent unless overwritten via `CachedStore.put`. Adding TTL/LRU would be new scope, not a fix.
+- Only caller is `test_cache_system.py`; no other imports of `cache`/`store` in the workspace, so no callsites to migrate.

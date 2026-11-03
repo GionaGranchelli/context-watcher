@@ -1,0 +1,7 @@
+{
+  "stage": "live M1 workspace after source edit",
+  "acceptance_passed": true,
+  "tests_unchanged": true,
+  "source_ast_equals_m2": false,
+  "output": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
+}

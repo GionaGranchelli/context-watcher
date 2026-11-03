@@ -1,0 +1,28 @@
+Inspected both files; no changes made. Workspace contains only these two files, no other callers.
+
+## math_ops.py
+
+```python
+def divide_or_fallback(a, b, fallback=0.0):
+    return a / b
+
+def safe_mean(numbers):
+    return sum(numbers) / len(numbers)
+```
+
+Current behavior:
+- `divide_or_fallback(a, b, fallback=0.0)` — the `fallback` parameter is accepted but **never used**. It unconditionally returns `a / b`, so `b == 0` raises `ZeroDivisionError` instead of returning `fallback`. Valid inputs (`b != 0`) are correct.
+- `safe_mean(numbers)` — returns `sum(numbers) / len(numbers)`. An empty iterable raises `ZeroDivisionError` instead of returning `0.0`. Non-empty input is correct.
+
+## test_math_ops.py
+
+- `test_divide`: asserts `divide_or_fallback(10, 2) == 5.0` (passes) and `divide_or_fallback(10, 0, fallback=99.0) == 99.0` (fails).
+- `test_mean`: asserts `safe_mean([1, 2, 3]) == 2.0` (passes) and `safe_mean([]) == 0.0` (fails).
+
+[INFERENCE] No execution tool available in this session, so I did not run the suite. From the code: 2 of 4 assertions pass; the 2 failing ones fail as `ZeroDivisionError` (unittest errors, not assertion mismatches).
+
+## Implications for the upcoming fix
+
+- Both failures are the zero-division edge case; valid-input behavior already matches the tests and must be preserved.
+- Signatures to keep: `divide_or_fallback(a, b, fallback=0.0)`, `safe_mean(numbers)`.
+- Required semantics per tests: `b == 0` → return `fallback`; empty `numbers` → return `0.0` (note `safe_mean` has no fallback parameter, so the empty case must yield literal `0.0` unless a signature change is permitted — signatures must be preserved, so hardcode/`0.0` default is the boring option).

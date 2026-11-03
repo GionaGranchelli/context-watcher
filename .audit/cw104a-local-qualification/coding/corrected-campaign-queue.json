@@ -1,0 +1,17 @@
+{
+  "status": "finished_pending_full_audit",
+  "completed": [
+    "f1-32k-v2-r1-m2",
+    "f1-32k-v2-r1-m1",
+    "f3-32k-v2-r1-m1",
+    "f3-32k-v2-r1-m2",
+    "f1-32k-v2-r2-m1",
+    "f1-32k-v2-r2-m2",
+    "f3-32k-v2-r2-m2",
+    "f3-32k-v2-r2-m1",
+    "f1-32k-v2-r3-m2",
+    "f1-32k-v2-r3-m1",
+    "f3-32k-v2-r3-m1",
+    "f3-32k-v2-r3-m2"
+  ]
+}

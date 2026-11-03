@@ -1,0 +1,8 @@
+{
+  "profile": "isolated cw104a-m1 only",
+  "previous_base_url": "http://192.168.1.156:8095/v1",
+  "corrected_base_url": "http://127.0.0.1:14401/openai/v1",
+  "reason": "Use identical proxy transport for M1 and M2; M1 has no committed treatment and must be verified unchanged",
+  "credential_changed": false,
+  "personal_profile_changed": false
+}

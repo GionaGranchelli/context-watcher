@@ -1,0 +1,24 @@
+Inspected all three files; no edits made. Current behavior:
+
+**store.py — `KeyValueStore`** (complete, working)
+- `__init__`: empty dict `self._data`.
+- `put(k, v)`: unconditional write.
+- `get(k)`: `self._data.get(k)` → `None` on miss. No TTL, no eviction.
+
+**cache.py — `CachedStore`** (skeleton, non-functional)
+- `__init__(self, backing_store)`: stores `backing_store`, empty `self.cache`. Signatures fixed.
+- `get(k)`: `return None` — never consults `self.cache` or `backing_store`.
+- `put(k, v)`: `pass` — writes neither to cache nor backend.
+
+**test_cache_system.py** — two tests encoding the intended contract:
+1. `test_cached_lookup`: backend pre-populated with `user_1='Alice'`; first `cached.get('user_1')` must return `'Alice'` → implies a **miss populates cache from backend**. Then backend is mutated directly to `'MutatedDirectly'`; second `get` must still return `'Alice'` → cache is **read-through-on-first-access and sticky thereafter**; no invalidation/refresh on backend mutation.
+2. `test_put_updates_both`: `cached.put('key','val')` must be visible via both `cached.get('key')` and `backend.get('key')` → `put` writes **through to backend and into cache**.
+
+**Current test status** `[INFERENCE]` — no execution tool available in this session, so I did not run the suite. Both tests fail against the skeleton: `test_cached_lookup` fails at the first assertion (`get` returns `None`); `test_put_updates_both` fails at `cached.get('key')` (and would fail at `backend.get('key')` too).
+
+**Constraints for the upcoming implementation**
+- Keep `CachedStore.__init__(self, backing_store)`, `get(self, k)`, `put(self, k, v)` signatures unchanged; `self.cache` and `self.backing_store` remain public attributes.
+- `get`: cache hit → cached value; miss → fetch from backend, populate cache, return it. Miss on both → `None` (matches `KeyValueStore.get` semantics).
+- `put`: write to backend and cache; must not bypass backend, since `test_put_updates_both` asserts `backend.get('key') == 'val'`.
+- No cache invalidation on direct backend mutation — that's asserted behavior, not a bug to fix.
+- Only these three files exist; no other `CachedStore` callers to migrate.

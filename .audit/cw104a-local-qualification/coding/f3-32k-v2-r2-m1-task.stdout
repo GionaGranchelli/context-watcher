@@ -1,0 +1,11 @@
+Done. `cache.py` now implements the read-through cache; signatures unchanged (`__init__(self, backing_store)`, `get(self, k)`, `put(self, k, v)`), tests untouched.
+
+**Behavior**
+- `get(k)`: cache hit (`k in self.cache`) → cached value. Miss → fetch from `backing_store`; cache it only when non-`None`; return the fetched value. Membership test instead of `self.cache.get(k)` so a cached value is never confused with a miss, and `None` is never cached — a key that missed stays uncached, so a later backend write to it is visible.
+- `put(k, v)`: writes through to `backing_store` first, then populates the cache, so both views agree.
+
+**Test traces** `[INFERENCE]` — no execution tool in this session, so I did not run the suite; tests will be run independently.
+- `test_cached_lookup`: first `get('user_1')` misses → fetches `'Alice'` from backend, caches it. Direct backend mutation to `'MutatedDirectly'` doesn't touch `self.cache`; second `get` hits cache → `'Alice'`. Passes.
+- `test_put_updates_both`: `put('key','val')` writes backend and cache; `cached.get('key')` hits cache → `'val'`; `backend.get('key')` → `'val'`. Passes.
+
+Sticky-cache-on-read is asserted behavior in `test_cached_lookup`, not invalidation; no TTL/eviction added. No other callers of `CachedStore` exist in the workspace.

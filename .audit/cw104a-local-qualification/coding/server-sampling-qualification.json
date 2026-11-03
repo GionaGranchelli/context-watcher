@@ -1,0 +1,107 @@
+{
+  "source_scope": "Host checkout source; equality to running container source not independently verified",
+  "source_findings": [
+    "Explicit temperature 0 is documented as greedy",
+    "Positive integer seed is supported in the inspected server source",
+    "Reasoning recovery code can raise temperature/presence penalty"
+  ],
+  "client_seed_status": "Seed omitted in frozen current experiment; no silent alteration to running trials",
+  "request_recovery_observations": [
+    {
+      "time": 1793680214.4978824,
+      "prompt_tokens": 39165,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793680463.2417295,
+      "prompt_tokens": 39356,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793680717.717821,
+      "prompt_tokens": 39642,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793680992.6775675,
+      "prompt_tokens": 4225,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681020.7576113,
+      "prompt_tokens": 4426,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681048.8908257,
+      "prompt_tokens": 4645,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681080.4178822,
+      "prompt_tokens": 5087,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681114.4885182,
+      "prompt_tokens": 5483,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681150.4315538,
+      "prompt_tokens": 5570,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681206.0131805,
+      "prompt_tokens": 32358,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681424.1167424,
+      "prompt_tokens": 33179,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681633.0405858,
+      "prompt_tokens": 33330,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681857.070342,
+      "prompt_tokens": 4225,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681885.4832397,
+      "prompt_tokens": 4426,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681913.754132,
+      "prompt_tokens": 4632,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    },
+    {
+      "time": 1793681945.5800996,
+      "prompt_tokens": 4760,
+      "reasoning_recoveries": 0,
+      "finish": "stop"
+    }
+  ]
+}

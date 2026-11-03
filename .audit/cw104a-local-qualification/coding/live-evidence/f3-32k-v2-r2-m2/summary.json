@@ -1,0 +1,157 @@
+{
+  "run": {
+    "tag": "f3-32k-v2-r2-m2",
+    "status": "finished",
+    "workspace": "/tmp/cw104a-local-qual/corrected-workspaces/f3-32k-v2-r2-m2",
+    "initial_hashes": {
+      "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+      "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+      "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+    },
+    "bootstrap_rc": 0,
+    "bootstrap_seconds": 177.12434992199996,
+    "transcript": "/tmp/cw104a-local-qual/corrected-sessions/f3-32k-v2-r2-m2/2026-11-03T05-57-45-129Z_01a19ffc-2829-7400-bc0b-1e70229c5425.jsonl",
+    "cw_session": "omp_01a19ffc-2829-7400-bc0b-1e70229c5425",
+    "task_rc": 0,
+    "task_seconds": 434.8428286069975,
+    "acceptance_passed": true,
+    "acceptance_output": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n",
+    "transcript_snapshot_sha256": "cf7376b0cf53f4d6ef5b6f7f0385fb57e1ca25bb7cf5b816395a67928e35ca28"
+  },
+  "captures": [
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_ad65e2995f2942efa701fe6b940c2875",
+      "created_at": "2026-11-03T05:57:45.561356722+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "3c404f2742331053a06bce399c7ed9949ebec88c16d63938dd581b3f177b41ef",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 58,
+        "prompt_tokens": 4221,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4279
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_c91376072908409f98adc13ba43cf1b6",
+      "created_at": "2026-11-03T05:58:12.282245493+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "1360d196f7ffb1cb589c2b6082212389cb446dd5811c462aad137527d53fdc67",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 141,
+        "prompt_tokens": 4304,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4445
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_e237ba0e46c24e55abc500bcc4ab4347",
+      "created_at": "2026-11-03T05:58:41.623845509+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "3d82d917430739f223c8b48bf6a684d0b88c5c0f3e72c867940d0c5fc60725fd",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 133,
+        "prompt_tokens": 4780,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4913
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_4d0cd220a52e45699680d22d3c48c7be",
+      "created_at": "2026-11-03T05:59:14.783370666+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "c16cbdf808de9effa45392c35ae508028d672e423fcbcd3a8359c29317e4b601",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 102,
+        "prompt_tokens": 5282,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5384
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_558ba5f9d5d943dda4c6bd1e028bb124",
+      "created_at": "2026-11-03T05:59:49.645893582+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "ccb417b293bd338516bfd8e140d176db8af0df508603a4b83bbd365a155fbe79",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 788,
+        "prompt_tokens": 5403,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6191
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_fd95ba00e0504c89aceb016da543fa81",
+      "created_at": "2026-11-03T06:00:42.926003578+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "d52e31e930c7cf4a09295b3eddf8163ca5149cb9bb753f6e43404436469bd73c",
+      "pin_occurrences": 1,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 731,
+        "prompt_tokens": 32102,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 32833
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_f00dbb2f61494eaeae91a990acd420fb",
+      "created_at": "2026-11-03T06:04:17.679543535+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "61a933fd09565d7b9252ab6a3deb62bc43e10865453814b9e1273fe7d1c1a218",
+      "pin_occurrences": 1,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 599,
+        "prompt_tokens": 32977,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 33576
+      },
+      "outcome": "completed"
+    }
+  ],
+  "snapshot_only": false
+}

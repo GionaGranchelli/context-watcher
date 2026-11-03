@@ -1,0 +1,30 @@
+Done. `math_ops.py` only; tests untouched.
+
+## Change
+
+```python
+def divide_or_fallback(a, b, fallback=0.0):
+    if b == 0:
+        return fallback
+    return a / b
+
+def safe_mean(numbers):
+    if not numbers:
+        return 0.0
+    return sum(numbers) / len(numbers)
+```
+
+- `divide_or_fallback`: guards `b == 0` (matches int `0` and float `0.0`) and returns the supplied `fallback`; the `fallback` parameter is now actually used. Non-zero `b` path is byte-identical to before.
+- `safe_mean`: empty sequence returns `0.0`; non-empty path unchanged (`sum/len`). Generators were already broken via `len()` before the fix and remain so — `not numbers` is `False` for generators, so no behavior change for any input that previously worked.
+
+Signatures preserved exactly: `divide_or_fallback(a, b, fallback=0.0)`, `safe_mean(numbers)`.
+
+## Verification
+
+No execution tool in this session, so I did not run the suite; per the task, tests run independently. Static trace against `test_math_ops.py`:
+- `divide_or_fallback(10, 2)` → `5.0` ✓
+- `divide_or_fallback(10, 0, fallback=99.0)` → `99.0` ✓
+- `safe_mean([1, 2, 3])` → `2.0` ✓
+- `safe_mean([])` → `0.0` ✓
+
+Note: the `<cw_pinned_context>` block in the last read is contextWatcher's in-memory overlay, not disk content; the file on disk ends at `return sum(numbers) / len(numbers)`.

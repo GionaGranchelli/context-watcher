@@ -1,0 +1,26 @@
+Confirmed the pinned-context block in tool output is harness-injected, not file content (`grep` for `cw_pinned_context` in `math_ops.py` → no matches).
+
+**Change — `math_ops.py` only; `test_math_ops.py` untouched.**
+
+```python
+def divide_or_fallback(a, b, fallback=0.0):
+    if b == 0:
+        return fallback
+    return a / b
+
+def safe_mean(numbers):
+    if len(numbers) == 0:
+        return 0.0
+    return sum(numbers) / len(numbers)
+```
+
+**Behavior**
+
+- `divide_or_fallback`: `fallback` was previously accepted and never read. Now `b == 0` returns `fallback` verbatim; every nonzero `b` still takes the original `a / b` path, so valid-input results and float-ness are unchanged. `b == 0` covers `0`, `0.0`, `0j`, `Decimal(0)` — all inputs that raised `ZeroDivisionError` before. No coercion of `fallback`, so `fallback=99` returns `99` (int); the test passes `99.0`.
+- `safe_mean`: empty input returns `0.0` before touching `sum`/`len`; non-empty path is byte-identical to before, so true division still yields `float` (`[1,2,3]` → `2.0`). Used `len(numbers) == 0` rather than `if not numbers` to keep the existing sized-container semantics and avoid truthiness errors on array-like inputs; generators still raise `TypeError` at `len()`, as before.
+
+**Signatures:** `divide_or_fallback(a, b, fallback=0.0)` and `safe_mean(numbers)` unchanged. Only callers in the workspace are the test assertions.
+
+**Verification:** no shell/execution tool in this session, so I did not run the suite — `[INFERENCE]` from source. Mapping to the four assertions: `10,2` → `5.0` (pass, unchanged path); `10,0,fallback=99.0` → `99.0` (was `ZeroDivisionError`); `[1,2,3]` → `2.0` (pass, unchanged path); `[]` → `0.0` (was `ZeroDivisionError`). Tests will be run independently as you stated.
+
+Left the stale header comment `# math_ops.py - initially buggy` in place to keep the fix focused; say the word if you want it corrected.

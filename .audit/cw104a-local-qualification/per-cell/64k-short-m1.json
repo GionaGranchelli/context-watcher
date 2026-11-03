@@ -1,0 +1,40 @@
+{
+  "tag": "64k-short-m1",
+  "band": "64k",
+  "interaction": "short",
+  "mode": "m1",
+  "bootstrap_rc": 0,
+  "transcript": "/tmp/cw104a-local-qual/context-runs/64k-short-m1/2026-11-03T00-59-03-041Z_01a19eea-b001-701b-a7c8-4626d5a7d635.jsonl",
+  "steps": [
+    {
+      "turn": 1,
+      "rc": 0,
+      "stdout": "**Regression test:** `test_import_omp_transcript` \u2014 `crates/cw-harnesses/src/lib.rs` (`mod tests`). Asserts `sess_id == \"omp_01a16530-b4a1-71cb-b159-96200fb07f14\"`, i.e. the full UUID is preserved for `HarnessKind::Omp` rather than truncated to 12 chars.\n\n**Helper:** `imported_session_id` \u2014 `crates/cw-harnesses/src/adapters/generic.rs`. Omp keeps the full `id`; other harnesses truncate at the 12th char; result is `{harness}_{id}`.\n"
+    }
+  ],
+  "response_count": 2,
+  "total_input_tokens": 121198,
+  "total_output_tokens": 696,
+  "total_cached_tokens": 0,
+  "turn_usages": [
+    {
+      "input": 60382,
+      "output": 371,
+      "cacheRead": 0,
+      "duration_ms": 386735.403522,
+      "ttft_ms": 377792.016269,
+      "stop": "stop"
+    },
+    {
+      "input": 60816,
+      "output": 325,
+      "cacheRead": 0,
+      "duration_ms": 386211.226066,
+      "ttft_ms": 379971.037026,
+      "stop": "stop"
+    }
+  ],
+  "final_answer": "**Regression test:** `test_import_omp_transcript` \u2014 `crates/cw-harnesses/src/lib.rs` (`mod tests`). Asserts `sess_id == \"omp_01a16530-b4a1-71cb-b159-96200fb07f14\"`, i.e. the full UUID is preserved for `HarnessKind::Omp` rather than truncated to 12 chars.\n\n**Helper:** `imported_session_id` \u2014 `crates/cw-harnesses/src/adapters/generic.rs`. Omp keeps the full `id`; other harnesses truncate at the 12th char; result is `{harness}_{id}`.",
+  "acceptance_passed": true,
+  "status": "complete"
+}

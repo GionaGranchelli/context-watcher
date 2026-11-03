@@ -1,0 +1,10 @@
+{
+  "scope": "live post-edit snapshot; terminal result pending",
+  "acceptance_passed": true,
+  "additional_behavior_passed": true,
+  "preserved_files": {
+    "store.py": true,
+    "test_cache_system.py": true
+  },
+  "diagnostics": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n"
+}

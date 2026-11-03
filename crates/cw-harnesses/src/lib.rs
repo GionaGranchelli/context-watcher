@@ -93,7 +93,7 @@ mod tests {
 
         let sess_id =
             import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
-        assert!(sess_id.starts_with("omp_01a16530-b4a"));
+        assert_eq!(sess_id, "omp_01a16530-b4a1-71cb-b159-96200fb07f14");
         let sess = store.get_session(&sess_id).unwrap().unwrap();
         assert_eq!(sess.harness, HarnessKind::Omp);
         assert_eq!(

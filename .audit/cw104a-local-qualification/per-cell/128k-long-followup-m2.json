@@ -1,0 +1,45 @@
+{
+  "tag": "128k-long-followup-m2",
+  "mode": "m2",
+  "rc": 0,
+  "seconds": 44.98,
+  "transcript": "/tmp/cw104a-local-qual/context-runs/128k-direct-short-m2/2026-11-03T03-29-46-822Z_01a19f74-af46-73c7-9ae9-d505af565379.jsonl",
+  "answers": [
+    {
+      "input": 2112,
+      "output": 96,
+      "cacheRead": 0,
+      "stop": "stop",
+      "answer": "Session initialized. Read-only, source-grounded. Working directory: `/tmp/cw104a-local-qual/audit-workspace`. Standing by for the next prompt."
+    },
+    {
+      "input": 123609,
+      "output": 642,
+      "cacheRead": 0,
+      "stop": "stop",
+      "answer": "**Regression test:** `test_import_omp_transcript` \u2014 `crates/cw-harnesses/src/lib.rs` (`mod tests`).\n\nEvidence: it imports an OMP JSONL whose `session` line carries the full UUID `01a16530-b4a1-71cb-b159-96200fb07f14` and asserts `assert_eq!(sess_id, \"omp_01a16530-b4a1-71cb-b159-96200fb07f14\")` \u2014 the complete UUID, not a truncated prefix.\n\n**Helper:** `imported_session_id(harness: HarnessKind, id: &str) -> String` \u2014 `crates/cw-harnesses/src/adapters/generic.rs`.\n\nBehavior: `harness == HarnessKind::Omp` \u2192 ID passed through unchanged; every other harness \u2192 truncated at the 12th char (`id.char_indices().nth(12)`), then prefixed `format!(\"{}_{}\", harness.as_str(), id)`. The OMP branch is exactly what the test pins.\n\nNote on scope: the test proves OMP preservation only; the truncation branch for non-OMP harnesses is not exercised by any supplied test \u2014 that half of `imported_session_id` is unverified by the supplied source."
+    },
+    {
+      "input": 3796,
+      "output": 1002,
+      "cacheRead": 0,
+      "stop": "stop",
+      "answer": "**Yes \u2014 for OMP, the importer preserves the complete session ID.**\n\n- **Test:** `test_import_omp_transcript` \u2014 `crates/cw-harnesses/src/lib.rs` (`mod tests`). Fixture `session` line carries the full UUID `01a16530-b4a1-71cb-b159-96200fb07f14`; assertion `assert_eq!(sess_id, \"omp_01a16530-b4a1-71cb-b159-96200fb07f14\")` pins the untruncated UUID under `HarnessKind::Omp`.\n- **Helper:** `imported_session_id(harness: HarnessKind, id: &str) -> String` \u2014 `crates/cw-harnesses/src/adapters/generic.rs`. OMP branch returns `id` unchanged; non-OMP harnesses truncate at the 12th char (`id.char_indices().nth(12)`) before the `format!(\"{}_{}\", harness.as_str(), id)` prefix. Session-line IDs reach it via the `entry_type == \"session\"` branch (`entry.get(\"id\")`).\n\nScope caveat (unchanged from prior work): preservation is proven only for the OMP branch. The 12-char truncation for other harnesses is exercised by no supplied test \u2014 that half of `imported_session_id` is unverified by the supplied source."
+    }
+  ],
+  "acceptance_passed": true,
+  "status": "complete",
+  "egress_captures": [
+    {
+      "turn_id": "turn_edfeae768ea4434fbe34cc85202be813",
+      "request_equals_egress": true,
+      "sha256": "b8195354fdc961de093e3428ca0066f1970c4dde548e439de79d68f120fd31d6",
+      "bytes": 14997,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": []
+    }
+  ],
+  "rule_verified": true,
+  "egress_verified": true
+}

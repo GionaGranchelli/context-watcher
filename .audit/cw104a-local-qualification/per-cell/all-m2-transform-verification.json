@@ -1,0 +1,182 @@
+{
+  "verified_turns": 11,
+  "results": [
+    {
+      "run": "32k-short-m2",
+      "turn": "turn_ae27d580f27e413b8fc37197dfbc35e7",
+      "session": "omp_01a19ea7-e8a0-77e9-84e3-68abd4802a92",
+      "provider_input": 33130,
+      "committed_rule": "mut_07772856",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_07772856"
+      ],
+      "exact_transform_replay": true
+    },
+    {
+      "run": "32k-long-m2",
+      "turn": "turn_3d1378624c744d94ae9f8d0d4364fab6",
+      "session": "omp_01a19ebb-fad2-76f7-88d0-0a38c16e1edd",
+      "provider_input": 33129,
+      "committed_rule": "mut_fd13bb1b",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_fd13bb1b"
+      ],
+      "exact_transform_replay": true
+    },
+    {
+      "run": "32k-long-m2",
+      "turn": "turn_02bf2d9a0e7a4111b8738dcd219e6cbf",
+      "session": "omp_01a19ebb-fad2-76f7-88d0-0a38c16e1edd",
+      "provider_input": 35585,
+      "committed_rule": "mut_fd13bb1b",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_fd13bb1b"
+      ],
+      "exact_transform_replay": true
+    },
+    {
+      "run": "32k-long-m2",
+      "turn": "turn_4727cf209d41433fa1b03ba6225aa43d",
+      "session": "omp_01a19ebb-fad2-76f7-88d0-0a38c16e1edd",
+      "provider_input": 35866,
+      "committed_rule": "mut_fd13bb1b",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_fd13bb1b"
+      ],
+      "exact_transform_replay": true
+    },
+    {
+      "run": "64k-short-m2",
+      "turn": "turn_52d6f660a24b4293b1fcae1e1bcf0e94",
+      "session": "omp_01a19ede-e924-732c-9a5e-9c3ad7570f8f",
+      "provider_input": 60874,
+      "committed_rule": "mut_36248ef5",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_36248ef5"
+      ],
+      "exact_transform_replay": true
+    },
+    {
+      "run": "64k-long-m2",
+      "turn": "turn_fbe4b9175bbb4c4e838e158a1fe1fc51",
+      "session": "omp_01a19ede-e924-732c-9a5e-9c3ad7570f8f",
+      "provider_input": 61230,
+      "committed_rule": "mut_36248ef5",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_36248ef5"
+      ],
+      "exact_transform_replay": true
+    },
+    {
+      "run": "92k-short-m2",
+      "turn": "turn_4c24673207b1494f823a4072a980a646",
+      "session": "omp_01a19f28-7e90-71f1-bde0-520e079f80da",
+      "provider_input": 89838,
+      "committed_rule": "mut_7195498d",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_7195498d"
+      ],
+      "exact_transform_replay": true
+    },
+    {
+      "run": "92k-long-m2",
+      "turn": "turn_2e346ac1283a444f8eef4aa4780add4c",
+      "session": "omp_01a19ede-e924-732c-9a5e-9c3ad7570f8f",
+      "provider_input": 91480,
+      "committed_rule": "mut_36248ef5",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_36248ef5"
+      ],
+      "exact_transform_replay": true
+    },
+    {
+      "run": "128k-direct-short-m2",
+      "turn": "turn_2853e5539eda4e8bb1f2eb11fd17037c",
+      "session": "omp_01a19f74-af46-73c7-9ae9-d505af565379",
+      "provider_input": 123609,
+      "committed_rule": "mut_d60dfe66",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_d60dfe66"
+      ],
+      "exact_transform_replay": false
+    },
+    {
+      "run": "128k-direct-short-m2",
+      "turn": "turn_71e8ab825d1d47eb8bb57bc9d8da12fb",
+      "session": "omp_01a19f74-af46-73c7-9ae9-d505af565379",
+      "provider_input": 124612,
+      "committed_rule": "mut_d60dfe66",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_d60dfe66"
+      ],
+      "exact_transform_replay": true
+    },
+    {
+      "run": "128k-long-followup-m2",
+      "turn": "turn_edfeae768ea4434fbe34cc85202be813",
+      "session": "omp_01a19f74-af46-73c7-9ae9-d505af565379",
+      "provider_input": 3796,
+      "committed_rule": "mut_d60dfe66",
+      "pin_absent_from_saved_transcript": true,
+      "request_equals_egress": true,
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_applied_rules": [
+        "mut_d60dfe66"
+      ],
+      "exact_transform_replay": true
+    }
+  ],
+  "note": "The OMP client extension applies the committed overlay before cw-proxy capture. The proxy therefore records request==egress and empty applied_mutation_ids; this verifier replays the local transform endpoint against the unpinned request shape."
+}

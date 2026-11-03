@@ -1,0 +1,193 @@
+{
+  "run": {
+    "tag": "f1-32k-v2-r3-m1",
+    "status": "finished",
+    "workspace": "/tmp/cw104a-local-qual/corrected-workspaces/f1-32k-v2-r3-m1",
+    "initial_hashes": {
+      "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+      "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+    },
+    "bootstrap_rc": 0,
+    "bootstrap_seconds": 218.6068934169889,
+    "transcript": "/tmp/cw104a-local-qual/corrected-sessions/f1-32k-v2-r3-m1/2026-11-03T06-28-33-278Z_01a1a018-5b7e-742b-8df5-dcc08560ad4e.jsonl",
+    "task_rc": 0,
+    "task_seconds": 685.6559415270021,
+    "acceptance_passed": true,
+    "acceptance_output": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n",
+    "transcript_snapshot_sha256": "fad9c4cf8333bee8e15a3f9ff072a539c31e3575c5575f9b075d7c83bb6ee741"
+  },
+  "captures": [
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_f2094aa5289c410caa91101c1d2c024a",
+      "created_at": "2026-11-03T06:28:33.705973049+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "8f348416c76f4527714e4a2abe825705a028f190fa7a6232a531fed5656b271f",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 89,
+        "prompt_tokens": 4225,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4314
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_09a5b58de7274f09ba86bf50dfe77286",
+      "created_at": "2026-11-03T06:29:02.435714975+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "70f14240b7280f3041b5ffe533c5c17804e6bcaeebfd56a008d53c81ab9c9694",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 98,
+        "prompt_tokens": 4337,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4435
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_471d7356fd6141469c00f4ad39967abb",
+      "created_at": "2026-11-03T06:29:31.467530534+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "357097d247f8e0efef0fa37c5ef3229e7807527142a5b6129b083e17100caba2",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 176,
+        "prompt_tokens": 4637,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4813
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_91d17ca6344b4047acd97ad39dfa993d",
+      "created_at": "2026-11-03T06:30:03.365141929+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "229490455f07c087996f465724317f8b5fa868fc8c34a20704045257449df496",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 65,
+        "prompt_tokens": 5157,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5222
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_84daadd5737849d2b8bf793b8f92cfe5",
+      "created_at": "2026-11-03T06:30:36.154262001+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "7e5c847e5990684b306eb0d5df879fdb9e679eca1896c8908be7ff8d80e5e398",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 89,
+        "prompt_tokens": 5245,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5334
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_3d569fff909645eb8c567a5c545ff34e",
+      "created_at": "2026-11-03T06:31:09.791594433+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "a0dbcefdfc40fce5358dcbb10b08d2555f1f46d214bdf1b5373382b1154d6060",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 995,
+        "prompt_tokens": 6416,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 7411
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_6f3a2c3ffd004cf8bccfda762f069268",
+      "created_at": "2026-11-03T06:32:12.521418686+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "61242b0cea60a1e3d57cf1755ba0dcb113919ef9c6e92d4b7d7fbb495f47fb8d",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 1230,
+        "prompt_tokens": 33283,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 34513
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_e8126177e7d8496f9875f6f8ca616192",
+      "created_at": "2026-11-03T06:36:08.012226475+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "01a1ecb95c868e1403d1a8923e4718e92bc603a5fa0b73c9b9f3b333598faa8a",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 48,
+        "prompt_tokens": 34637,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 34685
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_324388558268414a896bad8a83c67aa0",
+      "created_at": "2026-11-03T06:39:45.210474769+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "a0109e7fb134f2e84d065934fc994271a13501f90190ae1d8a4e56b86b72fcbc",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 695,
+        "prompt_tokens": 34771,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 35466
+      },
+      "outcome": "completed"
+    }
+  ],
+  "snapshot_only": false
+}

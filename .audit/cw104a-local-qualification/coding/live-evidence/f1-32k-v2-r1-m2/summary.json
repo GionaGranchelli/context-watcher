@@ -1,0 +1,194 @@
+{
+  "run": {
+    "tag": "f1-32k-v2-r1-m2",
+    "status": "finished",
+    "workspace": "/tmp/cw104a-local-qual/corrected-workspaces/f1-32k-v2-r1-m2",
+    "initial_hashes": {
+      "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+      "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+    },
+    "bootstrap_rc": 0,
+    "bootstrap_seconds": 213.0028082219942,
+    "transcript": "/tmp/cw104a-local-qual/corrected-sessions/f1-32k-v2-r1-m2/2026-11-03T04-43-12-205Z_01a19fb7-e7cd-74c2-ac71-ecd5da6984dc.jsonl",
+    "cw_session": "omp_01a19fb7-e7cd-74c2-ac71-ecd5da6984dc",
+    "task_rc": 0,
+    "task_seconds": 651.2975530620024,
+    "acceptance_passed": true,
+    "acceptance_output": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n",
+    "transcript_snapshot_sha256": "a905f22d22c2eba8285f6152ff3f1ff7bd58ce34f0b06552a69b7be4e9f91609"
+  },
+  "captures": [
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_695ef733e9624689bc1377042cac0e1d",
+      "created_at": "2026-11-03T04:43:12.642774596+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "943a129428537c78b4915753340f7027049d4c46901bf1e08754cb0d1a595c8e",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 128,
+        "prompt_tokens": 4225,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4353
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_3a81b93a7d9b451d90269e3b51ffba38",
+      "created_at": "2026-11-03T04:43:40.719964188+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "5364b99c58b854505798b50917261e9d1b4c6f3d5fa098dbb5fae6c4e1668655",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 67,
+        "prompt_tokens": 4426,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4493
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_ade5de346c124da6b01e0ee61ec4df0a",
+      "created_at": "2026-11-03T04:44:08.858581852+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "a634d00d610410bd5e30699c97bbbd2d197a013e6d61ed588bbad5eec5e171fd",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 152,
+        "prompt_tokens": 4645,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4797
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_b05efdd6b8684b4d982fbb91bc1a1cf6",
+      "created_at": "2026-11-03T04:44:40.393620616+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "eaaa389b90b196ffd304db80149c7b7b994aa535721c60d8abc69111782321c5",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 154,
+        "prompt_tokens": 5087,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5241
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_7cb999c939ac4f4d9cfbc16f235ca38f",
+      "created_at": "2026-11-03T04:45:14.454746728+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "0ffdaa0448ebc6db626ddb446aeb2431f4fe8e2d80efa7f9237984b5de2ab94d",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 64,
+        "prompt_tokens": 5483,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5547
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_0f3d765bf7d540d9a18eba3dc4062e21",
+      "created_at": "2026-11-03T04:45:50.393980577+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "411798be560f6ffd3e872c5f34e8574c12fd7b34ce3f2c03b104f47f4a23721a",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 870,
+        "prompt_tokens": 5570,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 6440
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_935f604c784241949c9e857201344c39",
+      "created_at": "2026-11-03T04:46:45.900091507+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "a5e2a010611bc126f09714eda4325e9c6d08e525fe32bdf9e824a7574981be3c",
+      "pin_occurrences": 1,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 698,
+        "prompt_tokens": 32358,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 33056
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_2473d33197e94a7f94013fc463426d30",
+      "created_at": "2026-11-03T04:50:24.010886904+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "05d53d277333b95ed2a5daaa76ed8b42784580c07567f45ac30fa95e09cff083",
+      "pin_occurrences": 1,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 66,
+        "prompt_tokens": 33179,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 33245
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_f446d535868c47efaeb9e4903443c44d",
+      "created_at": "2026-11-03T04:53:52.912933809+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "3f4a8910fe96e9584616662df3940f4e6f081a26f9551922743bebf303c9aed7",
+      "pin_occurrences": 1,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 672,
+        "prompt_tokens": 33330,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 34002
+      },
+      "outcome": "completed"
+    }
+  ],
+  "snapshot_only": false
+}

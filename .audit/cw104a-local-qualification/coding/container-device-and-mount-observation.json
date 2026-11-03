@@ -1,0 +1,31 @@
+{
+  "working_dir": "/home/machinist/Development/strata-gfx906",
+  "devices": [],
+  "gpu_selection_environment": [],
+  "mounts": [
+    {
+      "source": "/home/machinist/Development/strata-gfx906/.strata-api-key",
+      "destination": "/run/secrets/strata-api-key",
+      "type": "bind",
+      "rw": false
+    },
+    {
+      "source": "/home/machinist/Development/strata-gfx906/.venv/podman",
+      "destination": "/home/machinist/Development/strata-gfx906/.venv",
+      "type": "bind",
+      "rw": true
+    },
+    {
+      "source": "/home/machinist/Development/strata-gfx906",
+      "destination": "/home/machinist/Development/strata-gfx906",
+      "type": "bind",
+      "rw": true
+    },
+    {
+      "source": "/home/machinist/Development/Strata/Strata-data",
+      "destination": "/home/machinist/Development/Strata/Strata-data",
+      "type": "bind",
+      "rw": true
+    }
+  ]
+}

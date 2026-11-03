@@ -1,0 +1,87 @@
+class StrataEngine:
+    """The resident engine: `strata --serve` reads `GEN <max_new> <ids>` lines and streams `T <id>` lines, then
+    `DONE ...`.  Requests are serialized by the service's FIFO, so one pipe is enough.
+
+    Per-request sampling rides the same line as engine-side keys between max_new and the ids
+    (`temperature=F top_p=F top_k=N seed=N`, the engine's own spelling).  An absent temperature keeps the
+    engine's default, which is greedy; `temperature=0` means the same thing, so it is not forwarded.
+    """
+    silence_s = ENGINE_SILENCE_S         # #481: main() sets the config's engine_silence_s (survives restart())
+    silent_note = None                   # #481: why the server ended a silent engine (death_note says it)
+    gpu_busy = None                      # #1317: () -> bool, "the GPU is working" (the telemetry's reading); a GPU at work is not frozen
+            if time.time() > deadline:
+                raise EngineDied("the engine did not answer the VRAM command")
+
+    @staticmethod
+    def sampling_keys(sampling: dict) -> str:
+        keys = ""
+        t = sampling.get("temperature")
+        if isinstance(t, (int, float)) and float(t) > 0.0:
+            keys += f" temperature={float(t)!r}"
+        tp = sampling.get("top_p")
+        if isinstance(tp, (int, float)) and float(tp) < 1.0:
+            keys += f" top_p={float(tp)!r}"
+        tk = sampling.get("top_k")
+        if isinstance(tk, int) and not isinstance(tk, bool) and tk >= 0:
+            # the engine's sampled path keeps at most 64 candidates: 0 ("off") and wider lists get all 64
+            keys += f" top_k={tk if 1 <= tk <= 64 else 64}"
+        mp = sampling.get("min_p")
+        if isinstance(mp, (int, float)) and 0.0 < float(mp) <= 1.0:
+            keys += f" min_p={float(mp)!r}"
+        rp = sampling.get("repetition_penalty")
+        rp_on = isinstance(rp, (int, float)) and float(rp) != 1.0
+        pf = sampling.get("frequency_penalty")
+        pf_on = isinstance(pf, (int, float)) and float(pf) != 0.0
+        pp = sampling.get("presence_penalty")
+        pp_on = isinstance(pp, (int, float)) and float(pp) != 0.0
+        if rp_on:
+            keys += f" penalty_repeat={float(rp)!r}"
+        if pf_on:
+            keys += f" penalty_freq={float(pf)!r}"
+        if pp_on:
+            keys += f" penalty_present={float(pp)!r}"
+        if rp_on or pf_on or pp_on:
+            # a penalty without a window counts over nothing: the engine's default is the last 64 tokens
+            pln = sampling.get("penalty_last_n")
+            if isinstance(pln, int) and not isinstance(pln, bool) and pln > 0:
+                keys += f" penalty_last_n={pln}"
+            else:
+                keys += " penalty_last_n=64"
+        seed = sampling.get("seed")
+        if isinstance(seed, int) and seed > 0:
+            keys += f" seed={seed}"
+        # setup's calibration (tools/calibrate.py): engine settings for this request only, measured without a restart
+        tune = sampling.get("strata_tune")
+                                                      "request again")
+                            print(f"[strata] the engine's logits became non-finite after {n} tokens (#879): the reply "
+                                  "ends here as \"length\"; the engine dropped its cached state, so the next request "
+                                  "reads its prompt from the start", flush=True)
+                            finish = "length"
+                            break
+                        if recover_prompt is not None and not cancel.is_set() and n < max_new:
+                            recovery_count += 1
+                            # Only the two settings that keep the same words coming are raised (temperature to at
+                            # least 1.0, presence penalty to at least 1.5): a client's top_p and top_k are never
+                            # touched, and its own request dict is copied, not changed.
+                            want = (max(1.0, float((sampling or {}).get("temperature") or 0)),
+                                    max(1.5, float((sampling or {}).get("presence_penalty") or 0)))
+                            if want != tuple(float((sampling or {}).get(k) or 0)
+                                             for k in ("temperature", "presence_penalty")):
+                                sampling = {**(sampling or {}), "temperature": want[0], "presence_penalty": want[1]}
+                            prompt = recover_prompt
+                            with self.status_lock:
+                                st["reasoning_recoveries"] = recovery_count
+                            if trace is not None:
+                                trace["reasoning_recoveries"] = recovery_count
+                                trace["reasoning_repeat_coverage"] = round(repeat_coverage, 3)
+                            print(f"[strata] repeated reasoning detected at {n} tokens "
+                                  f"(coverage={repeat_coverage:.3f}); resuming the same output with the low-effort "
+
+def sampling_defaults_from_config(cfg: dict) -> dict:
+    """The run config's optional `sampling` block: defaults for the sampling fields a request leaves out, so
+    a plain client gets configured sampling instead of greedy.  Supported: temperature, top_p, top_k, min_p,
+    presence_penalty, repetition_penalty (also written repeat_penalty), frequency_penalty, penalty_last_n (also
+    repeat_last_n), seed.  The request's own fields
+    always win - an explicit temperature=0 still means greedy, a field set to null falls back to the default.
+    A bad value refuses to start the server (a typo'd config should not quietly change sampling); unknown keys
+    are named at startup and ignored."""

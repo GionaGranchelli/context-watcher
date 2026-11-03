@@ -1,0 +1,7 @@
+{
+  "acceptance_passed": true,
+  "output": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n",
+  "tests_unchanged": true,
+  "test_hash": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7",
+  "observation": "Live workspace snapshot after edits; agent process not yet known terminal"
+}

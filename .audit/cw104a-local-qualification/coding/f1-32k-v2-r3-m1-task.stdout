@@ -1,0 +1,31 @@
+Change applied to `math_ops.py` only; tests untouched.
+
+**Final source**
+
+```python
+# math_ops.py
+def divide_or_fallback(a, b, fallback=0.0):
+    if b == 0:
+        return fallback
+    return a / b
+
+def safe_mean(numbers):
+    if len(numbers) == 0:
+        return 0.0
+    return sum(numbers) / len(numbers)
+```
+
+**Decisions**
+
+- `divide_or_fallback`: guard added only on `b == 0` → returns `fallback` verbatim (no coercion; test passes `fallback=99.0` and expects `99.0`). Nonzero divisor path is the original `a / b`, so valid-input behavior is byte-identical. `b == 0` covers `int 0` and `float 0.0`.
+- `safe_mean`: empty check uses `len(numbers) == 0` rather than `not numbers` — `len()` was the existing contract, so any sized input that works today (e.g., numpy arrays, where `not arr` raises) keeps working; only the previously-crashing empty case is added. Non-empty path unchanged.
+- Signatures preserved exactly: `divide_or_fallback(a, b, fallback=0.0)`, `safe_mean(numbers)`. Stale `# initially buggy` header comment removed.
+
+**Static trace against the unedited tests**
+
+- `divide_or_fallback(10, 2)` → `5.0` ✓
+- `divide_or_fallback(10, 0, fallback=99.0)` → `99.0` ✓ (was `ZeroDivisionError`)
+- `safe_mean([1, 2, 3])` → `2.0` ✓
+- `safe_mean([])` → `0.0` ✓ (was `ZeroDivisionError`)
+
+No execution tool is available in this session, so that trace is static `[INFERENCE]`; per your note, tests will be run independently. All four assertions should now pass.

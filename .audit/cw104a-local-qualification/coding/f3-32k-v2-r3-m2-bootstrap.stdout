@@ -1,0 +1,19 @@
+Inspected all three files; no changes made.
+
+**store.py — `KeyValueStore`** (complete, working)
+- `__init__`: empty dict `self._data`.
+- `put(k, v)`: unconditional write.
+- `get(k)`: `self._data.get(k)` → `None` on miss. No cache, no TTL, no invalidation.
+
+**cache.py — `CachedStore`** (skeleton, non-functional)
+- `__init__(self, backing_store)`: stores `backing_store` reference + empty `self.cache` dict.
+- `get(k)`: hardcoded `return None` — never consults cache or backing store.
+- `put(k, v)`: `pass` — no-op, touches neither cache nor backend.
+
+**test_cache_system.py** — pins the intended semantics; only these two files are consumers of `CachedStore`/`KeyValueStore` (grep confirms no other callers):
+1. `test_cached_lookup` — requires read-through on miss (`get('user_1')` → backend's `'Alice'`) and cache-population; a direct backend mutation afterward must still return the cached `'Alice'` → cache wins on hit, no refresh/invalidation path.
+2. `test_put_updates_both` — requires write-through: `put` must update both `self.cache` and the backing store.
+
+**Current test status** `[INFERENCE]` — no execution tool available in this environment, so I could not run the suite. By code reading, both tests fail: `get` returns `None` instead of `'Alice'` (test 1), and `put` is a no-op so `cached.get('key')` is `None` (test 2).
+
+**Constraints carried forward for the implementation:** keep signatures `__init__(self, backing_store)`, `get(self, k)`, `put(self, k, v)`; implement miss → read-through-and-populate, hit → serve from cache (stale reads preserved per test 1), `put` → write to cache and backend. Tests stay untouched.

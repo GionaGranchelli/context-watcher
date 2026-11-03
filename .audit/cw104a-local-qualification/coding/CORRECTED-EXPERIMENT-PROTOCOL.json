@@ -1,0 +1,70 @@
+{
+  "status": "prepared_not_executed",
+  "purpose": "Correct the missing controlled long-context coding evidence; keep prior results as exploratory evidence",
+  "families": [
+    "F1",
+    "F3"
+  ],
+  "repetitions": 3,
+  "mode_task_order": {
+    "F1": [
+      [
+        "M2",
+        "M1"
+      ],
+      [
+        "M1",
+        "M2"
+      ],
+      [
+        "M2",
+        "M1"
+      ]
+    ],
+    "F3": [
+      [
+        "M1",
+        "M2"
+      ],
+      [
+        "M2",
+        "M1"
+      ],
+      [
+        "M1",
+        "M2"
+      ]
+    ]
+  },
+  "pin": "Preserve public function signatures, existing valid-input behavior, and test files. Keep the requested fix focused.",
+  "model": "machinist-strata/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+  "tools": [
+    "read",
+    "edit",
+    "write",
+    "grep",
+    "glob"
+  ],
+  "sampling_requirement": "Use identical explicit sampling options when supported; preserve actual wire settings and server capability evidence. Do not silently rely on defaults.",
+  "pristine_reset": "Copy archived pre-edit fixture files into a unique workspace per attempt, hash before starting; never reuse final workspaces.",
+  "history_requirement": "Use sanitized genuine tool logs/task history with legitimate early constraints. Exclude target fixture solutions and arbitrary filler. Freeze and hash the history before any treatment outcomes.",
+  "context_target": "Approximately 32K provider-reported input for the first coding-task request; record actual size and exclude wrong-band runs from 32K evidence.",
+  "capture": [
+    "original transcript",
+    "committed rule before task",
+    "exact expected transformation and rule ledger",
+    "provider-bound request settings and usage",
+    "independent acceptance and requirement checks",
+    "request/tool/retry counts",
+    "task and prefill/decode timing",
+    "overflow/compaction",
+    "available hardware observations"
+  ],
+  "stop_conditions": [
+    "8-hour campaign deadline 2026-11-03T07:22:22Z",
+    "unreliable tool use",
+    "unsafe control-token exposure",
+    "unqualified transformation"
+  ],
+  "scope": "No hosted calls, server changes, personal configuration edits, or optimization redesign."
+}

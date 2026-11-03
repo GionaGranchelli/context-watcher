@@ -1,0 +1,136 @@
+{
+  "run": {
+    "tag": "f1-32k-v2-r1-m1",
+    "status": "finished",
+    "workspace": "/tmp/cw104a-local-qual/corrected-workspaces/f1-32k-v2-r1-m1",
+    "initial_hashes": {
+      "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+      "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+    },
+    "bootstrap_rc": 0,
+    "bootstrap_seconds": 135.64387603300565,
+    "transcript": "/tmp/cw104a-local-qual/corrected-sessions/f1-32k-v2-r1-m1/2026-11-03T04-57-36-602Z_01a19fc5-185a-7320-a199-6e642f9399a5.jsonl",
+    "task_rc": 0,
+    "task_seconds": 442.37376556699746,
+    "acceptance_passed": true,
+    "acceptance_output": "..\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK\n",
+    "transcript_snapshot_sha256": "2f55e007e30d0ef5c2f9a3c48d629463ed1c5693873408fc0bb13058795b3d79"
+  },
+  "captures": [
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_8ac1cf86e2c346de9cf663d2b1ce1b98",
+      "created_at": "2026-11-03T04:57:37.040889866+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "e087c168a0edc6574f9d6d3c7996d3c0544b8a93e05ca3314c1a9bb3a47694bb",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 128,
+        "prompt_tokens": 4225,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4353
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_4c188f59a2ea4348ae38368df63565fe",
+      "created_at": "2026-11-03T04:58:05.396588325+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "31441864c15dc572015a17a864af9d38476f51875db95bc65da7373354d7151a",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 54,
+        "prompt_tokens": 4426,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4480
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_3d4b5d1083594506b3ab975a6a8c8c4b",
+      "created_at": "2026-11-03T04:58:33.720848265+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "623556d79d897cb8b6920f9e5199a9197a6ca3f0fa8a04bb1da50d8cf362c5aa",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 105,
+        "prompt_tokens": 4632,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 4737
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "bootstrap",
+      "turn_id": "turn_340d40cd3cca4bc9b908220ad3186ad0",
+      "created_at": "2026-11-03T04:59:05.540408688+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "f105de69c14909a736718348e5bba49d5a5ebf601745d4c6acd7e46ecb038f11",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 744,
+        "prompt_tokens": 4760,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 5504
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_edec8fad959a450cb1cafcd93369f1bd",
+      "created_at": "2026-11-03T04:59:52.899824973+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "13398add47c3101877cdc3d44253dc533dc6a35b0cabf5a1f0d35715b2741f75",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 1250,
+        "prompt_tokens": 31376,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 32626
+      },
+      "outcome": "completed"
+    },
+    {
+      "stage": "coding",
+      "turn_id": "turn_fa7ee744cb924638840e09df39ff6dd6",
+      "created_at": "2026-11-03T05:03:38.134974543+00:00",
+      "request_equals_egress": true,
+      "egress_sha256": "f2279af0d0cb26f988b2589c948e665d85e1cb3462a9972026f0b9f90ee261f7",
+      "pin_occurrences": 0,
+      "temperature": 0,
+      "top_p": 1,
+      "usage": {
+        "completion_tokens": 529,
+        "prompt_tokens": 32743,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        },
+        "total_tokens": 33272
+      },
+      "outcome": "completed"
+    }
+  ],
+  "snapshot_only": false
+}

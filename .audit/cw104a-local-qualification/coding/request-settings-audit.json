@@ -1,0 +1,230 @@
+[
+  {
+    "tag": "f1-r2-m2",
+    "turn_id": "turn_83df74fe8c8e4420918987ffd8b89227",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f1-r2-m2",
+    "turn_id": "turn_c2b43cc19ba24dab8b046c7312f5dc6b",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f1-r2-m2",
+    "turn_id": "turn_103de8d3e43a47d6a83a13533c581c81",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f1-r2-m2",
+    "turn_id": "turn_05e4c23d5628460eb2e441560683da91",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f1-r3-m2",
+    "turn_id": "turn_0b473891db074c52a3404d0e3114e493",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f1-r3-m2",
+    "turn_id": "turn_67f08ed22a3a412ba7ab86702022a160",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f1-r3-m2",
+    "turn_id": "turn_7afec7148c60425bbec855e50fddc77d",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f1-r3-m2",
+    "turn_id": "turn_11d34bf3c78143fbaa9475bb647092f2",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f3-r2-m2",
+    "turn_id": "turn_7953e079775449148f743bd5d1f91fb0",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f3-r2-m2",
+    "turn_id": "turn_5c40092e4087486290af5d18bdba5f5a",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f3-r3-m2",
+    "turn_id": "turn_8b4e7ac165a6443ea44102f5bb3561c6",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  },
+  {
+    "tag": "f3-r3-m2",
+    "turn_id": "turn_6e3379cdcfda47e4881424d3b6098236",
+    "settings": {
+      "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+      "max_completion_tokens": 16384,
+      "chat_template_kwargs": {
+        "preserve_thinking": true
+      },
+      "preserve_thinking": true,
+      "stream": true
+    },
+    "sampling_fields_absent": [
+      "temperature",
+      "top_p",
+      "top_k",
+      "seed"
+    ]
+  }
+]

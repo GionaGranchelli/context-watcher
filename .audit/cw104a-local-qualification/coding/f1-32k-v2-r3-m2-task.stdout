@@ -1,0 +1,15 @@
+Done. Source-only change in `math_ops.py`; tests untouched.
+
+**Change:**
+- `divide_or_fallback(a, b, fallback=0.0)` — added `if b == 0: return fallback` before the division. Previously `fallback` was accepted but ignored, so `b == 0` raised `ZeroDivisionError`. Now it returns the supplied fallback; nonzero `b` still returns `a / b` unchanged.
+- `safe_mean(numbers)` — added `if not numbers: return 0.0` before `sum(numbers) / len(numbers)`. Empty input previously raised `ZeroDivisionError` via `len == 0`; non-empty input behavior is unchanged.
+
+Signatures preserved exactly: `divide_or_fallback(a, b, fallback=0.0)`, `safe_mean(numbers)`.
+
+**Check against the pinned test expectations** (static; no shell tool here, so tests run independently as you stated):
+- `divide_or_fallback(10, 2)` → `5.0` ✓ (valid path untouched)
+- `divide_or_fallback(10, 0, fallback=99.0)` → `99.0` ✓ (new guard)
+- `safe_mean([1, 2, 3])` → `2.0` ✓
+- `safe_mean([])` → `0.0` ✓ (new guard)
+
+Edge notes: `b == 0` matches int `0` and float `0.0` (and any numeric equal to zero), which previously raised — that's the requested behavior change. `not numbers` is falsy only for empty sequences; truthy non-sequence inputs (e.g., generators) fall through to the original `sum/len` path, so no previously valid input changes behavior.

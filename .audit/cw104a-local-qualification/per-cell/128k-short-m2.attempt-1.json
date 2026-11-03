@@ -1,0 +1,10 @@
+{
+  "tag": "128k-short-m2-attempt-1",
+  "status": "cancelled_before_completion",
+  "provider_prompt_tokens": 21888,
+  "duration_seconds": 131.6,
+  "output_tokens": 0,
+  "provider_finish": "cancel",
+  "transcript": "/tmp/cw104a-local-qual/context-runs/128k-short-m2/2026-11-03T02-58-23-632Z_01a19f57-f310-75c1-bf1b-479f7df5f93d.jsonl",
+  "reason": "The long-corpus bootstrap was cancelled before response; no M2 rule or provider egress was verified. Cause not established."
+}

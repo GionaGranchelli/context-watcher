@@ -1,0 +1,11 @@
+{
+  "tag": "f1-32k-v2-r1-m2",
+  "provider_live_prompt_tokens": 32358,
+  "band_min": 28000,
+  "band_max": 36000,
+  "within_band": true,
+  "response_status": "pending",
+  "temperature": 0,
+  "top_p": 1,
+  "pin_occurrences": 1
+}

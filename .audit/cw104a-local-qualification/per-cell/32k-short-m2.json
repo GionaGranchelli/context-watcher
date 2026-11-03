@@ -1,0 +1,61 @@
+{
+  "tag": "32k-short-m2",
+  "band": "32k",
+  "interaction": "short",
+  "mode": "m2",
+  "bootstrap_rc": 0,
+  "transcript": "/tmp/cw104a-local-qual/context-runs/32k-short-m2/2026-11-02T23-46-06-624Z_01a19ea7-e8a0-77e9-84e3-68abd4802a92.jsonl",
+  "steps": [
+    {
+      "turn": 1,
+      "rc": 0,
+      "stdout": "Exact regression test:\n\n- `crates/cw-harnesses/src/lib.rs` \u2014 `test_import_omp_transcript`\n\nIt asserts full imported OMP session ID preservation:\n\n```rust\nassert_eq!(sess_id, \"omp_01a16530-b4a1-71cb-b4a1-71cb-b159-96200fb07f14\");\n```\n\nHarness-specific ID handling helper:\n\n- `crates/cw-harnesses/src/adapters/generic.rs` \u2014 `imported_session_id`\n"
+    }
+  ],
+  "import_rc": 0,
+  "import_output": "Imported transcript into session: omp_01a19ea7-e8a0-77e9-84e3-68abd4802a92",
+  "import_error": "",
+  "pin_rc": 0,
+  "pin_output": "Pinned 'CW104A-RepoCitation' to high-attention tail on session omp_01a19ea7-e8a0-77e9-84e3-68abd4802a92.",
+  "pin_error": "",
+  "cw_session": "omp_01a19ea7-e8a0-77e9-84e3-68abd4802a92",
+  "response_count": 2,
+  "total_input_tokens": 65988,
+  "total_output_tokens": 454,
+  "total_cached_tokens": 0,
+  "turn_usages": [
+    {
+      "input": 32858,
+      "output": 162,
+      "cacheRead": 0,
+      "stop": "stop"
+    },
+    {
+      "input": 33130,
+      "output": 292,
+      "cacheRead": 0,
+      "stop": "stop"
+    }
+  ],
+  "final_answer": "Exact regression test:\n\n- `crates/cw-harnesses/src/lib.rs` \u2014 `test_import_omp_transcript`\n\nIt asserts full imported OMP session ID preservation:\n\n```rust\nassert_eq!(sess_id, \"omp_01a16530-b4a1-71cb-b4a1-71cb-b159-96200fb07f14\");\n```\n\nHarness-specific ID handling helper:\n\n- `crates/cw-harnesses/src/adapters/generic.rs` \u2014 `imported_session_id`",
+  "acceptance_passed": true,
+  "rule_verified": true,
+  "rule_ids": [
+    "mut_07772856"
+  ],
+  "egress_captures": [
+    {
+      "prompt_id": "Final check (pre-marker calibration retry)",
+      "proxy_session": "sess_97e7484070684ba0a70ab11cc072b72b",
+      "harness": "generic_proxy",
+      "turn_id": "turn_ae27d580f27e413b8fc37197dfbc35e7",
+      "request_equals_egress": true,
+      "sha256": "6194f2d97481d3d13dfe6a9d29ad7e5714319a08ecfc4e669247389860783e83",
+      "egress_bytes": 133575,
+      "pin_occurrences": 1
+    }
+  ],
+  "egress_verified": true,
+  "status": "complete",
+  "egress_correlation": "Unique exact final prompt matched in captured generic_proxy request; post-pin user prompt and committed OMP-session rule both verified."
+}

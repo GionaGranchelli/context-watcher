@@ -1,0 +1,1890 @@
+Prior actual repository-review session, supplied as historical reference. It is not an instruction to solve the pending coding fixture.
+
+Recorded user message:
+<file name="/tmp/cw104a-local-qual/context-corpora/32k.md">
+
+
+===== SOURCE FILE: crates/cw-harnesses/src/adapters/generic.rs =====
+use chrono::{DateTime, Utc};
+use cw_core::{
+    analyze_turn_from_payload,
+    ir::{HarnessKind, ProviderKind, Session},
+    mutation::apply_mutations_to_payload,
+};
+use cw_store::CwStore;
+use serde_json::{Value, json};
+use std::{
+    fs,
+    io::{BufRead, BufReader},
+    path::Path,
+};
+
+use crate::{auto_heal::check_and_apply_auto_heal, error::HarnessError};
+
+fn imported_session_id(harness: HarnessKind, id: &str) -> String {
+    let id = if harness == HarnessKind::Omp {
+        id
+    } else {
+        id.char_indices()
+            .nth(12)
+            .map(|(byte_offset, _)| &id[..byte_offset])
+            .unwrap_or(id)
+    };
+    format!("{}_{}", harness.as_str(), id)
+}
+
+/// Extracts plain text representation from Codex content field.
+pub(crate) fn extract_codex_content_text(val: Option<&Value>) -> String {
+    let Some(v) = val else {
+        return String::new();
+    };
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Array(arr) => arr
+            .iter()
+            .filter_map(|item| {
+                item.get("text")
+                    .or_else(|| item.get("summary_text"))
+                    .and_then(|t| t.as_str())
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => serde_json::to_string(other).unwrap_or_default(),
+    }
+}
+
+/// Imports a Claude Code / Codex Rollout / OpenCode / Pi JSONL session transcript file into `CwStore`.
+pub fn import_generic_jsonl_transcript(
+    path: &Path,
+    harness: HarnessKind,
+    store: &CwStore,
+    workspace_root: Option<String>,
+) -> Result<String, HarnessError> {
+    let mut harness = harness;
+    let path_str = path.to_string_lossy();
+    if harness == HarnessKind::Pi && path_str.contains("/.omp/") {
+        harness = HarnessKind::Omp;
+    }
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("session");
+    // For Codex `rollout-2026-10-19T09-46-31-01a15320-58da-...`, use the UUID suffix so sessions don't collide on `rollout-2026`
+    let id_slug = if stem.starts_with("rollout-") && stem.len() > 28 {
+        stem.get(28..).unwrap_or(stem)
+    } else if let Some((_, uuid_part)) = stem.split_once('_') {
+        uuid_part
+    } else {
+        stem
+    };
+    let mut session_id = imported_session_id(harness, id_slug);
+
+    let file = fs::File::open(path)?;
+    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let lines_to_parse: Vec<String> = if file_len > 2_000_000 {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut head_reader = BufReader::new(&file);
+        let mut selected = Vec::with_capacity(600);
+        for _ in 0..45 {
+            let mut l = String::new();
+            if head_reader.read_line(&mut l).unwrap_or(0) == 0 {
+                break;
+            }
+            selected.push(l);
+        }
+        let mut tail_file = fs::File::open(path)?;
+        let _ = tail_file.seek(SeekFrom::Start(file_len.saturating_sub(1_200_000)));
+        let mut tail_buf = String::new();
+        let _ = tail_file.read_to_string(&mut tail_buf);
+        // Skip first partial line after seek
+        for l in tail_buf.lines().skip(1) {
+            selected.push(l.to_string());
+        }
+        selected
+    } else {
+        BufReader::new(file).lines().map_while(Result::ok).collect()
+    };
+
+    let mut messages = Vec::new();
+    let mut system_chunks: Vec<String> = Vec::new();
+    let mut turn_counter = 0u32;
+    let mut detected_workspace = workspace_root;
+    let mut detected_model = if harness == HarnessKind::Codex {
+        "gpt-5-codex".to_string()
+    } else {
+        "claude-sonnet-4".to_string()
+    };
+    let mut detected_provider = if harness == HarnessKind::Codex {
+        ProviderKind::OpenAI
+    } else {
+        ProviderKind::Anthropic
+    };
+    let mut title: Option<String> = None;
+    let mut first_ts: Option<DateTime<Utc>> = None;
+    let mut last_ts: Option<DateTime<Utc>> = None;
+    let mut latest_input_tokens: Option<u32> = None;
+    let mut latest_cache_read_tokens: Option<u32> = None;
+    let mut latest_output_tokens: u32 = 0;
+
+    for (line_idx, line) in lines_to_parse.into_iter().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+
+        let ts_str = entry
+            .get("timestamp")
+            .or_else(|| entry.get("created_at"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if let Some(ref ts) = ts_str
+            && let Ok(dt) = DateTime::parse_from_rfc3339(ts)
+        {
+            let utc_dt = dt.with_timezone(&Utc);
+            if first_ts.is_none() {
+                first_ts = Some(utc_dt);
+            }
+            last_ts = Some(utc_dt);
+        }
+
+        if detected_workspace.is_none()
+            && let Some(cwd) = entry.get("cwd").and_then(|v| v.as_str())
+            && !cwd.is_empty()
+        {
+            detected_workspace = Some(cwd.to_string());
+        }
+
+        let entry_type = entry.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+        if entry_type == "title" {
+            if let Some(t) = entry.get("title").and_then(|v| v.as_str())
+                && !t.trim().is_empty()
+            {
+                title = Some(t.trim().to_string());
+            }
+            continue;
+        }
+
+        // 1. Codex CLI Rollout format (`session_meta`, `turn_context`, `event_msg`, `response_item`)
+        if entry_type == "session" {
+            if let Some(id) = entry.get("id").and_then(|v| v.as_str())
+                && !id.is_empty()
+            {
+                session_id = imported_session_id(harness, id);
+            }
+            if let Some(cwd) = entry.get("cwd").and_then(|v| v.as_str())
+                && !cwd.is_empty()
+            {
+                detected_workspace = Some(cwd.to_string());
+            }
+            continue;
+        }
+
+        if entry_type == "model_change" {
+            if let Some(m) = entry.get("model").and_then(|v| v.as_str())
+                && !m.is_empty()
+            {
+                detected_model = m.to_string();
+            }
+            continue;
+        }
+
+        if entry_type == "session_meta" || entry_type == "turn_context" {
+            if let Some(p) = entry.get("payload") {
+                if let Some(sid) = p.get("session_id").and_then(|v| v.as_str())
+                    && !sid.is_empty()
+                {
+                    session_id = imported_session_id(harness, sid);
+                }
+                if let Some(cwd) = p.get("cwd").and_then(|v| v.as_str())
+                    && !cwd.is_empty()
+                {
+                    detected_workspace = Some(cwd.to_string());
+                }
+                if let Some(m) = p.get("model").and_then(|v| v.as_str())
+                    && !m.is_empty()
+                {
+                    detected_model = m.to_string();
+                }
+                if let Some(prov) = p.get("model_provider").and_then(|v| v.as_str()) {
+                    if prov.contains("ollama") || prov.contains("local") {
+                        detected_provider = ProviderKind::OpenAICompatible;
+                    } else if prov.contains("openai") {
+                        detected_provider = ProviderKind::OpenAI;
+                    }
+                }
+            }
+            continue;
+        }
+
+        if entry_type == "compacted" {
+            let win_num = entry
+                .get("payload")
+                .and_then(|p| p.get("window_number"))
+                .and_then(|w| w.as_u64())
+                .unwrap_or(1);
+            let rep_len = entry
+                .get("payload")
+                .and_then(|p| p.get("replacement_history"))
+                .and_then(|r| r.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            messages.clear();
+            turn_counter = turn_counter.max(win_num as u32) + 1;
+            messages.push(json!({
+                "role": "assistant",
+                "content": [{
+                    "type": "text",
+                    "text": format!("[cw:folded_turns 1..{}] Codex Compacted Context Window #{} ({} replacement items retained)", turn_counter, win_num, rep_len)
+                }],
+                "cw_timestamp": ts_str,
+                "cw_turn_seq": turn_counter
+            }));
+            continue;
+        }
+
+        if entry_type == "event_msg" {
+            if let Some(p) = entry.get("payload")
+                && p.get("type").and_then(|v| v.as_str()) == Some("token_count")
+                && let Some(last_usage) = p.get("info").and_then(|i| i.get("last_token_usage"))
+            {
+                if let Some(inp) = last_usage.get("input_tokens").and_then(|v| v.as_u64()) {
+                    latest_input_tokens = Some(inp as u32);
+                }
+                if let Some(cached) = last_usage
+                    .get("cached_input_tokens")
+                    .and_then(|v| v.as_u64())
+                {
+                    latest_cache_read_tokens = Some(cached as u32);
+                }
+                if let Some(out) = last_usage.get("output_tokens").and_then(|v| v.as_u64()) {
+                    latest_output_tokens = out as u32;
+                }
+            }
+            continue;
+        }
+
+        if entry_type == "response_item" {
+            let Some(p) = entry.get("payload") else {
+                continue;
+            };
+            let item_type = p.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            match item_type {
+                "message" => {
+                    let role = p.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+                    let text = extract_codex_content_text(p.get("content"));
+                    if text.trim().is_empty() {
+                        continue;
+                    }
+                    if role == "developer"
+                        || text.starts_with("# AGENTS.md")
+                        || text.starts_with("<INSTRUCTIONS>")
+                    {
+                        if system_chunks.len() < 4 {
+                            system_chunks.push(text);
+                        }
+                    } else if role == "user" {
+                        if !text.starts_with("<codex_internal_context") {
+                            turn_counter += 1;
+                            if title.is_none() {
+                                let one_line =
+                                    text.split_whitespace().collect::<Vec<_>>().join(" ");
+                                title = Some(one_line.chars().take(78).collect());
+                            }
+                        } else if turn_counter == 0 {
+                            turn_counter = 1;
+                        }
+                        messages.push(json!({
+                            "role": "user",
+                            "content": text,
+                            "cw_timestamp": ts_str,
+                            "cw_turn_seq": turn_counter.max(1)
+                        }));
+                    } else {
+                        messages.push(json!({
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": text}],
+                            "cw_timestamp": ts_str,
+                            "cw_turn_seq": turn_counter.max(1)
+                        }));
+                    }
+                }
+                "reasoning" => {
+                    let summary_txt = extract_codex_content_text(p.get("summary"));
+                    let thought = if !summary_txt.trim().is_empty() {
+                        summary_txt
+                    } else {
+                        "[Codex encrypted reasoning trace]".to_string()
+                    };
+                    messages.push(json!({
+                        "role": "assistant",
+                        "content": [{"type": "thinking", "thinking": thought}],
+                        "cw_timestamp": ts_str,
+                        "cw_turn_seq": turn_counter.max(1)
+                    }));
+                }
+                "function_call" | "custom_tool_call" => {
+                    let call_id = p
+                        .get("call_id")
+                        .or_else(|| p.get("id"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("codex_call_{line_idx}"));
+                    let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("exec");
+                    let raw_args = p
+                        .get("arguments")
+                        .or_else(|| p.get("input"))
+                        .cloned()
+                        .unwrap_or(Value::Null);
+                    let input_val = match raw_args {
+                        Value::String(ref s) => serde_json::from_str::<Value>(s)
+                            .unwrap_or_else(|_| json!({ "CommandLine": s })),
+                        other => other,
+                    };
+                    messages.push(json!({
+                        "role": "assistant",
+                        "content": [{
+                            "type": "tool_use",
+                            "id": call_id,
+                            "name": name,
+                            "input": input_val
+                        }],
+                        "cw_timestamp": ts_str,
+                        "cw_turn_seq": turn_counter.max(1)
+                    }));
+                }
+                "function_call_output" | "custom_tool_call_output" => {
+                    let call_id = p
+                        .get("call_id")
+                        .or_else(|| p.get("id"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| format!("codex_res_{line_idx}"));
+                    let out_txt = extract_codex_content_text(p.get("output"));
+                    messages.push(json!({
+                        "role": "user",
+                        "content": [{
+                            "type": "tool_result",
+                            "tool_use_id": call_id,
+                            "content": out_txt
+                        }],
+                        "cw_timestamp": ts_str,
+                        "cw_turn_seq": turn_counter.max(1)
+                    }));
+                }
+                "agent_message" => {
+                    let author = p
+                        .get("author")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("subagent");
+                    let text = extract_codex_content_text(p.get("content"));
+                    if !text.trim().is_empty() {
+                        messages.push(json!({
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": format!("[{author}] {text}")}],
+                            "cw_timestamp": ts_str,
+                            "cw_turn_seq": turn_counter.max(1)
+                        }));
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        // 2. Claude Code / OpenCode / Pi message format
+        if let Some(msg) = entry.get("message") {
+            if let Some(m) = msg.get("model").and_then(|v| v.as_str())
+                && !m.is_empty()
+            {
+                detected_model = m.to_string();
+            }
+            if let Some(prov) = msg.get("provider").and_then(|v| v.as_str())
+                && (prov.contains("machinist") || prov.contains("local") || prov.contains("ollama"))
+            {
+                detected_provider = ProviderKind::OpenAICompatible;
+            }
+            if let Some(api) = msg.get("api").and_then(|v| v.as_str())
+                && api.contains("openai")
+            {
+                detected_provider = ProviderKind::OpenAICompatible;
+            }
+            if let Some(u) = msg.get("usage") {
+                let cached = u
+                    .get("cache_read_input_tokens")
+                    .or_else(|| u.get("cacheRead"))
+                    .and_then(|v| v.as_u64());
+                if let Some(c) = cached {
+                    latest_cache_read_tokens = Some(c as u32);
+                }
+                let total_prompt = msg
+                    .get("contextSnapshot")
+                    .and_then(|cs| cs.get("promptTokens"))
+                    .and_then(|v| v.as_u64())
+                    .or_else(|| {
+                        let inp = u
+                            .get("input_tokens")
+                            .or_else(|| u.get("input"))
+                            .and_then(|v| v.as_u64())?;
+                        Some(inp + cached.unwrap_or(0))
+                    });
+                if let Some(inp) = total_prompt {
+                    latest_input_tokens = Some(inp as u32);
+                }
+                if let Some(out) = u
+                    .get("output_tokens")
+                    .or_else(|| u.get("output"))
+                    .and_then(|v| v.as_u64())
+                {
+                    latest_output_tokens = out as u32;
+                }
+            }
+            let role_val = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+            if role_val == "user" || role_val == "assistant" {
+                turn_counter += 1;
+            }
+            if role_val == "user" && title.is_none() {
+                if let Some(c) = msg.get("content").and_then(|v| v.as_str())
+                    && !c.trim().is_empty()
+                {
+                    let one_line = c.split_whitespace().collect::<Vec<_>>().join(" ");
+                    title = Some(one_line.chars().take(78).collect());
+                } else if let Some(arr) = msg.get("content").and_then(|v| v.as_array()) {
+                    for item in arr {
+                        if item.get("type").and_then(|t| t.as_str()) == Some("text")
+                            && let Some(t) = item.get("text").and_then(|s| s.as_str())
+                            && !t.trim().is_empty()
+                        {
+                            let one_line = t.split_whitespace().collect::<Vec<_>>().join(" ");
+                            title = Some(one_line.chars().take(78).collect());
+                            break;
+                        }
+                    }
+                }
+            }
+            let mut m_clone = msg.clone();
+            if let Some(obj) = m_clone.as_object_mut() {
+                if let Some(ref ts) = ts_str {
+                    obj.insert("cw_timestamp".to_string(), Value::String(ts.clone()));
+                }
+                obj.insert("cw_turn_seq".to_string(), json!(turn_counter.max(1)));
+            }
+            messages.push(m_clone);
+        } else if entry.get("role").is_some() {
+            if entry.get("role").and_then(|r| r.as_str()) == Some("user") {
+                turn_counter += 1;
+            }
+            messages.push(entry);
+        }
+    }
+
+    if messages.is_empty() {
+        return Ok(session_id);
+    }
+
+    let created_at = first_ts.unwrap_or_else(Utc::now);
+    let updated_at = last_ts.unwrap_or(created_at);
+    let system_text = if system_chunks.is_empty() {
+        format!("{} Agent Session", harness.as_str())
+    } else {
+        system_chunks.join("\n\n")
+    };
+
+    let payload = json!({
+        "cw_analysis_incomplete": file_len > 2_000_000,
+        "model": detected_model,
+        "max_tokens": 8192,
+        "system": system_text,
+        "messages": messages
+    });
+
+    let session = Session {
+        id: session_id.clone(),
+        parent_session_id: None,
+        harness,
+        workspace_root: detected_workspace.clone(),
+        model: detected_model,
+        provider: detected_provider,
+        title: title.or_else(|| Some(format!("{} ({id_slug})", harness.as_str()))),
+        created_at,
+        updated_at,
+    };
+    store.upsert_session(&session)?;
+    if let Ok(abs_path) = fs::canonicalize(path) {
+        let byte_len = fs::metadata(&abs_path).map(|m| m.len()).unwrap_or(0);
+        let _ = store.set_session_source_path(&session_id, &abs_path.to_string_lossy(), byte_len);
+    }
+
+    let seq = turn_counter.max(1);
+    let existing_mutations = store.list_mutations(&session_id).unwrap_or_default();
+    let mut mutated_payload_opt = None;
+    let mut saved_by_mutations = 0u32;
+    if !existing_mutations.is_empty() {
+        let mut cloned = payload.clone();
+        let rep = apply_mutations_to_payload(
+            &mut cloned,
+            ProviderKind::Anthropic,
+            &existing_mutations,
+            seq,
+        );
+        saved_by_mutations = rep.saved_tokens;
+        mutated_payload_opt = Some(cloned);
+    }
+    let payload_for_analysis = mutated_payload_opt.as_ref().unwrap_or(&payload);
+
+    let turn_id = format!("turn_{}_{}", session_id, seq);
+    let (mut turn, file_states) = analyze_turn_from_payload(
+        turn_id,
+        session_id.clone(),
+        None,
+        seq,
+        payload_for_analysis,
+        ProviderKind::Anthropic,
+        None,
+        latest_cache_read_tokens,
+        detected_workspace.as_deref(),
+    )?;
+    turn.created_at = updated_at;
+    turn.token_usage.output_tokens = latest_output_tokens;
+    turn.token_usage.saved_by_mutations = saved_by_mutations;
+    if let Some(real_inp) = latest_input_tokens
+        && real_inp > turn.token_usage.input_tokens
+    {
+        let adjusted_inp = real_inp.saturating_sub(saved_by_mutations);
+        turn.token_usage.input_tokens = adjusted_inp;
+        if let Some(cached) = latest_cache_read_tokens {
+            turn.token_usage.cached_tokens = cached.min(adjusted_inp);
+            turn.kv_cache_report.hit_tokens = cached.min(adjusted_inp);
+            turn.kv_cache_report.newly_cached_tokens = adjusted_inp.saturating_sub(cached);
+            turn.kv_cache_report.hit_ratio = cached as f32 / adjusted_inp.max(1) as f32;
+        }
+    }
+    store.save_turn(&turn, Some(&payload), mutated_payload_opt.as_ref(), None)?;
+    store.save_file_states(&session_id, &file_states)?;
+    check_and_apply_auto_heal(
+        store,
+        &session_id,
+        &mut turn,
+        &payload,
+        seq,
+        ProviderKind::Anthropic,
+        detected_workspace.as_deref(),
+    );
+    Ok(session_id)
+}
+
+
+
+===== SOURCE FILE: crates/cw-harnesses/src/lib.rs =====
+pub mod adapters;
+pub mod auto_heal;
+pub mod error;
+pub mod qualification;
+pub mod sync;
+pub mod watcher;
+
+pub use adapters::{
+    import_agy_transcript, import_generic_jsonl_transcript, import_hermes_state_db,
+    import_opencode_state_db,
+};
+pub use auto_heal::check_and_apply_auto_heal;
+pub use error::HarnessError;
+pub use sync::{TranscriptSyncReport, sync_mutations_to_transcript_on_disk};
+pub use watcher::{scan_and_import_all_transcripts_once, spawn_transcript_watcher};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use cw_core::ir::{HarnessKind, MutationOp, MutationStatus, NodeKind};
+    use cw_store::CwStore;
+    use std::{fs, path::Path};
+
+    #[test]
+    fn test_import_agy_transcript_fixture() {
+        let store = CwStore::open_in_memory().unwrap();
+        let fixture = Path::new("../cw-core/tests/fixtures/agy/transcript.jsonl");
+        let sess_id = import_agy_transcript(fixture, &store, None).unwrap();
+        let sess = store.get_session(&sess_id).unwrap().unwrap();
+        assert_eq!(sess.title.as_deref(), Some("Check Cargo.toml"));
+        let turn = store.get_latest_turn(&sess_id).unwrap().unwrap();
+        assert!(!turn.nodes.is_empty());
+        let files = store.get_file_states(&sess_id).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "Cargo.toml");
+    }
+
+    #[test]
+    fn test_sync_mutations_to_transcript_on_disk() {
+        let store = CwStore::open_in_memory().unwrap();
+        let fixture = Path::new("../cw-core/tests/fixtures/agy/transcript.jsonl");
+        let tmp_dir = std::env::temp_dir().join(format!("cw_test_sync_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp_dir);
+        let tmp_transcript = tmp_dir.join("transcript.jsonl");
+        fs::copy(fixture, &tmp_transcript).unwrap();
+
+        let sess_id = import_agy_transcript(&tmp_transcript, &store, None).unwrap();
+        store
+            .save_mutation(&cw_core::ir::MutationRule {
+                id: "mut_fold_test".to_string(),
+                session_id: sess_id.clone(),
+                op: MutationOp::FoldSubtree {
+                    start_turn: 1,
+                    end_turn: 1,
+                    summary_text: "Folded Turn 1".to_string(),
+                },
+                status: MutationStatus::Committed,
+                created_at: Utc::now(),
+                estimated_saved_tokens: 120,
+                estimated_kv_break_tokens: 0,
+            })
+            .unwrap();
+
+        let report = sync_mutations_to_transcript_on_disk(&store, &sess_id).unwrap();
+        assert!(Path::new(&report.export_path).exists());
+        assert_eq!(report.steps_compacted, 0);
+        assert_eq!(
+            fs::read(&tmp_transcript).unwrap(),
+            fs::read(fixture).unwrap()
+        );
+        assert_eq!(
+            fs::read(&report.export_path).unwrap(),
+            fs::read(&tmp_transcript).unwrap()
+        );
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_import_omp_transcript() {
+        let store = CwStore::open_in_memory().unwrap();
+        let tmp_dir = std::env::temp_dir().join(format!("cw_test_omp_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp_dir);
+        let transcript =
+            tmp_dir.join("2026-10-22T19-57-33-217Z_01a16530-b4a1-71cb-b159-96200fb07f14.jsonl");
+        let content = r#"{"type":"title","v":1,"title":"Determine Chrome Install Method","source":"auto"}
+{"type":"session","version":3,"id":"01a16530-b4a1-71cb-b159-96200fb07f14","cwd":"/home/gionag/Development/contextWatcher"}
+{"type":"message","message":{"role":"user","content":[{"type":"text","text":"How did I install chrome?"}]}}
+{"type":"message","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_123","name":"bash","arguments":{"command":"which google-chrome"}}],"model":"flint","provider":"machinist-flint","usage":{"input":84,"output":120,"cacheRead":9000},"contextSnapshot":{"promptTokens":9084}}}
+{"type":"message","message":{"role":"toolResult","toolCallId":"call_123","toolName":"bash","content":[{"type":"text","text":"/usr/bin/google-chrome"}]}}
+"#;
+        fs::write(&transcript, content).unwrap();
+
+        let sess_id =
+            import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
+        assert_eq!(sess_id, "omp_01a16530-b4a1-71cb-b159-96200fb07f14");
+        let sess = store.get_session(&sess_id).unwrap().unwrap();
+        assert_eq!(sess.harness, HarnessKind::Omp);
+        assert_eq!(
+            sess.title.as_deref(),
+            Some("Determine Chrome Install Method")
+        );
+        assert_eq!(
+            sess.workspace_root.as_deref(),
+            Some("/home/gionag/Development/contextWatcher")
+        );
+
+        let turn = store.get_latest_turn(&sess_id).unwrap().unwrap();
+        assert_eq!(turn.token_usage.input_tokens, 9084);
+        assert_eq!(turn.token_usage.cached_tokens, 9000);
+
+        // Verify tool call and tool result nodes are properly extracted
+        let has_tool_call = turn.nodes.iter().any(
+            |n| matches!(&n.kind, NodeKind::ToolCall { call_id, .. } if call_id == "call_123"),
+        );
+        let has_tool_res = turn.nodes.iter().any(
+            |n| matches!(&n.kind, NodeKind::ToolResult { call_id, .. } if call_id == "call_123"),
+        );
+        assert!(has_tool_call, "ToolCall node should exist in IR");
+        assert!(has_tool_res, "ToolResult node should exist in IR");
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_auto_heal_low_health_transcript() {
+        let store = CwStore::open_in_memory().unwrap();
+        // Configure AutoPilot with auto_heal_low_health = true, min_health_score = 95
+        let mut ap_cfg = store.get_autopilot_config().unwrap();
+        ap_cfg.enabled = true;
+        ap_cfg.auto_heal_low_health = true;
+        ap_cfg.min_health_score = 95;
+        ap_cfg.heal_strategy = "min".to_string();
+        ap_cfg.auto_sync_to_disk = true;
+        store.set_autopilot_config(&ap_cfg).unwrap();
+
+        let tmp_dir = std::env::temp_dir().join(format!("cw_test_heal_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp_dir);
+        let transcript = tmp_dir.join("2026-10-23T10-00-00-000Z_heal_session_test.jsonl");
+
+        // Create a transcript with duplicate file read of the same file
+        let content = format!(
+            r#"{{"type":"session","version":3,"id":"heal_session_test","cwd":"{}"}}
+{{"type":"message","message":{{"role":"user","content":[{{"type":"text","text":"Read Cargo.toml"}}]}}}}
+{{"type":"message","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"c1","name":"read_file","arguments":{{"path":"Cargo.toml"}}}}]}}}}
+{{"type":"message","message":{{"role":"toolResult","toolCallId":"c1","toolName":"read_file","content":[{{"type":"text","text":"[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n"}}]}}}}
+{{"type":"message","message":{{"role":"user","content":[{{"type":"text","text":"Read Cargo.toml again"}}]}}}}
+{{"type":"message","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"c2","name":"read_file","arguments":{{"path":"Cargo.toml"}}}}]}}}}
+{{"type":"message","message":{{"role":"toolResult","toolCallId":"c2","toolName":"read_file","content":[{{"type":"text","text":"[workspace]\nmembers = [\"crates/*\"]\nresolver = \"2\"\n"}}]}}}}
+"#,
+            tmp_dir.display()
+        );
+        fs::write(&transcript, &content).unwrap();
+
+        let sess_id =
+            import_generic_jsonl_transcript(&transcript, HarnessKind::Omp, &store, None).unwrap();
+        let turn = store.get_latest_turn(&sess_id).unwrap().unwrap();
+        assert!(turn.health_score > 0);
+        let mutations = store.list_mutations(&sess_id).unwrap();
+        assert!(
+            !mutations.is_empty(),
+            "Auto-heal should automatically generate committed mutations for duplicate file reads"
+        );
+        assert!(mutations.iter().any(|m| m.id.starts_with("ap_heal_")));
+
+        assert_eq!(
+            fs::read_to_string(&transcript).unwrap(),
+            content,
+            "Automatic analysis must not rewrite the source"
+        );
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn test_import_opencode_sqlite_db() {
+        let tmp_dir = std::env::temp_dir().join(format!("cw_test_opencode_{}", std::process::id()));
+        let _ = fs::create_dir_all(&tmp_dir);
+        let db_path = tmp_dir.join("opencode.db");
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session_v2 (
+                id text PRIMARY KEY,
+                directory text NOT NULL,
+                title text NOT NULL,
+                model text,
+                tokens_input integer DEFAULT 0,
+                tokens_output integer DEFAULT 0,
+                tokens_cache_read integer DEFAULT 0,
+                tokens_cache_write integer DEFAULT 0,
+                time_created integer NOT NULL,
+                time_updated integer NOT NULL
+            );
+            CREATE TABLE message (
+                id text PRIMARY KEY,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                data text NOT NULL
+            );
+            CREATE TABLE part (
+                id text PRIMARY KEY,
+                message_id text NOT NULL,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                data text NOT NULL
+            );",
+        )
+        .unwrap();
+
+        // Insert session
+        conn.execute(
+            "INSERT INTO session_v2 (id, directory, title, model, tokens_input, tokens_output, tokens_cache_read, tokens_cache_write, time_created, time_updated)
+             VALUES ('ses_test_123', '/test/project', 'Explore project', '{\"id\":\"claude-3-7-sonnet\"}', 10000, 500, 7500, 0, 1781210000000, 1781210010000);",
+            [],
+        )
+        .unwrap();
+
+        // Insert user message and part
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data)
+             VALUES ('msg_u1', 'ses_test_123', 1781210000000, '{\"role\":\"user\"}');",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_u1', 'msg_u1', 'ses_test_123', 1781210000000, '{\"type\":\"text\",\"text\":\"Read Cargo.toml\"}');",
+            [],
+        )
+        .unwrap();
+
+        // Insert assistant message with reasoning and tool call
+        conn.execute(
+            "INSERT INTO message (id, session_id, time_created, data)
+             VALUES ('msg_a1', 'ses_test_123', 1781210005000, '{\"role\":\"assistant\"}');",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_a1_reason', 'msg_a1', 'ses_test_123', 1781210005000, '{\"type\":\"reasoning\",\"text\":\"Let me inspect Cargo.toml\"}');",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO part (id, message_id, session_id, time_created, data)
+             VALUES ('prt_a1_tool', 'msg_a1', 'ses_test_123', 1781210006000, '{\"type\":\"tool\",\"tool\":\"read\",\"callID\":\"call_c1\",\"state\":{\"status\":\"completed\",\"input\":{\"filePath\":\"Cargo.toml\"},\"output\":\"[package]\\nname=\\\"test\\\"\"}}');",
+            [],
+        )
+        .unwrap();
+
+        let store = CwStore::open_in_memory().unwrap();
+        let imported = import_opencode_state_db(&db_path, &store, 10).unwrap();
+        assert_eq!(imported.len(), 1);
+        assert_eq!(imported[0], "opencode_ses_test_123");
+
+        let sess = store.get_session("opencode_ses_test_123").unwrap().unwrap();
+        assert_eq!(sess.title.as_deref(), Some("Explore project"));
+        assert_eq!(sess.model, "claude-3-7-sonnet");
+        assert_eq!(sess.harness, HarnessKind::OpenCode);
+
+        let turn = store
+            .get_latest_turn("opencode_ses_test_123")
+            .unwrap()
+            .unwrap();
+        assert!(turn.token_usage.cached_tokens > 0);
+        assert_eq!(turn.token_usage.output_tokens, 500);
+        assert!(turn.kv_cache_report.hit_ratio > 0.0);
+
+        let file_states = store.get_file_states("opencode_ses_test_123").unwrap();
+        assert_eq!(file_states.len(), 1);
+        assert_eq!(file_states[0].path, "Cargo.toml");
+
+        let _ = fs::remove_dir_all(&tmp_dir);
+    }
+}
+
+
+
+===== SOURCE FILE: crates/cw-harnesses/src/qualification.rs =====
+use cw_core::ir::HarnessKind;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// Returns Codex CLI configuration flags to route requests through contextWatcher's authenticated Responses proxy.
+pub fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
+    [
+        "model_provider=\"context_watcher\"".to_owned(),
+        "model_providers.context_watcher.name=\"contextWatcher\"".to_owned(),
+        format!(
+            "model_providers.context_watcher.base_url=\"http://127.0.0.1:{proxy_port}/openai/v1\""
+        ),
+        "model_providers.context_watcher.wire_api=\"responses\"".to_owned(),
+        "model_providers.context_watcher.requires_openai_auth=true".to_owned(),
+        "model_providers.context_watcher.env_key=\"OPENAI_API_KEY\"".to_owned(),
+        "model_providers.context_watcher.env_http_headers={\"x-cw-session-id\"=\"CW_SESSION_ID\",\"x-cw-control-token\"=\"CW_CONTROL_TOKEN\"}".to_owned(),
+        "shell_environment_policy.filters.CW_CONTROL_TOKEN=\"exclude\"".to_owned(),
+    ]
+    .into_iter()
+    .flat_map(|setting| ["--config".to_owned(), setting])
+    .collect()
+}
+
+/// Returns direct native provider configuration for Codex CLI (bypassing ContextWatcher proxy).
+pub fn codex_direct_config_args() -> Vec<String> {
+    [
+        "model_provider=\"openai_direct\"".to_owned(),
+        "model_providers.openai_direct.name=\"OpenAIDirect\"".to_owned(),
+        "model_providers.openai_direct.base_url=\"https://api.openai.com/v1\"".to_owned(),
+        "model_providers.openai_direct.wire_api=\"responses\"".to_owned(),
+        "model_providers.openai_direct.requires_openai_auth=true".to_owned(),
+        "model_providers.openai_direct.env_key=\"OPENAI_API_KEY\"".to_owned(),
+    ]
+    .into_iter()
+    .flat_map(|setting| ["--config".to_owned(), setting])
+    .collect()
+}
+
+/// Generates isolated models.json content for OMP pointing to contextWatcher's proxy.
+pub fn omp_proxy_models_config(proxy_port: u16, model_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "providers": {
+            "cw-proxy": {
+                "baseUrl": format!("http://127.0.0.1:{proxy_port}/openai/v1"),
+                "api": "openai-completions",
+                "apiKey": "cw-authenticated",
+                "models": [{
+                    "id": model_id,
+                    "name": format!("contextWatcher ({model_id})"),
+                    "contextWindow": 131072,
+                    "maxTokens": 4096
+                }]
+            }
+        }
+    })
+}
+
+/// Readiness is a ladder; each rung requires evidence beyond the previous one.
+/// Static inspection can reach at most `Configured`; `FunctionallyVerified` is only
+/// granted via [`mark_functionally_verified`] after an observed proxied request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum HarnessReadinessStatus {
+    /// Binary not found on PATH.
+    Unavailable,
+    /// Binary found but `--version` did not run successfully.
+    Detected,
+    /// Binary found and executes (`--version` succeeded).
+    Installed,
+    /// Installed, and contextWatcher can generate an isolated proxy configuration for it.
+    Configured,
+    /// Configured, and a proxied request through contextWatcher was actually observed.
+    FunctionallyVerified,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HarnessReadinessReport {
+    pub harness: HarnessKind,
+    pub binary_name: String,
+    pub binary_path: Option<PathBuf>,
+    pub version: Option<String>,
+    pub is_installed: bool,
+    /// The adapter *declares* credential isolation (e.g. env filters). Declared, not verified.
+    pub credential_isolation_declared: bool,
+    /// contextWatcher can generate an isolated proxy-routing config for this harness.
+    pub proxy_config_available: bool,
+    pub functionally_verified: bool,
+    pub verification_evidence: Option<String>,
+    pub status: HarnessReadinessStatus,
+    pub notes: Vec<String>,
+}
+
+/// Promote a `Configured` report to `FunctionallyVerified` given observed evidence
+/// (e.g. a session id whose requests were recorded by the proxy). Refuses otherwise.
+pub fn mark_functionally_verified(
+    report: &mut HarnessReadinessReport,
+    evidence: impl Into<String>,
+) -> bool {
+    if report.status != HarnessReadinessStatus::Configured {
+        return false;
+    }
+    report.functionally_verified = true;
+    report.verification_evidence = Some(evidence.into());
+    report.status = HarnessReadinessStatus::FunctionallyVerified;
+    true
+}
+
+/// Discovers a binary by name across standard PATH directories.
+pub fn find_binary(binary_name: &str) -> Option<PathBuf> {
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(binary_name);
+            if candidate.is_file() {
+                // Check if executable (Unix check)
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(meta) = candidate.metadata()
+                        && meta.permissions().mode() & 0o111 != 0
+                    {
+                        return Some(candidate);
+                    }
+                }
+                #[cfg(not(unix))]
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Extracts version from a binary using `--version`.
+pub fn extract_binary_version(binary_path: &Path) -> Option<String> {
+    let output = Command::new(binary_path).arg("--version").output().ok()?;
+    if output.status.success() {
+        let text = String::from_utf8_lossy(&output.stdout);
+        let trimmed = text.lines().next().unwrap_or("").trim().to_string();
+        if !trimmed.is_empty() {
+            return Some(trimmed);
+        }
+    }
+    None
+}
+
+/// Evaluates harness readiness for controlled live execution.
+pub fn check_harness_readiness(harness: HarnessKind) -> HarnessReadinessReport {
+    let binary_name = match harness {
+        HarnessKind::Codex => "codex",
+        HarnessKind::Omp | HarnessKind::OpenCode => "omp",
+        HarnessKind::Hermes => "hermes",
+        HarnessKind::Aider => "aider",
+        HarnessKind::ClaudeCode => "claude",
+        HarnessKind::Pi => "pi",
+        HarnessKind::Antigravity => "agy",
+        HarnessKind::GenericProxy => "proxy",
+    };
+
+    let bin_path = find_binary(binary_name);
+    let mut notes = Vec::new();
+    let version = bin_path.as_deref().and_then(extract_binary_version);
+    // Only adapters with a generated, isolated proxy config count as configurable.
+    let (cred_declared, proxy_config) = match harness {
+        HarnessKind::Codex => (true, true), // codex_proxy_config_args + env filter
+        HarnessKind::Omp | HarnessKind::OpenCode => (false, true), // omp_proxy_models_config
+        _ => (false, false),
+    };
+
+    let status = match (&bin_path, &version) {
+        (None, _) => {
+            notes.push(format!("Binary '{binary_name}' not found in PATH"));
+            HarnessReadinessStatus::Unavailable
+        }
+        (Some(path), None) => {
+            notes.push(format!("Found {} but `--version` failed", path.display()));
+            HarnessReadinessStatus::Detected
+        }
+        (Some(path), Some(v)) => {
+            notes.push(format!("Found {} ({v})", path.display()));
+            if proxy_config {
+                HarnessReadinessStatus::Configured
+            } else {
+                notes.push("No generated isolated proxy config for this harness".into());
+                HarnessReadinessStatus::Installed
+            }
+        }
+    };
+    if status >= HarnessReadinessStatus::Configured {
+        notes.push("Not functionally verified: no proxied request observed".into());
+    }
+
+    HarnessReadinessReport {
+        harness,
+        binary_name: binary_name.to_string(),
+        is_installed: version.is_some(),
+        binary_path: bin_path,
+        version,
+        credential_isolation_declared: cred_declared && status >= HarnessReadinessStatus::Installed,
+        proxy_config_available: proxy_config,
+        functionally_verified: false,
+        verification_evidence: None,
+        status,
+        notes,
+    }
+}
+
+/// Evaluates a suite of harnesses and returns an inventory.
+pub fn audit_all_harness_readiness() -> Vec<HarnessReadinessReport> {
+    vec![
+        check_harness_readiness(HarnessKind::Codex),
+        check_harness_readiness(HarnessKind::OpenCode),
+        check_harness_readiness(HarnessKind::Hermes),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_codex_proxy_config_args_structure() {
+        let args = codex_proxy_config_args(4401);
+        assert!(args.contains(&"--config".to_string()));
+        assert!(
+            args.iter()
+                .any(|a| a.contains("http://127.0.0.1:4401/openai/v1"))
+        );
+        assert!(
+            args.iter().any(
+                |a| a.contains("shell_environment_policy.filters.CW_CONTROL_TOKEN=\"exclude\"")
+            )
+        );
+    }
+
+    #[test]
+    fn test_codex_direct_config_args_structure() {
+        let args = codex_direct_config_args();
+        assert!(args.contains(&"--config".to_string()));
+        assert!(args.iter().any(|a| a.contains("https://api.openai.com/v1")));
+        assert!(
+            args.iter()
+                .any(|a| a.contains("model_provider=\"openai_direct\""))
+        );
+    }
+
+    #[test]
+    fn test_omp_proxy_models_config_structure() {
+        let cfg = omp_proxy_models_config(4401, "gpt-4o-mini");
+        assert_eq!(
+            cfg["providers"]["cw-proxy"]["baseUrl"],
+            "http://127.0.0.1:4401/openai/v1"
+        );
+        assert_eq!(
+            cfg["providers"]["cw-proxy"]["models"][0]["id"],
+            "gpt-4o-mini"
+        );
+    }
+
+    #[test]
+    fn test_find_binary_existing_and_nonexistent() {
+        // python3 is always present
+        let py = find_binary("python3");
+        assert!(py.is_some());
+
+        // nonexistent binary
+        let none = find_binary("nonexistent_binary_xyz_123");
+        assert!(none.is_none());
+    }
+
+    #[test]
+    fn test_check_harness_readiness_on_system() {
+        let mut r = check_harness_readiness(HarnessKind::Codex);
+        // Static checks never claim functional verification.
+        assert!(!r.functionally_verified);
+        assert_ne!(r.status, HarnessReadinessStatus::FunctionallyVerified);
+        if r.is_installed {
+            assert_eq!(r.status, HarnessReadinessStatus::Configured);
+            assert!(mark_functionally_verified(
+                &mut r,
+                "session sess_x observed"
+            ));
+            assert_eq!(r.status, HarnessReadinessStatus::FunctionallyVerified);
+        } else {
+            assert!(r.status < HarnessReadinessStatus::Installed);
+            assert!(!mark_functionally_verified(&mut r, "x"));
+        }
+    }
+
+    #[test]
+    fn test_unconfigurable_harness_never_reaches_configured() {
+        let mut r = check_harness_readiness(HarnessKind::Hermes);
+        assert!(r.status <= HarnessReadinessStatus::Installed);
+        assert!(!mark_functionally_verified(&mut r, "x"));
+    }
+}
+
+
+
+===== SOURCE FILE: AGENTS.md =====
+# AGENTS.md — AI Agent & Contributor Guide for `contextWatcher`
+
+Welcome to `contextWatcher` (`cw`). Every human or AI agent working in this repository **must** read and follow these guidelines before planning, writing, or modifying code.
+
+---
+
+## 0. Active milestone: CW-119 Controlled Live-Agent Product Value Qualification
+
+**Before coding**, read [BOARD.md](BOARD.md), [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), and [docs/HARNESS_MATRIX.md](docs/HARNESS_MATRIX.md). Checked historical board tasks are not current product qualification. Ground claims in code, fixtures, CI and reproducible evidence.
+
+- **Completed:** CW-116 Maintainability Gate (PRs #13, #14, #16); CW-112 Codex CLI qualification (PRs #17, #18); CW-114 Long-Session Reliability Campaign across harnesses (PR #20); CW-115 Performance and Savings Qualification (Phase 1 merged via PR #21; Phase 2 four-mode isolation merged via PR #22); CW-117A Policy Engine (PR #23); CW-117B Calibration & Evidence Integrity (PR #24); CW-117C Prospective Shadow Decision & Outcome Correlation (PR #25); CW-118 Product Value & Economic Qualification Gate A (PR #26).
+- **Active:** CW-119 Controlled Live-Agent Product Value Qualification, including CW-119B offline qualification of stateful Responses tail-only `PinContext`. Stateful tail pinning requires authenticated session binding and an explicitly committed rule; tool-only, unknown, signed/opaque, conversation-reference, and historical-mutation cases abstain. Do not infer provider cache hits from append-only request shape.
+- **Next Backlog:** CW-103 broader Codex/Hermes continuation, CW-104 local model qualification, CW-R11 large-history IO qualification.
+- Preserve public CLI/API, session identity, authenticated vs observation-only behavior, raw provider wire bytes/streaming, signed and unknown content, transcript originals, mutation eligibility and fail-open behavior. Do not claim observed cache savings where only estimates exist.
+- Use temporary isolated HOME/config and data directories, mock ports and test stores. Do not edit actual user Hermes config, live session transcripts, installed agent settings or running services.
+- Explicitly distinguish default CI tests, separately invoked ignored harness-binary tests and opt-in live-provider tests. Never report a skipped or unavailable test as passed. Avoid duplicating production algorithms or guards inside tests.
+
+---
+
+## 1. Mission & Core Philosophy
+
+`contextWatcher` is a **local-first, ultra-low-latency intercepting proxy, analyzer, and active manipulation engine** for LLM agent harnesses (Antigravity/AGY, Codex CLI, Pi, OpenCode, Aider, Claude Code).
+
+### Golden Architectural Invariants
+1. **Zero-Drop Proxy Transparency:** In passthrough mode (no active mutations or breakpoints), the proxy must never corrupt provider-specific fields, SSE streaming chunks, thinking signatures (e.g., Anthropic `signature` in `thinking` blocks or Gemini `thoughtSignature`), or cache control headers.
+2. **Canonical Context IR + Lossless Raw Envelope:** Every intercepted request or imported session transcript is parsed into a normalized **Canonical Context Graph (`ContextTurn` / `ContextNode`)** for analysis and UI rendering, while preserving a **lossless JSON pointer map** to the original raw payload so mutations only touch targeted JSON paths.
+3. **Deterministic Mutation Overlay:** Harnesses hold their own history in memory and re-send the full unmutated conversation on every turn. Therefore, all proxy mutations (Prune, Fold, Shadow-Dedupe, Pin, Tool-Gate) are stored as **deterministic overlays keyed by content/structural hashes** (`NodeFingerprint`) and automatically re-applied on every subsequent request—and optionally synced back to the harness's disk transcript.
+4. **KV-Cache Awareness First:** Every mutation must calculate its **KV Cache Impact** before execution. We distinguish between *Prefix-Mutating Operations* (which invalidate the KV cache after token index $k$) and *Tail-Only / Cache-Safe Operations* (which preserve the cached prefix).
+
+---
+
+## 2. Tech Stack & Workspace Layout
+
+```
+contextWatcher/
+├── Cargo.toml                  # Rust workspace root
+├── crates/
+│   ├── cw-core/                # Canonical IR, Radix Tree, KV Cache diffing, Linter, Mutation Engine
+│   ├── cw-proxy/               # Axum HTTP/SSE intercepting proxy (Anthropic, OpenAI, Gemini)
+│   ├── cw-store/               # SQLite persistence, session logs, mutation ledger
+│   ├── cw-harnesses/           # Transcript watchers & adapters (AGY, Codex, Pi, OpenCode, Claude)
+│   ├── cw-mcp/                 # Built-in MCP server so agents can inspect/fold their own context
+│   ├── cw-tui/                 # Ratatui terminal UI dashboard
+│   └── cw-cli/                 # Main `cw` binary (daemon, proxy, CLI commands, embedded Web UI)
+├── web/                        # Svelte 5 + SvelteKit + TypeScript + XYFlow + D3 Web UI
+├── ide/
+│   └── cw-intellij/            # Kotlin IntelliJ Platform Plugin
+├── plugins/
+│   ├── agy/                    # Antigravity skill & MCP config
+│   ├── codex/                  # Codex CLI wrapper & hooks
+│   ├── pi-opencode/            # Pi / OpenCode / Aider integration scripts
+│   └── claude/                 # Claude Code hooks & slash commands
+└── specs/                      # Source-of-truth technical specifications
+```
+
+---
+
+## 3. Specification-Driven Workflow
+
+Before implementing any feature or ticket from [`BOARD.md`](BOARD.md):
+
+1. **Read the Relevant Spec:**
+   * Architecture & APIs $\rightarrow$ [`specs/00-architecture.md`](specs/00-architecture.md)
+   * Graph, Radix Tree, KV Cache & Linter $\rightarrow$ [`specs/01-context-graph-and-kv-cache.md`](specs/01-context-graph-and-kv-cache.md)
+   * Mutation Engine & Overlays $\rightarrow$ [`specs/02-mutation-engine.md`](specs/02-mutation-engine.md)
+   * Web UI (Svelte 5) & TUI/CLI $\rightarrow$ [`specs/03-web-ui-and-tui.md`](specs/03-web-ui-and-tui.md)
+   * Harness Adapters & IntelliJ Plugin $\rightarrow$ [`specs/04-harness-and-ide-plugins.md`](specs/04-harness-and-ide-plugins.md)
+2. **Update `BOARD.md`:**
+   * Move the current ticket to **In Progress** when starting; don't activate later CW-116 subtasks prematurely.
+   * Move it to **Done** only after applicable tests pass, optional tests are accounted for, and evidence/docs are updated.
+   * Record unsupported or unverified scenarios explicitly rather than treating them as passed.
+
+---
+
+## 4. Coding Conventions & Quality Gates
+
+### Rust (`crates/*`)
+* **Edition:** Rust 2024 (or latest stable 2021+ toolchain).
+* **Error Handling:** Use `thiserror` in library crates (`cw-core`, `cw-store`, `cw-harnesses`) and `anyhow` in binary/application crates (`cw-cli`). Never `.unwrap()` on untrusted network payloads or transcript JSON lines.
+* **Async & Streaming:** Use `tokio` and `axum`. Proxy streaming responses (`text/event-stream`) must stream chunks directly to the harness with $<2\text{ms}$ overhead while tapping chunks asynchronously to the state engine.
+* **Testing:** Every mutation operator, KV cache prefix differ, and protocol normalizer in `cw-core` must have deterministic unit tests using recorded real-world fixtures (`tests/fixtures/{anthropic,openai,gemini,agy}/`).
+
+### Web UI (`web/`)
+* **Framework:** Svelte 5 (Runes: `$state`, `$derived`, `$effect`), SvelteKit (`adapter-static` for embedding into `cw-cli` via `rust-embed`).
+* **Visualization:** `@xyflow/svelte` for the interactive Context DAG / Radix Tree; `d3-hierarchy` for the Token Treemap & KV Cache Flamegraph.
+* **State Sync:** Single WebSocket connection (`/api/v1/ws`) driving reactive Svelte 5 stores.
+
+### IntelliJ Plugin (`ide/cw-intellij/`)
+* **Language:** Kotlin (JVM 17/21), IntelliJ Platform Gradle Plugin (2.x).
+* **Design:** Lightweight client connecting to the local `cw` daemon (`http://127.0.0.1:4400/api/v1/ws`). No heavy tokenization inside the IDE process—delegate all analysis to the Rust daemon.
+
+---
+
+## 5. Essential Commands
+
+```bash
+# Rust workspace checks & tests
+cargo check --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+python3 plugins/hermes/context-watcher/test_plugin.py
+
+# Web UI development
+cd web && npm install && npm run dev
+cd web && npm run build && npm run check
+
+# Run contextWatcher daemon locally (once scaffolded)
+cargo run -p cw-cli -- serve --port 4400 --proxy-port 4401
+```
+
+
+
+===== SOURCE FILE: docs/COMPATIBILITY.md =====
+# Supported operations and limits
+
+This is the current safety contract. Fixture coverage is narrower than full real-provider qualification. Generic HTTP compatibility does not establish native transcript support.
+
+| Input / operation | Observe | Active proxy mutation | Transcript export | In-place replacement |
+|---|---|---|---|---|
+| OpenAI Chat, known unsigned text shapes | Raw bytes and analysis | Explicit authenticated session; opt-in | Through supported harness adapter | Unsupported |
+| OpenAI Responses, stateless text and function items | Raw bytes and known-item analysis | Known unsigned text only when the client sends authenticated session headers | Adapter dependent | Unsupported |
+| OpenAI Responses `previous_response_id` + supported user-text tail + committed `PinContext` | Raw bytes; partial local view | Narrow tail append only; authenticated session and explicit committed rule required; user item `type` must be absent or exactly `"message"` | Unsupported | Unsupported |
+| Stateful non-OpenAI requests; mixed `messages` and `input`; invalid/unknown item types; tool-only tails; historical Prune/Fold/Dedupe/Normalize; any non-null `conversation` reference | Raw bytes; partial local view | Abstain and preserve request | Unsupported | Unsupported |
+| Anthropic known text/tool blocks | Raw bytes and analysis | Unsigned known shapes only | Exact tool-result mappings | Unsupported |
+| Gemini known text/function blocks | Raw bytes and analysis | No authenticated session headers from `cw wrap`; observation only | Adapter dependent | Unsupported |
+| Signed thinking / thought signatures / encrypted content | Opaque raw preservation | Disabled for whole payload | Source preserved | Unsupported |
+| Multimodal or unknown content shapes | Raw preservation; partial analysis | Disabled | Unknown records preserved | Unsupported |
+| Sampled transcript (> analysis size bound) | Marked incomplete | Disabled | No full-history optimization | Unsupported |
+| OMP / Pi native JSONL | Recorded-fixture import; local OMP qualification separate | `cw wrap` strips session credentials pending safe shell isolation; otherwise direct authenticated headers only | Exact eligible tool results; resumability version dependent | Unsupported |
+| Codex rollout / Claude JSONL | Recorded-format import | Codex wrapper: known unsigned Responses text, locally mock-verified; other transports depend on headers | Exactly mapped results only | Unsupported |
+| AGY JSONL | Recorded-format import | Depends on actual HTTP transport | Unsupported folds left unchanged | Unsupported |
+| OpenCode SQLite | Explicit import | Independent of import | No native DB write-back | Unsupported |
+| Hermes SQLite | Explicit import | Authenticated `cw wrap hermes` proxy path for built-in DeepSeek; other Hermes routes unverified | No native DB write-back | Unsupported |
+| Aider Markdown | Unsupported native import | Generic proxy observation only | Unsupported | Unsupported |
+
+The watcher follows registered JSONL sources only, filtered by the selected workspace. It reparses changed bounded snapshots on a blocking worker. Native SQLite live watching and validated incremental append cursors are not implemented.
+
+`cw init` installs and enables a Hermes plugin that adds authenticated session headers in Hermes' `llm_request` middleware. Launch Hermes through `cw wrap hermes chat ...` so its built-in DeepSeek provider uses the local `/deepseek` proxy route. The plugin reads the private CW token file in-process, only adds it for that loopback route, and the proxy strips CW headers before forwarding. A two-turn isolated Hermes run against a local mock verified session reuse and committed pin reapplication. A bounded real Hermes/DeepSeek request through an isolated CW daemon returned the expected answer and recorded the provider session; it does not qualify signatures, latency, or other provider routes. Native Hermes SQLite write-back remains unsupported. The old `post_tool_call` proposal was insufficient because Hermes ignores its return value; see [Hermes middleware](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/middleware.md).
+
+`CW_SESSION_ID` is child-process metadata, not proxy authentication: the proxy binds an overlay only when a request carries both authenticated `x-cw-session-id` and `x-cw-control-token` headers. OMP v18.12.6, Claude Code 2.1.126, and Codex CLI 0.165.0 passed local mock checks for authenticated session association. A follow-up Claude Code tool probe showed its Bash child can read `ANTHROPIC_CUSTOM_HEADERS`, including the control token. Therefore `cw wrap` now strips `x-cw-*` headers and control-token environment variables from every non-Codex child; OMP and Claude wrapper requests are observation-only. Codex keeps its authenticated path because its temporary CLI configuration excludes `CW_CONTROL_TOKEN` from shell subprocesses; local mock checks verified session reuse and overlay reapplication.
+
+OpenCode 1.17.3, Pi 1.0.4, and Aider 0.86.2 each sent authenticated session headers when configured through their native provider settings and bound the mock request to the configured session. The proxy stripped those headers before forwarding. These tests used throwaway values in temporary config files; they do not establish safety for untrusted tools running as the same OS user, and `cw wrap` does not create these configurations. Aider receives the documented `OPENAI_API_BASE` endpoint alias from `cw wrap`.
+
+Gemini CLI 0.42.0 and Antigravity CLI 1.4.10 completed local mock calls through `cw wrap` with a dummy API key and local upstream. Antigravity required `modelProvider: "gemini"` in its temporary settings. With explicit `--session-id` values, the store recorded new `sess_…` observation sessions rather than either requested ID, so authenticated session binding is not supported by these wrapper paths. The installed Gemini CLI 0.42.0 source supports `GEMINI_CLI_CUSTOM_HEADERS` for provider requests, but its shell environment sanitizer explicitly preserves all `GEMINI_CLI_*` variables. Carrying a CW session proof there would expose it to model-invoked shell commands, so `cw wrap` must not use this mechanism for authenticated binding. `cw wrap gemini` now strips inherited `x-cw-*` headers from this setting; the focused wrapper test passes. See [Gemini CLI configuration](https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md) and [Antigravity CLI settings](https://www.agy.dev/docs/settings?tab=cli). The proxy forwards a signed Anthropic request body unchanged with a committed pin and forwards a signed SSE response byte-for-byte in deterministic fixture tests. This is fixture-level preservation evidence, not validation of a cryptographic provider signature. A live OpenRouter-to-Anthropic signature check passed as described below; direct Anthropic connectivity and Gemini signatures remain unverified.
+
+The control token protects the local API from unauthenticated callers; it does not isolate against a hostile process running as the same OS user with access to the token file. Run untrusted harnesses under an OS sandbox or separate account.
+
+Opt-in live signature checks are available in `crates/cw-proxy/tests/live_provider.rs`. Run them separately so each provider call is explicit:
+
+```sh
+cargo test -p cw-proxy --test live_provider real_openrouter_gemini_reasoning_details_survive_proxy_forwarding -- --ignored
+cargo test -p cw-proxy --test live_provider real_openrouter_anthropic_signature_event_survives_proxy_streaming -- --ignored
+cargo test -p cw-proxy --test live_provider real_anthropic_signature_event_survives_proxy_streaming -- --ignored
+cargo test -p cw-proxy --test live_provider real_gemini_function_signature_survives_proxy_forwarding -- --ignored
+```
+
+Both OpenRouter cases need `OPENROUTER_API_KEY`. The Anthropic case optionally accepts `CW_R7_OPENROUTER_ANTHROPIC_MODEL` (defaults to `anthropic/claude-haiku-5.5`); it pins routing to Anthropic, disables fallback, and checks for a nonempty streaming `signature_delta`. It passed on 2026-10-29. The Gemini case optionally accepts `CW_R7_OPENROUTER_GEMINI_MODEL` (defaults to `google/gemini-3.8-flash`); it pins routing to Google AI Studio and checks for a tool call with nonempty OpenRouter `reasoning_details`. It passed on 2026-10-29. That normalized OpenAI-compatible response did not contain Gemini's native `thoughtSignature`, so it does not qualify native Gemini signature preservation. The direct Anthropic case needs `ANTHROPIC_API_KEY`, `CW_R7_ANTHROPIC_MODEL`, and optionally `CW_R7_ANTHROPIC_THINKING` (`adaptive` by default; `enabled` for models that support manual extended thinking). The native Gemini case needs `GEMINI_API_KEY` and `CW_R7_GEMINI_MODEL` set to a Gemini model with function-call signatures; it checks for `thoughtSignature`. Tests omit provider error bodies and signature values from assertion output.
+
+The local proxy safety suite verifies that valid session headers select a committed overlay, that the overlay reaches the upstream request, and that the internal session and control headers are stripped before upstream forwarding. Run it with `cargo test -p cw-proxy --test safety`.
+
+## Mutation rules
+
+A pointer locates a target but does not establish its identity. A fingerprint or real call ID must match; when both are supplied both must match. System-fragment writes are disabled without an exact span map. All file-read results and current unread results are protected from generic pruning/folding/truncation. Covered-read dedupe additionally requires matching successful contents and covering ranges. A later write alone does not establish coverage.
+
+Automatic folds, automatic spills, automatic transcript writes, unused-tool removal and local-engine parameter injection are disabled. User-created manual folds require supplied summary text and remain potentially lossy. Pins can change a prefix and are not equivalent to provider-native instructions or native transcript exports.
+
+## Measurements and engine features
+
+Only explicit provider usage is observed cache evidence. Radix/node spans, salience, model-family memory, cost and prefill calculations remain estimates. Unknown cache state is not a cache hit. Minimum optimization (`cache_safe_boost` / `min`) selects only zero-KV-break candidates (`kv_break_tokens == 0`), leaving any `CachedHit` prefix untouched.
+
+Engine slot listing uses actual engine responses; offline slot lists are empty. Splicing and page-alignment calculations are previews. Execute requests for physical page manipulation return unsupported. Replay is a non-network preview. Real task continuation is a separate explicit benchmark operation.
+
+## Sources checked for boundary behavior
+
+Anthropic permits consecutive roles and combines them into a turn; local validation must not reject this documented input. See the [Messages API reference](https://platform.claude.com/docs/en/api/messages/create). Local checks do not validate signatures or all provider schemas.
+
+Anthropic thinking modes vary by model, so the live test defaults to adaptive thinking and allows `enabled` for models that support manual extended thinking. See [Anthropic thinking configuration](https://platform.claude.com/docs/en/build-with-claude/thinking). Gemini 3 and 4 attach thought signatures to function-call responses; the live test forces a function call and checks for its signature. See [Gemini thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures).
+
+OpenRouter exposes an Anthropic Messages-compatible endpoint and supports provider routing controls; the live test uses these to require Anthropic and disable provider fallback. See the [OpenRouter Anthropic Messages API](https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages?explorer=true), [provider routing docs](https://openrouter.ai/docs/guides/routing/provider-selection), and [Claude Haiku 5.5 model page](https://openrouter.ai/anthropic/claude-haiku-5.5/). The model currently documents adaptive thinking by default; model availability and pricing may change.
+
+OpenRouter serves Google models through its OpenAI-compatible API and returns normalized `reasoning_details`; the live proxy test confirms those details pass through with a tool call. This is distinct from Google's native Gemini `thoughtSignature` field, which was absent from the observed normalized response. See [OpenRouter Google models](https://openrouter.ai/google/) and [reasoning details](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
+
+Gemini CLI documents `GOOGLE_GEMINI_BASE_URL` as its API-key endpoint override; `cw wrap` now sets that variable. See [Gemini CLI configuration](https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md). Aider documents `OPENAI_API_BASE` for OpenAI-compatible endpoints; `cw wrap` sets that alias. Aider 0.86.2 also completed a local mock request bound to its configured session when its native provider settings supplied authenticated `x-cw-*` headers. That manual configuration is not provisioned by `cw wrap` and does not establish credential isolation from same-user tools. Correct routing alone does not provide authenticated headers needed for overlay sessions.
+
+The OMP continuation runner uses documented `compact` RPC and isolated model configuration, with `qwen-chat-template` reasoning-off shaping. See [OMP RPC](https://github.com/can1357/oh-my-pi/blob/main/docs/rpc.md) and [model configuration](https://github.com/can1357/oh-my-pi/blob/main/docs/models.md). Installed-version behavior is checked during the run; upstream documentation alone is not runtime evidence.
+
+
+
+===== SOURCE FILE: docs/HARNESS_MATRIX.md =====
+# HARNESS_MATRIX.md — Production Qualification Matrix & Harness Baselines
+
+This document establishes the verified evidence baseline for **CW-110 / CW-110A (Production-Qualified Harness Integrations)** across the three primary target harnesses: **Codex CLI**, **Hermes Agent**, and **OMP (Oh My Pi)**.
+
+Qualification requires proving that contextWatcher (`cw`) observes the correct native session, optimizes the context actually transmitted to the model, preserves agent tool-calling functionality, and survives multi-turn sessions, restarts, and errors without data loss or credential leakage.
+
+---
+
+## 1. Qualification Status Tiers
+
+Every harness integration is categorized according to four qualification tiers:
+
+* 🟢 **Core Proxy Verified:** Protocol normalizer, Canonical IR, mutation overlay engine, credential stripping, byte-for-byte fidelity, and invariant validation tested and passing against mock provider wire contracts in CI without external binaries.
+* 🟢 **Harness Binary Verified:** The actual harness binary (`codex`, `hermes`, `omp`) executes end-to-end in automated integration tests against an isolated local mock provider, asserting process exit code 0, session binding, and wire behavior. Tests explicitly fail (`panic!`) if the binary is absent when invoked.
+* 🟢 **Real-Provider Verified:** Multi-turn coding sessions and task continuations executed against live cloud inference endpoints (OpenAI, Anthropic, DeepSeek) with committed overlays and observed token/cache telemetry.
+* 🟡 / 🔴 **Partial / Blocked:** Functionality that is partially implemented or blocked by known architectural limitations, with tracking tickets and remediation plans.
+
+---
+
+## 2. Summary Status by Harness
+
+| Harness | Core Proxy Verified | Harness Binary Verified | Real-Provider Verified | Live Optimization Status | Active Blocker / Target |
+|---|:---:|:---:|:---:|:---:|---|
+| **Codex CLI (`0.166.0`)** | 🟢 Verified | 🟢 Verified (3-Turn Native Resume & Overlays) | 🟢 Verified (`gpt-4o-mini` multi-turn live continuation) | 🟢 Supported (Responses API) | Qualified in CW-112 & CW-114 |
+| **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume & concurrency hardened) | 🟡 Opt-in Suite C | 🟢 Supported (OpenAI / DeepSeek middleware) | Qualified in CW-113 & CW-114 |
+| **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | Qualified in CW-111B & CW-114 |
+
+---
+
+## 3. The 10 Acceptance Criteria Matrix
+
+| # | Acceptance Criterion | Required Invariant | Codex CLI (`0.166.0`) | Hermes Agent (`0.22.5`) | OMP / Oh My Pi (`18.12.6`) |
+|---|---|---|:---:|:---:|:---:|
+| **AC1** | **Session Identity & Binding** | Correct session bound across multi-turn and resume without crossover | 🟢 **Harness Binary Verified**<br>`x-cw-session-id` header via custom model provider | 🟢 **Harness Binary Verified (Concurrency Hardened)**<br>Native `local-...` session bound across turn 1 and `--resume` turn 2; concurrent launches isolated via UUID-scoped handoff files (`CW_HERMES_OVERRIDE_FILE`) and per-session gateway tracking (CW-113) | 🟢 **Harness Binary Verified**<br>Session identity bound via `CW_SESSION_ID` / `sessionManager.getSessionId()`; control token read from 0600 file |
+| **AC2** | **Committed Overlay Reapplication** | Overlays committed on turn $N$ apply to outbound model payload on turn $N+1$ | 🟢 **Harness Binary Verified**<br>Multi-turn test confirms `PinContext` applied to turn 2 Responses `input` array | 🟢 **Harness Binary Verified**<br>Turn 2 `--resume` outbound Chat Completions payload contains committed `PinContext` policy | 🟢 **Harness Binary Verified**<br>Native `context` hook intercepts in-memory messages, queries `/transform`, and injects committed overlays into outbound prompt |
+| **AC3** | **Zero Duplicate Injection** | Overlays applied exactly once across turns $N, N+1, N+2$; no duplicate accumulation | 🟢 **Core Proxy Verified**<br>Tested across turns 1..3 with 0 duplicate pin occurrences | 🟢 **Core Proxy Verified**<br>Overlay deduplicated by `apply_mutations_to_payload` | 🟢 **Core Proxy Verified**<br>Deduplication verified in canonical engine |
+| **AC4** | **Tool-Call / Result Pairing** | Tool call IDs and tool result pairings strictly preserved under active mutation | 🟢 **Core Proxy Verified**<br>Tested with active `PinContext` mutation; OpenAI Responses & Chat tool pairings 100% valid | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired | 🟢 **Core Proxy Verified**<br>Chat completion tool call and tool result IDs strictly paired |
+| **AC5** | **Signed / Unsupported Shape Passthrough** | Cryptographic thinking signatures & unparseable shapes forwarded with exact byte & JSON-tree fidelity | 🟢 **Core Proxy Verified**<br>Anthropic `thinking` signatures asserted byte-for-byte and JSON-tree equal | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads | 🟢 **Core Proxy Verified**<br>Byte-for-byte passthrough verified on raw wire payloads |
+| **AC6** | **Credential Stripping & Tool Sandboxing** | Control tokens stripped from upstream requests and inaccessible to model tool commands | 🟢 **Core Proxy Verified (Config Sandboxing Contract)**<br>Stripped before upstream; `shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"` configured in settings; live model shell tool verification in CW-112 | 🟢 **Harness Binary Verified**<br>Stripped before upstream; UUID-scoped `hermes-override-<uuid>.json` created with `0600` permissions (`create_new(true)`) and atomically unlinked on consumption; `CW_CONTROL_TOKEN_FILE` read from 0600 file; same-user file boundary documented | 🟢 **Harness Binary Verified**<br>Stripped before upstream; `models.json` has 0 headers; `CW_CONTROL_TOKEN` purged from `process.env` on startup; same-user file boundary documented |
+| **AC7** | **Pristine Source Transcripts** | Harness on-disk transcripts and state databases are never corrupted or rewritten in place | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Harness ingestion, store indexing, and active proxy requests assert 100% BLAKE3 bit-for-bit hash identity on source files | 🟢 **Core Proxy Verified (Transcript Immutability Contract)**<br>Source transcript files untouched bit-for-bit | 🟢 **Harness Binary Verified**<br>On-disk transcript preserves original turns without in-place mutation; in-memory overlays never touch disk transcript |
+| **AC8** | **Safe Fault Recovery & Gate Fail-Open** | Malformed mutations or daemon outages fail open or safe without corrupting agent session | 🟢 **Core Proxy Verified**<br>Corrupting mutation committed; Pre-Forward Validation Gate catches orphan tool invariant violation, logs diagnostic warning, and fails open to raw payload | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified | 🟢 **Core Proxy Verified**<br>Pre-Forward Validation Gate fail-open verified |
+| **AC9** | **Live Binary Task Continuation** | Actual agent binary completes prompt/task against isolated proxy | 🟢 **Harness Binary Verified**<br>`codex exec` completes code 0 in automated test across multiple turns | 🟢 **Harness Binary Verified**<br>`hermes chat` completes code 0 across initial turn and resumed turn | 🟢 **Harness Binary Verified**<br>`omp -p` completes code 0 in automated test (passive proxy mode) |
+| **AC10** | **Telemetry Provenance & Cache Accounting** | Token usage verified against telemetry provenance; un-telemetred cache strictly un-fabricated | 🟢 **Core Proxy Verified**<br>Observed provider usage (`prompt_tokens`, `completion_tokens`) reconciled against AST token spans; absent cache telemetry strictly reported as 0 tokens (`telemetry_available: false`) | 🟢 **Core Proxy Verified**<br>Usage provenance reconciled against wire telemetry | 🟢 **Core Proxy Verified**<br>Usage provenance reconciled against wire telemetry |
+
+---
+
+## 4. Per-Harness Architecture & Verified Baselines
+
+### 4.1 Codex CLI (`0.166.0`) — Reference Implementation
+* **Status:** **Harness Binary Verified (3-Turn Native Resume & Overlays Qualified)** · Completed in CW-112 (see [CW-112-CODEX-QUALIFICATION.md](CW-112-CODEX-QUALIFICATION.md)).
+* **Wire Protocol:** OpenAI Responses API (`/openai/v1/responses`) with streaming Server-Sent Events (`text/event-stream`).
+* **Session Transport:** Native provider config arguments:
+  ```toml
+  model_provider="context_watcher"
+  model_providers.context_watcher.base_url="http://127.0.0.1:4401/openai/v1"
+  model_providers.context_watcher.wire_api="responses"
+  model_providers.context_watcher.env_http_headers={"x-cw-session-id"="CW_SESSION_ID","x-cw-control-token"="CW_CONTROL_TOKEN"}
+  shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"
+  ```
+* **Verified Evidence:**
+  - `test_harness_binary_codex_cli_native_resume_three_turn_qualification`:
+    - Turn 1: `codex exec` starts persistent native thread (`thread.started`), writes `calculator.py` with `add` function via `exec_command`.
+    - Turn 2: `codex exec resume <thread_id>` resumes same thread UUID, ContextWatcher injects committed `CW112_POLICY_ACTIVE` overlay, tool appends `multiply`.
+    - Turn 3: Second native resume re-applies overlay across resume boundary, tool creates `test_calculator.py` and runs unit tests; verified exit code 0.
+    - Rollouts in `CODEX_HOME/sessions` confirmed free of injected overlay content (proxy operates strictly in-flight without modifying persisted transcripts).
+  - `test_harness_binary_codex_cli_unknown_native_session_id_resume`: Resuming unknown UUID exits non-zero; daemon remains healthy.
+  - `test_harness_binary_codex_cli_unauthorized_token_rejection`: Invalid control token rejected with HTTP 403 Forbidden.
+  - `test_harness_binary_codex_cli_upstream_failure_handling`: Upstream 502 Bad Gateway handled with retry backoff; store uncorrupted.
+  - `test_harness_binary_codex_cli_session_isolation`: Session B isolated from Session A's active mutation overlay.
+  - Inbound `x-cw-control-token` and `x-cw-session-id` stripped prior to upstream forwarding.
+  - Tool sandboxing directly tested: model-invoked tool commands inside Codex confirmed to execute without `CW_CONTROL_TOKEN` in environment (`shell_environment_policy.filters.CW_CONTROL_TOKEN="exclude"`).
+* **Live Qualification Status:**
+  - `test_live_continuation_real_codex_multiturn` executed and verified against live OpenAI endpoint with `gpt-4o-mini` (19.26s, 100% pass) under authorized spend budget (<$0.01 spent).
+  - Multi-turn execution proved:
+    - Slices requests by invocation snapshot intervals (capturing all turn subrequests).
+    - Session continuity preserved across native `codex exec resume <thread_id>`.
+    - Real prompt caching observed on Turn 2 and Turn 3 (11,904 cached prompt tokens).
+    - Committed overlay `CW112_POLICY_ACTIVE` verified in outbound wire egress bytes (`store.get_wire_egress`).
+    - Tool subprocesses isolated from credentials (`CW_CONTROL_TOKEN="ABSENT"`).
+    - Persisted rollout JSONL history remains pristine without proxy overlay leakage.
+
+### 4.2 Hermes Agent (`0.22.5`) — Concurrency Hardened & Resume Verified
+* **Status:** **Harness Binary Verified (Multi-Turn Resume & Concurrency Hardened)** · Completed in CW-113.
+* **Wire Protocol:** OpenAI / DeepSeek Chat Completions (`/v1/chat/completions`) with delta chunk streaming.
+* **Middleware Extension Point & Concurrency Hardening (CW-113):**
+  - `plugins/hermes/context-watcher/__init__.py` registers an `llm_request` hook that attaches `x-cw-session-id`, `x-cw-control-token`, and `x-cw-workspace` to requests routed to `_CW_ROUTES`.
+  - **UUID-Scoped Override Handoff:** Replaced the global `hermes-session-override.json` file with unique per-invocation files: `~/.local/share/context-watcher/hermes-override-<uuid>.json`.
+  - **Atomic File Creation & Strict Permissions:** Files are created using `OpenOptions::new().create_new(true).mode(0o600)`, ensuring no symlink or pre-existing file takeover and restricting access strictly to the invoking user.
+  - **Environment-Directed Reference:** The wrapper passes the unique path via `CW_HERMES_OVERRIDE_FILE`. Hermes gateway allows this through via `terminal.client_env_passthrough`.
+  - **Handoff Validation & Atomic Unlink:** The middleware verifies that the target path is a regular file (not a symlink), owned with mode `0600` (`mode & 077 == 0`), created within 120 seconds, and contains valid JSON with a non-empty session ID. It unlinks the file immediately on read (`unlink()`), so each handoff file is consumed exactly once.
+  - **Gateway Daemon Session Scoping:** The Hermes gateway service (`hermes-gateway`) runs as a single persistent daemon serving multiple concurrent client sessions. The middleware indexes consumed overrides strictly by `hermes_sid` in `_SESSION_OVERRIDES`, eliminating shared module-level state and cross-session contamination.
+  - **Same-User Security Boundary:** Handoff files and control token files are created with `0600` permissions, protecting credentials from other user accounts on the host. In an uncontained execution environment, processes running under the same user UID share filesystem read privileges; isolation across processes requires OS containers (e.g. bubblewrap/docker). ContextWatcher unlinks handoff files immediately to minimize exposure windows.
+  - **Fail-Safe Operation:** Invalid, expired, unreadable, or symlinked override files fail safe: the middleware ignores the invalid handoff and does not attach spoofed or arbitrary session headers.
+* **Verified Evidence (7-Gate Multi-Process Qualification Test):**
+  - `test_harness_binary_hermes_middleware_session_binding` exercises 7 comprehensive verification gates:
+    - **Gate 1 (Handoff Consumption & Cleanup):** Two concurrent Hermes processes (Process A and Process B) launched simultaneously against the proxy; each consumed and atomically unlinked its own UUID-scoped override file.
+    - **Gate 2 (Session Identity Isolation):** Process A and Process B bound to two distinct native Hermes session IDs (`local-...`), with no cross-talk.
+    - **Gate 3 (Upstream Overlay Isolation):** Upstream mock captured model requests from both processes. Turn A received policy `CRITICAL_POLICY_A_ONLY`, Turn B received policy `CRITICAL_POLICY_B_ONLY`. Cross-contamination asserted to be exactly 0 (Turn A never saw B's policy; Turn B never saw A's policy).
+    - **Gate 4 (Native Resume Verification):** Session A was resumed via `hermes chat -r <sid_A>`. Turn 2 executed cleanly, maintained session identity `sid_A`, and carried active policy `CRITICAL_POLICY_A_ONLY`.
+    - **Gate 5 (Invalid Handoff Fail-Safe):** Tested with a pre-existing invalid handoff file; Hermes completed cleanly and the middleware failed safe without attaching unauthorized overlays.
+    - **Gate 6 (Credential Stripping):** Captured wire requests across all turns verified that `x-cw-control-token` and `x-cw-session-id` were stripped prior to reaching the upstream model endpoint.
+    - **Gate 7 (20-Session Concurrency Stress Test):** Python test suite `plugins/hermes/context-watcher/test_plugin.py` executed a 20-thread concurrent invocation stress test asserting 0 collisions, 0 race conditions, and complete file cleanup across all 20 threads.
+* **Remaining Work (CW-112):**
+  - Opt-in live multi-turn cloud provider qualification (`CW_QUALIFY_REAL_HERMES=1` against live DeepSeek endpoint).
+
+### 4.3 OMP / Oh My Pi (`18.12.6`) — Native Runtime Context Hook & Hardened Isolation
+* **Status:** **Harness Binary Verified (Native Runtime Hardened & Multi-Turn Resume Verified)** · Completed in CW-111 / CW-111B.
+* **Wire Protocol:** OpenAI Chat Completions (`/v1/chat/completions`) & Anthropic Messages (`/v1/messages`).
+* **Architecture & Security Boundary (CW-111B Hardening):**
+  - `plugins/pi-opencode/index.js` registers native OMP runtime event hooks `pi.on("context", ...)` and `pi.on("before_provider_request", ...)`.
+  - **Zero Credential Exposure in Config:** `models.json` contains zero custom headers or privileged CW control tokens. The unsafe helper `omp_proxy_models_config_with_headers()` has been completely removed from `cw-harnesses`.
+  - **Process Environment Sanitization & Same-User Boundary:** Private control tokens are read securely from `~/.local/share/context-watcher/control-token` (`0600` permissions). The extension immediately purges `CW_CONTROL_TOKEN` and `CW_CONTROL_TOKEN_FILE` from `process.env` in memory on startup so child processes spawned by OMP tools (bash, scripts) cannot inherit them.
+    > [!NOTE] Same-User Security Boundary: Files with `0600` permissions protect credentials against unauthorized user accounts on the host. However, any uncontained tool running under the *same* OS user account can access user-readable files unless enclosed in an OS sandbox/container (e.g. bubblewrap/docker). ContextWatcher purges the token from the process environment so standard tool executions do not inherit it.
+  - **Loopback Enforcement:** `CW_DAEMON_URL` strictly validates hostname against loopback addresses (`127.0.0.1`, `localhost`, `::1`, `[::1]`). Any non-loopback destination fails closed back to local default `http://127.0.0.1:4400`.
+  - **Canonical Session Identity & Isolation:** Prioritizes native session identity (`ctx.sessionManager.getSessionId()`) over ambient environment variables (`CW_SESSION_ID`), guaranteeing that switching native sessions within one process does not cross-bind to an initial wrapper session.
+  - **Single-Pass Transformation & Reference Idempotency:** Employs reference-based `WeakSet` tracking on both transformed message arrays and constituent message objects. Eliminates heuristic time/length windows, guaranteeing that subsequent requests bypassing the context hook are safely transformed while turns already transformed by the context hook are never double-mutated.
+  - **Dynamic Provider Resolution:** Automatically resolves provider (`anthropic`, `gemini`, `deepseek`, `ollama`, `openai`) from `ctx.model.provider` or payload shape.
+  - **Fail-Open Guarantee:** If the CW daemon is offline, unauthenticated, or returns an error, the extension fails open instantly, returning pristine messages so agent workflows are never interrupted.
+* **Verified Evidence (3-Turn Native Resume & Fail-Open Test):**
+  - `test_harness_binary_omp_native_runtime_overlay_reapplication`:
+    - Turn 1: `omp -p "Turn 1 pristine prompt"` executed with tools enabled against isolated proxy endpoint without `--no-session`. Native OMP writes session transcript to `$PI_CODING_AGENT_DIR/sessions/<slug>/<timestamp>_<uuid>.jsonl`.
+    - Turn 1 completed with exit code 0.
+    - Active `PinContext` mutation committed to CwStore (`CRITICAL_OMP_PINNED_POLICY`). (Safety contract enforces that user and system prompts are never pruned or stubbed).
+    - Turn 2: Native OMP resume executed via `omp -r <uuid> -p "Turn 2 resume prompt"` with tools enabled.
+    - Native `context` hook intercepted in-memory messages, queried `/transform`, and injected the pinned policy into outbound wire messages.
+    - Upstream mock captured Turn 2 wire payload containing `CRITICAL_OMP_PINNED_POLICY`.
+    - On-Disk Transcript Evidence: The `.jsonl` transcript file legitimately grew by appending Turn 2; asserted on-disk transcript preserves original Turn 1 prompt, records Turn 2, and does NOT contain the injected pinned policy (in-memory overlay only).
+    - Turn 3: Fail-Open verification under offline daemon (`CW_DAEMON_URL="http://127.0.0.1:19999"`). OMP completed cleanly with exit code 0 and pristine prompt forwarded.
+    - Upstream captured 0 internal contextWatcher metadata headers (`x-cw-*` stripped).
+    - Node.js contract test verified session precedence (native session taking priority over `CW_SESSION_ID`), session switching between native sessions, and reference-based single-pass idempotency.
+
+---
+
+## 5. Upstream Wire Evidence & Captured Requests
+
+### 5.1 Codex CLI Outgoing Request & Forwarding Verification
+Captured from `test_harness_binary_codex_cli_multiturn_overlay_reapplication`:
+* **Inbound to Proxy (`POST /openai/v1/responses`):**
+  ```http
+  POST /openai/v1/responses HTTP/1.1
+  host: 127.0.0.1:4401
+  content-type: application/json
+  accept: text/event-stream
+  x-cw-session-id: codex_multiturn_qual_sess
+  x-cw-control-token: <redacted-32-char-token>
+  authorization: Bearer mock-openai-key
+  ```
+* **Outbound Forwarded by Proxy to Upstream (`POST /v1/responses`):**
+  ```http
+  POST /v1/responses HTTP/1.1
+  host: 127.0.0.1:19284
+  content-type: application/json
+  accept: text/event-stream
+  authorization: Bearer mock-openai-key
+  ```
+* **Header Stripping Assertion:**
+  - `headers.get("x-cw-control-token") == None` ✅
+  - `headers.get("x-cw-session-id") == None` ✅
+  - Upstream receives 0 internal contextWatcher metadata headers.
+
+### 5.2 Overlay Reapplication on Turn 2 (Codex CLI)
+Captured from `test_harness_binary_codex_cli_multiturn_overlay_reapplication`:
+* **Turn 1 Outbound:** Initial prompt forwarded without mutation.
+* **Mutation Committed:** `PinContext { label: "SafetyDirective", content: "CRITICAL_POLICY: MAINTAIN_TOOL_SANDBOXING" }`.
+* **Turn 2 Outbound Forwarded to Upstream:**
+  ```json
+  {
+    "model": "gpt-4o",
+    "input": [
+      {"role": "user", "content": [{"type": "input_text", "text": "Turn 1 prompt"}]},
+      {"role": "assistant", "content": [{"type": "output_text", "text": "Mock responses output"}]},
+      {"role": "user", "content": [{"type": "input_text", "text": "Turn 2 prompt\n\n<cw_pinned_context>\nCRITICAL_POLICY: MAINTAIN_TOOL_SANDBOXING\n</cw_pinned_context>"}]}
+    ]
+  }
+  ```
+* **Result:** Overlay applied to active model context; source session history on disk untouched.
+
+### 5.3 Overlay Reapplication on Resumed Turn 2 (Hermes Agent)
+Captured from `test_harness_binary_hermes_middleware_session_binding`:
+* **Turn 1 Outbound:** Initial chat completion prompt forwarded cleanly under bound session `local-...`.
+* **Mutation Committed:** `PinContext { label: "SafetyPolicy", content: "CRITICAL_HERMES_PINNED_POLICY" }`.
+* **Turn 2 Resumed (`hermes chat -r <sid>`):**
+  ```json
+  {
+    "model": "mock-model",
+    "messages": [
+      {"role": "user", "content": "Say turn 1 prompt"},
+      {"role": "assistant", "content": "Mock chat output"},
+      {"role": "user", "content": "Say turn 2 follow-up\n\n<cw_pinned_context>\n- [SafetyPolicy]: CRITICAL_HERMES_PINNED_POLICY\n</cw_pinned_context>"}
+    ]
+  }
+  ```
+* **Result:** Active `llm_request` middleware attached same session ID on resume; proxy intercepted and applied overlay into chat completion messages.
+
+### 5.4 Overlay Injection via Native Runtime Context Hook (OMP / Oh My Pi)
+Captured from `test_harness_binary_omp_native_runtime_overlay_reapplication`:
+* **Turn 1 Outbound:** `omp -p "Turn 1 pristine prompt"` forwarded cleanly under session `omp_qual_...`.
+* **Mutation Committed:** `PinContext { label: "CRITICAL_OMP_PINNED_POLICY", content: "Zero-hallucination verified native context hook" }`.
+* **Turn 2 Outbound Forwarded to Upstream (`POST /v1/chat/completions`):**
+  ```json
+  {
+    "model": "mock-model",
+    "messages": [
+      {"role": "user", "content": [{"type": "text", "text": "Turn 2 follow-up prompt\n<cw_pinned_context>\n- [CRITICAL_OMP_PINNED_POLICY]: Zero-hallucination verified native context hook\n</cw_pinned_context>"}]}
+    ]
+  }
+  ```
+* **Result:** Native OMP `context` hook intercepted in-memory messages before prompt serialization, applied the active overlay via local CW daemon, and sent optimized prompt to provider; on-disk `.jsonl` session files remained 100% immutable and uncorrupted.
+
+---
+
+## 6. Reproducible Qualification Suite Runner
+
+The qualification suite is implemented in [`crates/cw-proxy/tests/qualification.rs`](../crates/cw-proxy/tests/qualification.rs) and organized into three test suites:
+
+### Suite A: Core Proxy & IR Invariant Tests (CI Default)
+Runs in standard CI environments without requiring harness binaries or cloud API keys:
+```bash
+cargo test -p cw-proxy --test qualification
+```
+Covers:
+- AC1: Session identity & binding
+- AC2: Committed overlay reapplication
+- AC3: Zero duplicate mutation injection
+- AC4: Tool-call and tool-result pairing preservation under active mutations
+- AC5: Signed Anthropic request byte-for-byte and JSON-tree fidelity
+- AC6: Core configuration sandboxing contract (`shell_environment_policy`)
+- AC7: Core source transcript immutability contract (BLAKE3 bit-for-bit check across AGY import, OMP, Hermes)
+- AC8: Safe fault recovery and Pre-Forward Validation Gate fail-open behavior
+- AC10: Telemetry provenance verification and un-fabricated cache accounting
+
+### Suite B: Harness Binary Integration Tests
+Requires locally installed agent binaries (`codex`, `hermes`, `omp`). Explicitly fails if a required binary is missing:
+```bash
+# Run all harness binary integration tests
+cargo test -p cw-proxy --test qualification harness_binary -- --ignored --nocapture
+
+# Run specific harness binary test
+cargo test -p cw-proxy --test qualification test_harness_binary_codex_cli -- --ignored --nocapture
+cargo test -p cw-proxy --test qualification test_harness_binary_hermes -- --ignored --nocapture
+cargo test -p cw-proxy --test qualification test_harness_binary_omp -- --ignored --nocapture
+```
+
+### Suite C: Live Multi-turn Continuation Tests (Opt-in)
+Runs against live cloud inference endpoints with real provider API keys:
+```bash
+# Live Codex CLI qualification against OpenAI
+export OPENAI_API_KEY="sk-..."
+export CW_QUALIFY_REAL_CODEX=1
+cargo test -p cw-proxy --test qualification test_live_continuation_real_codex -- --ignored --nocapture
+
+# Live Hermes Agent qualification against DeepSeek
+export DEEPSEEK_API_KEY="sk-..."
+export CW_QUALIFY_REAL_HERMES=1
+cargo test -p cw-proxy --test qualification test_live_continuation_real_hermes -- --ignored --nocapture
+
+# Live OMP qualification against OpenAI
+export OPENAI_API_KEY="sk-..."
+export CW_QUALIFY_REAL_OMP=1
+cargo test -p cw-proxy --test qualification test_live_continuation_real_omp -- --ignored --nocapture
+```
+
+---
+
+## 7. Long-Session Reliability Campaign (CW-114)
+
+Implemented in [`crates/cw-proxy/tests/long_session_reliability.rs`](../crates/cw-proxy/tests/long_session_reliability.rs) and documented in [`docs/CW-114-LONG-SESSION-RELIABILITY.md`](CW-114-LONG-SESSION-RELIABILITY.md).
+
+* **Scope:** 5 realistic coding-task families (`F1_BugFixing`, `F2_Refactoring`, `F3_FeatureImplementation`, `F4_Tdd`, `F5_InvestigationRecovery`) evaluated across 3 repetitions on all 3 target harnesses (Codex CLI, OMP, Hermes Agent) = **45 total sessions, 360 logical checkpoints/turns**.
+* **Results:**
+  - **Pass Rate:** **100% (45/45 passed, 0 failed, 0 degraded)**.
+  - **Tool Pairing Validity:** 100% across all 360 turns.
+  - **Session Isolation & Transcript Integrity:** 100% across all sessions; 0 credential leaks; 0 transcript corruptions.
+  - **Fault Injection & Resilience:** Verified mid-stream drop detection (`stream_error`), HTTP 502/429 retry backoff recovery, daemon restart state preservation, and concurrent session overlay isolation.
+* **Execution:**
+  ```bash
+  # Deterministic 45-session matrix
+  cargo test -p cw-proxy --test long_session_reliability test_cw114_deterministic_45_session_campaign -- --ignored --nocapture
+
+  # Fault injection & resilience suite
+  cargo test -p cw-proxy --test long_session_reliability test_cw114_fault_injection -- --ignored --nocapture
+  cargo test -p cw-proxy --test long_session_reliability test_cw114_resilience -- --ignored --nocapture
+  ```
+
+---
+
+## 8. Empirical Performance & Savings Qualification (CW-115)
+
+Implemented in [`crates/cw-proxy/tests/performance_qualification.rs`](../crates/cw-proxy/tests/performance_qualification.rs) and documented in [`docs/CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md`](CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md), with raw machine-readable telemetry recorded in [`docs/cw115_benchmark_data.json`](cw115_benchmark_data.json).
+
+* **Scope & Methodology:** Evaluates 3 distinct experiment modes across real coding-agent workloads with real provider telemetry, session-level budget admission control ($1.00 ceiling), and loop limits (`MAX_REQUESTS_PER_SESSION = 30`) in the **Codex CLI (`0.166.0`) F1 Bug-Fixing Live Pilot**:
+  - **Mode A (Native Baseline):** Harness connects directly to provider without proxy or intermediate hops.
+  - **Mode B (CW Passthrough):** Harness routes through `cw-proxy` with active mutations disabled (`AutoPilotConfig.enabled = false`, 0 mutations).
+  - **Mode C (CW Optimized):** Harness routes through `cw-proxy` with active committed context optimizations (historical tool output pruning and tail pin overlays).
+* **Observed Empirical Findings:**
+  - **Passthrough Overhead (Mode B vs Mode A):** Mean streaming overhead $< 2\text{ms/chunk}$; byte-level forwarding fidelity on intercepted payloads; TTFB averaging ~628ms; wall time within normal provider endpoint variation (-17.8% net delta due to cloud inference cluster timing); token totals reflect stochastic agent tool iteration paths (-90,190 mean delta).
+  - **Headline Aggregate Finding (Mode C vs Mode B, Both Repetitions):** Across both repetitions, optimization increased total input tokens by **+50.0%** (451,353 vs 300,976) and calculated cost by **+46.2%** ($0.03950 vs $0.02702) due to mid-session prompt cache invalidation in Repetition 1.
+  - **Cache-Aligned Counterexample (Repetition 2):** When optimizations preserved the prompt cache prefix, Mode C reduced input tokens by **-21.3%** (144,528 $\to$ 113,725), wall clock execution time by **-29.2%** (25.89s $\to$ 18.34s), and calculated cost by **-20.7%** ($0.01300 $\to$ $0.01031).
+  - **Phase 2 Four-Mode Optimization Isolation Experiment:** Isolating optimization into Mode 0 (Passthrough Control), Mode 1 (Cache-Safe Tail Pin), Mode 2 (Historical Pruning), and Mode 3 (Combined Optimization) across live Codex CLI `gpt-4o-mini` runs (documented in `docs/CW-115-FOUR-MODE-ISOLATION-REPORT.md` and `docs/cw115_four_mode_benchmark_data.json`):
+    - **Mode 1 (Tail-Only PinContext):** Retained 92.24% cache hit ratio (vs Mode 0 89.57%) in the live run; bit-for-bit prefix preservation proven deterministically via wire fixture test; observed -34.06% input token reduction via behavioral model steering (17 vs 23 requests), -37.71% cost savings ($0.01992 vs $0.03197), and -39.75% wall time speedup (36.4s vs 60.4s).
+    - **Mode 2 (Historical Pruning Only):** Cut 84,505 input tokens (-24.15%) and reduced cost by -25.49% ($0.02382 vs $0.03197) when the pruned stub remained consistent across continuation turns.
+    - **Mode 3 (Combined Optimization):** Delivered compound maximum reduction of -50.02% input tokens (174,920 vs 349,980), -43.5% model requests (13 vs 23), and -48.31% cost savings ($0.01653 vs $0.03197).
+  - **Architectural Validation:** Confirms ContextWatcher's core architectural principle: **KV-Cache Awareness First**. Pruning historical turns when a warm cache exists destroys the 50% prompt-cache discount and induces exploratory requests; mutations must operate strictly in tail/cache-safe mode (`min` strategy) whenever a warm prefix is detected.
+* **Execution:**
+  ```bash
+  # Deterministic cost model, budget guards, regression math & prefix preservation (CI test suite)
+  cargo test -p cw-proxy --test performance_qualification
+
+  # Opt-in live provider benchmark (requires OPENAI_API_KEY and CW_QUALIFY_REAL_CODEX=1)
+  export OPENAI_API_KEY="sk-..."
+  export CW_QUALIFY_REAL_CODEX=1
+  cargo test -p cw-proxy --test performance_qualification test_live_codex_cw115_empirical_performance_qualification -- --ignored --nocapture
+
+  # Opt-in live 4-mode optimization isolation experiment
+  export CW_QUALIFY_FOUR_MODE=1
+  cargo test -p cw-proxy --test performance_qualification test_live_codex_cw115_four_mode_isolation_experiment -- --ignored --nocapture
+  ```
+
+
+
+
+
+===== SOURCE FILE: BOARD.md =====
+# BOARD.md — `contextWatcher` Project Board
+
+> **Legend:** `P0` = Critical Path | `P1` = Core Feature | `P2` = Enhancement
+> **Workflow:** Move items across `Ready` $\to$ `In Progress` $\to$ `Review` $\to$ `Done`. Always reference ticket IDs (`CW-XXX`) in commits and PRs.
+
+> **Current delivery priority:** CW-120A Product Value Experiment Readiness; offline study preparation only, no provider spending authorized. CW-119C stateless PinContext delivery was verified by saved-evidence replay and merged via PR #30; stateful delivery and product economics remain unverified. CW-118 Gate A offline qualification merged via PR #26.
+
+---
+
+## Historical implementation milestones
+
+These checkboxes record earlier implementation work, not current qualification. The remediation section and [support contract](docs/COMPATIBILITY.md) govern current behavior; unsupported claims below remain historical design descriptions.
+
+* [x] **CW-000** `[P0]` `[Arch]` Project vision, architecture, roadmap, specs, and `AGENTS.md` initialization.
+
+### Epic 0: Workspace & Canonical Context IR (`specs/00-architecture.md`)
+* [x] **CW-001** `[P0]` `[Workspace]` Initialize Cargo workspace (`cw-core`, `cw-store`, `cw-proxy`, `cw-harnesses`, `cw-mcp`, `cw-tui`, `cw-cli`) with shared dependencies and linting rules.
+* [x] **CW-002** `[P0]` `[cw-core]` Define Canonical Context IR types (`Session`, `ContextTurn`, `ContextNode`, `NodeKind`, `Role`, `TokenSpan`, `NodeFingerprint`).
+* [x] **CW-003** `[P0]` `[cw-core]` Implement lossless Protocol Normalizers & JSON-Pointer maps for **Anthropic Messages API** (`/v1/messages`), **OpenAI Chat/Responses API**, and **Gemini API**.
+* [x] **CW-004** `[P0]` `[cw-core]` Implement fast Tokenizer & Token Accounting module (provider-aware prefix serialization order & positional attention salience curve).
+* [x] **CW-005** `[P0]` `[cw-store]` Implement SQLite persistence layer (`sessions`, `turns`, `blobs`, `mutations`, `firewall_rules`, `file_states`) with WAL mode enabled.
+
+### Epic 1: Intercepting Proxy & Transcript Watchers (`specs/00-architecture.md`, `specs/04-harness-and-ide-plugins.md`)
+* [x] **CW-006** `[P0]` `[cw-proxy]` Build Axum HTTP/SSE reverse proxy with streaming chunk tap, zero-drop header forwarding, and automatic provider detection.
+* [x] **CW-007** `[P0]` `[cw-proxy]` Expose Daemon Control REST API (`/api/v1/sessions`, `/api/v1/turns`, `/api/v1/mutations`, `/api/v1/replay`, `/api/v1/firewall`) and real-time WebSocket hub (`/api/v1/ws`).
+* [x] **CW-008** `[P0]` `[cw-harnesses]` Implement **Antigravity (AGY)** adapter (`transcript.jsonl` + `transcript_full.jsonl` watcher & parser, including `truncated_fields` resolution and tool call pairing).
+* [x] **CW-009** `[P0]` `[cw-harnesses]` Implement **Codex CLI** and **OpenAI-compatible** session rollout watcher & parser.
+* [x] **CW-010** `[P1]` `[cw-harnesses]` Implement **Pi / OpenCode / Aider** and **Claude Code** (`~/.claude/projects/**/*.jsonl`) transcript watchers.
+* [x] **CW-011** `[P1]` `[cw-cli]` Implement `cw wrap <harness-cmd>` launcher that injects proxy env vars (`OPENAI_BASE_URL`, `ANTHROPIC_BASE_URL`, `GEMINI_API_BASE_URL`) and attaches session metadata.
+
+### Epic 2: Radix Tree, KV Cache X-Ray & Context Linter (`specs/01-context-graph-and-kv-cache.md`)
+* [x] **CW-012** `[P0]` `[cw-core]` Implement Token-Prefix Radix Tree builder (`build_radix_graph`) across sequential turns and conversation branches.
+* [x] **CW-013** `[P0]` `[cw-core]` Implement KV Cache Boundary & Prefix Diff Analyzer (`CachedHit` 🟢, `NewlyCached` 🟡, `CacheInvalidated` 🔴) with exact invalidation root-cause detection (`DynamicSystemInjection`, `ToolSchemaMutated`, `HistoryEditedOrCompacted`, `CacheTtlExpired`).
+* [x] **CW-014** `[P0]` `[cw-core]` Implement **Stale File Detector (`CW-L001`)**: cross-reference `read_file` nodes in context against subsequent `edit_file`/`write_file` tool calls and on-disk file BLAKE3 hashes.
+* [x] **CW-015** `[P0]` `[cw-core]` Implement **Duplicate Read & Output Detector (`CW-L002`, `CW-L003`, `CW-L004`)**: detect identical or overlapping file reads, massive outputs, and consecutive failed debugging loops.
+* [x] **CW-016** `[P1]` `[cw-core]` Implement **Tool Bloat & Attention Dilution Linter (`CW-L005`, `CW-L006`, `CW-L007`)**: measure MCP tool schema overhead, detect unused tool servers, and compute "Lost in the Middle" attention risk scores.
+
+### Epic 3: Svelte 5 Web UI & Ratatui TUI (`specs/03-web-ui-and-tui.md`)
+* [x] **CW-017** `[P0]` `[web]` Initialize Svelte 5 + Vite + TypeScript project in `web/` and embed static build into `cw-cli` via `rust-embed`.
+* [x] **CW-018** `[P0]` `[web]` Build real-time WebSocket state store (`$state` / `$derived` / `$effect` runes) synced with the `cw` daemon.
+* [x] **CW-019** `[P0]` `[web]` Build **Interactive Context Graph / Radix Tree Canvas** with KV cache color coding and lint badges.
+* [x] **CW-020** `[P0]` `[web]` Build **Token Treemap & KV Cache Flamegraph** (`d3-hierarchy`) showing exact proportional usage across System, Rules, Skills, MCP Schemas, File Reads, Bash Outputs, and Thinking.
+* [x] **CW-021** `[P1]` `[web]` Build **Node Inspector & Surgical Action Drawer** (JSON Pointer viewer, token span details, and 1-click mutation controls).
+* [x] **CW-022** `[P1]` `[cw-tui]` Build **Ratatui Terminal UI (`cw tui`)** with split-pane Session/Turn Tree, KV Cache gauge, Lint list, and quick mutation hotkeys (`p` prune, `f` fold, `d` dedupe, `Space` pin, `o` optimize).
+* [x] **CW-023** `[P1]` `[cw-cli]` Implement CLI inspection & manipulation commands: `cw status`, `cw tree`, `cw lint`, `cw fold`, `cw prune`, `cw dedupe`, `cw gate`, `cw pin`, `cw import`.
+
+### Epic 4: Surgical Mutation & Deterministic Overlay Engine (`specs/02-mutation-engine.md`)
+* [x] **CW-024** `[P0]` `[cw-core]` Implement `NodeFingerprint` content/structural hashing and the **Deterministic Mutation Ledger (Overlay Engine)** so mutations persist across stateless HTTP proxy turns.
+* [x] **CW-025** `[P0]` `[cw-core]` Implement **Prune / Stub Operator (`PruneOrStub`)**: replace heavy tool outputs or thinking blocks with compact stubs while maintaining valid tool-use/tool-result pairing.
+* [x] **CW-026** `[P0]` `[cw-core]` Implement **Subtree Folding Operator (`FoldSubtree`)**: collapse a multi-turn trajectory into a single outcome summary node.
+* [x] **CW-027** `[P0]` `[cw-core]` Implement **Shadow Deduplication Operator (`ShadowDedupe`)**: automatically replace superseded earlier `read_file` outputs with `[cw:shadow_deduped ...]`.
+* [x] **CW-028** `[P0]` `[cw-core]` Implement **Dynamic Tool & Skill Gating Operator (`GateToolsAndSkills`)**: filter disabled MCP tools or servers out of the outgoing request payload on the fly.
+* [x] **CW-029** `[P1]` `[cw-core]` Implement **Context Pinning (`PinContext`)**: inject `<cw_pinned_context>` blocks at the high-attention tail of the prompt without invalidating the cached token prefix.
+* [x] **CW-030** `[P1]` `[cw-core]` Implement **Cache-Safe Draft Queue**: stage prefix-altering mutations and estimate KV cache rebuild cost (`estimate_mutation_impact`) before committing.
+
+### Epic 5: Context Firewall (Breakpoints) & Time-Travel Replay (`specs/02-mutation-engine.md`, `specs/03-web-ui-and-tui.md`)
+* [x] **CW-031** `[P1]` `[cw-proxy]` Implement **Context Firewall (`evaluate_firewall`)**: pause in-flight proxy requests or auto-truncate/dedupe when rules trigger.
+* [x] **CW-032** `[P1]` `[cw-proxy]` Implement **Time-Travel Forking & A/B Replay Engine (`/api/v1/sessions/:id/replay`)**: branch from any historical turn, apply mutation overlays, and record side-by-side comparison metrics.
+* [x] **CW-033** `[P1]` `[web]` Build **Firewall Interceptor Alert Banner** and **A/B Replay Comparison Studio** in the Svelte 5 Web UI.
+
+### Epic 6: MCP Server, Harness Plugins & IntelliJ Plugin (`specs/04-harness-and-ide-plugins.md`)
+* [x] **CW-034** `[P0]` `[cw-mcp]` Implement built-in MCP Server (`cw mcp`) exposing self-inspection and self-compaction tools (`cw_context_status`, `cw_evict_stale_reads`, `cw_fold_turns`, `cw_prune_tool_output`, `cw_pin_context`, `cw_gate_tools`).
+* [x] **CW-035** `[P0]` `[plugins/agy]` Create **Antigravity (AGY)** integration package: `context-watcher` Skill (`SKILL.md`), MCP configuration, and `transcript.jsonl` + `transcript_full.jsonl` sync.
+* [x] **CW-036** `[P1]` `[plugins/codex]` Create **Codex CLI** plugin wrapper, config profile, and MCP integration.
+* [x] **CW-037** `[P1]` `[plugins/pi-opencode]` Create **Pi / OpenCode / Aider** and **Claude Code** integration configs and wrapper scripts.
+* [x] **CW-038** `[P1]` `[ide/cw-intellij]` Create Kotlin **IntelliJ Platform Plugin** (`cw-intellij`) with WebSocket & HTTP service connecting to local `cw` daemon.
+* [x] **CW-039** `[P1]` `[ide/cw-intellij]` Implement IntelliJ **Editor Notification Banner & Gutter Line Markers** (`CwEditorNotificationProvider`, `CwLineMarkerProvider`).
+* [x] **CW-040** `[P1]` `[ide/cw-intellij]` Implement IntelliJ **ContextWatcher Tool Window** & Editor Actions (`PinSelectionToContextAction`, `EvictStaleFileAction`).
+
+### Epic 7: Production Hardening, Multi-Harness Sync & Local Model Engine Optimization
+* [x] **CW-041** `[P0]` `[cw-harnesses/cw-mcp/cw-cli]` Implement **Safe Transcript Write-Back (`cw sync-back`)** with `.bak` backups for Antigravity, Claude Code, Codex, OpenCode, Pi & Aider + `cw install-integrations` + `cw_optimize_strategy` MCP tool.
+* [x] **CW-042** `[P0]` `[cw-proxy]` **Proxy Production Hardening**: Strip internal `cw_*` fields before upstream forwarding, normalize `Accept-Encoding`, and add async **SSE Stream Parser Tap** for Anthropic, OpenAI, Gemini, Ollama & llama.cpp usage/KV metrics.
+* [x] **CW-043** `[P0]` `[cw-core]` **Real Disk `mtime` & Line-Slice Hash Verification (`CW-L001`)**: Detect external IDE/git edits on both full and partial (`StartLine..EndLine`) file reads and support 1-click Fresh Disk Diff tail injection.
+* [x] **CW-044** `[P0]` `[cw-core/cw-proxy]` **Auto-Pilot Background Policies**: Hands-free policies (`zero_break_tail_hygiene` with `/tmp/cw_logs/` spillover, `auto_cache_safe_pin`, `auto_diet_at_breakpoint`, `local_model_window_guard`) with REST API, CLI & Web UI controls.
+* [x] **CW-045** `[P0]` `[cw-core/web]` **Model Pricing, Cost ($) Ledger & Prefill Time Calculator**: Compute live turn cost (`$`), KV cache `$` savings, `cw` overlay `$` savings, and local prefill milliseconds saved across cloud and local models.
+* [x] **CW-046** `[P0]` `[cw-harnesses/cw-proxy]` **Incremental Watcher & Lightweight Graph API**: Track file `(mtime, byte_len)` state across all harness directories and serve lightweight historical turn summaries on `/api/v1/sessions/:id/graph` for instant rendering on 350k+ token sessions.
+* [x] **CW-047** `[P0]` `[cw-core/cw-proxy/web/cw-cli]` **Local Model Engine & KV-Cache Slot Controller (`Ollama`, `llama.cpp`, `vLLM`, `SGLang`, `LM Studio`)**: Automatic `n_keep` / `num_keep` system-prompt pinning, `cache_prompt: true` + `id_slot` session affinity, PagedAttention block alignment, KV VRAM calculator (`FP16`/`Q8_0`/`Q4_0`), sliding-window overflow guard, and Web UI **`🖥️ Local LLM & Auto-Pilot`** tab + `cw local` CLI.
+
+### Epic 8: Pre-Forward Validation Gate, Mutation Reliability & Taxonomy
+* [x] **CW-048** `[P0]` `[cw-proxy/cw-core]` **Post-Mutation Pre-Forward Validation Gate & Fail-Open Fallback**:
+  - Re-parse mutated outgoing JSON through `cw-core::ir` protocol normalizer before upstream dispatch.
+  - Assert structural invariants: strict role alternation, `tool_use` <-> `tool_result` ID 1:1 pairing, thinking signature integrity.
+  - Fail-Open Guarantee: On any validation error, log diagnostic warning, revert payload to raw unmutated clone, and forward safely so upstream never returns HTTP 400.
+* [x] **CW-049** `[P1]` `[cw-store/cw-proxy]` **Closed-Loop Mutation Effectiveness & Telemetry Tracker**:
+  - Correlate applied `MutationLedgerId` with subsequent turn metrics (TTFT ms, provider cache hit/miss tokens, follow-up read frequency).
+  - Surface per-mutation effectiveness scores in `cw gain --history` and Web UI.
+* [x] **CW-050** `[P2]` `[cw-core/cw-mcp]` **Taxonomy Reconciliation (`ShadowDedupe`)**:
+  - Align `CW-L001` linter fix name, MCP tool description, and `MutationOp` onto unified `ShadowDedupe` taxonomy.
+* [x] **CW-051** `[P0]` `[cw-core/cw-harnesses/cw-proxy/cw-cli]` **Proactive Low-Health Self-Healer (`AutoPilot Rule 5`) & OMP Benchmark**:
+  - Autonomous health threshold evaluation (`min_health_score`, default 75) across in-flight proxy requests and background transcript ingestion.
+  - Zero-prompt auto-healing: applies non-breaking shadow deduplication and surgical log compaction, commits mutations, and atomically syncs back to `.jsonl` transcript with `.bak` safety.
+  - CLI control via `cw autopilot --min-health <u8> --strategy <str> --sync-to-disk <bool>`.
+  - Deep empirical benchmark conducted with `omp` against local LLM `flint` (`192.168.1.156:8090`, Q8_0, 40B): health restored from 48 to 100/100, 5,074 tokens saved, 99.1% KV cache hit ratio preserved, TTFT accelerated 4.3x (428ms), 100% test pass rate (8/8).
+
+### Epic 9: Architecture, SOLID Refactoring & Robustness Hardening
+* [x] **CW-052** `[P0]` `[cw-core/cw-store/cw-proxy/cw-harnesses/cw-mcp]` **Codebase Audit, SOLID Principles Refactoring & Multi-Packet Stream Hardening**:
+  - **Zero-Panic Guarantee**: Eliminated `.unwrap()` hazards across proxy dry-run handlers, store mutex locks, and CLI status lookups.
+  - **Gemini Tool Compatibility**: Fixed LSP violation by normalizing tool filtering and deterministic sorting across both `functionDeclarations` and `function_declarations` schemas.
+  - **Dependency Inversion (DIP)**: Abstracted database coupling by introducing [`ContextRepository`](file:///home/gionag/Development/contextWatcher/crates/cw-core/src/repository.rs) and [`MutationRepository`](file:///home/gionag/Development/contextWatcher/crates/cw-core/src/repository.rs) in `cw-core`.
+  - **JSON-RPC 2.0 Compliance**: Standardized MCP error handling with error code `-32601` for unknown methods and diagnostic errors for unknown tools.
+  - **Multi-Packet SSE Stream Tap**: Implemented [`SseChunkAccumulator`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/src/lib.rs) ensuring zero dropped usage or KV cache metrics under fragmented TCP packets.
+  - **Crash-Safe Atomic Sync-Back**: Implemented atomic temp file writes (`fs::rename`) and automated `.bak` backups before modifying harness transcripts.
+  - **Verification**: 25 automated tests passing across the workspace with 0 clippy warnings.
+
+---
+
+### Epic 10: Horizon 1 — Always-On Zero-Touch Automation & Ambient Pulse
+* [x] **CW-053** `[P0]` `[cw-core/cw-store]` **Ambient Savings Metric Accumulator & Pulse Formatter**:
+  - Compute cumulative tokens saved, KV cache hit ratio, Time-to-First-Token acceleration factor (e.g. 176s -> 1.6s, 108x faster), and dollar value saved.
+  - Generate clean, friendly pulse strings: `⚡ [cw] We saved you 12,966 tokens | KV Cache: 98.2% preserved | TTFT: 176s -> 1.6s (108x faster) | $0.18 saved`.
+* [x] **CW-054** `[P0]` `[cw-proxy/cw-harnesses]` **Always-On Autonomous Background Self-Healer**:
+  - Automatically evaluate in-flight proxy turns and background transcript watcher updates.
+  - Proactively apply non-breaking surgical log and monologue diet whenever context bloat exceeds 15,000 tokens or Health drops below 75, with zero user prompting.
+* [x] **CW-055** `[P0]` `[cw-cli]` **Ambient Savings Pulse Delivery**:
+  - Output periodic pulse updates to stderr in `cw wrap` and log pulse events to SQLite.
+  - Support automatic terminal notifications and non-breaking transcript comments.
+* [x] **CW-056** `[P1]` `[cw-cli]` **`cw pulse` CLI & Ambient Notification Integration**:
+  - Implemented `cw pulse` command to query recent ambient savings notifications across active sessions (`cw pulse --session <id>`).
+  - Added REST API routes `/api/v1/pulses` and `/api/v1/sessions/:id/pulses` + WebSocket event `AmbientSavingsPulse`.
+
+---
+
+### Epic 11: Horizon 2 — Multi-Agent Swarm Radix Router
+* [x] **CW-060** `[P1]` `[cw-core]` **Cross-Session Prefix Grouping & Radix Tree Sharing**:
+  - Implemented [`SwarmPrefixGroup`](file:///home/gionag/Development/contextWatcher/crates/cw-core/src/swarm.rs) and [`analyze_swarm_prefix_sharing`](file:///home/gionag/Development/contextWatcher/crates/cw-core/src/swarm.rs) in `cw-core`.
+  - Automatically clusters active and historical agent sessions by `(workspace, model)` and extracts their Longest Common Prefix (LCP) across ordered root nodes (system prompt, rules, tool definitions).
+  - Computes exact local GPU VRAM memory multiplexing reduction: $(M - 1) \times P$ tokens saved, with FP16 and INT8/Q8 megabyte savings estimates.
+  - Implemented [`build_swarm_radix_graph`](file:///home/gionag/Development/contextWatcher/crates/cw-core/src/swarm.rs) generating a unified visual Radix DAG with shared trunk and branching subagent leaves.
+* [x] **CW-061** `[P1]` `[cw-proxy/cw-cli]` **Swarm Prompt Multiplexer & CLI Inspection (`cw swarm`)**:
+  - Implemented `cw swarm [--project <name>] [--model <name>] [--min-members <N>] [--json]` CLI command in `cw-cli`.
+  - Added REST API routes `/api/v1/swarms` and `/api/v1/swarms/:group_id/graph` in `cw-proxy`.
+  - Tested on live sessions: identified 47 multi-agent clusters across 300 active agents with 7,485 shared tokens saved and 1.87 GB VRAM preserved.
+
+---
+
+### Epic 12: Horizon 3 — Engine-Level PagedAttention Splicing
+* [x] **CW-070** `[P2]` `[cw-core/cw-proxy/cw-cli]` **Engine-Level PagedAttention & Slot Bridge**:
+  - Implemented [`crates/cw-core/src/slot_bridge.rs`](file:///home/gionag/Development/contextWatcher/crates/cw-core/src/slot_bridge.rs) providing discrete PagedAttention memory block mapping (`block_size = 16` or `64`), deterministic slot affinity hashing, and zero-recompute physical page unmapping calculation (`plan_slot_splicing`).
+  - Added REST API routes `/api/v1/engine/slots` and `/api/v1/engine/slots/:slot_id/splice` in [`crates/cw-proxy/src/lib.rs`](file:///home/gionag/Development/contextWatcher/crates/cw-proxy/src/lib.rs).
+  - Implemented `cw slot [--session <id>] [--engine <url>] [--slot-id <N>] [--splice-range <start..end>] [--json]` in [`crates/cw-cli/src/main.rs`](file:///home/gionag/Development/contextWatcher/crates/cw-cli/src/main.rs).
+  - Validated live against upstream engine at `http://192.168.1.156:8095`: successfully retrieved slot status (131k context, 28k tokens, 1,761 blocks, 7.0 GB VRAM) and simulated physical page unmap (300 blocks / 4,800 tokens / 1.2 GB VRAM / ~7.4s prefill recompute avoided).
+
+### Epic 13: Live Multi-Agent Swarm Benchmark on Hardware (.156)
+* [x] **CW-075** `[P1]` `[benchmark]` **Multi-Agent Swarm Concurrency Benchmark on Strata/Qwen3.8**:
+  - Implemented [`benchmark/run_swarm_benchmark.py`](file:///home/gionag/Development/contextWatcher/benchmark/run_swarm_benchmark.py) simulating 4 subagents (Lead, Coder, Tester, Auditor) hitting `http://192.168.1.156:8095`.
+  - Proven on hardware: unshared execution cold-prefills 12,886 tokens taking 85.6s, while `cw swarm` multiplexing drops team memory to 3,286 tokens (74.5% memory reduction, 2.34 GB VRAM saved) and slashes TTFT to 21.2s (4.04x speedup, 120x+ on subagents).
+  - Generated report in [`benchmark/artifacts_swarm/SWARM_BENCHMARK_REPORT.md`](file:///home/gionag/Development/contextWatcher/benchmark/artifacts_swarm/SWARM_BENCHMARK_REPORT.md).
+
+### Epic 14: Horizon 4 — Amb
+</file>
+Using only the supplied repository source, identify the helper that applies harness-specific session ID handling. Cite its exact relative file and symbol. Do not edit files.
+
+Recorded assistant message:
+`crates/cw-harnesses/src/adapters/generic.rs` — `imported_session_id(harness: HarnessKind, id: &str) -> String`
+
+It applies harness-specific session ID handling: OMP IDs are used unchanged, other harness IDs are truncated to the first 12 characters, then prefixed with `harness.as_str()`.
+
+Recorded user message:
+Evaluation ID: 32k-long-step1. Compare OMP and non-OMP session ID handling. Give the exact helper and behavior for each, with source citations. Do not edit files.
+
+Recorded assistant message:
+Exact helper: `imported_session_id` in `crates/cw-harnesses/src/adapters/generic.rs`.
+
+```rust
+fn imported_session_id(harness: HarnessKind, id: &str) -> String {
+    let id = if harness == HarnessKind::Omp {
+        id
+    } else {
+        id.char_indices()
+            .nth(12)
+            .map(|(byte_offset, _)| &id[..byte_offset])
+            .unwrap_or(id)
+    };
+    format!("{}_{}", harness.as_str(), id)
+}
+```
+
+Behavior:
+
+- **OMP / `HarnessKind::Omp`**
+  - Session ID is used unchanged.
+  - Final stored ID is `omp_<id>`.
+  - Citation: `crates/cw-harnesses/src/adapters/generic.rs`, `imported_session_id`, `if harness == HarnessKind::Omp { id }`.
+
+- **Non-OMP harnesses**
+  - Session ID is truncated to the first 12 characters when possible.
+  - `char_indices().nth(12)` finds the byte offset of the 13th character; slicing `&id[..byte_offset]` keeps the first 12 characters.
+  - If the ID has fewer than 13 characters, it is left unchanged.
+  - Final stored ID is `<harness>_<first-12-chars-or-full-id>`.
+  - Citation: `crates/cw-harnesses/src/adapters/generic.rs`, `imported_session_id`, `id.char_indices().nth(12).map(|(byte_offset, _)| &id[..byte_offset]).unwrap_or(id)`.
+
+Recorded user message:
+Evaluation ID: 32k-long-step2. Which test asserts that the imported OMP session ID remains complete? Give its exact name and file. Do not edit files.
+
+Recorded assistant message:
+Exact test: `test_import_omp_transcript`
+
+File: `crates/cw-harnesses/src/lib.rs`
+
+It asserts the imported OMP session ID remains complete:
+
+```rust
+assert_eq!(sess_id, "omp_01a16530-b4a1-71cb-b159-96200fb07f14");
+```
+
+Recorded user message:
+Evaluation ID: 32k-long-step3. Final check: name the exact regression test for full imported OMP session ID preservation and the helper that applies harness-specific ID handling. Cite both exact relative paths and symbol names. Do not edit files.
+
+Recorded assistant message:
+Exact regression test:
+
+- `test_import_omp_transcript`
+- File: `crates/cw-harnesses/src/lib.rs`
+
+Exact helper:
+
+- `imported_session_id`
+- File: `crates/cw-harnesses/src/adapters/generic.rs`

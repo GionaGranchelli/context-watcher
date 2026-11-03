@@ -1,0 +1,41 @@
+{
+  "tag": "128k-direct-short-m2",
+  "mutation_id": "mut_d60dfe66",
+  "mutation_status": "committed",
+  "pin_in_saved_omp_transcript": false,
+  "provider_calls_with_marker": 2,
+  "calls": [
+    {
+      "turn_id": "turn_2853e5539eda4e8bb1f2eb11fd17037c",
+      "harness": "generic_proxy",
+      "request_equals_egress": true,
+      "egress_bytes": 487101,
+      "egress_sha256": "64c96298cc1616579b8d163623c345f60918dd45743cb63fd9b67028b953c8b8",
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_status": "ok",
+      "transform_api_applied_rules": [
+        "mut_d60dfe66"
+      ],
+      "transform_output_matches_egress_messages": false
+    },
+    {
+      "turn_id": "turn_71e8ab825d1d47eb8bb57bc9d8da12fb",
+      "harness": "generic_proxy",
+      "request_equals_egress": true,
+      "egress_bytes": 490900,
+      "egress_sha256": "6139271c5231735e50e9a32c034bc729e1ef76485eab70136f81ee864ffd3650",
+      "pin_occurrences": 1,
+      "pin_in_tail": true,
+      "proxy_applied_mutation_ids": [],
+      "transform_api_status": "ok",
+      "transform_api_applied_rules": [
+        "mut_d60dfe66"
+      ],
+      "transform_output_matches_egress_messages": true
+    }
+  ],
+  "treatment_verified": true,
+  "interpretation": "The OMP extension applied the committed overlay before cw-proxy capture. Proxy ledger attribution is empty because the proxy sees a generic session; transform endpoint replay verifies the applied rule."
+}

@@ -1,0 +1,13 @@
+Inspected both files; no changes made.
+
+**math_ops.py** (2 functions):
+- `divide_or_fallback(a, b, fallback=0.0)` — body is just `return a / b`. The `fallback` parameter is accepted but never used; `b == 0` raises `ZeroDivisionError`. Valid inputs (`b != 0`) return true division.
+- `safe_mean(numbers)` — `sum(numbers) / len(numbers)`. Empty input raises `ZeroDivisionError` (`len == 0`). Non-empty returns the mean.
+
+**test_math_ops.py** (unittest, imports both functions):
+- `test_divide`: expects `divide_or_fallback(10, 2) == 5.0` (passes today) and `divide_or_fallback(10, 0, fallback=99.0) == 99.0` (fails today — `ZeroDivisionError`, since fallback is ignored).
+- `test_mean`: expects `safe_mean([1, 2, 3]) == 2.0` (passes today) and `safe_mean([]) == 0.0` (fails today — `ZeroDivisionError`).
+
+So the tests encode the intended contract: fallback-on-zero-division and `0.0` on empty mean; the implementation currently only satisfies the valid-input half. No shell tool available here, so the pass/fail split is from static reading `[INFERENCE]` — it follows directly from the unused `fallback` and `len(numbers) == 0` paths.
+
+Constraints noted for the fix: keep `divide_or_fallback(a, b, fallback=0.0)` and `safe_mean(numbers)` signatures unchanged, keep valid-input behavior, no test edits. One design point for the fix: `safe_mean([])` must return `0.0` without adding a parameter (tests pin the exact signature), so the empty case needs a hardcoded/`0.0` return rather than a new `fallback` kwarg. Ready to implement on the next turn.

@@ -1,0 +1,12 @@
+Done — `cache.py` only; tests untouched. No exec tool in this environment, so verification is a trace, not an observed run; tests will be run independently.
+
+**Implementation** (`CachedStore`, signatures preserved: `__init__(self, backing_store)`, `get(self, k)`, `put(self, k, v)`):
+
+- `get(k)`: cache hit (`k in self.cache`) returns the cached value; on miss, reads through to `backing_store.get(k)` and caches the value only when it is non-`None`. Uncached misses stay transparent, so a later backend write for a never-cached key becomes visible on the next `get`.
+- `put(k, v)`: write-through — updates `backing_store` and the local `cache` with the same value.
+
+**Trace against `test_cache_system.py`:**
+1. `test_cached_lookup`: first `get('user_1')` misses, reads `'Alice'` from backend, caches it → `'Alice'`. Direct `backend.put('user_1', 'MutatedDirectly')` does not touch the cache; second `get` hits the cache → still `'Alice'`. Pass.
+2. `test_put_updates_both`: `put('key', 'val')` writes both stores; `cached.get('key')` hits cache → `'val'`; `backend.get('key')` → `'val'`. Pass.
+
+Invariant worth noting: cache hits take precedence over backend state (no invalidation on direct backend mutation), which is exactly what the test pins.

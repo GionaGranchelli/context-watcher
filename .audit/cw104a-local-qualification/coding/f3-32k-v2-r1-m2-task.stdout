@@ -1,0 +1,31 @@
+## Change
+
+`cache.py` — `CachedStore` implemented; signatures unchanged (`__init__(self, backing_store)`, `get(self, k)`, `put(self, k, v)`), attributes `backing_store`/`cache` unchanged. Tests untouched.
+
+```python
+def get(self, k):
+    if k in self.cache:
+        return self.cache[k]
+    v = self.backing_store.get(k)
+    if v is not None:
+        self.cache[k] = v
+    return v
+
+def put(self, k, v):
+    self.cache[k] = v
+    self.backing_store.put(k, v)
+```
+
+Semantics:
+- `get` is cache-first; on miss it reads through to the backing store and caches only non-`None` values, then returns whatever the backend gave (so an absent key still returns `None`, matching `KeyValueStore.get`).
+- Membership test `k in self.cache`, not truthiness: required to distinguish "cached `None`" from "miss". Since `get` never caches `None`, a cached `None` can only come from `put`, and the membership check keeps it from re-reading the backend.
+- Cache is authoritative on hit — no read-through, no TTL refresh. That's what pins `test_cached_lookup`'s second assertion: a direct `backend.put` is invisible to `CachedStore`.
+- `put` writes cache and backend unconditionally, including `None` values.
+
+## Trace (static; no shell available to execute)
+
+`test_cached_lookup`: `cache` empty → miss → backend returns `'Alice'` → cached, returned ✓. `backend.put('user_1', 'MutatedDirectly')` mutates only `_data`; `cache` still holds `'Alice'` → hit → `'Alice'` ✓.
+
+`test_put_updates_both`: `put('key','val')` populates `cache['key']` and `backend._data['key']` → `cached.get('key')` hits cache → `'val'` ✓; `backend.get('key')` → `'val'` ✓.
+
+Only caller of `CachedStore` in the workspace is `test_cache_system.py`; no other imports of `cache`/`store`, so no callsites affected. I could not run `python3 -m unittest test_cache_system` — no execution tool in this toolset — so the pass status is a trace, not an observed run.

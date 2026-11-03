@@ -1,0 +1,40 @@
+{
+  "f3-32k-v2-r1-m1": {
+    "fingerprint": "1f84488ab02a4b10e30746ba403a371fe746ae3c5bbd167e8153b912b047e46b",
+    "additional_behavior_passed": true,
+    "public_signatures_preserved": true,
+    "preserved_files": {
+      "test_cache_system.py": true,
+      "store.py": true
+    },
+    "diagnostic": ""
+  },
+  "f1-32k-v2-r1-m1": {
+    "fingerprint": "4451bdf6c7dde1ba3b3e637609a69d0c087b070ce6d1c7a07a5181770126bc17",
+    "additional_behavior_passed": true,
+    "public_signatures_preserved": true,
+    "preserved_files": {
+      "test_math_ops.py": true
+    },
+    "diagnostic": ""
+  },
+  "f1-32k-v2-r1-m2": {
+    "fingerprint": "124d4f7f150053a6281d27f9fd81167f33011fe9ea71da0b217566524d4ce682",
+    "additional_behavior_passed": true,
+    "public_signatures_preserved": true,
+    "preserved_files": {
+      "test_math_ops.py": true
+    },
+    "diagnostic": ""
+  },
+  "f3-32k-v2-r1-m2": {
+    "fingerprint": "2aba1c67512d8a4b68d802bda0822ee7ccc8ae6867674e61e9cbd2cbc53c59da",
+    "additional_behavior_passed": true,
+    "public_signatures_preserved": true,
+    "preserved_files": {
+      "test_cache_system.py": true,
+      "store.py": true
+    },
+    "diagnostic": ""
+  }
+}

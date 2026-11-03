@@ -103,7 +103,10 @@ mod tests {
     use crate::ir::{
         CacheInvalidationCause, KvNodeStatus, LintRuleId, MutationOp, MutationRule, MutationStatus,
     };
-    use crate::mutation::{apply_mutations_to_payload, estimate_mutation_impact};
+    use crate::mutation::{
+        apply_mutations_to_payload, apply_mutations_to_payload_with_policy,
+        estimate_mutation_impact,
+    };
     use serde_json::json;
 
     #[test]
@@ -353,7 +356,13 @@ mod tests {
             },
         ];
 
-        apply_mutations_to_payload(&mut payload, ProviderKind::Anthropic, &rules, 1);
+        apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::Anthropic,
+            &rules,
+            1,
+            &crate::mutation::PinContextPolicy::explicit_opt_in("s1"),
+        );
         let tools = payload["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], "read_file");
@@ -539,7 +548,7 @@ mod tests {
 
     #[test]
     fn test_opencode_pin_growth_and_unread_tool_output_regression() {
-        use crate::autopilot::{AutoPilotConfig, evaluate_autopilot_policies};
+        use crate::autopilot::{AutoPilotConfig, evaluate_autopilot_policies_with_policy};
 
         // Simulate an OpenCode session on Turn 15 where Turn 1 was "do npm test, see if it runs",
         // tools schemas are present (which previously inflated `max_turn` to 15),
@@ -611,7 +620,7 @@ mod tests {
 
         // 2. Verify AutoPilot default config does not inject any PinContext or prune the tail tool output
         let ap_cfg = AutoPilotConfig::default();
-        let ap_report = evaluate_autopilot_policies(
+        let ap_report = evaluate_autopilot_policies_with_policy(
             &ap_cfg,
             "s_oc",
             "litellm-estate/swift-1.5-iq3_xxs",
@@ -620,6 +629,7 @@ mod tests {
             &turn.nodes,
             Some(&turn),
             &mut payload,
+            &crate::mutation::PinContextPolicy::default(),
         );
         assert!(ap_report.generated_mutations.is_empty());
         let serialized = serde_json::to_string(&payload).unwrap();
@@ -661,15 +671,26 @@ mod tests {
         ];
         assert!(dup_pins[0].op.is_semantically_equivalent(&dup_pins[1].op));
         let tool_tail_payload = payload.clone();
-        let tool_tail_report =
-            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &dup_pins, 15);
+        let tool_tail_report = apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &dup_pins,
+            15,
+            &crate::mutation::PinContextPolicy::explicit_opt_in("s_oc"),
+        );
         assert_eq!(payload, tool_tail_payload);
         assert!(tool_tail_report.applied_rule_ids.is_empty());
         payload["messages"]
             .as_array_mut()
             .unwrap()
             .push(json!({"role":"user", "content":"continue"}));
-        apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &dup_pins, 15);
+        apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &dup_pins,
+            15,
+            &crate::mutation::PinContextPolicy::explicit_opt_in("s_oc"),
+        );
         let after_str = serde_json::to_string(&payload).unwrap();
         assert_eq!(
             after_str.matches("<cw_pinned_context>").count(),

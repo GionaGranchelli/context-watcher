@@ -1712,6 +1712,9 @@ async fn execute_codex_session(
             created_at: Utc::now(),
         })
         .unwrap();
+    store
+        .set_pin_context_policy(cw_session_id, true, true)
+        .unwrap();
 
     // Checkpoint 5..8: Resumed session with active overlay reapplication
     for turn_idx in 5..=8 {
@@ -2375,6 +2378,9 @@ async fn execute_omp_session(
             created_at: Utc::now(),
         });
     }
+    store
+        .set_pin_context_policy(&canonical_sid, true, true)
+        .unwrap();
 
     // Checkpoints 5..8
     for turn_idx in 5..=8 {
@@ -3181,6 +3187,9 @@ terminal:
             created_at: Utc::now(),
         })
         .unwrap();
+    store
+        .set_pin_context_policy(cw_session_id, true, true)
+        .unwrap();
 
     // Checkpoints 5..8
     for turn_idx in 5..=8 {
@@ -3935,6 +3944,7 @@ async fn test_cw114_resilience_daemon_restart_persisted_state() {
                 created_at: Utc::now(),
             })
             .unwrap();
+        store1.set_pin_context_policy(sid, true, true).unwrap();
     } // Daemon 1 dropped
 
     // 2. Restarted Daemon instance on same SQLite DB file
@@ -4066,6 +4076,7 @@ async fn test_cw114_resilience_concurrent_sessions_distinct_overlays() {
             created_at: Utc::now(),
         })
         .unwrap();
+    store.set_pin_context_policy(sid_a, true, true).unwrap();
 
     store
         .save_mutation(&MutationRule {
@@ -4082,6 +4093,7 @@ async fn test_cw114_resilience_concurrent_sessions_distinct_overlays() {
             created_at: Utc::now(),
         })
         .unwrap();
+    store.set_pin_context_policy(sid_b, true, true).unwrap();
 
     let mut state = DaemonState::new(store.clone());
     let token = state.control_token.clone();

@@ -928,11 +928,12 @@ pub fn run_preview(store: &CwStore, session: &str) -> Result<()> {
         .get_turn_raw_payload(&latest.id)?
         .ok_or_else(|| anyhow::anyhow!("Original unavailable"))?;
     let provider = latest.normalization_provider.unwrap_or(meta.provider);
-    cw_core::mutation::apply_mutations_to_payload(
+    cw_core::mutation::apply_mutations_to_payload_with_policy(
         &mut payload,
         provider,
         &store.list_mutations(session)?,
         latest.sequence_number,
+        &store.get_pin_context_policy(session).unwrap_or_default(),
     );
     let preview = recompute_latest_turn_in_store(store, session)
         .ok_or_else(|| anyhow::anyhow!("Preview unavailable"))?;

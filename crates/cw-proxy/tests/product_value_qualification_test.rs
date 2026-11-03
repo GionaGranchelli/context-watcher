@@ -1311,6 +1311,9 @@ async fn stateful_responses_pin_reaches_mock_upstream_and_sqlite_egress() {
             created_at: now,
         })
         .unwrap();
+    store
+        .set_pin_context_policy(session_id, true, true)
+        .unwrap();
 
     let raw = json!({
         "model":"gpt-4o-mini",
@@ -1867,6 +1870,9 @@ async fn test_cw118_cache_safe_policy_qualification_defer_and_pin() {
         created_at: Utc::now(),
     };
     store.save_mutation(&pin_rule).unwrap();
+    store
+        .set_pin_context_policy(&pin_rule.session_id, true, true)
+        .unwrap();
 
     let client = reqwest::Client::new();
     let resp = client

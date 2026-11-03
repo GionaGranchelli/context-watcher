@@ -16,6 +16,10 @@ use std::time::{Duration, Instant};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error(
+        "PinContext reinforcement requires explicit risk acknowledgement and an active, valid session ID"
+    )]
+    PinContextConsentRequired,
     #[error("Session changed; refresh the plan before applying it")]
     Conflict,
     #[error("I/O error: {0}")]
@@ -138,6 +142,16 @@ impl CwStore {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS pin_context_policy_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+                risk_acknowledged INTEGER NOT NULL CHECK(risk_acknowledged IN (0,1)),
+                changed_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_pin_policy_session ON pin_context_policy_events(session_id,id);
 
             CREATE TABLE IF NOT EXISTS turns (
                 id TEXT PRIMARY KEY,
@@ -433,6 +447,65 @@ impl CwStore {
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).map(|d|d.with_timezone(&Utc)).unwrap_or_default(),
             })
         ).optional().map_err(StoreError::from)
+    }
+
+    /// Missing, revoked, or unreadable policy never grants reinforcement permission.
+    pub fn get_pin_context_policy(
+        &self,
+        session_id: &str,
+    ) -> Result<cw_core::mutation::PinContextPolicy, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let enabled: Option<i64> = conn.query_row(
+            "SELECT (enabled=1 AND risk_acknowledged=1 AND NOT EXISTS(SELECT 1 FROM session_terminations WHERE session_id=?1)) FROM pin_context_policy_events WHERE session_id=?1 ORDER BY id DESC LIMIT 1",
+            params![session_id], |row| row.get(0),
+        ).optional()?;
+        Ok(if enabled == Some(1) {
+            cw_core::mutation::PinContextPolicy::explicit_opt_in(session_id)
+        } else {
+            cw_core::mutation::PinContextPolicy::default()
+        })
+    }
+
+    /// Appends an explicit grant/revocation; never edits or deletes stored mutation rules.
+    pub fn set_pin_context_policy(
+        &self,
+        session_id: &str,
+        enabled: bool,
+        risk_acknowledged: bool,
+    ) -> Result<(), StoreError> {
+        if !cw_core::control::is_valid_session_id(session_id) || (enabled && !risk_acknowledged) {
+            return Err(StoreError::PinContextConsentRequired);
+        }
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        if enabled
+            && conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM session_terminations WHERE session_id=?1)",
+                params![session_id],
+                |row| row.get::<_, bool>(0),
+            )?
+        {
+            return Err(StoreError::PinContextConsentRequired);
+        }
+        conn.execute(
+            "INSERT INTO pin_context_policy_events(session_id,enabled,risk_acknowledged,changed_at) VALUES (?1,?2,?3,?4)",
+            params![session_id, enabled, risk_acknowledged, Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_pin_context_policy_events(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<Value>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let mut stmt = conn.prepare("SELECT id,enabled,risk_acknowledged,changed_at FROM pin_context_policy_events WHERE session_id=?1 ORDER BY id")?;
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_,i64>(0)?, "enabled": row.get::<_,bool>(1)?,
+                "risk_acknowledged": row.get::<_,bool>(2)?, "changed_at": row.get::<_,String>(3)?,
+            }))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     pub fn record_export(
@@ -2013,5 +2086,147 @@ mod tests {
                 .formatted_message
                 .contains("⚡ [cw] We saved you 1500 tokens")
         );
+    }
+    #[test]
+    fn pin_policy_is_explicit_persistent_scoped_and_revocable_without_rule_changes() {
+        let dir = std::env::temp_dir().join(format!("cw121a-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("store.db");
+        {
+            let store = CwStore::open(&path).unwrap();
+            for id in ["session-pin", "other-session"] {
+                store
+                    .upsert_session(&Session {
+                        id: id.into(),
+                        parent_session_id: None,
+                        harness: HarnessKind::GenericProxy,
+                        workspace_root: None,
+                        model: "offline".into(),
+                        provider: ProviderKind::OpenAI,
+                        title: None,
+                        created_at: Utc::now(),
+                        updated_at: Utc::now(),
+                    })
+                    .unwrap();
+            }
+            let rule = MutationRule {
+                id: "legacy-pin".into(),
+                session_id: "session-pin".into(),
+                op: cw_core::ir::MutationOp::PinContext {
+                    label: "legacy".into(),
+                    content: "retain".into(),
+                    source_node_id: None,
+                },
+                status: MutationStatus::Committed,
+                estimated_saved_tokens: 0,
+                estimated_kv_break_tokens: 0,
+                created_at: Utc::now(),
+            };
+            store.save_mutation(&rule).unwrap();
+        }
+        {
+            let store = CwStore::open(&path).unwrap();
+            assert!(
+                !store
+                    .get_pin_context_policy("session-pin")
+                    .unwrap()
+                    .is_enabled_for("session-pin")
+            );
+            assert!(
+                store
+                    .set_pin_context_policy("session-pin", true, false)
+                    .is_err()
+            );
+            assert!(
+                store
+                    .set_pin_context_policy("missing-session", true, true)
+                    .is_err()
+            );
+            assert!(
+                store
+                    .list_pin_context_policy_events("session-pin")
+                    .unwrap()
+                    .is_empty()
+            );
+            store
+                .set_pin_context_policy("session-pin", true, true)
+                .unwrap();
+        }
+        {
+            let store = CwStore::open(&path).unwrap();
+            assert!(
+                store
+                    .get_pin_context_policy("session-pin")
+                    .unwrap()
+                    .is_enabled_for("session-pin")
+            );
+            assert!(
+                !store
+                    .get_pin_context_policy("other-session")
+                    .unwrap()
+                    .is_enabled_for("other-session")
+            );
+            let before =
+                serde_json::to_value(store.list_mutations("session-pin").unwrap()).unwrap();
+            store
+                .set_pin_context_policy("session-pin", false, false)
+                .unwrap();
+            let session = store.get_session("session-pin").unwrap().unwrap();
+            store.upsert_session(&session).unwrap();
+            assert!(
+                !store
+                    .get_pin_context_policy("session-pin")
+                    .unwrap()
+                    .is_enabled_for("session-pin")
+            );
+            assert_eq!(
+                serde_json::to_value(store.list_mutations("session-pin").unwrap()).unwrap(),
+                before
+            );
+            assert_eq!(
+                store
+                    .list_pin_context_policy_events("session-pin")
+                    .unwrap()
+                    .len(),
+                2
+            );
+            store
+                .set_pin_context_policy("session-pin", true, true)
+                .unwrap();
+            store
+                .mark_session_terminated("session-pin", Some("offline-test"))
+                .unwrap();
+            assert!(
+                !store
+                    .get_pin_context_policy("session-pin")
+                    .unwrap()
+                    .is_enabled_for("session-pin")
+            );
+            assert!(
+                store
+                    .set_pin_context_policy("session-pin", true, true)
+                    .is_err()
+            );
+        }
+        {
+            let store = CwStore::open(&path).unwrap();
+            assert!(
+                !store
+                    .get_pin_context_policy("session-pin")
+                    .unwrap()
+                    .is_enabled_for("session-pin")
+            );
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute_batch("DROP TABLE pin_context_policy_events")
+                .unwrap();
+            let policy = store
+                .get_pin_context_policy("session-pin")
+                .unwrap_or_default();
+            assert!(!policy.is_enabled_for("session-pin"));
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -191,6 +191,9 @@ async fn contract_transform_context_api_auth_validation_and_fail_open() {
         created_at: Utc::now(),
     };
     store.save_mutation(&pin_rule).unwrap();
+    store
+        .set_pin_context_policy(session_id, true, true)
+        .unwrap();
 
     let req_with_pin = Request::builder()
         .method("POST")

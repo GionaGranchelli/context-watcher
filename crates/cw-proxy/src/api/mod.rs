@@ -2,6 +2,7 @@ pub mod engine;
 pub mod firewall;
 pub mod hud;
 pub mod mutations;
+pub mod pin_policy;
 pub mod sessions;
 pub mod transform;
 pub mod ws;
@@ -30,6 +31,10 @@ pub fn build_api_router(state: DaemonState) -> Router {
         )
         .route("/api/v1/sessions", get(sessions::api_list_sessions))
         .route("/api/v1/sessions/:id", get(sessions::api_get_session))
+        .route(
+            "/api/v1/sessions/:id/pin-context-policy",
+            get(pin_policy::get_policy).post(pin_policy::set_policy),
+        )
         .route(
             "/api/v1/sessions/:id/graph",
             get(sessions::api_get_session_graph),

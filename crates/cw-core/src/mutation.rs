@@ -25,6 +25,26 @@ pub struct MutationApplicationReport {
     pub saved_tokens: u32,
 }
 
+/// Trusted callers must obtain this session-scoped policy from explicit operator consent.
+/// It cannot be deserialized from an intercepted provider request or a mutation rule.
+#[derive(Debug, Clone, Default)]
+pub struct PinContextPolicy {
+    authorized_session_id: Option<String>,
+}
+
+impl PinContextPolicy {
+    pub fn explicit_opt_in(session_id: &str) -> Self {
+        Self {
+            authorized_session_id: crate::control::is_valid_session_id(session_id)
+                .then(|| session_id.to_owned()),
+        }
+    }
+
+    pub fn is_enabled_for(&self, session_id: &str) -> bool {
+        self.authorized_session_id.as_deref() == Some(session_id)
+    }
+}
+
 /// Applies all `Committed` mutations from `rules` deterministically onto a raw provider JSON payload.
 /// Preserves protocol invariants (never breaks `tool_use` / `tool_result` pairing or signatures).
 pub fn apply_mutations_to_payload(
@@ -32,6 +52,23 @@ pub fn apply_mutations_to_payload(
     provider: ProviderKind,
     rules: &[MutationRule],
     turn_seq: u32,
+) -> MutationApplicationReport {
+    apply_mutations_to_payload_with_policy(
+        payload,
+        provider,
+        rules,
+        turn_seq,
+        &PinContextPolicy::default(),
+    )
+}
+
+/// Applies a session's rules with reinforcement consent checked independently of rule status.
+pub fn apply_mutations_to_payload_with_policy(
+    payload: &mut Value,
+    provider: ProviderKind,
+    rules: &[MutationRule],
+    turn_seq: u32,
+    pin_policy: &PinContextPolicy,
 ) -> MutationApplicationReport {
     let active_rules: Vec<&MutationRule> = rules
         .iter()
@@ -78,6 +115,22 @@ pub fn apply_mutations_to_payload(
     let mut skipped_rules = Vec::new();
 
     for rule in &active_rules {
+        if matches!(rule.op, MutationOp::PinContext { .. }) {
+            let reason = if !pin_policy.is_enabled_for(&rule.session_id) {
+                Some("PinContextOptInRequired")
+            } else if provider == ProviderKind::Gemini {
+                Some("GeminiPinContextUnqualified")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                skipped_rules.push(SkippedMutation {
+                    rule_id: rule.id.clone(),
+                    reason: reason.into(),
+                });
+                continue;
+            }
+        }
         if let Err(reason) = eligibility.is_op_eligible(&rule.op) {
             skipped_rules.push(SkippedMutation {
                 rule_id: rule.id.clone(),
@@ -273,6 +326,10 @@ pub fn apply_mutations_to_payload(
 
     if !pinned_blocks.is_empty() && !inject_pinned_context_at_tail(payload, &pinned_blocks) {
         applied_ids.retain(|id| !pin_rule_ids.contains(id));
+        skipped_rules.extend(pin_rule_ids.into_iter().map(|rule_id| SkippedMutation {
+            rule_id,
+            reason: "PinContextTailIneligible".into(),
+        }));
     }
 
     let after_nodes = parse_request_to_nodes(payload, provider, turn_seq).unwrap_or_default();
@@ -992,6 +1049,20 @@ mod tests {
     }
 
     #[test]
+    fn committed_pin_requires_explicit_session_opt_in() {
+        let original = json!({"messages":[{"role":"user", "content":"Continue."}]});
+        let mut payload = original.clone();
+        let rule = pin_rule();
+        let report = apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[rule], 1);
+        assert_eq!(
+            payload, original,
+            "committing a pin must not authorize reinforcement"
+        );
+        assert!(report.applied_rule_ids.is_empty());
+        assert_eq!(report.skipped_rules[0].reason, "PinContextOptInRequired");
+    }
+
+    #[test]
     fn pin_abstains_on_non_user_and_tool_result_message_tails() {
         let tails = [
             json!({"role":"tool", "tool_call_id":"call-1", "content":"tool output"}),
@@ -1004,8 +1075,13 @@ mod tests {
         for tail in tails {
             let mut payload = json!({"messages":[tail]});
             let original = payload.clone();
-            let report =
-                apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+            let report = apply_mutations_to_payload_with_policy(
+                &mut payload,
+                ProviderKind::OpenAI,
+                &[pin_rule()],
+                1,
+                &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+            );
             assert_eq!(payload, original, "unsupported tail must remain unchanged");
             assert!(report.applied_rule_ids.is_empty());
         }
@@ -1019,8 +1095,13 @@ mod tests {
         ] {
             let mut payload =
                 json!({"messages":[{"role":"user","content":content}], "extra":"preserve"});
-            let report =
-                apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+            let report = apply_mutations_to_payload_with_policy(
+                &mut payload,
+                ProviderKind::OpenAI,
+                &[pin_rule()],
+                1,
+                &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+            );
             assert_eq!(report.applied_rule_ids, ["pin-1"]);
             assert_eq!(payload["extra"], "preserve");
             assert!(contains_text(&payload["messages"][0], "retain this"));
@@ -1038,8 +1119,13 @@ mod tests {
             }]
         });
 
-        let report =
-            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+        let report = apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &[pin_rule()],
+            1,
+            &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+        );
 
         assert_eq!(report.applied_rule_ids, ["pin-1"]);
         let blocks = payload["input"][0]["content"].as_array().unwrap();
@@ -1056,8 +1142,13 @@ mod tests {
         });
         let original = payload.clone();
 
-        let report =
-            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+        let report = apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &[pin_rule()],
+            1,
+            &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+        );
 
         assert!(report.applied_rule_ids.is_empty());
         assert_eq!(payload, original);
@@ -1075,8 +1166,13 @@ mod tests {
             ]
         });
         let original_prefix = payload["input"].clone();
-        let report =
-            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+        let report = apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &[pin_rule()],
+            1,
+            &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+        );
         assert_eq!(report.applied_rule_ids, ["pin-1"]);
         assert_eq!(payload["previous_response_id"], "resp_previous");
         assert_eq!(payload["input"][0], original_prefix[0]);
@@ -1085,8 +1181,13 @@ mod tests {
             payload["input"][2]["content"][0],
             original_prefix[2]["content"][0]
         );
-        let retry_report =
-            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+        let retry_report = apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &[pin_rule()],
+            1,
+            &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+        );
         assert_eq!(retry_report.applied_rule_ids, ["pin-1"]);
         assert_eq!(
             payload["input"][2]["content"]
@@ -1110,8 +1211,13 @@ mod tests {
             summary_text: "summary".into(),
         };
         let original = payload.clone();
-        let report =
-            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[historical], 1);
+        let report = apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &[historical],
+            1,
+            &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+        );
         assert!(report.applied_rule_ids.is_empty());
         assert_eq!(report.skipped_rules.len(), 1);
         assert_eq!(report.skipped_rules[0].rule_id, "fold-1");
@@ -1130,8 +1236,13 @@ mod tests {
             "input": [{"type":"function_call_output","call_id":"call-1","output":"done"}]
         });
         let original = payload.clone();
-        let report =
-            apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[pin_rule()], 1);
+        let report = apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &[pin_rule()],
+            1,
+            &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+        );
         assert!(report.applied_rule_ids.is_empty());
         assert_eq!(report.skipped_rules.len(), 1);
         assert_eq!(report.skipped_rules[0].rule_id, "pin-1");
@@ -1174,7 +1285,13 @@ mod tests {
             let mut rule = pin_rule();
             rule.id = format!("historical-{index}");
             rule.op = op;
-            let report = apply_mutations_to_payload(&mut payload, ProviderKind::OpenAI, &[rule], 1);
+            let report = apply_mutations_to_payload_with_policy(
+                &mut payload,
+                ProviderKind::OpenAI,
+                &[rule],
+                1,
+                &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+            );
             assert!(report.applied_rule_ids.is_empty());
             assert_eq!(report.skipped_rules.len(), 1);
             assert_eq!(
@@ -1182,6 +1299,116 @@ mod tests {
                 "RejectedStatefulProviderOwnedHistory"
             );
             assert_eq!(payload, original);
+        }
+    }
+    #[test]
+    fn reinforcement_consent_is_scoped_and_does_not_disable_pruning() {
+        let original = json!({"messages":[
+            {"role":"assistant","tool_calls":[{"id":"read-1","type":"function","function":{"name":"read_file","arguments":"{}"}}]},
+            {"role":"tool","tool_call_id":"read-1","content":"old log to prune"},
+            {"role":"assistant","content":"I read the result."},
+            {"role":"user","content":"Continue."}
+        ]});
+        let mut prune = pin_rule();
+        prune.id = "prune-1".into();
+        prune.op = MutationOp::PruneOrStub {
+            target_fingerprint: None,
+            target_call_id: Some("read-1".into()),
+            target_json_pointer: Some("/messages/1/content".into()),
+            stub_text: "short log".into(),
+        };
+        let rules = [pin_rule(), prune];
+        let mut baseline = original.clone();
+        let baseline_report =
+            apply_mutations_to_payload(&mut baseline, ProviderKind::OpenAI, &rules[1..], 1);
+        assert_eq!(baseline_report.applied_rule_ids, ["prune-1"]);
+        for policy in [
+            PinContextPolicy::default(),
+            PinContextPolicy::explicit_opt_in("another-session"),
+        ] {
+            let mut payload = original.clone();
+            let report = apply_mutations_to_payload_with_policy(
+                &mut payload,
+                ProviderKind::OpenAI,
+                &rules,
+                1,
+                &policy,
+            );
+            assert_eq!(payload, baseline);
+            assert_eq!(report.applied_rule_ids, ["prune-1"]);
+            assert_eq!(report.skipped_rules.len(), 1);
+            assert_eq!(report.skipped_rules[0].reason, "PinContextOptInRequired");
+        }
+        let mut enabled = original.clone();
+        let report = apply_mutations_to_payload_with_policy(
+            &mut enabled,
+            ProviderKind::OpenAI,
+            &rules,
+            1,
+            &PinContextPolicy::explicit_opt_in("session-1"),
+        );
+        assert_eq!(report.applied_rule_ids, ["pin-1", "prune-1"]);
+        assert_eq!(enabled["messages"][1], baseline["messages"][1]);
+        assert!(
+            enabled["messages"][3]["content"]
+                .as_str()
+                .unwrap()
+                .contains("retain this")
+        );
+    }
+
+    #[test]
+    fn reinforcement_policy_covers_supported_shapes_and_keeps_gemini_unqualified() {
+        for (provider, original) in [
+            (
+                ProviderKind::OpenAI,
+                json!({"messages":[{"role":"user","content":"Continue."}]}),
+            ),
+            (
+                ProviderKind::Anthropic,
+                json!({"messages":[{"role":"user","content":[{"type":"text","text":"Continue."}]}]}),
+            ),
+            (
+                ProviderKind::OpenAI,
+                json!({"input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue."}]}]}),
+            ),
+            (
+                ProviderKind::OpenAI,
+                json!({"previous_response_id":"resp_1","input":[{"role":"user","content":"Continue."}]}),
+            ),
+            (
+                ProviderKind::Gemini,
+                json!({"contents":[{"role":"user","parts":[{"text":"Continue."}]}]}),
+            ),
+            (
+                ProviderKind::Gemini,
+                json!({"contents":[{"role":"user","parts":[{"functionResponse":{"name":"read","response":{"result":"ok"}}}]}]}),
+            ),
+        ] {
+            let mut disabled = original.clone();
+            let report = apply_mutations_to_payload(&mut disabled, provider, &[pin_rule()], 1);
+            assert_eq!(disabled, original);
+            assert!(report.applied_rule_ids.is_empty());
+            assert_eq!(report.skipped_rules[0].reason, "PinContextOptInRequired");
+            let mut enabled = original.clone();
+            let report = apply_mutations_to_payload_with_policy(
+                &mut enabled,
+                provider,
+                &[pin_rule()],
+                1,
+                &PinContextPolicy::explicit_opt_in("session-1"),
+            );
+            if provider == ProviderKind::Gemini {
+                assert_eq!(enabled, original);
+                assert!(report.applied_rule_ids.is_empty());
+                assert_eq!(
+                    report.skipped_rules[0].reason,
+                    "GeminiPinContextUnqualified"
+                );
+            } else {
+                assert_ne!(enabled, original);
+                assert_eq!(report.applied_rule_ids, ["pin-1"]);
+            }
         }
     }
 }

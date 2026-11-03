@@ -10,7 +10,7 @@ use cw_core::{
     analyze_turn_from_payload,
     autopilot::{generate_ambient_savings_pulse, should_emit_savings_pulse},
     ir::{ContextTurn, MutationOp, MutationRule, MutationStatus, ProviderKind},
-    mutation::{apply_mutations_to_payload, estimate_mutation_impact},
+    mutation::estimate_mutation_impact,
     optimizer::resolve_strategy_alias,
 };
 use cw_store::CwStore;
@@ -315,15 +315,28 @@ pub async fn api_auto_optimize(
         return (StatusCode::PRECONDITION_FAILED, error.to_string()).into_response();
     }
     recompute_latest_turn_with_mutations(&state, &id);
+    let preview = recompute_latest_turn_in_store(&state.store, &id);
+    let applied: Vec<_> = created
+        .iter()
+        .filter(|rule| {
+            preview
+                .as_ref()
+                .is_some_and(|turn| turn.applied_mutation_ids.contains(&rule.id))
+        })
+        .collect();
     (
         [(
             "x-cw-revision",
             state.store.session_revision(&id).unwrap_or_default(),
         )],
         Json(json!({
-            "applied_count": created.len(),
+            "applied_count": applied.len(),
+            "created_count": created.len(),
+            "basis": "estimated mutation preview; not provider execution",
+            "skipped_rules": preview.map(|turn| turn.skipped_mutations).unwrap_or_default(),
             "estimated_saved_tokens": created.iter().map(|r| r.estimated_saved_tokens.max(0) as u64).sum::<u64>(),
-            "applied_mutations": created
+            "applied_mutations": applied,
+            "created_mutations": created
         })),
     )
         .into_response()
@@ -334,7 +347,13 @@ pub fn recompute_latest_turn_in_store(store: &CwStore, session_id: &str) -> Opti
     let latest = turns.last()?;
     let raw = store.get_turn_raw_payload(&latest.id).ok().flatten()?;
     let provider = store.get_session(session_id).ok().flatten()?.provider;
-    preview_turn(latest, &raw, &rules, provider)
+    preview_turn_with_policy(
+        latest,
+        &raw,
+        &rules,
+        provider,
+        &store.get_pin_context_policy(session_id).unwrap_or_default(),
+    )
 }
 
 pub fn preview_turn(
@@ -343,9 +362,31 @@ pub fn preview_turn(
     rules: &[MutationRule],
     provider: ProviderKind,
 ) -> Option<ContextTurn> {
+    preview_turn_with_policy(
+        latest,
+        raw,
+        rules,
+        provider,
+        &cw_core::mutation::PinContextPolicy::default(),
+    )
+}
+
+fn preview_turn_with_policy(
+    latest: &ContextTurn,
+    raw: &Value,
+    rules: &[MutationRule],
+    provider: ProviderKind,
+    policy: &cw_core::mutation::PinContextPolicy,
+) -> Option<ContextTurn> {
     let mut payload = raw.clone();
     let provider = latest.normalization_provider.unwrap_or(provider);
-    let report = apply_mutations_to_payload(&mut payload, provider, rules, latest.sequence_number);
+    let report = cw_core::mutation::apply_mutations_to_payload_with_policy(
+        &mut payload,
+        provider,
+        rules,
+        latest.sequence_number,
+        policy,
+    );
     let (mut preview, _) = analyze_turn_from_payload(
         latest.id.clone(),
         latest.session_id.clone(),

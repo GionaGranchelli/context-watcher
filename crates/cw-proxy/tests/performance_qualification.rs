@@ -15,7 +15,10 @@
 use chrono::{DateTime, Utc};
 use cw_core::{
     ir::{MutationOp, MutationRule, MutationStatus, ProviderKind},
-    mutation::{apply_mutations_to_payload, estimate_mutation_impact},
+    mutation::{
+        apply_mutations_to_payload, apply_mutations_to_payload_with_policy,
+        estimate_mutation_impact,
+    },
     normalizer::parse_request_to_nodes,
 };
 use cw_proxy::{proxy::build_proxy_router, state::DaemonState};
@@ -1613,11 +1616,12 @@ fn test_cw115_four_mode_isolation_and_prefix_preservation() {
 
     // Mode 1: Cache-Safe Tail Operations (PinContext ONLY)
     let mut payload_m1 = base_payload.clone();
-    let rep_m1 = apply_mutations_to_payload(
+    let rep_m1 = apply_mutations_to_payload_with_policy(
         &mut payload_m1,
         ProviderKind::OpenAI,
         std::slice::from_ref(&pin_rule),
         2,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in("test_session"),
     );
     assert_eq!(rep_m1.applied_rule_ids, vec!["rule_pin_tail"]);
     // CRITICAL INVARIANT: The entire historical prefix (items 0, 1, 2, 3) MUST BE 100% BIT-FOR-BIT IDENTICAL to Mode 0!
@@ -1686,11 +1690,12 @@ fn test_cw115_four_mode_isolation_and_prefix_preservation() {
 
     // Mode 3: Combined Optimization (PruneOrStub AND PinContext)
     let mut payload_m3 = base_payload.clone();
-    let rep_m3 = apply_mutations_to_payload(
+    let rep_m3 = apply_mutations_to_payload_with_policy(
         &mut payload_m3,
         ProviderKind::OpenAI,
         &[prune_rule.clone(), pin_rule.clone()],
         2,
+        &cw_core::mutation::PinContextPolicy::explicit_opt_in("test_session"),
     );
     assert_eq!(rep_m3.applied_rule_ids.len(), 2);
     // Historical item 2 is mutated AND tail item 4 has pinned block

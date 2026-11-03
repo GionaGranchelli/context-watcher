@@ -25,7 +25,7 @@ The existing authenticated `GET /api/v1/sessions/:id/pin-context-policy` now als
 - `preview_basis` and `risk_warning`: eligibility refers only to the latest recorded request. Null means there is no request to evaluate. Every future request still needs its own shape/safety checks. Latency, cache, token cost, and behavior may worsen; benefits remain unproven.
 - `measured_savings: null`: preview is not a provider measurement.
 
-Preview applies to an in-memory copy only. It creates no rules or grants, and writes no transcript or turn. Stored drafts and disabled rules remain distinguishable from committed candidates. The grant/revoke POST contract is unchanged. Operators can inspect contents and scope before enabling; this bounded change does not add a content-specific approval mechanism or a new activation UI.
+Preview uses the latest turn's normalization provider, falling back to session metadata only when it is absent, for both mutation eligibility and protocol validation. Session-level generation disclosures still describe the stored session policy. Preview applies to an in-memory copy only. It creates no rules or grants, and writes no transcript or turn. Stored drafts and disabled rules remain distinguishable from committed candidates. The grant/revoke POST contract is unchanged. Operators can inspect contents and scope before enabling; this bounded change does not add a content-specific approval mechanism or a new activation UI.
 
 ## Complete activation-path inventory
 
@@ -57,11 +57,12 @@ Manual means an explicit PinContext command or payload with pin content, not cho
 - `derived_creation_rechecks_consent_preserves_non_pins_and_blocks_gemini`: transactional persistence, stale-grant rejection, unchanged stored rules after revocation, session isolation, cross-session ID collision rejection, Gemini blocking, and explicit manual storage.
 - `configured_automatic_creation_requires_consent_and_stops_after_revocation`: actual proxy dry-run path and SQLite verify no default creation, one opted-in generation, no further generation after revocation, original request preservation, and read-only activation preview with labels/content and future-policy disclosure.
 - `manual_draft_is_inspectable_inactive_and_never_grants_consent`: authenticated manual staging, preview visibility, and no application/grant.
+- `activation_preview_uses_effective_turn_provider_with_session_fallback` covers provider precedence for mutation and validation, stateful OpenAI/compatible differences, and missing-provider fallback.
 - Strategy API regressions cover both draft and committed consent-blocked proposals. Five web confirmation tests distinguish proposals and creation from preview application and measured savings.
 
 Run `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo fmt --all -- --check`, and `cd web && npm test && npm run check && npm run build`. The existing default smoke runner is offline only; refreshing its current source hashes does not qualify a live runner or change historical observations.
 
-Validation: 262 Rust tests passed, 19 ignored. Five web confirmation tests, Svelte check/build, workspace Clippy/formatting, 15 runner-admission tests, and the offline lifecycle preflight passed. No live-provider or model-server tests ran. Browser/terminal interaction testing and broader activation workflows were not executed. Historical evidence and the original freeze remain unchanged.
+Validation: 263 Rust tests passed, 19 ignored. Five web confirmation tests, Svelte check/build, workspace Clippy/formatting, 15 runner-admission tests, and the offline lifecycle preflight passed. No live-provider or model-server tests ran. Browser/terminal interaction testing and broader activation workflows were not executed. Historical evidence and the original freeze remain unchanged.
 
 ## CW-121C remaining scope
 

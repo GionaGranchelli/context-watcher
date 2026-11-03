@@ -17,6 +17,10 @@ const BLOCK: &str =
     "\n<cw_pinned_context>\n- [constraint]: Preserve the public API.\n</cw_pinned_context>";
 
 fn fixture() -> (Router, String, CwStore) {
+    fixture_with_provider(ProviderKind::OpenAI)
+}
+
+fn fixture_with_provider(provider: ProviderKind) -> (Router, String, CwStore) {
     let store = CwStore::open_in_memory().unwrap();
     store
         .upsert_session(&Session {
@@ -25,7 +29,7 @@ fn fixture() -> (Router, String, CwStore) {
             harness: HarnessKind::Omp,
             workspace_root: None,
             model: "offline-no-provider".into(),
-            provider: ProviderKind::OpenAI,
+            provider,
             title: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -634,6 +638,71 @@ async fn activation_preview_does_not_qualify_tool_tails_or_invalid_protocols() {
         assert_eq!(
             preview["stored_pins"][0]["eligible_in_latest_request_preview_after_opt_in"],
             false
+        );
+        assert_eq!(preview["enabled"], false);
+        assert!(
+            store
+                .list_pin_context_policy_events(SESSION)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(store.get_turn_raw_payload(&turn.id).unwrap().unwrap(), raw);
+    }
+}
+
+#[tokio::test]
+async fn activation_preview_uses_effective_turn_provider_with_session_fallback() {
+    let chat = json!({"messages":[{"role":"user","content":"Continue."}]});
+    let responses =
+        json!({"previous_response_id":"resp_1","input":[{"role":"user","content":"Continue."}]});
+    for (session_provider, normalized_provider, raw, eligible) in [
+        (
+            ProviderKind::Gemini,
+            Some(ProviderKind::OpenAI),
+            chat.clone(),
+            true,
+        ),
+        (
+            ProviderKind::OpenAI,
+            Some(ProviderKind::OpenAICompatible),
+            responses.clone(),
+            false,
+        ),
+        (
+            ProviderKind::OpenAICompatible,
+            Some(ProviderKind::OpenAI),
+            responses.clone(),
+            true,
+        ),
+        // OpenAI permits this history; the Anthropic validator rejects an assistant-first request.
+        (
+            ProviderKind::Anthropic,
+            Some(ProviderKind::OpenAI),
+            json!({"messages":[{"role":"assistant","content":"Prior answer."},{"role":"user","content":"Continue."}]}),
+            true,
+        ),
+        (ProviderKind::OpenAI, None, responses.clone(), true),
+        (ProviderKind::OpenAICompatible, None, responses, false),
+    ] {
+        let (app, token, store) = fixture_with_provider(session_provider);
+        let (mut turn, _) = cw_core::analyze_turn_from_payload(
+            "provider-preview".into(),
+            SESSION.into(),
+            None,
+            1,
+            &raw,
+            normalized_provider.unwrap_or(session_provider),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        turn.normalization_provider = normalized_provider;
+        store.save_turn(&turn, Some(&raw), None, None).unwrap();
+        let preview = policy_preview(&app, &token).await;
+        assert_eq!(
+            preview["stored_pins"][0]["eligible_in_latest_request_preview_after_opt_in"], eligible,
+            "session={session_provider:?}, turn={normalized_provider:?}"
         );
         assert_eq!(preview["enabled"], false);
         assert!(

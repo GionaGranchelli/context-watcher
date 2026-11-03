@@ -31,6 +31,10 @@ pub async fn get_policy(State(state): State<DaemonState>, Path(id): Path<String>
         let config = state.store.get_autopilot_config()?;
         let terminated = state.store.is_session_terminated(&id)?;
         let latest = state.store.get_latest_turn(&id)?;
+        let preview_provider = latest
+            .as_ref()
+            .and_then(|turn| turn.normalization_provider)
+            .unwrap_or(session.provider);
         let raw = latest
             .as_ref()
             .map(|turn| state.store.get_turn_raw_payload(&turn.id))
@@ -39,7 +43,7 @@ pub async fn get_policy(State(state): State<DaemonState>, Path(id): Path<String>
         let preview = raw.map(|mut raw| {
             let mut report = cw_core::mutation::apply_mutations_to_payload_with_policy(
                 &mut raw,
-                session.provider,
+                preview_provider,
                 &rules,
                 latest
                     .as_ref()
@@ -51,7 +55,7 @@ pub async fn get_policy(State(state): State<DaemonState>, Path(id): Path<String>
                     cw_core::mutation::PinContextPolicy::explicit_opt_in(&id)
                 },
             );
-            if cw_core::validator::validate_protocol_invariants(&raw, session.provider).is_err() {
+            if cw_core::validator::validate_protocol_invariants(&raw, preview_provider).is_err() {
                 report.applied_rule_ids.clear();
             }
             report

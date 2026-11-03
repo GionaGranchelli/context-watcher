@@ -2,7 +2,7 @@
 
 ## CW-121B: Consent-aware creation
 
-[Creation contract, activation preview, and path inventory](docs/CW-121B-CONSENT-AWARE-CREATION.md). Offline core/store/API tests cover disabled/default and legacy policies, opt-in and revocation, non-pin preservation, manual inactive staging, transactional stale-grant and session protections, Gemini blocking, and inspectable activation scope. 262 Rust tests passed, 19 ignored; five web reporting tests, Svelte check/build, Clippy/formatting, and offline runner checks passed. Reporting distinguishes proposals from creation and measured savings. No inference, model-server access, historical rewrite, or production changes.
+[Creation contract, activation preview, and path inventory](docs/CW-121B-CONSENT-AWARE-CREATION.md). Offline core/store/API tests cover disabled/default and legacy policies, opt-in and revocation, non-pin preservation, manual inactive staging, transactional stale-grant and session protections, Gemini blocking, and inspectable activation scope. 263 Rust tests passed, 19 ignored; five web reporting tests, Svelte check/build, Clippy/formatting, and offline runner checks passed. Reporting distinguishes proposals from creation and measured savings. No inference, model-server access, historical rewrite, or production changes.
 
 ## CW-121A: PinContext application consent
 

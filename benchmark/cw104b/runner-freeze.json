@@ -30,10 +30,10 @@
     "crates/cw-harnesses/src/error.rs": "605692c3a827574c592c9a7809da99d10aebf703cc2e8bdb5541b1cb16bb5ad1",
     "crates/cw-proxy/src/api/mod.rs": "bdc3bc3e517b41939eccece3ed66bbcd956d5f859c506b830969a4de9602b23a",
     "crates/cw-proxy/src/api/mutations.rs": "460114501ec41b7d8566c55e90a6c60dc7f2aa31f2c0e20618396eb0fe752f69",
-    "crates/cw-proxy/src/api/pin_policy.rs": "44f0d1531859e6c28fca77b108a243d975e8f66ccd88ee9f78a3c6166c92af31",
+    "crates/cw-proxy/src/api/pin_policy.rs": "936264c5cc225511d4930326b01eb3a64a0bbfedf0040fa52f244ace40e1feeb",
     "crates/cw-proxy/src/api/transform.rs": "249d9e257908c94376d5cb0b9ab3eefcb20a935ab8b32cdae12a15d1d9fd13c1",
     "crates/cw-proxy/src/proxy/mod.rs": "2bd7834725607ead9454d062dffd3f2336e3ee9fd555d6abc3da14d985cf821f",
-    "crates/cw-proxy/tests/pin_lifecycle.rs": "81b6a14c96847c4f6d3d0e2cf142604ea5ca5d002aba248242cfc3717f44c4d0",
+    "crates/cw-proxy/tests/pin_lifecycle.rs": "1b767c9a97a5e53e832309a78c71716ddaa2e7d4ccc83ac93667589a591cf8f8",
     "crates/cw-store/src/lib.rs": "548fd530d778c2d8d1363e9cc7bfd6aa1b271331eb8c25961b000933011425ee",
     "crates/cw-tui/src/lib.rs": "98bcb47bcf58d103c8e7e776862256a51a7cffcb7dd369dee226dcaa12e59b11",
     "plugins/pi-opencode/index.js": "9623aeefb02ac6da1346eca42567fb75c4e1a9e1bbc8469c4e950c8827a1a08e"

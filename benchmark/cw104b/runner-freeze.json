@@ -30,7 +30,7 @@
     "crates/cw-proxy/src/api/pin_policy.rs": "ad0bcbed481e9ad855266f421e31eb7485f699bada8786f257e1999fe1622874",
     "crates/cw-proxy/src/api/transform.rs": "249d9e257908c94376d5cb0b9ab3eefcb20a935ab8b32cdae12a15d1d9fd13c1",
     "crates/cw-proxy/src/proxy/mod.rs": "d840665227a1c5666e6f0e8831df6291f15b973b3a58a61c83c4f74e390c90d8",
-    "crates/cw-proxy/tests/pin_lifecycle.rs": "3e3db942e74fab64a5ce0460b7441ff58a9b0a1681a4d2eeb17e76159fd26690",
+    "crates/cw-proxy/tests/pin_lifecycle.rs": "0a1359f1984e264ef821a2e77ff05a9526d7a810fa61b035a860ad2fe5f76470",
     "crates/cw-store/src/lib.rs": "961b069ee4bc278ce8a9c7b481597e178e705df515eacdcd4cf2a944efa165b6",
     "plugins/pi-opencode/index.js": "9623aeefb02ac6da1346eca42567fb75c4e1a9e1bbc8469c4e950c8827a1a08e"
   },

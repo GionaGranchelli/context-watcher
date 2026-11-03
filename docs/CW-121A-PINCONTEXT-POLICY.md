@@ -20,7 +20,7 @@ The loopback control API requires the existing control credential and origin che
 - `POST` to the same route with `{"enabled":true,"acknowledge_risk":true}` explicitly enables reinforcement for that session.
 - `POST` with `{"enabled":false}` revokes it without deleting or changing any mutation rule.
 
-An enable request without explicit risk acknowledgement is rejected. Unknown request fields are rejected. Review `GET /api/v1/sessions/:id/mutations` before opting in; those rule contents are what the policy permits. Audit events identify control operations and their timestamps, not independently verified human identities. Broader clients and user-facing controls remain CW-121B/C work.
+An enable request without explicit risk acknowledgement is rejected. Unknown request fields are rejected. Review `GET /api/v1/sessions/:id/mutations` before opting in; those rule contents are what the policy permits. Audit events identify control operations and their timestamps, not independently verified human identities. Broader clients and user-facing controls remain CW-121B/C work. CW-121B must make automatic creation policy-aware and show pin contents and scope before consent, including which stored pins would become active.
 
 PinContext can add tokens, increase local latency or cloud cost, disturb cache reuse, and change agent behavior. Its benefits remain unproven. Reinforcement is not protection from pruning. No new Protect from Pruning feature is implemented.
 
@@ -29,7 +29,7 @@ PinContext can add tokens, increase local latency or cloud cost, disturb cache r
 | Path | CW-121A boundary | Remaining CW-121B/C work |
 |---|---|---|
 | Proxy forwarding and native OMP context-transform API | Load current session policy; blocked pins report no applied ID | Operator-facing grant/revoke controls in harness clients |
-| Auto-pilot `auto_cache_safe_pin` and low-health strategy generation | Generated rules cannot grant consent; final application checks policy; reports distinguish generated from applied | Avoid proposing inactive pins by default; explain warnings and consent state |
+| Auto-pilot `auto_cache_safe_pin` and low-health strategy generation | Generated rules cannot grant consent; final application checks policy; reports distinguish generated from applied | Make automatic creation policy-aware; show existing and proposed pin contents and scope before opt-in |
 | Optimization presets and lint suggestions | Can create stored rules; applying them still requires consent; REST preview reports creation separately from application | Policy-aware plans, warnings, and activation flow |
 | REST mutation creation and draft commit | Committing is not consent; no automatic grant | Visible inactive state and risk disclosure before manual activation |
 | CLI pin, optimize, and batch optimize | Store rules only; model-bound application checks the session policy; CLI preview uses policy | CLI grant/revoke commands and truthful activation messages |
@@ -40,7 +40,7 @@ PinContext can add tokens, increase local latency or cloud cost, disturb cache r
 | Core optimizer estimates and direct callers without session policy | Remain pin-disabled; cannot infer permission from a candidate or committed rule | Policy-aware estimates and entry-point migration where qualified |
 | Gemini contents path | Reinforcement blocked regardless of grant | Issue #35 and separate provider qualification |
 
-The final mutation guard is shared by every application call above. CLI/TUI/web/MCP success wording may still describe a created rule as pinned; that interface migration is explicitly unfinished. No new CLI, TUI, web, or MCP consent controls are claimed here.
+The final mutation guard is shared by every application call above. Strategy confirmations distinguish created or staged rules, preview eligibility, rule estimates, and unavailable measured savings. Other CLI/TUI/web/MCP success wording may still describe a created rule as pinned; that interface migration is explicitly unfinished. No new CLI, TUI, web, or MCP consent controls are claimed here.
 
 ## Deterministic evidence
 

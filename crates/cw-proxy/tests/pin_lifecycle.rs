@@ -346,73 +346,81 @@ async fn proxy_final_boundary_and_ledger_follow_current_policy_without_provider_
 }
 
 #[tokio::test]
-async fn strategy_commit_neither_enables_nor_reports_a_disabled_pin_as_applied() {
-    let (app, token, store) = fixture();
-    let raw = json!({"system":"<RULE[AGENTS.md]>Preserve public API.</RULE[AGENTS.md]>","messages":[{"role":"user","content":"Implement the task."}]});
-    let (mut turn, _) = cw_core::analyze_turn_from_payload(
-        "strategy-fixture".into(),
-        SESSION.into(),
-        None,
-        1,
-        &raw,
-        ProviderKind::Anthropic,
-        None,
-        None,
-        None,
-    )
-    .unwrap();
-    // Exercise the long-context strategy threshold without a model or large fixture.
-    turn.token_usage.input_tokens = 30_001;
-    for node in &mut turn.nodes {
-        node.attention_salience = 0.1;
-    }
-    store.save_turn(&turn, Some(&raw), None, None).unwrap();
-    let plans = store.optimization_plans(&turn).unwrap();
-    let plan = plans
-        .iter()
-        .find(|plan| plan.id == "cache_safe_boost")
-        .unwrap();
-    assert_eq!(plan.items.len(), 1);
-    assert!(matches!(
-        plan.items[0].mutation_op,
-        MutationOp::PinContext { .. }
-    ));
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/v1/sessions/{SESSION}/optimize"))
-                .header("host", "127.0.0.1")
-                .header("x-cw-control-token", &token)
-                .header("if-match", store.session_revision(SESSION).unwrap())
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({"strategy_id":"cache_safe_boost"}).to_string(),
-                ))
-                .unwrap(),
+async fn strategy_draft_and_inactive_commit_report_creation_separately_from_application() {
+    for status in ["draft", "committed"] {
+        let (app, token, store) = fixture();
+        let raw = json!({"system":"<RULE[AGENTS.md]>Preserve public API.</RULE[AGENTS.md]>","messages":[{"role":"user","content":"Implement the task."}]});
+        let (mut turn, _) = cw_core::analyze_turn_from_payload(
+            "strategy-fixture".into(),
+            SESSION.into(),
+            None,
+            1,
+            &raw,
+            ProviderKind::Anthropic,
+            None,
+            None,
+            None,
         )
-        .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let result: Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap()).unwrap();
-    assert_eq!(result["created_count"], 1);
-    assert_eq!(result["applied_count"], 0);
-    assert_eq!(result["applied_mutations"], json!([]));
-    assert_eq!(result["skipped_rules"].as_array().unwrap().len(), 2);
-    assert!(
-        result["skipped_rules"]
-            .as_array()
-            .unwrap()
+        // Exercise the long-context strategy threshold without a model or large fixture.
+        turn.token_usage.input_tokens = 30_001;
+        for node in &mut turn.nodes {
+            node.attention_salience = 0.1;
+        }
+        store.save_turn(&turn, Some(&raw), None, None).unwrap();
+        let plans = store.optimization_plans(&turn).unwrap();
+        let plan = plans
             .iter()
-            .all(|r| r["reason"] == "PinContextOptInRequired")
-    );
-    assert!(
-        store
-            .list_pin_context_policy_events(SESSION)
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(store.get_turn_raw_payload(&turn.id).unwrap().unwrap(), raw);
+            .find(|plan| plan.id == "cache_safe_boost")
+            .unwrap();
+        assert_eq!(plan.items.len(), 1);
+        assert!(matches!(
+            plan.items[0].mutation_op,
+            MutationOp::PinContext { .. }
+        ));
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/sessions/{SESSION}/optimize"))
+                    .header("host", "127.0.0.1")
+                    .header("x-cw-control-token", &token)
+                    .header("if-match", store.session_revision(SESSION).unwrap())
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({"strategy_id":"cache_safe_boost","status":status}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let result: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap())
+                .unwrap();
+        assert_eq!(result["created_count"], 1);
+        assert_eq!(result["applied_count"], 0);
+        assert_eq!(result["applied_mutations"], json!([]));
+        assert_eq!(result["created_mutations"][0]["status"], status);
+        assert_eq!(store.list_mutations(SESSION).unwrap().len(), 2);
+        assert_eq!(
+            result["skipped_rules"].as_array().unwrap().len(),
+            if status == "draft" { 1 } else { 2 }
+        );
+        assert!(
+            result["skipped_rules"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|r| r["reason"] == "PinContextOptInRequired")
+        );
+        assert!(
+            store
+                .list_pin_context_policy_events(SESSION)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(store.get_turn_raw_payload(&turn.id).unwrap().unwrap(), raw);
+    }
 }

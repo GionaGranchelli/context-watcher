@@ -20,10 +20,6 @@
 
 ---
 
-
-
----
-
 ## 🗺️ Architectural Stack: The 4 Evolutionary Horizons
 
 The future horizons of `contextWatcher` form a **layered, mutually reinforcing stack**:

@@ -1,6 +1,8 @@
-"""One local-only matched smoke pair, with mock and cache gates before coding."""
+"""Offline fixture preflight by default; live execution requires fresh authorization."""
+import argparse
 import copy
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -11,18 +13,133 @@ import subprocess
 import threading
 import time
 import urllib.request
+import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-import yaml
 from acceptance import check
 
 B = Path(__file__).resolve().parent
 ROOT = B.parents[1]
-VAULT = Path.home() / '.local/share/context-watcher/cw104b-evidence-vault'
-ENDPOINT = 'http://192.168.1.156:8095'
-MODEL = 'Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS'
+RUNNER_FREEZE = B / 'runner-freeze.json'
+OFFLINE_FIXTURE = B / 'fixtures/offline-lifecycle.json'
+
+
+class NoProviderRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError('Provider redirects are disabled for local-only qualification')
+
+
+def local_endpoint(value):
+    parsed = urllib.parse.urlsplit(value)
+    networks = ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', 'fc00::/7', '::1/128')
+    try:
+        address = ipaddress.ip_address(parsed.hostname or '')
+        local = any(address in ipaddress.ip_network(network) for network in networks)
+        parsed.port  # Validate the port without opening a connection.
+    except ValueError:
+        local = False
+    if (not local or parsed.scheme not in ('http', 'https') or parsed.username is not None
+            or parsed.password is not None or parsed.path not in ('', '/') or parsed.query or parsed.fragment):
+        raise ValueError('Endpoint must be a bare private/loopback IP HTTP(S) origin without credentials')
+    return value.rstrip('/')
+
+
+def verify_runner_freeze():
+    frozen = json.loads(RUNNER_FREEZE.read_text())
+    for name, expected in frozen['files'].items():
+        if hashlib.sha256((ROOT / name).read_bytes()).hexdigest() != expected:
+            raise ValueError('Runner/input freeze mismatch: ' + name)
+    return hashlib.sha256(RUNNER_FREEZE.read_bytes()).hexdigest()
+
+
+def live_authorization(options, freeze_sha256, now=None):
+    """Validate an operator's attestation; this is not cryptographic identity proof."""
+    if not options.live or not options.authorization_file:
+        raise ValueError('Live inference requires --live and a fresh --authorization-file')
+    endpoint = local_endpoint(options.endpoint)
+    try:
+        raw_document = options.authorization_file.read_bytes()
+        document = json.loads(raw_document)
+        allowed = {'authorization_id', 'approved_by', 'approval_reference', 'issued_at', 'expires_at',
+                   'scope', 'max_pairs', 'cloud_spend_allowed', 'max_seconds', 'max_provider_requests',
+                   'endpoint', 'model', 'provider', 'runner_freeze_sha256', 'evidence_dir'}
+        if not isinstance(document, dict) or set(document) != allowed:
+            raise ValueError('Unexpected or missing authorization fields')
+        issued = datetime.fromisoformat(document['issued_at'].replace('Z', '+00:00'))
+        expires = datetime.fromisoformat(document['expires_at'].replace('Z', '+00:00'))
+    except (KeyError, ValueError, TypeError, AttributeError):
+        raise ValueError('Invalid live authorization document') from None
+    now = now or datetime.now(timezone.utc)
+    if (issued.tzinfo is None or expires.tzinfo is None or not issued <= now < expires
+            or not 0 < (expires - issued).total_seconds() <= 86400):
+        raise ValueError('Live authorization must be current and expire within 24 hours of issuance')
+    for field in ['authorization_id', 'approved_by', 'approval_reference']:
+        if not isinstance(document.get(field), str) or not document[field].strip() or len(document[field]) > 256:
+            raise ValueError('Authorization needs a nonempty bounded ' + field)
+    if (document.get('scope') != 'one-local-m1-m2-smoke-pair'
+            or type(document.get('max_pairs')) is not int or document['max_pairs'] != 1
+            or document.get('cloud_spend_allowed') is not False
+            or type(document.get('max_seconds')) is not int or not 0 < document['max_seconds'] <= 3600
+            or type(document.get('max_provider_requests')) is not int or not 0 < document['max_provider_requests'] <= 30):
+        raise ValueError('Authorization must bound one local pair to at most 3600 seconds/30 provider requests with no cloud spend')
+    if (document.get('endpoint') != endpoint or document.get('model') != options.model
+            or document.get('provider') != options.provider
+            or document.get('runner_freeze_sha256') != freeze_sha256
+            or document.get('evidence_dir') != str(options.evidence_dir.resolve())):
+        raise ValueError('Authorization does not match the endpoint, model, provider, evidence directory, or runner freeze')
+    # Do not expose the private evidence path in a shareable manifest.
+    record = {key: value for key, value in document.items() if key != 'evidence_dir'}
+    record.update(record_valid=True, consumed=False,
+                  document_sha256=hashlib.sha256(raw_document).hexdigest())
+    return record
+
+
+def claim_authorization(evidence_dir, authorization):
+    used = evidence_dir / 'used-authorizations'
+    used.mkdir(mode=0o700, exist_ok=True)
+    marker = used / (hashlib.sha256(authorization['authorization_id'].encode()).hexdigest() + '.json')
+    try:
+        fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        raise ValueError('Live authorization has already been consumed; obtain fresh approval') from None
+    with os.fdopen(fd, 'w') as output:
+        json.dump(dict(authorization, consumed=True), output)
+        output.flush()
+        os.fsync(output.fileno())
+    authorization['consumed'] = True
+
+
+def model_profile(options):
+    text = options.model_profile.read_text()
+    try:
+        if options.model_profile.suffix.lower() == '.json':
+            config = json.loads(text)
+        else:
+            import yaml
+            config = yaml.safe_load(text)
+    except ImportError:
+        raise ValueError('YAML profiles require PyYAML; JSON profiles use the standard library') from None
+    except Exception:
+        raise ValueError('Model profile is not valid JSON/YAML') from None
+    if not isinstance(config, dict):
+        raise ValueError('Model profile must be an object')
+    providers = config.get('providers')
+    source = providers.get(options.provider) if isinstance(providers, dict) else None
+    if not isinstance(source, dict):
+        raise ValueError('Explicit provider is missing from the model profile')
+    models = source.get('models')
+    if not isinstance(models, list) or any(not isinstance(model, dict) for model in models):
+        raise ValueError('Model profile requires a list of model definitions')
+    selected = [model for model in models if model.get('id') == options.model]
+    if (source.get('api') != 'openai-completions' or selected != [{'id': options.model}]
+            or set(source) - {'api', 'apiKey', 'baseUrl', 'models'}):
+        raise ValueError('Only the qualified minimal OpenAI-completions profile/model is supported')
+    key = source.get('apiKey')
+    if options.live and (not isinstance(key, str) or not key.strip()):
+        raise ValueError('The explicit live profile requires an in-process API key')
+    return {'api': source['api'], 'models': selected}, key
 
 
 def digest(value):
@@ -35,28 +152,33 @@ def free_port():
         return sock.getsockname()[1]
 
 
-def run(mock_only=False):
+def run_owner(options, result, public):
+    mock_only = not options.live
+    model = options.model
+    endpoint = local_endpoint(options.endpoint) if options.live else None
     started = time.monotonic()
     phase_start = os.environ.get('CW104B_PHASE_START_UTC')
     elapsed_before = (datetime.now(timezone.utc) - datetime.strptime(phase_start, '%Y%m%dT%H%M%SZ').replace(tzinfo=timezone.utc)).total_seconds() if phase_start else 0
-    deadline = started + max(0, 3600 - elapsed_before)
-    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    private = VAULT / ('smoke-' + stamp)
+    if elapsed_before < 0:
+        raise ValueError('Phase start cannot be in the future')
+    cap = result['authorization']['max_seconds'] if options.live else 3600
+    deadline = started + max(0, cap - elapsed_before)
+    if options.live:
+        expires = datetime.fromisoformat(result['authorization']['expires_at'].replace('Z', '+00:00'))
+        deadline = min(deadline, started + (expires - datetime.now(timezone.utc)).total_seconds())
+    stamp = result['started_utc']
+    private = options.evidence_dir / result['run_id']
     private.mkdir(mode=0o700)
-    public = ROOT / '.audit/cw104b' / ('smoke-' + stamp + '.json')
-    result = {'status': 'PREFLIGHT', 'started_utc': stamp, 'arms': [], 'gate_requests': [],
-              'requests': [], 'raw_evidence': private.name, 'hard_cap_seconds': 3600, 'original_phase_start_utc': phase_start or stamp, 'elapsed_before_attempt_seconds': elapsed_before}
+    result.update({'status': 'PREFLIGHT', 'started_utc': stamp, 'arms': [], 'gate_requests': [],
+              'requests': [], 'raw_evidence': private.name, 'hard_cap_seconds': cap, 'original_phase_start_utc': phase_start or stamp, 'elapsed_before_attempt_seconds': elapsed_before, 'provider_requests_admitted': 0})
     lock = threading.Lock()
     state = {'mode': 'mock', 'arm': None, 'mock': [], 'expected': {}, 'fatal': None}
-    config = yaml.safe_load(Path('/tmp/cw104a-local-qual/home/.omp/profiles/cw104a-m1/agent/models.yml').read_text())
-    provider = config['providers']['machinist-strata']
-    key = provider.pop('apiKey')
+    provider, key = model_profile(options)
+    result['model_profile_public_sha256'] = digest(provider)
     protocol = json.loads((B / 'protocol.json').read_text())
-    frozen = json.loads((B / 'freeze.json').read_text())
-    for name, expected in frozen['files'].items():
-        if hashlib.sha256((B / name).read_bytes()).hexdigest() != expected:
-            raise RuntimeError('Frozen implementation hash mismatch: ' + name)
-    history = (VAULT / 'cw104b-frozen-history.txt').read_text()
+    if model != protocol['model']:
+        raise ValueError('Model differs from the frozen protocol; review a new protocol before live qualification')
+    history = options.history_file.read_text()
     if hashlib.sha256(history.encode()).hexdigest() != protocol['history_sha256']:
         raise RuntimeError('Frozen history mismatch')
     pin = '\n<cw_pinned_context>\n- [CW104B-Constraints]: ' + protocol['families']['f3']['pin'] + '\n</cw_pinned_context>'
@@ -76,10 +198,19 @@ def run(mock_only=False):
         return value
 
     def api(path, body=None):
-        request = urllib.request.Request(ENDPOINT + path,
+        if not options.live or not result['authorization'].get('consumed'):
+            raise RuntimeError('Live endpoint access requires a consumed fresh authorization')
+        remaining()
+        if path == '/v1/chat/completions':
+            if result['provider_requests_admitted'] >= result['authorization']['max_provider_requests']:
+                raise RuntimeError('Authorized provider-request budget exhausted')
+            result['provider_requests_admitted'] += 1
+            save()
+        request = urllib.request.Request(endpoint + path,
             data=json.dumps(body).encode() if body is not None else None,
             headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
-        return urllib.request.urlopen(request, timeout=min(300, remaining()))
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoProviderRedirect())
+        return opener.open(request, timeout=min(300, remaining()))
 
     def metrics():
         with api('/metrics') as response:
@@ -121,9 +252,9 @@ def run(mock_only=False):
                         self.send_response(200)
                         self.send_header('Content-Type', 'text/event-stream')
                         self.end_headers()
-                        chunks = [dict(id='mock', model=MODEL, object='chat.completion.chunk',
+                        chunks = [dict(id='mock', model=model, object='chat.completion.chunk',
                             choices=[dict(index=0, delta={'role': 'assistant', 'content': 'OK'}, finish_reason=None)]),
-                            dict(id='mock', model=MODEL, object='chat.completion.chunk',
+                            dict(id='mock', model=model, object='chat.completion.chunk',
                             choices=[dict(index=0, delta={}, finish_reason='stop')])]
                         for chunk in chunks:
                             self.wfile.write(('data: ' + json.dumps(chunk) + '\n\n').encode())
@@ -138,7 +269,7 @@ def run(mock_only=False):
                     if not entries and body != expected:
                         raw(arm + '-unexpected-first-request.json', body)
                         raise RuntimeError('First request differs from frozen mock payload')
-                    if body.get('model') != MODEL or body.get('seed') != 104002 or body.get('temperature') != 0 or body.get('top_p') != 1 or body.get('strata_prefix') != {'messages': 2}:
+                    if body.get('model') != model or body.get('seed') != 104002 or body.get('temperature') != 0 or body.get('top_p') != 1 or body.get('strata_prefix') != {'messages': 2}:
                         raise RuntimeError('Model, sampling, or cache-boundary mismatch')
                     if body['messages'][:2] != expected['messages'][:2]:
                         raise RuntimeError('Frozen early history changed or compacted')
@@ -203,7 +334,7 @@ def run(mock_only=False):
                     after = after_request(before)
                     entry['server_request'] = after['requests'][0]
                     entry['cache_after'] = after['conversation_cache']
-                    if response_models != {MODEL} or not usage or not finishes:
+                    if response_models != {model} or not usage or not finishes:
                         raise RuntimeError('Model identity, finish, or usage missing')
                     if not entries:
                         if not 16384 <= usage['prompt_tokens'] <= 32768:
@@ -230,7 +361,7 @@ def run(mock_only=False):
     env = {k: os.environ[k] for k in ['PATH', 'LANG', 'TERM'] if k in os.environ}
     env.update(HOME=str(home), CW_CONTROL_TOKEN_FILE=str(private / 'control-token'),
                CW_OPENAI_UPSTREAM=f'http://127.0.0.1:{server.server_port}', CW_CAPTURE_WIRE_EGRESS='1')
-    cw = ROOT / 'target/debug/cw'
+    cw = options.cw_bin
     daemon = None
 
     def arm_run(arm, mock):
@@ -250,7 +381,7 @@ def run(mock_only=False):
                          ['pin', 'CW104B-Constraints', protocol['families']['f3']['pin'], '--session', 'omp_' + sid]]:
                 subprocess.run([str(cw), '--db', str(private / 'store.db')] + args, env=agent_env, capture_output=True, check=True, timeout=15)
         limit = 30 if mock else min(1500, int(remaining()) - 5)
-        args = ['omp', '--model=machinist-strata/' + MODEL, f'--cwd={workspace}',
+        args = [options.omp_bin, '--model=' + options.provider + '/' + model, f'--cwd={workspace}',
                 f'--session-dir={private}/sessions/{phase}-{arm}', f'--resume={seed}',
                 '--system-prompt=Use relative file paths to implement the user request.',
                 '--tools=read,edit,write,grep,glob', '--no-context-files', '--no-skills', '--no-rules', '--no-extensions',
@@ -312,10 +443,10 @@ def run(mock_only=False):
         provider.update(apiKey='local-relay-placeholder', baseUrl=f'http://127.0.0.1:{proxy}/openai/v1')
         cfg = home / '.omp/profiles/cw104b/agent'
         cfg.mkdir(parents=True)
-        (cfg / 'models.yml').write_text(yaml.safe_dump({'providers': {'machinist-strata': provider}}))
+        (cfg / 'models.yml').write_text(json.dumps({'providers': {options.provider: provider}}))
         (cfg / 'config.yml').write_text('temperature: 0\ntopP: 1\n')
-        native = Path('/tmp/cw104a-local-qual/home/.omp/natives')
-        if native.exists():
+        native = options.omp_natives_dir
+        if native is not None:
             shutil.copytree(native, home / '.omp/natives', copy_function=shutil.copy2)
         for arm in ['m1', 'm2']:
             arm_run(arm, True)
@@ -329,7 +460,7 @@ def run(mock_only=False):
         result['mock_full_request_verified'] = True
         raw('mock-payloads.json', state['mock'])
         if mock_only:
-            result['status'] = 'MOCK_GATES_PASSED_NO_INFERENCE'
+            result['status'] = 'OWNER_ONLY_MOCK_GATES_PASSED_NO_INFERENCE'
             return True
         result['status'] = 'CACHE_GATE'
         save()
@@ -350,7 +481,7 @@ def run(mock_only=False):
             after = after_request(before)
             entry['server_request'] = after['requests'][0]
             usage = answer.get('usage')
-            if answer.get('model') != MODEL or not usage or not 16384 <= usage['prompt_tokens'] <= 32768:
+            if answer.get('model') != model or not usage or not 16384 <= usage['prompt_tokens'] <= 32768:
                 raise RuntimeError('Cache gate model, usage, or context mismatch')
             save()
         for label, arm in [('neutral-before-gate-m2', 'neutral'), ('matched-m2', 'm2'), ('neutral-before-gate-m1', 'neutral'), ('matched-m1', 'm1')]:
@@ -387,9 +518,80 @@ def run(mock_only=False):
     return result['status'] == 'SMOKE_COMPLETE_PENDING_EVIDENCE_AUDIT'
 
 
+def offline_preflight(result):
+    fixture = json.loads(OFFLINE_FIXTURE.read_text())
+    if fixture['kind'] != 'sanitized-offline-lifecycle':
+        raise ValueError('Wrong offline fixture kind')
+    result.update(fixture_sha256=hashlib.sha256(OFFLINE_FIXTURE.read_bytes()).hexdigest(),
+                  verification_scope='Sanitized in-process API lifecycle; not native OMP or private historical replay')
+    command = ['cargo', 'test', '--locked', '-p', 'cw-proxy', '--test', 'pin_lifecycle']
+    completed = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=300)
+    result.update(status='OFFLINE_FIXTURE_PASS' if completed.returncode == 0 else 'OFFLINE_FIXTURE_FAILED',
+                  verification_command=command, verification_exit=completed.returncode, inference_calls=0)
+    if completed.returncode:
+        print(completed.stderr)
+    return completed.returncode == 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--live', action='store_true', help='Request one live pair; fresh authorization is also mandatory')
+    modes.add_argument('--mock-only', action='store_true', help='Explicit alias for the default portable offline fixture')
+    modes.add_argument('--owner-replay', action='store_true', help='Owner-only native OMP mock with private frozen history; no inference')
+    parser.add_argument('--authorization-file', type=Path)
+    parser.add_argument('--endpoint', help='Bare private/loopback IP origin, used only with --live')
+    parser.add_argument('--model-profile', type=Path, help='Explicit JSON or YAML OMP model profile; owner modes only')
+    parser.add_argument('--provider', help='Provider entry in the explicit profile')
+    parser.add_argument('--model', help='Exact model ID from the frozen protocol')
+    parser.add_argument('--evidence-dir', type=Path, help='Private owner raw-evidence directory')
+    parser.add_argument('--history-file', type=Path, help='Owner-only frozen historical reference')
+    parser.add_argument('--manifest-dir', type=Path, default=ROOT / '.audit/cw104b')
+    parser.add_argument('--cw-bin', type=Path, default=ROOT / 'target/debug/cw')
+    parser.add_argument('--omp-bin', default='omp')
+    parser.add_argument('--omp-natives-dir', type=Path)
+    options = parser.parse_args(argv)
+    stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    result = {'status': 'PREFLIGHT', 'started_utc': stamp, 'run_id': 'smoke-' + stamp + '-' + uuid.uuid4().hex[:8],
+              'mode': 'live' if options.live else 'owner-only-mock' if options.owner_replay else 'offline-fixture',
+              'authorization': {'record_valid': False, 'consumed': False}, 'inference_calls': 0,
+              'provider_requests_admitted': 0}
+    if options.live:
+        result.pop('inference_calls')  # Actual admissions/usage are recorded by the live path.
+    options.manifest_dir.mkdir(parents=True, exist_ok=True)
+    public = options.manifest_dir / (result['run_id'] + '.json')
+    try:
+        freeze_sha256 = verify_runner_freeze()
+        result['runner_freeze_sha256'] = freeze_sha256
+        if not options.live and (options.authorization_file or options.endpoint):
+            raise ValueError('--authorization-file and --endpoint require --live')
+        if options.live and not options.authorization_file:
+            raise ValueError('--live requires a fresh --authorization-file')
+        if options.live or options.owner_replay:
+            for field in ['model_profile', 'provider', 'model', 'evidence_dir', 'history_file']:
+                if not getattr(options, field):
+                    raise ValueError('Owner modes require --' + field.replace('_', '-'))
+            if options.live:
+                if not options.endpoint:
+                    raise ValueError('--live requires an explicit --endpoint')
+                result['authorization'] = live_authorization(options, freeze_sha256)
+            options.evidence_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+            if os.name != 'nt' and options.evidence_dir.stat().st_mode & 0o077:
+                raise ValueError('Owner evidence directory must be private (0700)')
+            if options.live:
+                claim_authorization(options.evidence_dir, result['authorization'])
+            passed = run_owner(options, result, public)
+        else:
+            passed = offline_preflight(result)
+        return 0 if passed else 1
+    except Exception as error:
+        result.update(status='PREFLIGHT_BLOCKED', error_type=type(error).__name__,
+                      error=str(error) if isinstance(error, (ValueError, RuntimeError)) else 'Required local input or execution unavailable')
+        return 2
+    finally:
+        public.write_text(json.dumps(result, indent=2) + '\n')
+        print(json.dumps({'status': result['status'], 'mode': result['mode'], 'manifest': str(public)}))
+
+
 if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--mock-only', action='store_true')
-    args = parser.parse_args()
-    raise SystemExit(0 if run(args.mock_only) else 1)
+    raise SystemExit(main())

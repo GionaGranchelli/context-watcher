@@ -1,3 +1,6 @@
+# Historical source is retained for audit; do not bypass current live admission.
+raise SystemExit("Historical probe retired: use the current smoke.py offline preflight or its separately authorized --live gate")
+
 """Bounded cache diagnostic: frozen OMP payloads, no agent tools executed."""
 import copy, hashlib, json, time, urllib.request
 from pathlib import Path

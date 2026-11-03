@@ -1,3 +1,6 @@
+# Historical source is retained for audit; do not bypass current live admission.
+raise SystemExit("Historical probe retired: use the current smoke.py offline preflight or its separately authorized --live gate")
+
 import json,time,uuid,urllib.request,yaml
 from pathlib import Path
 A=Path(__file__).resolve().parent;cfg=Path('/tmp/cw104a-local-qual/home/.omp/profiles/cw104a-m1/agent/models.yml');key=yaml.safe_load(cfg.read_text())['providers']['machinist-strata']['apiKey'];base='http://192.168.1.156:8095';model='Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS'

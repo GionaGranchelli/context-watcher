@@ -1,0 +1,5 @@
+Expected failure before OMP identifier validation.
+thread 'tests::test_import_omp_session_binding_identifiers' (1620152) panicked at crates/cw-harnesses/src/lib.rs:150:13:
+unsupported native ID must be rejected
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p cw-harnesses --lib`

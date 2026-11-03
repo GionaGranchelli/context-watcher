@@ -1,5 +1,11 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## PR #32 runner admission and identifier hardening
+
+The runner now defaults to a sanitized in-process API fixture that can run from a normal checkout without OMP, PyYAML, provider credentials, a LAN endpoint, or private history. Live mode requires an affirmative flag and a current, single-use approval document recorded in the manifest. The endpoint/profile/evidence/history locations are explicit owner inputs; private historical replay remains owner-only, and the new fixture does not independently reproduce the historical measurements. Historical direct probe entrypoints are retired.
+
+OMP imports now share the proxy's session-ID validator, preserving full UUIDs while rejecting unsupported canonical identifiers before persistence. Source transcripts remain unchanged. The original experiment results and historical freeze are retained; this safety change is not a new inference qualification or authorization.
+
 ## PinContext exposure diagnosis, offline only
 
 The hashed patched trace contains the explicit M2 pin only on request 0 of 6. Its write occurs on request 3 without the pin; the original early brief remains present throughout. The rule is still committed. The transform operates on request copies, and the user-tail guard abstains on subsequent tool tails. This is one-shot reminder qualification, not persistent exposure or product readiness.

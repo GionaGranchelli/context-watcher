@@ -81,11 +81,12 @@ async fn transform(app: &Router, token: &str, original: &[Value]) -> Value {
 }
 
 fn history() -> Vec<Value> {
-    vec![
-        json!({"role":"system", "content":"Use the repository tools."}),
-        json!({"role":"user", "content":"Preserve the public API. Historical development activity follows."}),
-        json!({"role":"user", "content":[{"type":"text","text":"Implement the pending change."}]}),
-    ]
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../../benchmark/cw104b/fixtures/offline-lifecycle.json"
+    ))
+    .unwrap();
+    assert_eq!(fixture["kind"], "sanitized-offline-lifecycle");
+    fixture["messages"].as_array().unwrap().clone()
 }
 
 fn append_tool_turn(history: &mut Vec<Value>, id: &str) {

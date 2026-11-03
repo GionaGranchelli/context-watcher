@@ -1,0 +1,36 @@
+{
+  "status": "REVIEW_FINDINGS_ADDRESSED_OFFLINE",
+  "runner_default": "sanitized in-process lifecycle fixture",
+  "live_gate": "affirmative --live plus fresh single-use operator attestation bound to endpoint/model/provider/freeze/evidence directory",
+  "live_validation": "NOT_EXECUTED",
+  "private_historical_replay": "OWNER_ONLY_NOT_INDEPENDENTLY_REPLAYED",
+  "portable_check": "python -S with intentionally unavailable OMP and cw binaries: PASS",
+  "python_admission_tests": 15,
+  "rust_tests": {
+    "passed": 248,
+    "ignored": 19
+  },
+  "clippy": "PASS",
+  "format": "PASS",
+  "omp_ids": "full UUIDs retained; unsupported canonical IDs rejected before store writes; shared 128-byte ASCII proxy contract",
+  "historical_results_unchanged": true,
+  "historical_freeze_sha256": "39f0971570215269764a5b86c6f35c00bd7d9588d19818dafea0ef4baab3a3cd",
+  "current_runner_freeze_sha256": "70ece115ac6b83bfec488e8e090449e7b2a17dbd0379471fd85746998541b3c2",
+  "retired_probe_sources": {
+    "benchmark/cw104b/long_prefix_probe.py": {
+      "original_sha256": "3cb175e90f2d15f12dab06131782a010534f36683b0d34c51e856646340f2b09",
+      "source_retained_below_guard": true
+    },
+    ".audit/cw104b/cache_probe.py": {
+      "original_sha256": "09720c6c4a434a1c1932ef73f8e0498495927459a97fdd31cea09fbbfd07d15f",
+      "source_retained_below_guard": true
+    },
+    ".audit/cw104b/shared_prefix_probe.py": {
+      "original_sha256": "3d507c9c7c98ffd394fcaa350de00f9db2110b071f7562027e17475b14af4ecf",
+      "source_retained_below_guard": true
+    }
+  },
+  "inference_calls": 0,
+  "production_settings_changed": false,
+  "merged": false
+}

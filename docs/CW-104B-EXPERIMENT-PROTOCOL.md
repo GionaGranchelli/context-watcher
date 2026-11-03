@@ -2,6 +2,14 @@
 
 Version CW-104B-1. Task inputs, pins, fixtures, and acceptance code are frozen in `benchmark/cw104b/protocol.json` and `freeze.json`. Execution remains gated; this document does not claim readiness.
 
+## Current execution admission
+
+The current `smoke.py` defaults to a committed, sanitized offline API fixture. It needs no OMP binary, provider profile, key, endpoint, or private history. This is not replay of the owner-only historical experiment. CI exercises the default command and its admission tests.
+
+Real inference requires both `--live` and a separate, current, single-use operator authorization. The authorization is bound to the local endpoint, frozen model/provider, current `runner-freeze.json`, and private evidence directory, with explicit one-pair/time/request limits. Its fields and consumption state are recorded in the run manifest. No readiness result or earlier chat approval grants another run. No live validation was performed for this runner revision.
+
+Historical `freeze.json` and all earlier measurements remain unchanged. `runner-freeze.json` records the new admission/preflight implementation. Private historical replay requires explicit `--owner-replay` inputs and remains owner-only. See [the safe runner instructions](../benchmark/cw104b/README.md). The former direct live probe helpers are retired before any configuration read.
+
 ## Task and treatment
 
 Two families are defined: F1 numeric edge cases with preserved signatures/types and protected files; F3 backing-store caching with preserved signatures and protected store/test/policy files. The one authorized smoke pair uses F3. The opening briefs specify the requested implementation and all constraints. They appear before the same anonymized, genuine historical repository-review record. The final request is exactly: **Implement the change requested in the opening brief.** It does not repeat constraints. M2's frozen pin repeats only the designated early constraints and provides no implementation answer. M1 has no committed rule.

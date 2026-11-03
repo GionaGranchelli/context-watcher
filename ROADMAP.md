@@ -1,6 +1,26 @@
 # ROADMAP.md — `contextWatcher` Product & Engineering Roadmap
 
-> **Core Philosophy:** *"The best tool is the one you don't have to call or see. It is always on, does everything automatically, and only drops a message every now and then: 'We saved you 12,966 tokens, KV Cache 98.2% preserved, TTFT: 176s -> 1.6s (108x faster)'."*
+> **Current product decision (2026-11-03):** Qualify cache-aware context reduction **without PinContext**. PinContext becomes an explicitly user-enabled, potentially harmful reinforcement tool, not an assumed optimization. Implementing that policy and user-facing warnings is tracked as **CW-121**; this PR changes roadmap/documentation only.
+
+> **Evidence caveat:** The historical horizon descriptions below are earlier implementation targets and examples, **not** general performance, energy, physical KV-splicing, or savings guarantees. The current [compatibility contract](docs/COMPATIBILITY.md) and measured [evidence](EVIDENCE.md) take precedence.
+
+## Active qualification roadmap (planned)
+
+| Priority | Work | Required result |
+|---|---|---|
+| **P0 · CW-121** | PinContext opt-in demotion and potentially harmful warning | Explicit manual activation; no silent auto-pin; clear cloud-cost/local-latency/cache risk |
+| **P0 · CW-122** | Historical pruning only vs passthrough | Repeatable input token and usage-derived cost reductions |
+| **P0 · CW-123** | Cache-aware defer/apply policy | No unexplained cache-cost inversions; safe abstention under uncertainty |
+| **P0 · CW-124** | Real local inference | Actual time-to-first-token and end-to-end latency, including prefill/decode |
+| **P0 · CW-125** | Complete agent tasks | No unacceptable correctness or constraint regressions |
+| **P1 · CW-126** | Longer sessions near context limits | Less context pressure or fewer required compactions with correct outcomes |
+| **P2 · CW-127** | TUI/dashboard transparency | Users can see why CW applied/deferred/rejected an optimization |
+
+[Detailed acceptance criteria, experiment baseline and authorization bounds](docs/CW-121-CORE-VALUE-ROADMAP.md). **No implementation or inference is authorized by updating the roadmap.**
+
+---
+
+
 
 ---
 

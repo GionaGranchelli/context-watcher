@@ -3,7 +3,27 @@
 > **Legend:** `P0` = Critical Path | `P1` = Core Feature | `P2` = Enhancement
 > **Workflow:** Move items across `Ready` $\to$ `In Progress` $\to$ `Review` $\to$ `Done`. Always reference ticket IDs (`CW-XXX`) in commits and PRs.
 
-> **Current delivery priority:** CW-120A Product Value Experiment Readiness; offline study preparation only, no provider spending authorized. CW-119C stateless PinContext delivery was verified by saved-evidence replay and merged via PR #30; stateful delivery and product economics remain unverified. CW-118 Gate A offline qualification merged via PR #26.
+> **Current product roadmap priority:** CW-121 PinContext opt-in safety demotion and CW-122–125 pruning-only value/safety qualification. CW-126/127 follow. CW-120A PinContext study remains historical/ongoing experimental work, not proof of savings or authorization for new runs. See [core value roadmap](docs/CW-121-CORE-VALUE-ROADMAP.md).
+
+---
+
+## Current product direction — 2026-11-03 (planned, not implemented)
+
+**Core claim to qualify:** Context-Watcher can reduce redundant context *without PinContext*, while preserving agent correctness and avoiding unjustified prompt-cache rebuilding. The next qualification baseline is native agent / CW passthrough / CW **historical-pruning-only**; automatic instruction reinforcement is not part of the core performance experiment.
+
+**PinContext decision:** Demote it to **explicit opt-in**, with a prominent **potentially harmful** warning: extra prompt tokens may make local inference slower, increase cloud cost, disturb cache reuse, or change agent behavior. The opt-in/default policy and protect-vs-reinforce distinction are future implementation work (CW-121), **not** guaranteed by this documentation update. The single patched CW-104B pair passed integrity checks but showed no benefit and does not prove general harm or benefit.
+
+| Ticket | Priority | Next qualification / change | Expected outcome |
+|---|---|---|---|
+| [CW-121](docs/CW-121-CORE-VALUE-ROADMAP.md) | **P0** | Make PinContext optional, visibly risk-labeled; distinguish retention protection from prompt reinforcement | No silent automatic pin injection; explicit consent and risk disclosure across supported entry points |
+| CW-122 | **P0** | Historical pruning vs passthrough, **no PinContext** | Repeatable input-token and usage-derived cloud cost reductions |
+| CW-123 | **P0** | Cache-aware defer/apply policy | No unexplained or undisclosed cache-cost inversions; abstain when evidence is inadequate |
+| CW-124 | **P0** | Real local inference | Measured TTFT, prefill/decode and end-to-end latency, not estimates |
+| CW-125 | **P0** | Complete agent task acceptance | No unacceptable correctness/constraint regression |
+| CW-126 | **P1** | Long sessions close to context limits | Reduced measured context pressure or fewer compactions without lost correctness |
+| CW-127 | **P2** | Observability of decisions | User understands what was optimized or abstained, and why |
+
+**Evidence standard:** [Detailed plan and acceptance criteria](docs/CW-121-CORE-VALUE-ROADMAP.md). CW-115 historical-prune-only recorded a promising isolated cost reduction, but another CW-115 pilot showed cost inversion; neither proves a general speedup. All experiments must separate actual telemetry, modeled savings, and unverified assumptions. No inference/spend authorization or implementation is implied by this roadmap.
 
 ---
 
@@ -206,7 +226,7 @@ The checked tickets below are historical implementation milestones. They are not
 | **CW-104A** Local-first context effectiveness qualification | Evidence recovery | All 12 corrected coding attempts finished; six pairs recovered, five with clean transport/usage. Product causality remains unqualified. See `docs/CW-104A-RECOVERED-RESULTS.md`. |
 | **CW-104B** Recover and validate local context optimization | Review / readiness gates complete | One separately authorized patched pair passed strict treatment/cache/acceptance gates. Both tasks pass; M2 used more time and tokens. Product value unproven; full campaign awaits separate approval. See `docs/CW-104B-SMOKE-RESULTS.md`. |
 | CW-104B follow-up: PinContext exposure diagnosis | Offline review complete; pilot no-go | One-shot exposure is 1/6 requests and absent at the write decision. Hermetic lifecycle tests pass. Correctness fix and endpoint regression merged via PR #33; PR #32 reconciled with reviewed main, without overlapping source diffs. Discriminating task, oracle controls, history, and counterbalanced mock gates must be frozen before any new inference authorization. See `docs/PINCONTEXT-EXPOSURE-DIAGNOSIS.md`. |
-| PR #32 review hardening | In Review | Offline default, fresh single-use live approval, portable CI fixture, explicit owner inputs, and shared validated OMP/proxy session IDs. No further inference or change in product qualification. |
+| PR #32 review hardening | Merged via PR #32 | Offline default, fresh single-use live approval, portable CI fixture, explicit owner inputs, and shared validated OMP/proxy session IDs. No further inference or change in product qualification. |
 | **CW-110** Shared harness qualification runner | Done | Automated qualification test suite in `crates/cw-proxy/tests/qualification.rs` covering all 10 acceptance criteria across mock Responses, Chat Completions, and Messages upstreams; documented baseline support matrix and blockers in `docs/HARNESS_MATRIX.md`. |
 | **CW-110A** Qualification evidence hardening | Done | Completely separated qualification suite into Suite A (CI default contract tests), Suite B (harness binary integration requiring installed binaries and failing explicitly if absent), and Suite C (live provider continuation). Hardened AC4 (active mutation tool-pairing), AC5 (byte-for-byte & JSON-tree thinking signature fidelity), AC6 (tool env sandboxing), AC7 (BLAKE3 bit-for-bit transcript preservation), AC8 (Validation Gate fail-open), and AC10 (un-fabricated cache status reconciliation). |
 | **CW-111** OMP native runtime integration | Done | Replaced command-only extension with native runtime `context` and `before_provider_request` hooks and `/api/v1/sessions/:id/transform` endpoint; automated test (`test_harness_binary_omp_native_runtime_overlay_reapplication`) proved active overlay injection on Turn 2 wire payload while on-disk `.jsonl` transcript remained 100% immutable. |
@@ -279,6 +299,13 @@ The checked tickets below are historical implementation milestones. They are not
 
 ## 🗂️ Backlog (ordered)
 
+* **CW-121** `[P0]` PinContext safety demotion: explicit opt-in, warnings and protect-vs-reinforce separation — **planned; not implemented**.
+* **CW-122** `[P0]` Historical pruning-only vs passthrough qualification (without PinContext).
+* **CW-123** `[P0]` Cache-aware defer/apply policy and inversion auditing.
+* **CW-124** `[P0]` Real local inference TTFT, prefill/decode and session latency study.
+* **CW-125** `[P0]` Full-task correctness and constraint regression gate.
+* **CW-126** `[P1]` Long-session/context-limit and compaction-pressure qualification.
+* **CW-127** `[P2]` Decision, cost and abstention observability UX.
 * **CW-103** Broader Codex/Hermes qualification continuation (CW-112 live qualification and CW-114 multi-task completed).
 * **CW-104** Hardware and local model qualification.
 * **CW-R11** Large-history IO and pagination qualification — CW-R11A implementation and generated baseline are in review; broader qualification remains open.

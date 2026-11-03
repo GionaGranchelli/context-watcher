@@ -80,7 +80,9 @@ Unlike `/compact` (which calls an LLM to rewrite your history into a lossy Engli
 | **Earlier Covered Reads of the Same File** | 🗑️ **Garbage-Collected** (`[cw:shadow_deduped ...]` pointer) |
 | **Verbose Old Tool Logs (`cargo test`, `git diff`)** | 🗑️ **Garbage-Collected** (`[cw:pruned ...]` 1-line stub) |
 | **Completed Unsigned `<thinking>` Blocks** | 🗑️ **Garbage-Collected** (`[cw:pruned_thinking ...]`) |
-| **Low-Salience Rules (<42% Attention Zone)** | 📌 **Pinned to Tail** (`<cw_pinned_context>`, 0% KV break) |
+| **Optional PinContext reinforcement** | **Experimental / potentially harmful.** May add tokens, increase local latency or cloud cost, alter model behavior, or affect prompt-cache reuse. **Target policy:** explicit user opt-in; not a proven optimizer. |
+
+> **PinContext caution:** A valid one-pair local test showed no product benefit; one pair cannot prove general harm or benefit. The [CW-121 roadmap](docs/CW-121-CORE-VALUE-ROADMAP.md) proposes opt-in-only pinning and risk disclosures across all entry points. Existing presets and configured auto-pilot policies may still inject PinContext reinforcement text into model-bound requests. **The proposed opt-in-only policy is not yet enforced by the runtime.** Check active rules and preview transformations before enabling active mutation. Protecting a message from pruning is distinct from adding a reinforced copy to the model prompt.
 
 ### Strategy Tiers
 

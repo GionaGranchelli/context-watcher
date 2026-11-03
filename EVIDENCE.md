@@ -1,5 +1,13 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## PinContext exposure diagnosis, offline only
+
+The hashed patched trace contains the explicit M2 pin only on request 0 of 6. Its write occurs on request 3 without the pin; the original early brief remains present throughout. The rule is still committed. The transform operates on request copies, and the user-tail guard abstains on subsequent tool tails. This is one-shot reminder qualification, not persistent exposure or product readiness.
+
+`benchmark/pin_exposure/diagnose.py` verifies the source hashes without network access. `crates/cw-proxy/tests/pin_lifecycle.rs` exercises the real transform API in-process, including eight tool follow-ups and later-user reapplication. The earlier invalid tool-pinned run is rejected. No new inference, production server access, or settings change occurred.
+
+Draft PR #33 isolates the two-file correctness fix from the benchmark/evidence review in PR #32. The proposed four-arm pilot in `docs/PINCONTEXT-RETENTION-BENCHMARK.md` is not authorized or execution-ready. Its fixture/oracle/history/counterbalance gates remain open. See `.audit/pin-exposure/trace.json` and `docs/PINCONTEXT-EXPOSURE-DIAGNOSIS.md`.
+
 ## CW-104B recovery status
 
 All 12 corrected CW-104A coding attempts finished. Recovery from per-run records yields six matched pairs; five have complete usage and clean transport. Their coding-only totals are M1 2,840.34 seconds / 426,553 input tokens and M2 2,385.39 seconds / 358,228 input tokens. These descriptive differences do not establish causality or a reliable performance advantage. The remaining pair retains its transport failures and missing usage. See `docs/CW-104A-RECOVERED-RESULTS.md`.

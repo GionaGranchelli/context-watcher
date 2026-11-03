@@ -1,6 +1,6 @@
 # CW-121A: Session consent at the PinContext application boundary
 
-Status: implementation for review. This is the first runtime boundary for the [roadmap in PR #34](https://github.com/GionaGranchelli/context-watcher/pull/34), not completion of CW-121B/C. PR #34 still requires independent approval. No inference or production changes are part of this work.
+Status: implementation for review. This is the first runtime boundary for the [roadmap in PR #34](https://github.com/GionaGranchelli/context-watcher/pull/34), not completion of CW-121B/C. PR #34 merged on 2026-11-03 and is included in this branch. No inference or production changes are part of this work.
 
 ## Runtime contract
 

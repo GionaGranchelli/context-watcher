@@ -1,5 +1,25 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## PR #32 runner admission and identifier hardening
+
+The runner now defaults to a sanitized in-process API fixture that can run from a normal checkout without OMP, PyYAML, provider credentials, a LAN endpoint, or private history. Live mode requires an affirmative flag and a current, single-use approval document recorded in the manifest. The endpoint/profile/evidence/history locations are explicit owner inputs; private historical replay remains owner-only, and the new fixture does not independently reproduce the historical measurements. Historical direct probe entrypoints are retired.
+
+OMP imports now share the proxy's session-ID validator, preserving full UUIDs while rejecting unsupported canonical identifiers before persistence. Source transcripts remain unchanged. The original experiment results and historical freeze are retained; this safety change is not a new inference qualification or authorization.
+
+## PinContext exposure diagnosis, offline only
+
+The hashed patched trace contains the explicit M2 pin only on request 0 of 6. Its write occurs on request 3 without the pin; the original early brief remains present throughout. The rule is still committed. The transform operates on request copies, and the user-tail guard abstains on subsequent tool tails. This is one-shot reminder qualification, not persistent exposure or product readiness.
+
+`benchmark/pin_exposure/diagnose.py` verifies the source hashes without network access. `crates/cw-proxy/tests/pin_lifecycle.rs` exercises the real transform API in-process, including eight tool follow-ups and later-user reapplication. The earlier invalid tool-pinned run is rejected. No new inference, production server access, or settings change occurred.
+
+PR #33 merged the correctness fix and endpoint regression into main as `51b5710`. PR #32 now includes that reviewed main commit through a non-rewriting branch merge; the three correctness files have no remaining PR diff. Its initial two-file extraction now also includes a focused, in-process transform-endpoint regression. That regression fails against the pre-fix core and passes with the unchanged guard; full messages and zero applied pins are checked. Gemini contents-tail eligibility is tracked separately in #35, and empty user-text semantics in #36. The proposed four-arm pilot in `docs/PINCONTEXT-RETENTION-BENCHMARK.md` is not authorized or execution-ready. Its fixture/oracle/history/counterbalance gates remain open. See `.audit/pin-exposure/trace.json` and `docs/PINCONTEXT-EXPOSURE-DIAGNOSIS.md`.
+
+## CW-104B recovery status
+
+All 12 corrected CW-104A coding attempts finished. Recovery from per-run records yields six matched pairs; five have complete usage and clean transport. Their coding-only totals are M1 2,840.34 seconds / 426,553 input tokens and M2 2,385.39 seconds / 358,228 input tokens. These descriptive differences do not establish causality or a reliable performance advantage. The remaining pair retains its transport failures and missing usage. See `docs/CW-104A-RECOVERED-RESULTS.md`.
+
+The user enabled server caching after CW-104A. Current enabled-cache counters must not be attributed to the historical uncached runs. Reserved-window initial reuse is now verified at 27,929 tokens per arm. The first genuine pair had invalid tool-output pinning. After a local fix and separate authorization, the replacement pair passed strict treatment/cache/acceptance gates; M2 used more time and tokens. See `docs/CW-104B-SMOKE-RESULTS.md`.
+
 This document establishes the empirical justification, real-world benchmark data, and core value claims for **contextWatcher (`cw`)** prior to general availability.
 
 ---
@@ -167,3 +187,9 @@ PR #30 merged at `b127991`. Its final verifier requires a successfully applied s
 ## CW-120A offline readiness
 
 The frozen initial study is six matched F1/F3 M1/M2 pairs (12 synthetic offline rehearsal sessions), using seed `1202026` and three M1-first / three M2-first pairs. The offline report is explicitly synthetic; its modeled costs are not product results. Preset-solution acceptance and modeled M2 mutation/prefix values are labeled simulation-only; actual agent success and request transformation are not evaluated. The simulator's acceptance checks raise under `python -O`; optimized-mode regression tests cover both unexpected initial acceptance and failed final acceptance. Separate CW-118 mock-proxy tests remain independently referenced. CW-118 failure-inclusive accounting, pricing calculation, bootstrap, and resume tests are reused; CW-119C contributes the saved exact-egress evidence and bounded SpendGuard pattern. Since the study has no M0 arm, proxy overhead is reported as `NOT_EVALUATED`, not zero. The synthetic cache-write count is zero. For live Responses usage, uncached tokens must exclude both cached reads and cache writes before pricing; current SpendGuard does not yet price a cache-write bucket. No provider request was made. See [readiness plan](docs/CW-120A-PRODUCT-VALUE-READINESS.md), [gap analysis](docs/CW-120A-GAP-ANALYSIS.md), and [offline rehearsal](docs/cw120a-offline-readiness.json). A future run requires an extended offline-verified F1/F3 Codex runner, fresh authorization, and preflight model/pricing checks.
+
+Historical CW-104B pre-reservation long-history gate: `.audit/cw104b/committed-pin-mock-preflight.json` confirms exact expected full-payload transformation with the frozen history. `.audit/cw104b/long-prefix-probe.json` preserves the stopped real diagnostic, with server recovery in `long-prefix-probe-postfailure.json`. Concurrent inference blocked cache equivalence; provider usage is NOT_AVAILABLE. No coding pair or cloud call ran.
+
+Current CW-104B verdict: BLOCKED_WITH_EVIDENCE due to tool-output pin mutation in the completed pair and all six recovered M2 arms. `docs/CW-104B-SMOKE-RESULTS.md` supersedes the preliminary qualification. Core regression failed before the guard; workspace tests, Clippy, formatting, and full native follow-up mock passed after it. No cloud calls or production server changes.
+
+Final CW-104B readiness: `.audit/cw104b/smoke-20261103T140929Z-audit.json` passes every gate, including string-aware pin location. Both arms pass public and independent acceptance; initial cached tokens are 27,929 each. M1/M2 coding time is 59.23/93.24 seconds, requests 5/6, input 144,272/174,188, output 1,850/3,236. This single negative product-value observation does not establish a general effect. No full campaign, cloud call, server configuration change, or merge occurred.

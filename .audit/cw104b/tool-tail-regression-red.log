@@ -1,0 +1,21 @@
+
+running 1 test
+test mutation::tests::pin_abstains_on_non_user_and_tool_result_message_tails ... FAILED
+
+failures:
+
+failures:
+    mutation::tests::pin_abstains_on_non_user_and_tool_result_message_tails
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 41 filtered out; finished in 0.00s
+
+   Compiling cw-core v0.2.4 (<user-home>/Development/contextWatcher/crates/cw-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.41s
+     Running unittests src/lib.rs (target/debug/deps/cw_core-353274d8991ad3c1)
+
+thread 'mutation::tests::pin_abstains_on_non_user_and_tool_result_message_tails' (1498119) panicked at crates/cw-core/src/mutation.rs:994:13:
+assertion `left == right` failed: unsupported tail must remain unchanged
+  left: Object {"messages": Array [Object {"content": String("tool output\n<cw_pinned_context>\n- [test]: retain this\n</cw_pinned_context>"), "role": String("tool"), "tool_call_id": String("call-1")}]}
+ right: Object {"messages": Array [Object {"content": String("tool output"), "role": String("tool"), "tool_call_id": String("call-1")}]}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p cw-core --lib`

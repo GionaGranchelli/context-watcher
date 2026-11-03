@@ -14,6 +14,24 @@ use std::{
 
 use crate::{auto_heal::check_and_apply_auto_heal, error::HarnessError};
 
+fn imported_session_id(harness: HarnessKind, id: &str) -> Result<String, HarnessError> {
+    let id = if harness == HarnessKind::Omp {
+        id
+    } else {
+        id.char_indices()
+            .nth(12)
+            .map(|(byte_offset, _)| &id[..byte_offset])
+            .unwrap_or(id)
+    };
+    let session_id = format!("{}_{}", harness.as_str(), id);
+    if harness == HarnessKind::Omp
+        && (id.is_empty() || !cw_core::control::is_valid_session_id(&session_id))
+    {
+        return Err(HarnessError::InvalidOmpSessionId);
+    }
+    Ok(session_id)
+}
+
 /// Extracts plain text representation from Codex content field.
 pub(crate) fn extract_codex_content_text(val: Option<&Value>) -> String {
     let Some(v) = val else {
@@ -58,11 +76,7 @@ pub fn import_generic_jsonl_transcript(
     } else {
         stem
     };
-    let mut session_id = format!(
-        "{}_{}",
-        harness.as_str(),
-        id_slug.chars().take(12).collect::<String>()
-    );
+    let mut session_id = None;
 
     let file = fs::File::open(path)?;
     let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
@@ -154,10 +168,17 @@ pub fn import_generic_jsonl_transcript(
 
         // 1. Codex CLI Rollout format (`session_meta`, `turn_context`, `event_msg`, `response_item`)
         if entry_type == "session" {
+            if harness == HarnessKind::Omp
+                && entry
+                    .get("id")
+                    .is_some_and(|id| id.as_str().is_none_or(str::is_empty))
+            {
+                return Err(HarnessError::InvalidOmpSessionId);
+            }
             if let Some(id) = entry.get("id").and_then(|v| v.as_str())
                 && !id.is_empty()
             {
-                session_id = format!("{}_{}", harness.as_str(), &id[..id.len().min(12)]);
+                session_id = Some(imported_session_id(harness, id)?);
             }
             if let Some(cwd) = entry.get("cwd").and_then(|v| v.as_str())
                 && !cwd.is_empty()
@@ -178,10 +199,16 @@ pub fn import_generic_jsonl_transcript(
 
         if entry_type == "session_meta" || entry_type == "turn_context" {
             if let Some(p) = entry.get("payload") {
+                if harness == HarnessKind::Omp
+                    && p.get("session_id")
+                        .is_some_and(|id| id.as_str().is_none_or(str::is_empty))
+                {
+                    return Err(HarnessError::InvalidOmpSessionId);
+                }
                 if let Some(sid) = p.get("session_id").and_then(|v| v.as_str())
                     && !sid.is_empty()
                 {
-                    session_id = format!("{}_{}", harness.as_str(), &sid[..sid.len().min(12)]);
+                    session_id = Some(imported_session_id(harness, sid)?);
                 }
                 if let Some(cwd) = p.get("cwd").and_then(|v| v.as_str())
                     && !cwd.is_empty()
@@ -465,6 +492,10 @@ pub fn import_generic_jsonl_transcript(
         }
     }
 
+    let session_id = match session_id {
+        Some(id) => id,
+        None => imported_session_id(harness, id_slug)?,
+    };
     if messages.is_empty() {
         return Ok(session_id);
     }

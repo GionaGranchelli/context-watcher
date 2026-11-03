@@ -1,0 +1,551 @@
+{
+  "attempts": {
+    "f3-32k-v2-r2-m1": {
+      "coding_start": "2026-11-03T06:10:56.363Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        0,
+        0
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 7,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f3-32k-v2-r3-m2": {
+      "coding_start": "2026-11-03T07:00:04.357Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        1,
+        1
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 7,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f1-32k-v2-r2-m1": {
+      "coding_start": "2026-11-03T05:37:07.713Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        0,
+        0,
+        0
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 5,
+          "tool_errors": 1
+        },
+        "coding": {
+          "tool_calls": 3,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 1
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f3-32k-v2-r1-m1": {
+      "coding_start": "2026-11-03T05:10:23.788Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 6,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 7,
+          "tool_errors": 0
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f1-32k-v2-r3-m1": {
+      "coding_start": "2026-11-03T06:32:12.497Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        0,
+        0,
+        0
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 7,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 3,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 10,
+          "tool_errors": 0
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f1-32k-v2-r1-m1": {
+      "coding_start": "2026-11-03T04:59:52.876Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        0,
+        0
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 4,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 5,
+          "tool_errors": 0
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f1-32k-v2-r1-m2": {
+      "coding_start": "2026-11-03T04:46:45.869Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        1,
+        1,
+        1
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 3,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 11,
+          "tool_errors": 0
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f3-32k-v2-r1-m2": {
+      "coding_start": "2026-11-03T05:22:57.096Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        1,
+        1,
+        1
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 9,
+          "tool_errors": 1
+        },
+        "coding": {
+          "tool_calls": 2,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 11,
+          "tool_errors": 1
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f1-32k-v2-r3-m2": {
+      "coding_start": "2026-11-03T06:21:12.234Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        1,
+        1
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 6,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 2,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    },
+    "f3-32k-v2-r2-m2": {
+      "coding_start": "2026-11-03T06:00:42.894Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        1,
+        1
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 7,
+          "tool_errors": 1
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 1
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f3-32k-v2-r3-m1": {
+      "coding_start": "2026-11-03T06:46:31.001Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        0,
+        0,
+        0
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 6,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 2,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        }
+      },
+      "initial_fixture_hashes": {
+        "store.py": "e137c05574ceaa4d4c4d0f2517f579ba541a1125142587d2fa9f452c53412fa3",
+        "test_cache_system.py": "76d312d52e0c63d71fba96c4f17537dc9cc1ed8329b3c54b37755e5bc5de5e97",
+        "cache.py": "072a229d8c6f5387acae4c27a1d0bb211f6833143f5d95de268df82af748a918"
+      }
+    },
+    "f1-32k-v2-r2-m2": {
+      "coding_start": "2026-11-03T05:50:43.067Z",
+      "models": [
+        "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS"
+      ],
+      "sampling_variants": 1,
+      "sampling": [
+        "{\"chat_template_kwargs\": {\"preserve_thinking\": true}, \"max_completion_tokens\": 16384, \"seed\": \"NOT_RECORDED\", \"temperature\": 0, \"top_p\": 1}"
+      ],
+      "pin_counts": [
+        1,
+        1
+      ],
+      "pin_absent_original_transcript": true,
+      "request_egress_equal_all": true,
+      "compaction_events": [],
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 6,
+          "tool_errors": 1
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 7,
+          "tool_errors": 1
+        }
+      },
+      "initial_fixture_hashes": {
+        "math_ops.py": "a7b65aa07a203eaa20a7814e53883287002eb62b1bc567bf525d5980c8a08969",
+        "test_math_ops.py": "ca77eebfb18fbf07d35a8da253b3eccef753811b53b3f63f8de6f202ab24f1f7"
+      }
+    }
+  },
+  "pairs": [
+    {
+      "family": "f1",
+      "rep": 1,
+      "task_order": [
+        "f1-32k-v2-r1-m2",
+        "f1-32k-v2-r1-m1"
+      ],
+      "fixture_hashes_equal": true,
+      "non_message_fields_differ": [],
+      "initial_message_counts": [
+        11,
+        17
+      ],
+      "initial_roles_equal": false,
+      "pin_only_request_difference": "NOT_VERIFIED: independently generated bootstrap histories and workspace/evaluation identifiers differ"
+    },
+    {
+      "family": "f1",
+      "rep": 2,
+      "task_order": [
+        "f1-32k-v2-r2-m1",
+        "f1-32k-v2-r2-m2"
+      ],
+      "fixture_hashes_equal": true,
+      "non_message_fields_differ": [],
+      "initial_message_counts": [
+        13,
+        14
+      ],
+      "initial_roles_equal": false,
+      "pin_only_request_difference": "NOT_VERIFIED: independently generated bootstrap histories and workspace/evaluation identifiers differ"
+    },
+    {
+      "family": "f1",
+      "rep": 3,
+      "task_order": [
+        "f1-32k-v2-r3-m2",
+        "f1-32k-v2-r3-m1"
+      ],
+      "fixture_hashes_equal": true,
+      "non_message_fields_differ": [],
+      "initial_message_counts": [
+        16,
+        14
+      ],
+      "initial_roles_equal": false,
+      "pin_only_request_difference": "NOT_VERIFIED: independently generated bootstrap histories and workspace/evaluation identifiers differ"
+    },
+    {
+      "family": "f3",
+      "rep": 1,
+      "task_order": [
+        "f3-32k-v2-r1-m1",
+        "f3-32k-v2-r1-m2"
+      ],
+      "fixture_hashes_equal": true,
+      "non_message_fields_differ": [],
+      "initial_message_counts": [
+        14,
+        18
+      ],
+      "initial_roles_equal": false,
+      "pin_only_request_difference": "NOT_VERIFIED: independently generated bootstrap histories and workspace/evaluation identifiers differ"
+    },
+    {
+      "family": "f3",
+      "rep": 2,
+      "task_order": [
+        "f3-32k-v2-r2-m2",
+        "f3-32k-v2-r2-m1"
+      ],
+      "fixture_hashes_equal": true,
+      "non_message_fields_differ": [],
+      "initial_message_counts": [
+        15,
+        15
+      ],
+      "initial_roles_equal": true,
+      "pin_only_request_difference": "NOT_VERIFIED: independently generated bootstrap histories and workspace/evaluation identifiers differ"
+    },
+    {
+      "family": "f3",
+      "rep": 3,
+      "task_order": [
+        "f3-32k-v2-r3-m1",
+        "f3-32k-v2-r3-m2"
+      ],
+      "fixture_hashes_equal": true,
+      "non_message_fields_differ": [],
+      "initial_message_counts": [
+        14,
+        15
+      ],
+      "initial_roles_equal": false,
+      "pin_only_request_difference": "NOT_VERIFIED: independently generated bootstrap histories and workspace/evaluation identifiers differ"
+    }
+  ],
+  "observed_server_versions": [
+    "0.1.44.1"
+  ],
+  "observed_cache_enabled_values": [
+    false
+  ],
+  "limits": "No raw text exported. Full request-only-treatment equivalence is not established; bootstrap histories differ. Seed absent. Hardware exclusivity NOT_VERIFIED.",
+  "matrix_replay_followup": {
+    "evidence": "matrix-mismatch-replay.json",
+    "exact_full_payload_replay": true,
+    "original_verifier_failure_mechanism": "NOT_VERIFIED",
+    "prehook_original_wire": "NOT_VERIFIED"
+  }
+}

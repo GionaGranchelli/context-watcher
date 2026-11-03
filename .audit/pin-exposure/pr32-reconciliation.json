@@ -1,0 +1,32 @@
+{
+  "pr": 32,
+  "reviewed_merged_pr": 33,
+  "main_commit": "51b5710b891395885f0b768d0748067bea73ee08",
+  "previous_qualification_head": "31bc58266e2a19445d85f72136f117b94cbd23f0",
+  "integration_merge_commit": "91b358ce2b34a8c75e138d77c90d327daee08bd8",
+  "method": "normal merge of reviewed main; no rebase or force push",
+  "merge_changed_file_contents": false,
+  "correctness_files": {
+    "crates/cw-core/src/mutation.rs": {
+      "main_blob": "c0e0adeb0d982f5d9b8728e17fcee3ac9ac8d602",
+      "branch_blob": "c0e0adeb0d982f5d9b8728e17fcee3ac9ac8d602"
+    },
+    "crates/cw-core/src/lib.rs": {
+      "main_blob": "911a7326fb858cb09adc0c668045911f71416c65",
+      "branch_blob": "911a7326fb858cb09adc0c668045911f71416c65"
+    },
+    "crates/cw-proxy/src/lib.rs": {
+      "main_blob": "014952c0d9edca8e2b6aafbdd30f614e91fb14a2",
+      "branch_blob": "014952c0d9edca8e2b6aafbdd30f614e91fb14a2"
+    }
+  },
+  "overlapping_correctness_diff_empty": true,
+  "reviewed_main_is_ancestor": true,
+  "historical_cw104b_evidence_tree_preserved": true,
+  "source_commits_retained": true,
+  "new_inference_calls": 0,
+  "production_settings_changed": false,
+  "pr32_merged": false,
+  "verification_command": "cargo test -p cw-proxy --lib --test pin_lifecycle",
+  "verification_result": "21 passed, 0 failed"
+}

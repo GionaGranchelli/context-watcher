@@ -1,0 +1,43 @@
+{
+  "kind": "bounded long-prefix cache diagnostic; no coding or tool execution",
+  "status": "BLOCKED_WITH_EVIDENCE",
+  "requests": [],
+  "error_type": "RuntimeError",
+  "error": "Runtime busy or queued",
+  "dispatched_requests": 1,
+  "coding_runs": 0,
+  "provider_usage": "NOT_AVAILABLE: response was not persisted before runtime-health guard failed",
+  "recovered_server_request": [
+    {
+      "projection": null,
+      "time": 1793711921.664994,
+      "duration_s": 54.9,
+      "finish": "length",
+      "prompt_tokens": 27926,
+      "reused": 0,
+      "output_tokens": 8,
+      "prompt_total": 27926,
+      "prompt_read": 27926,
+      "reasoning_recoveries": 0,
+      "reasoning_repeat_coverage": 0.0,
+      "engine_generated": 9,
+      "prompt_ms": 54606.0,
+      "decode_ms": 274.7,
+      "decode_tok_s": 32.8,
+      "hit_rate": null,
+      "pcie_share": null,
+      "ram_blobs": 0,
+      "file_blobs": 0,
+      "file_mb": 0,
+      "drafts_offered": 0,
+      "drafts_accepted": 0
+    }
+  ],
+  "blocker": "Concurrent unrelated inference observed after diagnostic response; equivalent cache state not qualified",
+  "other_work_observation": {
+    "state": "generating",
+    "queued": 4,
+    "prompt_tokens": 164,
+    "max_tokens": 1024
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "status": "BLOCKED_WITH_EVIDENCE",
+  "requirements": {
+    "six_pairs_recovered": true,
+    "independent_acceptance_checks": {
+      "attempts": 12,
+      "all_pass": true
+    },
+    "experimental_equivalence": "NOT_ESTABLISHED: bootstrap histories differ; no causal claim",
+    "transport_failures_preserved": true,
+    "tiny_cache_reuse": "VERIFIED_DIRECT_API_ONLY",
+    "frozen_task_and_negative_acceptance_checks": "VERIFIED",
+    "frozen_history_full_request_mock": true,
+    "long_prefix_equivalent_cache_state": "NOT_VERIFIED: concurrent runtime traffic",
+    "bounded_coding_smoke_pair": "NOT_EXECUTED: prerequisites did not pass",
+    "original_evidence_archive": "327 hashes verified; originals retained privately",
+    "review_update": "Local worktree only; not committed, pushed, approved, or merged"
+  },
+  "blocker_observations": [
+    "long-prefix-probe-postfailure.json",
+    "runtime-recheck.json",
+    "runtime-recheck-2.json"
+  ],
+  "latest_runtime": {
+    "state": "generating",
+    "queued": 1,
+    "phase": "tool call complete",
+    "prompt_tokens": 5217,
+    "prompt_read": null,
+    "prompt_total": null,
+    "generated": 2623,
+    "max_tokens": 3000,
+    "elapsed_s": 80.0,
+    "tok_s": 60.7,
+    "tok_s_mean": 41.3,
+    "prefill_tok_s_mean": 81.3,
+    "tok_s_window_s": 2.0
+  },
+  "resume_condition": "Quiet local runtime window, stable effective configuration, then repeat cache-equivalence gate with a new preserved attempt before coding. Never stop other workloads or change server configuration automatically.",
+  "inference_this_recovery": "One long diagnostic warm-up plus previously recorded tiny probes; zero coding arms; zero cloud calls",
+  "goal_achieved": false
+}

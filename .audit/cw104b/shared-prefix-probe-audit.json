@@ -1,0 +1,20 @@
+{
+  "request_counter_deltas": [
+    1,
+    1,
+    1
+  ],
+  "cached_tokens": [
+    0,
+    85,
+    85
+  ],
+  "server_reused_tokens": [
+    0,
+    85,
+    85
+  ],
+  "all_model_ids_match": true,
+  "all_checked_boundaries_idle": true,
+  "scope": "Tiny direct-API A/B/A only; OMP request-field preservation and 16K-32K boundary equivalence remain NOT_VERIFIED."
+}

@@ -1,0 +1,17 @@
+{
+  "authorization_id": "SET_UNIQUE_ID_AFTER_FRESH_APPROVAL",
+  "approved_by": "",
+  "approval_reference": "",
+  "issued_at": "SET_AFTER_FRESH_APPROVAL",
+  "expires_at": "SET_WITHIN_24_HOURS_OF_ISSUANCE",
+  "scope": "one-local-m1-m2-smoke-pair",
+  "max_pairs": 1,
+  "max_seconds": 3600,
+  "max_provider_requests": 30,
+  "cloud_spend_allowed": false,
+  "endpoint": "APPROVED_PRIVATE_IP_ORIGIN",
+  "model": "FROZEN_MODEL_ID",
+  "provider": "EXPLICIT_PROFILE_PROVIDER",
+  "runner_freeze_sha256": "SHA256_OF_CURRENT_RUNNER_FREEZE_JSON",
+  "evidence_dir": "ABSOLUTE_PRIVATE_EVIDENCE_DIRECTORY"
+}

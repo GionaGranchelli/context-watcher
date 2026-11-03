@@ -1,0 +1,55 @@
+{
+  "created_utc": "2026-11-03T14:51:12.762316+00:00",
+  "inference_calls": 0,
+  "production_server_access": false,
+  "production_settings_changed": false,
+  "merged_code": false,
+  "isolated_fix_review": {
+    "pr": "https://github.com/GionaGranchelli/context-watcher/pull/33",
+    "base": "e4c6e13edfc6e2ab2b77583df3a6217bc60cebe3",
+    "head": "a6c0489658787e939b5c678bcd75ac15ce8c18b3",
+    "changed_files": 2,
+    "added_lines": 60,
+    "core_tests_passed": 83,
+    "clippy": "PASS",
+    "format": "PASS",
+    "matches_original_fix_commit": "100b3c1: identical production/test files",
+    "github_ci": {
+      "run_id": 41656397257,
+      "conclusion": "success"
+    }
+  },
+  "lifecycle_api_test": {
+    "passed": 2,
+    "tool_followups_per_sequence": 8,
+    "in_process_no_socket": true
+  },
+  "trace_diagnosis": {
+    "source": "smoke-20261103T140929Z.json",
+    "source_hashes_verified": 25,
+    "pin_exposure_requests": "1/6",
+    "write_decision_request": 3,
+    "pin_at_write": false,
+    "original_early_brief_present": true,
+    "rule_still_committed": true
+  },
+  "negative_control": {
+    "source": "smoke-20261103T134708Z.json",
+    "expected_nonzero_exit": true,
+    "observed_exit": 1,
+    "reason": "Repeated tool-output pins do not match the one-request exposure diagnosis"
+  },
+  "workspace_tests": {
+    "passed": 245,
+    "ignored": 19,
+    "clippy": "PASS",
+    "format": "PASS"
+  },
+  "pilot_decision": "NO_GO: proposal only; fixture/oracle/history/counterbalance gates and fresh authorization required",
+  "new_source_sha256": {
+    "crates/cw-proxy/tests/pin_lifecycle.rs": "ec118a0e1dd53580f16182cddb7d451f765998ce42c2cd3672e4ebf941b3e6ef",
+    "benchmark/pin_exposure/diagnose.py": "1f7833fac6d5dc5250ec413a38331611aba308476a6eeb42928462637825048b",
+    "docs/PINCONTEXT-EXPOSURE-DIAGNOSIS.md": "3a0002e043561c5227d8fd691d5f720f9f122218b733d813a6cc51c51a0946e4",
+    "docs/PINCONTEXT-RETENTION-BENCHMARK.md": "6d5e4ad3353c0d1e017ace0ab21d197489f93022d1c35793a51a215c121891a5"
+  }
+}

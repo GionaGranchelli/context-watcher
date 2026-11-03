@@ -1,0 +1,11 @@
+{
+  "status": "BLOCKED_WITH_EVIDENCE",
+  "current_blocker": "Intended treatment invalidated by tool-output pin injection",
+  "runtime_busy_blocker": "RESOLVED: exclusive window and equal initial cache verified",
+  "real_pair": "COMPLETED_BUT_INVALID_TREATMENT",
+  "local_fix": "SUPPORTED_USER_TEXT_TAIL_GUARD_APPLIED",
+  "patched_real_pair": "NOT_EXECUTED",
+  "authoritative_report": "docs/CW-104B-SMOKE-RESULTS.md",
+  "full_campaign": "NOT_EXECUTED",
+  "goal_achieved": false
+}

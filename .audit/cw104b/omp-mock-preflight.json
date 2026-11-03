@@ -1,0 +1,55 @@
+{
+  "kind": "mock-only harness preflight; no model inference",
+  "runs": [
+    {
+      "arm": "m1",
+      "exit": 0,
+      "captured_requests": 1,
+      "stderr": "Working...\n"
+    },
+    {
+      "arm": "m2",
+      "exit": 0,
+      "captured_requests": 2,
+      "stderr": "Working...\n"
+    }
+  ],
+  "event_trace": "{\"kind\":\"loaded\",\"keys\":[],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"context\",\"keys\":[\"type\",\"messages\"],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"before_provider_request\",\"keys\":[\"type\",\"payload\"],\"payloadKeys\":[\"model\",\"messages\",\"stream\",\"stream_options\",\"temperature\",\"top_p\",\"tools\",\"max_completion_tokens\",\"preserve_thinking\",\"chat_template_kwargs\"],\"messageShapes\":[{\"role\":\"system\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":true}],\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":1,\"blocks\":[{\"type\":\"text\",\"marker\":false}],\"marker\":false}]}\n{\"kind\":\"loaded\",\"keys\":[],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"context\",\"keys\":[\"type\",\"messages\"],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"before_provider_request\",\"keys\":[\"type\",\"payload\"],\"payloadKeys\":[\"model\",\"messages\",\"stream\",\"stream_options\",\"temperature\",\"top_p\",\"tools\",\"max_completion_tokens\",\"preserve_thinking\",\"chat_template_kwargs\"],\"messageShapes\":[{\"role\":\"system\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":true}],\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":1,\"blocks\":[{\"type\":\"text\",\"marker\":false}],\"marker\":false}]}\n",
+  "requests": 2,
+  "request_top_keys": [
+    [
+      "model",
+      "messages",
+      "stream",
+      "stream_options",
+      "temperature",
+      "top_p",
+      "tools",
+      "max_completion_tokens",
+      "preserve_thinking",
+      "chat_template_kwargs",
+      "strata_prefix",
+      "seed"
+    ],
+    [
+      "model",
+      "messages",
+      "stream",
+      "stream_options",
+      "temperature",
+      "top_p",
+      "tools",
+      "max_completion_tokens",
+      "preserve_thinking",
+      "chat_template_kwargs",
+      "strata_prefix",
+      "seed"
+    ]
+  ],
+  "metadata_transmitted": true,
+  "full_request_equal": true,
+  "request_hashes": [
+    "da851436de8970ff9b401e3e5170909ef607f22f1b304dd8767cff985cc831fa",
+    "da851436de8970ff9b401e3e5170909ef607f22f1b304dd8767cff985cc831fa"
+  ]
+}

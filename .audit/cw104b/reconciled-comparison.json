@@ -1,0 +1,567 @@
+{
+  "attempts": {
+    "f1-32k-v2-r1-m1": {
+      "initial_completed_provider_context": 31376,
+      "initial_dispatch_context": 31376,
+      "coding_seconds": 442.37376556699746,
+      "coding": {
+        "dispatches": 2,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 2
+        },
+        "known_input_tokens": 64119,
+        "known_output_tokens": 1779,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 4,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 5,
+          "tool_errors": 0
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 135.64387603300565,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 578.0176416000031
+    },
+    "f1-32k-v2-r1-m2": {
+      "initial_completed_provider_context": 32358,
+      "initial_dispatch_context": 32358,
+      "coding_seconds": 651.2975530620024,
+      "coding": {
+        "dispatches": 3,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 3
+        },
+        "known_input_tokens": 98867,
+        "known_output_tokens": 1436,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 3,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 11,
+          "tool_errors": 0
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 213.0028082219942,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 864.3003612839966
+    },
+    "f1-32k-v2-r2-m1": {
+      "initial_completed_provider_context": 31776,
+      "initial_dispatch_context": 31776,
+      "coding_seconds": 642.9749261480029,
+      "coding": {
+        "dispatches": 3,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 3
+        },
+        "known_input_tokens": 97788,
+        "known_output_tokens": 1498,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 5,
+          "tool_errors": 1
+        },
+        "coding": {
+          "tool_calls": 3,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 1
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 168.71402107000176,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 811.6889472180046
+    },
+    "f1-32k-v2-r2-m2": {
+      "initial_completed_provider_context": 31714,
+      "initial_dispatch_context": 31714,
+      "coding_seconds": 421.2487479620031,
+      "coding": {
+        "dispatches": 2,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 2
+        },
+        "known_input_tokens": 64029,
+        "known_output_tokens": 958,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 6,
+          "tool_errors": 1
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 7,
+          "tool_errors": 1
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 171.11976462200982,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 592.3685125840129
+    },
+    "f1-32k-v2-r3-m1": {
+      "initial_completed_provider_context": 33283,
+      "initial_dispatch_context": 33283,
+      "coding_seconds": 685.6559415270021,
+      "coding": {
+        "dispatches": 3,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 3
+        },
+        "known_input_tokens": 102691,
+        "known_output_tokens": 1973,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 7,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 3,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 10,
+          "tool_errors": 0
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 218.6068934169889,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 904.262834943991
+    },
+    "f1-32k-v2-r3-m2": {
+      "initial_completed_provider_context": 32037,
+      "initial_dispatch_context": 32037,
+      "coding_seconds": 439.6288866870018,
+      "coding": {
+        "dispatches": 2,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 2
+        },
+        "known_input_tokens": 64936,
+        "known_output_tokens": 1428,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 6,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 2,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 178.63950497700716,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 618.268391664009
+    },
+    "f3-32k-v2-r1-m1": {
+      "initial_completed_provider_context": 32287,
+      "initial_dispatch_context": 32287,
+      "coding_seconds": 524.3806117060012,
+      "coding": {
+        "dispatches": 7,
+        "missing_usage_records": 5,
+        "outcomes": {
+          "completed": 2,
+          "stream_error": 1,
+          "upstream_error": 4
+        },
+        "known_input_tokens": 65858,
+        "known_output_tokens": 1553,
+        "complete_usage": false
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 6,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 7,
+          "tool_errors": 0
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 184.41618647100404,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 708.7967981770053
+    },
+    "f3-32k-v2-r1-m2": {
+      "initial_completed_provider_context": 32746,
+      "initial_dispatch_context": 32746,
+      "coding_seconds": 680.8406376459898,
+      "coding": {
+        "dispatches": 3,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 3
+        },
+        "known_input_tokens": 101153,
+        "known_output_tokens": 2012,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 9,
+          "tool_errors": 1
+        },
+        "coding": {
+          "tool_calls": 2,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 11,
+          "tool_errors": 1
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 228.00233814200328,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 908.842975787993
+    },
+    "f3-32k-v2-r2-m1": {
+      "initial_completed_provider_context": 32065,
+      "initial_dispatch_context": 32065,
+      "coding_seconds": 435.5440860939998,
+      "coding": {
+        "dispatches": 2,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 2
+        },
+        "known_input_tokens": 64978,
+        "known_output_tokens": 1310,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 7,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 177.02355559899297,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 612.5676416929928
+    },
+    "f3-32k-v2-r2-m2": {
+      "initial_completed_provider_context": 32102,
+      "initial_dispatch_context": 32102,
+      "coding_seconds": 434.8428286069975,
+      "coding": {
+        "dispatches": 2,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 2
+        },
+        "known_input_tokens": 65079,
+        "known_output_tokens": 1330,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 7,
+          "tool_errors": 1
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 1
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 177.12434992199996,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 611.9671785289975
+    },
+    "f3-32k-v2-r3-m1": {
+      "initial_completed_provider_context": 31668,
+      "initial_dispatch_context": 31668,
+      "coding_seconds": 633.7925087790063,
+      "coding": {
+        "dispatches": 3,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 3
+        },
+        "known_input_tokens": 96977,
+        "known_output_tokens": 1238,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 6,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 2,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 170.62515751500905,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 804.4176662940154
+    },
+    "f3-32k-v2-r3-m2": {
+      "initial_completed_provider_context": 32158,
+      "initial_dispatch_context": 32158,
+      "coding_seconds": 438.3754750049993,
+      "coding": {
+        "dispatches": 2,
+        "missing_usage_records": 0,
+        "outcomes": {
+          "completed": 2
+        },
+        "known_input_tokens": 65317,
+        "known_output_tokens": 1194,
+        "complete_usage": true
+      },
+      "tool_scopes": {
+        "bootstrap": {
+          "tool_calls": 7,
+          "tool_errors": 0
+        },
+        "coding": {
+          "tool_calls": 1,
+          "tool_errors": 0
+        },
+        "session": {
+          "tool_calls": 8,
+          "tool_errors": 0
+        }
+      },
+      "compaction_events": [],
+      "acceptance_passed": true,
+      "independent_acceptance_passed": true,
+      "bootstrap_seconds": 177.12269218098663,
+      "complete_session_wall_seconds": "NOT_AVAILABLE: sum of phase durations excludes inter-phase setup",
+      "known_phase_seconds": 615.498167185986
+    }
+  },
+  "pairs": [
+    {
+      "family": "f1",
+      "rep": 1,
+      "clean_transport": true,
+      "m2_minus_m1": {
+        "seconds": {
+          "absolute": 208.92378749500494,
+          "relative_percent": 47.22788821512144
+        },
+        "requests": {
+          "absolute": 1,
+          "relative_percent": 50.0
+        },
+        "input_tokens": {
+          "absolute": 34748,
+          "relative_percent": 54.19298491866685
+        },
+        "output_tokens": {
+          "absolute": -343,
+          "relative_percent": -19.280494659921303
+        }
+      }
+    },
+    {
+      "family": "f1",
+      "rep": 2,
+      "clean_transport": true,
+      "m2_minus_m1": {
+        "seconds": {
+          "absolute": -221.72617818599974,
+          "relative_percent": -34.4844206467488
+        },
+        "requests": {
+          "absolute": -1,
+          "relative_percent": -33.333333333333336
+        },
+        "input_tokens": {
+          "absolute": -33759,
+          "relative_percent": -34.5226408148239
+        },
+        "output_tokens": {
+          "absolute": -540,
+          "relative_percent": -36.048064085447265
+        }
+      }
+    },
+    {
+      "family": "f1",
+      "rep": 3,
+      "clean_transport": true,
+      "m2_minus_m1": {
+        "seconds": {
+          "absolute": -246.02705484000035,
+          "relative_percent": -35.881998527144894
+        },
+        "requests": {
+          "absolute": -1,
+          "relative_percent": -33.333333333333336
+        },
+        "input_tokens": {
+          "absolute": -37755,
+          "relative_percent": -36.76563671597316
+        },
+        "output_tokens": {
+          "absolute": -545,
+          "relative_percent": -27.62290927521541
+        }
+      }
+    },
+    {
+      "family": "f3",
+      "rep": 1,
+      "clean_transport": false,
+      "m2_minus_m1": {
+        "seconds": {
+          "absolute": 156.46002593998855,
+          "relative_percent": 29.837111145464945
+        },
+        "requests": {
+          "absolute": -4,
+          "relative_percent": -57.142857142857146
+        },
+        "input_tokens": {
+          "absolute": "NOT_AVAILABLE",
+          "relative_percent": "NOT_AVAILABLE"
+        },
+        "output_tokens": {
+          "absolute": "NOT_AVAILABLE",
+          "relative_percent": "NOT_AVAILABLE"
+        }
+      }
+    },
+    {
+      "family": "f3",
+      "rep": 2,
+      "clean_transport": true,
+      "m2_minus_m1": {
+        "seconds": {
+          "absolute": -0.7012574870022945,
+          "relative_percent": -0.16100723425985125
+        },
+        "requests": {
+          "absolute": 0,
+          "relative_percent": 0.0
+        },
+        "input_tokens": {
+          "absolute": 101,
+          "relative_percent": 0.15543722490689157
+        },
+        "output_tokens": {
+          "absolute": 20,
+          "relative_percent": 1.5267175572519085
+        }
+      }
+    },
+    {
+      "family": "f3",
+      "rep": 3,
+      "clean_transport": true,
+      "m2_minus_m1": {
+        "seconds": {
+          "absolute": -195.417033774007,
+          "relative_percent": -30.832966793892147
+        },
+        "requests": {
+          "absolute": -1,
+          "relative_percent": -33.333333333333336
+        },
+        "input_tokens": {
+          "absolute": -31660,
+          "relative_percent": -32.646916279117725
+        },
+        "output_tokens": {
+          "absolute": -44,
+          "relative_percent": -3.5541195476575123
+        }
+      }
+    }
+  ],
+  "interpretation": "Descriptive only; histories differ and no causal advantage is established."
+}

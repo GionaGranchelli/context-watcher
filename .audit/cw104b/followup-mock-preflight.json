@@ -1,0 +1,94 @@
+{
+  "kind": "mock-only harness preflight; no model inference",
+  "runs": [
+    {
+      "arm": "m1",
+      "exit": 0,
+      "captured_requests": 2,
+      "stderr": "Working...\n"
+    },
+    {
+      "arm": "m2",
+      "exit": 0,
+      "captured_requests": 4,
+      "stderr": "Working...\n"
+    }
+  ],
+  "event_trace": "{\"kind\":\"loaded\",\"keys\":[],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"context\",\"keys\":[\"type\",\"messages\"],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"before_provider_request\",\"keys\":[\"type\",\"payload\"],\"payloadKeys\":[\"model\",\"messages\",\"stream\",\"stream_options\",\"temperature\",\"top_p\",\"tools\",\"max_completion_tokens\",\"preserve_thinking\",\"chat_template_kwargs\"],\"messageShapes\":[{\"role\":\"system\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":true}],\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":1,\"blocks\":[{\"type\":\"text\",\"marker\":false}],\"marker\":false}]}\n{\"kind\":\"context\",\"keys\":[\"type\",\"messages\"],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"before_provider_request\",\"keys\":[\"type\",\"payload\"],\"payloadKeys\":[\"model\",\"messages\",\"stream\",\"stream_options\",\"temperature\",\"top_p\",\"tools\",\"max_completion_tokens\",\"preserve_thinking\",\"chat_template_kwargs\"],\"messageShapes\":[{\"role\":\"system\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":true}],\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":1,\"blocks\":[{\"type\":\"text\",\"marker\":false}],\"marker\":false},{\"role\":\"assistant\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"tool\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false}]}\n{\"kind\":\"loaded\",\"keys\":[],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"context\",\"keys\":[\"type\",\"messages\"],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"before_provider_request\",\"keys\":[\"type\",\"payload\"],\"payloadKeys\":[\"model\",\"messages\",\"stream\",\"stream_options\",\"temperature\",\"top_p\",\"tools\",\"max_completion_tokens\",\"preserve_thinking\",\"chat_template_kwargs\"],\"messageShapes\":[{\"role\":\"system\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":true}],\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":false}],\"marker\":false}]}\n{\"kind\":\"context\",\"keys\":[\"type\",\"messages\"],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"before_provider_request\",\"keys\":[\"type\",\"payload\"],\"payloadKeys\":[\"model\",\"messages\",\"stream\",\"stream_options\",\"temperature\",\"top_p\",\"tools\",\"max_completion_tokens\",\"preserve_thinking\",\"chat_template_kwargs\"],\"messageShapes\":[{\"role\":\"system\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":true}],\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":1,\"blocks\":[{\"type\":\"text\",\"marker\":false}],\"marker\":false},{\"role\":\"assistant\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"tool\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false}]}\n",
+  "history_sha256": "0134917afb850953bba07dece1f71e6ce26c5f6ed48e96f4a3a51f6513becdda",
+  "history_characters": 103418,
+  "requests": 4,
+  "request_top_keys": [
+    [
+      "model",
+      "messages",
+      "stream",
+      "stream_options",
+      "temperature",
+      "top_p",
+      "tools",
+      "max_completion_tokens",
+      "preserve_thinking",
+      "chat_template_kwargs",
+      "strata_prefix",
+      "seed"
+    ],
+    [
+      "model",
+      "messages",
+      "stream",
+      "stream_options",
+      "temperature",
+      "top_p",
+      "tools",
+      "max_completion_tokens",
+      "preserve_thinking",
+      "chat_template_kwargs",
+      "strata_prefix",
+      "seed"
+    ],
+    [
+      "model",
+      "messages",
+      "stream",
+      "stream_options",
+      "temperature",
+      "top_p",
+      "tools",
+      "max_completion_tokens",
+      "preserve_thinking",
+      "chat_template_kwargs",
+      "strata_prefix",
+      "seed"
+    ],
+    [
+      "model",
+      "messages",
+      "stream",
+      "stream_options",
+      "temperature",
+      "top_p",
+      "tools",
+      "max_completion_tokens",
+      "preserve_thinking",
+      "chat_template_kwargs",
+      "strata_prefix",
+      "seed"
+    ]
+  ],
+  "metadata_transmitted": true,
+  "full_expected_transformation_equal": true,
+  "tool_followup_full_payload_equal": true,
+  "committed_rules": [
+    {
+      "status": "committed"
+    }
+  ],
+  "original_transcripts_pin_absent": true,
+  "request_hashes": [
+    "3aa4048c32e01b9506393b07bb551b3d13c71bb4dde7fbb1e91d7d041432daec",
+    "b8014da389f0b590c5d5ad2abb2d70530d81f6efadaf78295f3d0ad67fc01911",
+    "6f7fddb8f56289745f5035bdaed171b3bf68674c234f9eed1775016d8dfee09f",
+    "b8014da389f0b590c5d5ad2abb2d70530d81f6efadaf78295f3d0ad67fc01911"
+  ]
+}

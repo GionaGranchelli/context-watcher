@@ -1,0 +1,26 @@
+{
+  "failed_before": "pin_abstains_on_non_user_and_tool_result_message_tails: tool output was modified",
+  "after": {
+    "cargo test --workspace": {
+      "passed": 243,
+      "ignored": 19,
+      "exit": 0
+    },
+    "cargo clippy --workspace --all-targets -- -D warnings": {
+      "exit": 0
+    },
+    "cargo fmt --all -- --check": {
+      "exit": 0
+    },
+    "native_followup_mock": {
+      "requests": 4,
+      "initial_expected_pin": true,
+      "full_followup_equal": true
+    }
+  },
+  "production_file_sha256": {
+    "crates/cw-core/src/mutation.rs": "4b6e3b69212a51731c57baa3b22ccdbbc281b059e33a0f3d4a9c107153e7c787",
+    "crates/cw-core/src/lib.rs": "4ad009054fc14f38fb57701c71cedcac0654b86a1e73ef0f4b0a17d04ccffb7b"
+  },
+  "live_requalification": "NOT_EXECUTED"
+}

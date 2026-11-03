@@ -1,0 +1,27 @@
+{
+  "attempt": "smoke-20261103T134247Z.json",
+  "status": "INVALID_CACHE_INITIALIZATION_STOPPED",
+  "m1_first_response_usage": {
+    "prompt_tokens": 27948,
+    "completion_tokens": 130,
+    "total_tokens": 28078,
+    "prompt_tokens_details": {
+      "cached_tokens": 27943
+    }
+  },
+  "qualified_shared_prefix_tokens": 27929,
+  "observed_cached_tokens": 27943,
+  "excess_reused_tokens": 14,
+  "provider_tool_names": [
+    "glob",
+    "grep"
+  ],
+  "workspace_still_pristine": true,
+  "m2_coding_requests": 0,
+  "performance_comparison": "NOT_EVALUATED",
+  "primary_failure": "Initial coding cache state differs from qualified prefix",
+  "secondary_runner_defect": "A subsequent blocked retry overwrote the first fatal error message",
+  "suspected_mechanism": "Final M1 cache diagnostic repeated the exact coding request; active KV state retained 14 additional suffix tokens",
+  "root_cause_scope": "Experimental warm-up design; not evidence of a Context Watcher transformation defect",
+  "next_fix": "Use one frozen neutral suffix to align active KV state before each coding arm; qualify equal reuse before authorizing a replacement pair."
+}

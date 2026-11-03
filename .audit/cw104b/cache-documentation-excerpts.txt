@@ -1,0 +1,119 @@
+**Conversation cache.** A request that continues a chat reads only the part after what the engine already holds: the
+live session, or one of the checkpoints it keeps in RAM (up to 6, ~118 MB each, taken at the start of each new
+assistant turn and every 16K prompt tokens). A checkpoint is used only when the prompt starts with exactly its tokens
+and pictures. The oldest checkpoint - in practice the end of the system prompt, which every chat of the same client
+shares - is kept for good while the rest rotates by least recent use, so a NEW chat that shares that prefix starts
+reading after it instead of from token 0. A prompt read from the start is also checkpointed at the end of its system
+prompt when that is 2,048 tokens or more (engine 0.1.20; PR #62 + #65), so that root exists for agent clients with long
+system prompts and tool lists. Claude Code stamps its system prompt with a billing header that changes on every
+request (`cch=...`) and every session (the 4th part of `cc_version=`); the server pins both stamps (to `f`s, as
+llama.cpp does), so the system prompt and the tool list in front of it are the same prompt on every turn. Engine options: `--prompt-cache N` (0 = off), `--prompt-cache-every N`,
+`--prompt-cache-root N` (0 = no system-prompt checkpoint), `--turn-token ID`.
+A one-shot request that no later request continues (a classification call, a probe) can send
+`"strata_checkpoint": false` in its body: it saves no checkpoint at its last turn nor every 16K tokens, so what
+follows the reused prefix (or the root) is read in one run, and its session is not kept or parked for a next request.
+It still starts from a checkpoint it matches, and still saves the system-prompt root when that reaches
+`--prompt-cache-root`. Without the field (or with `true`) nothing changes.
+
+**One long document, many questions: a pinned shared prefix (opt-in, 0.1.40.2, [RESEARCH_RUNS.md](RESEARCH_RUNS.md)).**
+A request can say where the document ends: `"strata_prefix": {"messages": 1}` (the first message is the document),
+`{"message": 0, "chars": 210000}` (the first 210,000 characters of message 0, for a client that sends the document and
+the question in one message) or `{"tokens": 12345}`. The engine reads the prompt in two parts there, keeps the checkpoint
+at the boundary pinned (retention never evicts it, a parked conversation holding it stays parked, `SAVE` keeps it) and,
+when a later question resumes from it, does not park the question it leaves. So the next question starts at the end of
+the document, and 20 questions cost one read of it. Without the field the server's checkpoints are where they were: the
+last turn's start, the system prompt's end and every `--prompt-cache-every` tokens, so a question that follows a long
+document in the same chat re-reads up to 16K tokens of it (55 s at 262K on a Tesla P100). The field is checked against the
+prompt's own ids (the prefix is always the longest common start), a prefix that cannot be marked is said in the server's
+window and ignored, and a malformed field is a 400. One pinned prefix at a time per engine (a new one replaces it);
+it needs `--prompt-cache 3` or more. `tools/research_run.py` runs a document and a question list against a server with and
+without it. The engine's own key is `pin=N` on the `GEN` line.
+
+**Multiple conversations (opt-in).** Add `--conversation-cache-mib 8192
+--conversation-cache-slots 4` to the engine arguments to park up to four conversations
+in a bounded 8 GiB host-RAM cache. This preserves controller/worker histories when
+their requests alternate; it does not execute requests concurrently. No client session
+ID is required: only exact token/image prefixes with matching steering mode are reused.
+The default budget is 0 (disabled); `--prompt-cache 0` also disables parking.
+With `--layer-split`, a parked conversation holds one image per stage (each later stage's
+session and its share of the conversation checkpoints), every image is validated before
+anything is overwritten, and each is restored on its own GPU. Verified on a 4-GPU split:
+a 9,276-token conversation restored in 51 ms, and its follow-up decodes exactly the tokens
+it decodes when the conversation never left (`tools/parking_test.py`). FP16,
+INT8, Q4_0 and identity-layout K8V4 snapshots are supported; the K8V4 draft ring
+remains INT8, as in upstream. Windows/HIP and multi-GPU runtime coverage must be
+reported separately from Linux/CUDA evidence.
+
+The web page's Monitor tab has a **Conversation cache** card (0.1.39, #596): the parked conversations against the
+slots and the RAM budget, how many were parked, restored and evicted, and the last switch (read from the engine's
+log), and for every setup how many prompt tokens the cache gave back - in the last request and since the start.
+`/metrics` has the same under `"conversation_cache"`.
+
+Snapshots contain running state, checkpoints, used K/V pages, and draft-layer K/V.
+They add host RAM, not another model or VRAM allocation. The byte budget also counts
+an incoming snapshot during a switch. After a restore, unchanged K/V pages can be
+retained for the next parking operation; growth appends storage without copying
+the existing pages. Rewinds refresh the affected pages, and running state and
+checkpoints are captured again. Retained active K/V counts against the same byte
+budget and is discarded before evicting parked entries under memory pressure.
+If reserving space for growth would evict another conversation, parking uses a
+full capture instead.
+Oldest parked entries are evicted first.
+Oversized snapshots or host allocation failures fall back to ordinary prompt processing.
+`--conversation-cache-min-tokens N` (default 0 = park every conversation) parks only conversations of at least N
+tokens. A parked conversation costs one of the slots whatever its length, and parking is a switch-time decision, so a
+client that interleaves short side requests with one long conversation spends the cache on the side requests and, once
+it is full, evicts the long one oldest-first - exactly the reuse it wanted. Setting the minimum above the side
+requests' length keeps the long conversation parked. The check runs before `make_room()`, so a skipped park evicts
+nothing and stores nothing; the log line is `conversation cache: skip parking (N tokens, below the M minimum;
+parked=P)`. 0 is the pre-flag behaviour and the flag leaves the answers untouched - it only decides which
+conversations keep a slot.
+`--conversation-cache-min-free-mib N` (default 2560) additionally requires that
+RAM headroom remain available: the engine checks before allocation (against the
+snapshot's estimated size, less the K/V it already retains) and again after capture.
+Unknown telemetry or insufficient RAM skips parking, and the same figure and floor
+decide whether a session file may be saved or restored (below). An 8 GiB budget
+is a cap, not a recommendation for every machine.
+
+**The RAM figure (`available_host_bytes()`).** The headroom is the smallest of three
+numbers, sampled each time it is asked and not a reservation (other writers can take the
+room afterwards):
+
+1. `MemAvailable` (Windows: `GlobalMemoryStatusEx`'s available physical memory).
+2. The room under each memory limit of the engine's own cgroup and of every ancestor
+`--native-dense-gguf`, the head shards and `--embd-gguf`), the PLE shard, the pack's index/dense/embedding files and
+`native_experts.txt`, every file the expert source resolved - the pack's `experts.bin`, or for a pack read in place each
+layer's gate/up/down GGUF as `native_experts.txt` names it, also one outside the CLI shards - and the MTP's files; not
+other files in those folders, and not the path, so a moved model folder still matches. A
+change in the middle of a file that keeps its size is not seen: do not change model files while their sessions are
+kept. The config fingerprint covers the engine version string (another version is refused; two builds of the same version
+are not told apart - there is no build hash), CUDA or HIP,
+`--kv`, `STRATA_KV_ROT`, `--kv-resident`, `--max-context`, `--mtp-window`, the resolved rope configuration (type,
+base, factor, freq scale, original context, the YaRN knobs - the cached K is post-RoPE), the loaded control vector (a
+digest of the tables uploaded: every file's content times its exact scale, the mode, the layer range and the
+direction) and the arithmetic switches (`--native-*`, `--no-ple`, the A/B arms). Sampling, seeds, draft tuning and
+the expert tier are not in it: they change what comes next, not what the saved cells hold.
+
+A save writes a temporary file with a new hidden name beside `path` (created exclusively, never an existing file or
+link), flushes it to the disk, renames it over `path` (`MoveFileExW` with write-through on Windows, which promises no transaction
+on every filesystem) and, on POSIX, flushes the folder (Windows has no folder flush; the file flush and the
+write-through rename are all it does). A save that fails before the rename keeps the old file at `path` and removes
+only its own temporary file. Once the rename is done the old file is gone: if the folder flush then fails, the save
+fails with `published` set - the new file's bytes are complete and flushed, but its name may not survive a power loss.
+A filesystem that cannot flush a folder (`EINVAL`) is not a failure; the engine logs it. A restore opens `path` without following a symbolic link (or a Windows reparse point) and refuses
+anything but a regular file with one name; it checks the size, the header, both fingerprints (before the payload is
+parsed; the first 16 MiB block, header included, is already read), that the parse's peak (the image, the read buffer, the per-segment overhead) fits in RAM above the parking
+floor (`--conversation-cache-min-free-mib`), the file's size against the largest this session can restore, the
+geometry and layer range before any state array, and every count against the bytes left and this session's exact
+limits (context and cells, checkpoints, layers, each running-state array, each K/V part) before allocating it, the payload hash
+and then the usual snapshot validation - all before any device write, and a refusal leaves the current session as it
+was. A transfer failure after the device writes began ends the engine (`FATAL`) rather than decode from a partial
+state; the server reports `500` and starts it again. A restore does not park the outgoing session. Not supported with
+`--layer-split`, `--peer-device`, `--batch` (the config's `"parallel"`, #465; the server answers `501`) or
+`--prompt-cache 0` (the RAM conversation cache need not be on). On Linux the file
+moves with `O_DIRECT` in 16 MiB blocks when the filesystem takes it (buffered I/O otherwise, or with
+`STRATA_SESSION_BUFFERED=1`); on Windows with buffered I/O. The engine has been run on Linux/CUDA only. An earlier
+revision's CPU file-I/O test passed as a 32-bit Windows executable under Wine; the current code has not been built
+for Windows, and the Windows engine, HIP and AMD cards have not been run.
+
+A session file saves conversation state, not all of the process's execution history. Exact future token replay

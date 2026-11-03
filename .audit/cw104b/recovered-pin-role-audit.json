@@ -1,0 +1,258 @@
+{
+  "needle_label": "CW104A-TaskConstraints",
+  "attempts": {
+    "f1-32k-v2-r1-m1": [
+      {
+        "turn_id": "turn_edec8fad959a450cb1cafcd93369f1bd",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_fa7ee744cb924638840e09df39ff6dd6",
+        "locations": []
+      }
+    ],
+    "f1-32k-v2-r1-m2": [
+      {
+        "turn_id": "turn_935f604c784241949c9e857201344c39",
+        "locations": [
+          {
+            "message": 16,
+            "role": "user",
+            "shape": "list"
+          }
+        ]
+      },
+      {
+        "turn_id": "turn_2473d33197e94a7f94013fc463426d30",
+        "locations": [
+          {
+            "message": 19,
+            "role": "tool",
+            "shape": "str"
+          }
+        ]
+      },
+      {
+        "turn_id": "turn_f446d535868c47efaeb9e4903443c44d",
+        "locations": [
+          {
+            "message": 21,
+            "role": "tool",
+            "shape": "str"
+          }
+        ]
+      }
+    ],
+    "f1-32k-v2-r2-m1": [
+      {
+        "turn_id": "turn_f37893d4087d406caeeacf5882801ef2",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_49e0501fe6714b51808cf42b82fce4e2",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_8055800a3ed545b2abe358b1ecdd9cad",
+        "locations": []
+      }
+    ],
+    "f1-32k-v2-r2-m2": [
+      {
+        "turn_id": "turn_4eaa91038b034a408eb0579a868f3ece",
+        "locations": [
+          {
+            "message": 13,
+            "role": "user",
+            "shape": "list"
+          }
+        ]
+      },
+      {
+        "turn_id": "turn_69cab5a95460415f9a0fa24200691d54",
+        "locations": [
+          {
+            "message": 15,
+            "role": "tool",
+            "shape": "str"
+          }
+        ]
+      }
+    ],
+    "f1-32k-v2-r3-m1": [
+      {
+        "turn_id": "turn_6f3a2c3ffd004cf8bccfda762f069268",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_e8126177e7d8496f9875f6f8ca616192",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_324388558268414a896bad8a83c67aa0",
+        "locations": []
+      }
+    ],
+    "f1-32k-v2-r3-m2": [
+      {
+        "turn_id": "turn_e313ff27f5d948d79ae35679ea9d720a",
+        "locations": [
+          {
+            "message": 13,
+            "role": "user",
+            "shape": "list"
+          }
+        ]
+      },
+      {
+        "turn_id": "turn_4c2b8aa577934694b95c4da60134164a",
+        "locations": [
+          {
+            "message": 16,
+            "role": "tool",
+            "shape": "str"
+          }
+        ]
+      }
+    ],
+    "f3-32k-v2-r1-m1": [
+      {
+        "turn_id": "turn_79d6fe7411b2443682c1a6af4b0445b7",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_f4efe3f269a94310b53e30c2bd061961",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_f9675638c47b495190dd7a5cc7183009",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_876d3e92a743490cbfb0891f7157b89d",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_ebe4f0ab3b7d45d9993f2eadd65fb01e",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_4725bed606d94738b5d118f088478c95",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_4a3d86279d744d458d9d67fa60c195a6",
+        "locations": []
+      }
+    ],
+    "f3-32k-v2-r1-m2": [
+      {
+        "turn_id": "turn_1fd24dfa4a5d43dd815c436aec3cf973",
+        "locations": [
+          {
+            "message": 17,
+            "role": "user",
+            "shape": "list"
+          }
+        ]
+      },
+      {
+        "turn_id": "turn_4501e576bb874dcabdcfcb3a7d267e74",
+        "locations": [
+          {
+            "message": 19,
+            "role": "tool",
+            "shape": "str"
+          }
+        ]
+      },
+      {
+        "turn_id": "turn_ea91a8add63c4d52a7068fadf50f5635",
+        "locations": [
+          {
+            "message": 21,
+            "role": "tool",
+            "shape": "str"
+          }
+        ]
+      }
+    ],
+    "f3-32k-v2-r2-m1": [
+      {
+        "turn_id": "turn_156bc1276295496d987b5ed8d9463442",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_d9358dcb88c845a6b1f91ea91a8250d0",
+        "locations": []
+      }
+    ],
+    "f3-32k-v2-r2-m2": [
+      {
+        "turn_id": "turn_fd95ba00e0504c89aceb016da543fa81",
+        "locations": [
+          {
+            "message": 14,
+            "role": "user",
+            "shape": "list"
+          }
+        ]
+      },
+      {
+        "turn_id": "turn_f00dbb2f61494eaeae91a990acd420fb",
+        "locations": [
+          {
+            "message": 16,
+            "role": "tool",
+            "shape": "str"
+          }
+        ]
+      }
+    ],
+    "f3-32k-v2-r3-m1": [
+      {
+        "turn_id": "turn_9c1af4d38115419f847c6f3045788677",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_8b466b40672442f291c21d1b83d86909",
+        "locations": []
+      },
+      {
+        "turn_id": "turn_5ea45bec02b04bcd996aea4b0288f61c",
+        "locations": []
+      }
+    ],
+    "f3-32k-v2-r3-m2": [
+      {
+        "turn_id": "turn_02bca3bd9f794511b438c744648042b5",
+        "locations": [
+          {
+            "message": 14,
+            "role": "user",
+            "shape": "list"
+          }
+        ]
+      },
+      {
+        "turn_id": "turn_7adfe56b3ca9431d8780608960be2ee1",
+        "locations": [
+          {
+            "message": 16,
+            "role": "tool",
+            "shape": "str"
+          }
+        ]
+      }
+    ]
+  },
+  "ineligible_pin_attempts": [
+    "f1-32k-v2-r1-m2",
+    "f1-32k-v2-r2-m2",
+    "f1-32k-v2-r3-m2",
+    "f3-32k-v2-r1-m2",
+    "f3-32k-v2-r2-m2",
+    "f3-32k-v2-r3-m2"
+  ],
+  "status": "HISTORICAL_TREATMENT_INVALID_WHERE_TOOL_PINS_FOUND"
+}

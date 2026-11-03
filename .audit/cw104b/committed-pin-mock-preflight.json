@@ -1,0 +1,63 @@
+{
+  "kind": "mock-only harness preflight; no model inference",
+  "runs": [
+    {
+      "arm": "m1",
+      "exit": 0,
+      "captured_requests": 1,
+      "stderr": "Working...\n"
+    },
+    {
+      "arm": "m2",
+      "exit": 0,
+      "captured_requests": 2,
+      "stderr": "Working...\n"
+    }
+  ],
+  "event_trace": "{\"kind\":\"loaded\",\"keys\":[],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"context\",\"keys\":[\"type\",\"messages\"],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"before_provider_request\",\"keys\":[\"type\",\"payload\"],\"payloadKeys\":[\"model\",\"messages\",\"stream\",\"stream_options\",\"temperature\",\"top_p\",\"tools\",\"max_completion_tokens\",\"preserve_thinking\",\"chat_template_kwargs\"],\"messageShapes\":[{\"role\":\"system\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":true}],\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":1,\"blocks\":[{\"type\":\"text\",\"marker\":false}],\"marker\":false}]}\n{\"kind\":\"loaded\",\"keys\":[],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"context\",\"keys\":[\"type\",\"messages\"],\"payloadKeys\":[],\"messageShapes\":[]}\n{\"kind\":\"before_provider_request\",\"keys\":[\"type\",\"payload\"],\"payloadKeys\":[\"model\",\"messages\",\"stream\",\"stream_options\",\"temperature\",\"top_p\",\"tools\",\"max_completion_tokens\",\"preserve_thinking\",\"chat_template_kwargs\"],\"messageShapes\":[{\"role\":\"system\",\"type\":\"string\",\"count\":null,\"blocks\":null,\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":true}],\"marker\":false},{\"role\":\"user\",\"type\":\"object\",\"count\":2,\"blocks\":[{\"type\":\"text\",\"marker\":false},{\"type\":\"text\",\"marker\":false}],\"marker\":false}]}\n",
+  "history_sha256": "0134917afb850953bba07dece1f71e6ce26c5f6ed48e96f4a3a51f6513becdda",
+  "history_characters": 103418,
+  "requests": 2,
+  "request_top_keys": [
+    [
+      "model",
+      "messages",
+      "stream",
+      "stream_options",
+      "temperature",
+      "top_p",
+      "tools",
+      "max_completion_tokens",
+      "preserve_thinking",
+      "chat_template_kwargs",
+      "strata_prefix",
+      "seed"
+    ],
+    [
+      "model",
+      "messages",
+      "stream",
+      "stream_options",
+      "temperature",
+      "top_p",
+      "tools",
+      "max_completion_tokens",
+      "preserve_thinking",
+      "chat_template_kwargs",
+      "strata_prefix",
+      "seed"
+    ]
+  ],
+  "metadata_transmitted": true,
+  "full_expected_transformation_equal": true,
+  "committed_rules": [
+    {
+      "status": "committed"
+    }
+  ],
+  "original_transcripts_pin_absent": true,
+  "request_hashes": [
+    "70640e57a137ecb4c0572d19e6bb3ffa5daf0bbe395538688181ba2d4a29be4d",
+    "e8ded98e7d5b1ca9f34e5dc0f6e47bb53c301461136dea38cfdcc5aac5ccc720"
+  ]
+}

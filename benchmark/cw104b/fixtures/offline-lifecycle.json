@@ -1,0 +1,9 @@
+{
+  "kind": "sanitized-offline-lifecycle",
+  "scope": "API request lifecycle only; no OMP binary, private history, or model inference",
+  "messages": [
+    {"role": "system", "content": "Use the repository tools."},
+    {"role": "user", "content": "Preserve the public API. Historical development activity follows."},
+    {"role": "user", "content": [{"type": "text", "text": "Implement the pending change."}]}
+  ]
+}

@@ -50,3 +50,8 @@ jobs:
 
       - name: Run Hermes Plugin Tests
         run: python3 plugins/hermes/context-watcher/test_plugin.py
+
+      - name: Offline smoke admission and fixture checks
+        run: |
+          python3 -B -m unittest discover -s benchmark/cw104b -p test_smoke.py -v
+          python3 -B benchmark/cw104b/smoke.py --manifest-dir "$RUNNER_TEMP/cw104b-offline"

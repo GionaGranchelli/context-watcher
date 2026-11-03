@@ -2,6 +2,8 @@
 
 Status: implementation for review. This is the first runtime boundary for the [roadmap in PR #34](https://github.com/GionaGranchelli/context-watcher/pull/34), not completion of CW-121B/C. PR #34 merged on 2026-11-03 and is included in this branch. No inference or production changes are part of this work.
 
+The [CW-121B creation contract](CW-121B-CONSENT-AWARE-CREATION.md) supersedes the inactive automatic-generation gap described in this initial inventory. Automatic and strategy-derived creation now require consent; direct manual inactive creation remains supported. Broader activation controls remain CW-121C.
+
 ## Runtime contract
 
 A committed rule does not authorize reinforcement. Missing consent, a revoked grant, a failed policy read, or consent for another session prevents PinContext injection. Other mutation operators retain their existing eligibility checks and behavior. Existing pin rules remain stored with their original status and contents.

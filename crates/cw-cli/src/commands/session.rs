@@ -287,7 +287,7 @@ pub fn run_optimize(
             return Ok(());
         }
 
-        let mut sessions_compacted = 0usize;
+        let mut sessions_with_candidates = 0usize;
         let mut total_ops = 0usize;
         let mut total_saved_tok = 0u64;
         let mut total_synced = 0usize;
@@ -306,11 +306,12 @@ pub fn run_optimize(
             if plan.items.is_empty() {
                 continue;
             }
-            sessions_compacted += 1;
+            sessions_with_candidates += 1;
             total_ops += plan.items.len();
             total_saved_tok += plan.saved_tokens as u64;
 
             if !dry_run {
+                let mut proposed = Vec::new();
                 for item in &plan.items {
                     let rule = MutationRule {
                         id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
@@ -325,8 +326,19 @@ pub fn run_optimize(
                         estimated_kv_break_tokens: item.kv_break_tokens,
                         created_at: chrono::Utc::now(),
                     };
-                    store.save_mutation(&rule)?;
+                    proposed.push(rule);
                 }
+                let creation =
+                    store.save_generated_mutations_at_revision(&s.id, None, &proposed)?;
+                total_ops -= plan.items.len();
+                total_ops += creation.created.len();
+                println!(
+                    "Session {}: proposed {}, created {}, skipped {}. Measured savings unavailable.",
+                    s.id,
+                    proposed.len(),
+                    creation.created.len(),
+                    creation.skipped.len()
+                );
                 if !draft {
                     let _ = recompute_latest_turn_in_store(store, &s.id);
                     if sync_back && sync_mutations_to_transcript_on_disk(store, &s.id).is_ok() {
@@ -337,7 +349,7 @@ pub fn run_optimize(
         }
 
         println!(
-            "✅ BatchOptimize ({}) [strategy: '{}'] — Matched {} sessions, compacted {} sessions ({} operations, -{} tokens{}).",
+            "✅ BatchOptimize ({}) [strategy: '{}'] — Matched {} sessions, {} with proposals ({} {} operations, estimated plan reduction {} tokens{}; measured savings unavailable).",
             if dry_run {
                 "DRY RUN"
             } else if draft {
@@ -347,8 +359,9 @@ pub fn run_optimize(
             },
             strat_id,
             target_sessions.len(),
-            sessions_compacted,
+            sessions_with_candidates,
             total_ops,
+            if dry_run { "proposed" } else { "created" },
             total_saved_tok,
             if total_synced > 0 {
                 format!(", synced {total_synced} transcripts to disk")
@@ -446,6 +459,7 @@ pub fn run_optimize(
                 strat_id
             );
         };
+        let mut proposed = Vec::new();
         for item in &plan.items {
             let rule = MutationRule {
                 id: format!("mut_{}", &Uuid::new_v4().to_string()[..8]),
@@ -460,25 +474,23 @@ pub fn run_optimize(
                 estimated_kv_break_tokens: item.kv_break_tokens,
                 created_at: chrono::Utc::now(),
             };
-            store.save_mutation(&rule)?;
+            proposed.push(rule);
         }
+        let creation = store.save_generated_mutations_at_revision(&sess_id, None, &proposed)?;
         if !draft {
             let updated_turn = recompute_latest_turn_in_store(store, &sess_id);
-            if let Some(mut t) = updated_turn {
-                if t.token_usage.saved_by_mutations == 0 && plan.saved_tokens > 0 {
-                    t.token_usage.saved_by_mutations = plan.saved_tokens;
-                }
-                if let Ok(Some(sess)) = store.get_session(&sess_id) {
-                    let pulse = cw_core::autopilot::generate_ambient_savings_pulse(
-                        &sess_id,
-                        &t,
-                        &sess.model,
-                        sess.provider,
-                        t.token_usage.saved_by_mutations as u64,
-                    );
-                    let _ = store.record_ambient_pulse(&pulse);
-                    println!("\n{}", pulse.formatted_message);
-                }
+            if let Some(t) = updated_turn
+                && let Ok(Some(sess)) = store.get_session(&sess_id)
+            {
+                let pulse = cw_core::autopilot::generate_ambient_savings_pulse(
+                    &sess_id,
+                    &t,
+                    &sess.model,
+                    sess.provider,
+                    t.token_usage.saved_by_mutations as u64,
+                );
+                let _ = store.record_ambient_pulse(&pulse);
+                println!("\n{}", pulse.formatted_message);
             }
             if sync_back {
                 let report = sync_mutations_to_transcript_on_disk(store, &sess_id)?;
@@ -486,9 +498,15 @@ pub fn run_optimize(
             }
         }
         println!(
+            "Proposed {}, created {}, skipped {}. Measured savings unavailable.",
+            proposed.len(),
+            creation.created.len(),
+            creation.skipped.len()
+        );
+        println!(
             "\n✅ {} {} optimization operations from '{}' on session {} (Est. saved: {} tok, Health: {} -> {}/100).",
             if draft { "Staged" } else { "Committed" },
-            plan.items.len(),
+            creation.created.len(),
             plan.name,
             sess_id,
             plan.saved_tokens,

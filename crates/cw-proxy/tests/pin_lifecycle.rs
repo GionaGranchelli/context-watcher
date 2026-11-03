@@ -399,15 +399,17 @@ async fn strategy_draft_and_inactive_commit_report_creation_separately_from_appl
         let result: Value =
             serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap())
                 .unwrap();
-        assert_eq!(result["created_count"], 1);
+        assert_eq!(result["proposed_count"], 1);
+        assert_eq!(result["created_count"], 0);
+        assert_eq!(
+            result["creation_skipped_rules"][0]["reason"],
+            "PinContextOptInRequired"
+        );
         assert_eq!(result["applied_count"], 0);
         assert_eq!(result["applied_mutations"], json!([]));
-        assert_eq!(result["created_mutations"][0]["status"], status);
-        assert_eq!(store.list_mutations(SESSION).unwrap().len(), 2);
-        assert_eq!(
-            result["skipped_rules"].as_array().unwrap().len(),
-            if status == "draft" { 1 } else { 2 }
-        );
+        assert_eq!(result["created_mutations"], json!([]));
+        assert_eq!(store.list_mutations(SESSION).unwrap().len(), 1);
+        assert_eq!(result["skipped_rules"].as_array().unwrap().len(), 1);
         assert!(
             result["skipped_rules"]
                 .as_array()
@@ -471,4 +473,175 @@ async fn terminated_session_consent_conflict_is_json_and_explains_the_cause() {
         set_policy(&app, &token, json!({"enabled":false})).await["enabled"],
         false
     );
+}
+
+async fn policy_preview(app: &Router, token: &str) -> Value {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/sessions/{SESSION}/pin-context-policy"))
+                .header("host", "127.0.0.1")
+                .header("x-cw-control-token", token)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn manual_draft_is_inspectable_inactive_and_never_grants_consent() {
+    let (app, token, store) = fixture();
+    let response=app.clone().oneshot(Request::builder().method("POST")
+        .uri(format!("/api/v1/sessions/{SESSION}/mutations"))
+        .header("host","127.0.0.1").header("x-cw-control-token",&token)
+        .header("if-match",store.session_revision(SESSION).unwrap()).header("content-type","application/json")
+        .body(Body::from(json!({"op":{"op":"pin_context","label":"manual draft","content":"Preserve the edge case.","source_node_id":null},"status":"draft"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let rule: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap()).unwrap();
+    assert_eq!(rule["status"], "draft");
+    let preview = policy_preview(&app, &token).await;
+    assert_eq!(preview["enabled"], false);
+    assert!(preview["events"].as_array().unwrap().is_empty());
+    let draft = preview["stored_pins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["rule_id"] == rule["id"])
+        .unwrap();
+    assert_eq!(draft["label"], "manual draft");
+    assert_eq!(draft["content"], "Preserve the edge case.");
+    assert_eq!(draft["currently_authorized"], false);
+    assert!(draft["eligible_in_latest_request_preview_after_opt_in"].is_null());
+    assert_eq!(preview["measured_savings"], Value::Null);
+    let result = transform(&app, &token, &history()).await;
+    assert_eq!(result["applied_rules"], json!([]));
+    assert_eq!(result["messages"], json!(history()));
+    assert_eq!(store.list_mutations(SESSION).unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn configured_automatic_creation_requires_consent_and_stops_after_revocation() {
+    let (api, token, store) = fixture();
+    let config = cw_core::autopilot::AutoPilotConfig {
+        enabled: true,
+        auto_cache_safe_pin: true,
+        pin_min_context_tokens: 0,
+        auto_heal_low_health: false,
+        auto_diet_at_breakpoint: false,
+        local_model_window_guard: false,
+        ..Default::default()
+    };
+    store.set_autopilot_config(&config).unwrap();
+    let mut state = DaemonState::new(store.clone());
+    state.control_token = token.clone();
+    state.openai_upstream = "http://127.0.0.1:1".into();
+    let proxy = cw_proxy::build_proxy_router(state);
+    // Small synthetic request positions a rule in the salience trough; no inference.
+    let raw = json!({"model":"offline","messages":[
+        {"role":"system","content":format!("{}<RULE[AGENTS.md]>Preserve public API.</RULE[AGENTS.md]>","Reference notes. ".repeat(100))},
+        {"role":"user","content":"Current task details. ".repeat(75)}]});
+    let nodes = cw_core::normalizer::parse_request_to_nodes(&raw, ProviderKind::OpenAI, 1).unwrap();
+    assert!(nodes.iter().any(
+        |n| matches!(n.kind, cw_core::ir::NodeKind::InjectedRule { .. })
+            && n.attention_salience < 0.42
+    ));
+    for (step, enabled) in [false, true, false].into_iter().enumerate() {
+        if step > 0 {
+            set_policy(
+                &api,
+                &token,
+                json!({"enabled":enabled,"acknowledge_risk":enabled}),
+            )
+            .await;
+        }
+        let response = proxy
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/openai/v1/chat/completions")
+                    .header("host", "127.0.0.1")
+                    .header("x-cw-session-id", SESSION)
+                    .header("x-cw-control-token", &token)
+                    .header("x-cw-dry-run", "true")
+                    .header("content-type", "application/json")
+                    .body(Body::from(raw.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1_000_000).await.unwrap())
+                .unwrap();
+        assert_eq!(body["cw_dry_run"], true);
+        let pins = store.list_mutations(SESSION).unwrap();
+        assert_eq!(pins.len(), if step == 0 { 1 } else { 2 });
+        if !enabled {
+            assert_eq!(body["mutated_payload"], raw);
+        } else {
+            assert_ne!(body["mutated_payload"], raw);
+        }
+        let preview = policy_preview(&api, &token).await;
+        assert_eq!(
+            preview["automatic_generation"]["may_generate_after_opt_in"],
+            true
+        );
+        assert_eq!(
+            preview["automatic_generation"]["currently_permitted"],
+            enabled
+        );
+        assert_eq!(preview["stored_pins"].as_array().unwrap().len(), pins.len());
+        assert_eq!(
+            preview["stored_pins"][0]["eligible_in_latest_request_preview_after_opt_in"],
+            true
+        );
+        assert_eq!(
+            preview["stored_pins"][0]["content"],
+            "Preserve the public API."
+        );
+        let turn = store.get_latest_turn(SESSION).unwrap().unwrap();
+        assert_eq!(store.get_turn_raw_payload(&turn.id).unwrap().unwrap(), raw);
+    }
+}
+
+#[tokio::test]
+async fn activation_preview_does_not_qualify_tool_tails_or_invalid_protocols() {
+    for raw in [
+        json!({"messages":[{"role":"tool","tool_call_id":"unmatched","content":"result"}]}),
+        json!({"messages":[{"role":"tool","tool_call_id":"unmatched","content":"result"},{"role":"user","content":"Continue."}]}),
+    ] {
+        let (app, token, store) = fixture();
+        let (turn, _) = cw_core::analyze_turn_from_payload(
+            "invalid-preview".into(),
+            SESSION.into(),
+            None,
+            1,
+            &raw,
+            ProviderKind::OpenAI,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        store.save_turn(&turn, Some(&raw), None, None).unwrap();
+        let preview = policy_preview(&app, &token).await;
+        assert_eq!(
+            preview["stored_pins"][0]["eligible_in_latest_request_preview_after_opt_in"],
+            false
+        );
+        assert_eq!(preview["enabled"], false);
+        assert!(
+            store
+                .list_pin_context_policy_events(SESSION)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(store.get_turn_raw_payload(&turn.id).unwrap().unwrap(), raw);
+    }
 }

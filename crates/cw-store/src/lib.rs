@@ -34,6 +34,12 @@ pub enum StoreError {
     LockPoisoned,
 }
 
+#[derive(Debug, Default)]
+pub struct MutationCreationReport {
+    pub created: Vec<MutationRule>,
+    pub skipped: Vec<cw_core::ir::SkippedMutation>,
+}
+
 #[derive(Clone)]
 pub struct CwStore {
     conn: Arc<Mutex<Connection>>,
@@ -457,6 +463,13 @@ impl CwStore {
         session_id: &str,
     ) -> Result<cw_core::mutation::PinContextPolicy, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        Self::read_pin_context_policy(&conn, session_id)
+    }
+
+    fn read_pin_context_policy(
+        conn: &Connection,
+        session_id: &str,
+    ) -> Result<cw_core::mutation::PinContextPolicy, StoreError> {
         let enabled: Option<i64> = conn.query_row(
             "SELECT (enabled=1 AND risk_acknowledged=1 AND NOT EXISTS(SELECT 1 FROM session_terminations WHERE session_id=?1)) FROM pin_context_policy_events WHERE session_id=?1 ORDER BY id DESC LIMIT 1",
             params![session_id], |row| row.get(0),
@@ -923,6 +936,27 @@ impl CwStore {
         revision: Option<&str>,
         rules: &[MutationRule],
     ) -> Result<(), StoreError> {
+        self.save_mutation_batch(session_id, revision, rules, false)
+            .map(|_| ())
+    }
+
+    /// Policy/strategy-derived rules are rechecked against consent in the write transaction.
+    pub fn save_generated_mutations_at_revision(
+        &self,
+        session_id: &str,
+        revision: Option<&str>,
+        rules: &[MutationRule],
+    ) -> Result<MutationCreationReport, StoreError> {
+        self.save_mutation_batch(session_id, revision, rules, true)
+    }
+
+    fn save_mutation_batch(
+        &self,
+        session_id: &str,
+        revision: Option<&str>,
+        rules: &[MutationRule],
+        generated: bool,
+    ) -> Result<MutationCreationReport, StoreError> {
         let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         if let Some(expected) = revision
@@ -930,9 +964,43 @@ impl CwStore {
         {
             return Err(StoreError::Conflict);
         }
+        let has_pins = generated
+            && rules
+                .iter()
+                .any(|rule| matches!(rule.op, cw_core::ir::MutationOp::PinContext { .. }));
+        let policy = if has_pins {
+            Self::read_pin_context_policy(&tx, session_id)?
+        } else {
+            cw_core::mutation::PinContextPolicy::default()
+        };
+        let provider = if has_pins {
+            tx.query_row(
+                "SELECT provider FROM sessions WHERE id=?1",
+                params![session_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+            .map(|p| ProviderKind::from_str_lossy(&p))
+            .unwrap_or(ProviderKind::OpenAI)
+        } else {
+            ProviderKind::OpenAI
+        };
+        let mut report = MutationCreationReport::default();
         for rule in rules {
             if rule.session_id != session_id {
                 return Err(StoreError::Conflict);
+            }
+            if generated && !policy.permits_generated_op(&rule.op, session_id, provider) {
+                report.skipped.push(cw_core::ir::SkippedMutation {
+                    rule_id: rule.id.clone(),
+                    reason: if provider == ProviderKind::Gemini {
+                        "GeminiPinContextUnqualified"
+                    } else {
+                        "PinContextOptInRequired"
+                    }
+                    .into(),
+                });
+                continue;
             }
             let json = serde_json::to_string(rule)?;
             let status = match rule.status {
@@ -940,10 +1008,16 @@ impl CwStore {
                 MutationStatus::Committed => "committed",
                 MutationStatus::Disabled => "disabled",
             };
-            tx.execute("INSERT INTO mutations(id,session_id,rule_json,status,created_at) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET rule_json=excluded.rule_json,status=excluded.status WHERE mutations.session_id=excluded.session_id",params![rule.id,rule.session_id,json,status,rule.created_at.to_rfc3339()])?;
+            let changed = tx.execute("INSERT INTO mutations(id,session_id,rule_json,status,created_at) VALUES (?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET rule_json=excluded.rule_json,status=excluded.status WHERE mutations.session_id=excluded.session_id",params![rule.id,rule.session_id,json,status,rule.created_at.to_rfc3339()])?;
+            if generated {
+                if changed == 0 {
+                    return Err(StoreError::Conflict);
+                }
+                report.created.push(rule.clone());
+            }
         }
         tx.commit()?;
-        Ok(())
+        Ok(report)
     }
 
     pub fn clear_session_mutations(
@@ -2230,5 +2304,127 @@ mod tests {
             assert!(!policy.is_enabled_for("session-pin"));
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn derived_creation_rechecks_consent_preserves_non_pins_and_blocks_gemini() {
+        let store = CwStore::open_in_memory().unwrap();
+        for (id, provider) in [
+            ("scope-a", ProviderKind::OpenAI),
+            ("scope-b", ProviderKind::OpenAI),
+            ("scope-g", ProviderKind::Gemini),
+        ] {
+            store
+                .upsert_session(&Session {
+                    id: id.into(),
+                    parent_session_id: None,
+                    harness: HarnessKind::GenericProxy,
+                    workspace_root: None,
+                    model: "offline".into(),
+                    provider,
+                    title: None,
+                    created_at: Utc::now(),
+                    updated_at: Utc::now(),
+                })
+                .unwrap();
+        }
+        let rule = |id: &str, session: &str, pin: bool| MutationRule {
+            id: id.into(),
+            session_id: session.into(),
+            op: if pin {
+                cw_core::ir::MutationOp::PinContext {
+                    label: "test".into(),
+                    content: "Preserve API.".into(),
+                    source_node_id: None,
+                }
+            } else {
+                cw_core::ir::MutationOp::ShadowDedupe { file_path: None }
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: Utc::now(),
+        };
+        let report = store
+            .save_generated_mutations_at_revision(
+                "scope-a",
+                None,
+                &[
+                    rule("a-pin", "scope-a", true),
+                    rule("a-dedupe", "scope-a", false),
+                ],
+            )
+            .unwrap();
+        assert_eq!(report.created.len(), 1);
+        assert_eq!(report.created[0].id, "a-dedupe");
+        assert_eq!(report.skipped.len(), 1);
+        assert_eq!(store.list_mutations("scope-a").unwrap().len(), 1);
+        store.set_pin_context_policy("scope-a", true, true).unwrap();
+        let stale = store.get_pin_context_policy("scope-a").unwrap();
+        assert!(stale.is_enabled_for("scope-a"));
+        let report = store
+            .save_generated_mutations_at_revision(
+                "scope-a",
+                None,
+                &[rule("a-pin", "scope-a", true)],
+            )
+            .unwrap();
+        assert_eq!(report.created.len(), 1);
+        let before = serde_json::to_value(store.list_mutations("scope-a").unwrap()).unwrap();
+        store
+            .set_pin_context_policy("scope-a", false, false)
+            .unwrap();
+        let report = store
+            .save_generated_mutations_at_revision(
+                "scope-a",
+                None,
+                &[rule("a-new", "scope-a", true)],
+            )
+            .unwrap();
+        assert!(report.created.is_empty());
+        assert_eq!(
+            serde_json::to_value(store.list_mutations("scope-a").unwrap()).unwrap(),
+            before
+        );
+        let report = store
+            .save_generated_mutations_at_revision(
+                "scope-b",
+                None,
+                &[rule("b-pin", "scope-b", true)],
+            )
+            .unwrap();
+        assert!(report.created.is_empty());
+        store.set_pin_context_policy("scope-g", true, true).unwrap();
+        let report = store
+            .save_generated_mutations_at_revision(
+                "scope-g",
+                None,
+                &[rule("g-pin", "scope-g", true)],
+            )
+            .unwrap();
+        assert!(report.created.is_empty());
+        assert_eq!(report.skipped[0].reason, "GeminiPinContextUnqualified");
+        store
+            .save_mutation(&rule("manual-pin", "scope-b", true))
+            .unwrap();
+        assert_eq!(store.list_mutations("scope-b").unwrap().len(), 1);
+        assert!(
+            !store
+                .get_pin_context_policy("scope-b")
+                .unwrap()
+                .is_enabled_for("scope-b")
+        );
+        store.set_pin_context_policy("scope-b", true, true).unwrap();
+        assert!(matches!(
+            store.save_generated_mutations_at_revision(
+                "scope-b",
+                None,
+                &[rule("a-pin", "scope-b", true)]
+            ),
+            Err(StoreError::Conflict)
+        ));
+        assert_eq!(
+            serde_json::to_value(store.list_mutations("scope-a").unwrap()).unwrap(),
+            before
+        );
     }
 }

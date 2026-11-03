@@ -308,12 +308,18 @@ pub async fn api_auto_optimize(
             }
         }
     }
-    if let Err(error) = state
-        .store
-        .save_mutations_at_revision(&id, Some(expected), &created)
-    {
-        return (StatusCode::PRECONDITION_FAILED, error.to_string()).into_response();
-    }
+    let proposed_count = created.len();
+    let creation =
+        match state
+            .store
+            .save_generated_mutations_at_revision(&id, Some(expected), &created)
+        {
+            Ok(report) => report,
+            Err(error) => {
+                return (StatusCode::PRECONDITION_FAILED, error.to_string()).into_response();
+            }
+        };
+    let created = creation.created;
     recompute_latest_turn_with_mutations(&state, &id);
     let preview = recompute_latest_turn_in_store(&state.store, &id);
     let applied: Vec<_> = created
@@ -331,7 +337,10 @@ pub async fn api_auto_optimize(
         )],
         Json(json!({
             "applied_count": applied.len(),
+            "proposed_count": proposed_count,
             "created_count": created.len(),
+            "committed_count": created.iter().filter(|r|r.status == MutationStatus::Committed).count(),
+            "creation_skipped_rules": creation.skipped,
             "basis": "estimated mutation preview; not provider execution",
             "skipped_rules": preview.map(|turn| turn.skipped_mutations).unwrap_or_default(),
             "estimated_saved_tokens": created.iter().map(|r| r.estimated_saved_tokens.max(0) as u64).sum::<u64>(),

@@ -1227,6 +1227,19 @@ fn configured_auto_pin_cannot_bypass_reinforcement_consent_or_claim_application(
     for node in &mut nodes {
         node.attention_salience = 0.1;
     }
+    let mut default_payload = original.clone();
+    let default_report = cw_core::autopilot::evaluate_autopilot_policies(
+        &AutoPilotConfig::default(),
+        "session-auto",
+        "offline-model",
+        ProviderKind::Anthropic,
+        1,
+        &nodes,
+        None,
+        &mut default_payload,
+    );
+    assert!(default_report.generated_mutations.is_empty());
+    assert_eq!(default_payload, original);
     let config = AutoPilotConfig {
         enabled: true,
         auto_cache_safe_pin: true,
@@ -1248,16 +1261,11 @@ fn configured_auto_pin_cannot_bypass_reinforcement_consent_or_claim_application(
         &mut disabled,
         &cw_core::mutation::PinContextPolicy::default(),
     );
-    assert!(
-        !report.generated_mutations.is_empty(),
-        "fixture must generate an actual pin"
-    );
+    assert!(report.generated_mutations.is_empty());
+    assert_eq!(report.suppressed_pin_candidates, 1);
     assert_eq!(disabled, original);
     assert!(report.application.applied_rule_ids.is_empty());
-    assert_eq!(
-        report.application.skipped_rules[0].reason,
-        "PinContextOptInRequired"
-    );
+    assert!(report.application.skipped_rules.is_empty());
     let mut enabled = original.clone();
     let report = evaluate_autopilot_policies_with_policy(
         &config,
@@ -1272,4 +1280,79 @@ fn configured_auto_pin_cannot_bypass_reinforcement_consent_or_claim_application(
     );
     assert_ne!(enabled, original);
     assert_eq!(report.application.applied_rule_ids.len(), 1);
+}
+
+#[test]
+fn low_health_strategy_filters_pins_but_preserves_non_pin_generation() {
+    let raw = json!({"system":"<RULE[AGENTS.md]>Preserve API.</RULE[AGENTS.md]>","messages":[
+        {"role":"assistant","tool_calls":[{"id":"cmd","type":"function","function":{"name":"bash","arguments":"{}"}}]},
+        {"role":"tool","tool_call_id":"cmd","content":"old command log"},
+        {"role":"assistant","content":"Read the log."},{"role":"user","content":"Continue."}]});
+    let (mut turn, _) = analyze_turn_from_payload(
+        "heal-turn".into(),
+        "heal-session".into(),
+        None,
+        2,
+        &raw,
+        ProviderKind::Anthropic,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
+    turn.token_usage.input_tokens = 30_001;
+    turn.health_score = 0;
+    for n in &mut turn.nodes {
+        n.attention_salience = 0.1;
+        if matches!(n.kind, NodeKind::ToolResult { .. }) {
+            n.turn_seq = 1;
+            n.token_span.count = 200;
+        }
+    }
+    let config = AutoPilotConfig {
+        enabled: true,
+        auto_cache_safe_pin: false,
+        auto_heal_low_health: true,
+        heal_strategy: "max_token_diet".into(),
+        auto_diet_at_breakpoint: false,
+        local_model_window_guard: false,
+        ..Default::default()
+    };
+    let mut outputs = Vec::new();
+    for enabled in [false, true, false] {
+        let policy = if enabled {
+            cw_core::mutation::PinContextPolicy::explicit_opt_in("heal-session")
+        } else {
+            Default::default()
+        };
+        let mut payload = raw.clone();
+        let report = evaluate_autopilot_policies_with_policy(
+            &config,
+            "heal-session",
+            "offline",
+            ProviderKind::Anthropic,
+            2,
+            &turn.nodes,
+            Some(&turn),
+            &mut payload,
+            &policy,
+        );
+        let pins = report
+            .generated_mutations
+            .iter()
+            .filter(|r| matches!(r.op, MutationOp::PinContext { .. }))
+            .count();
+        assert_eq!(pins, usize::from(enabled));
+        assert_eq!(report.suppressed_pin_candidates, usize::from(!enabled));
+        let non_pins: Vec<_> = report
+            .generated_mutations
+            .iter()
+            .filter(|r| !matches!(r.op, MutationOp::PinContext { .. }))
+            .map(|r| serde_json::to_value(&r.op).unwrap())
+            .collect();
+        assert!(!non_pins.is_empty());
+        outputs.push(non_pins);
+    }
+    assert_eq!(outputs[0], outputs[1]);
+    assert_eq!(outputs[1], outputs[2]);
 }

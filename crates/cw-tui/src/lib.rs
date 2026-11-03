@@ -90,8 +90,10 @@ impl TuiApp {
             estimated_kv_break_tokens: 0,
             created_at: chrono::Utc::now(),
         };
-        let _ = self.store.save_mutation(&rule);
-        self.status_msg = format!("Applied mutation: {desc}");
+        self.status_msg = match self.store.save_mutation(&rule) {
+            Ok(()) => format!("Stored mutation rule: {desc}; application is separate."),
+            Err(error) => format!("Rule not saved: {error}"),
+        };
         self.reload(None);
     }
 }
@@ -200,7 +202,7 @@ pub fn run_tui(store: CwStore, session_id: Option<String>) -> Result<()> {
                                 content: snippet,
                                 source_node_id: Some(node.id.clone()),
                             },
-                            &format!("Pinned '{label}' to tail"),
+                            &format!("PinContext '{label}' (session consent required)"),
                         );
                     }
                 }
@@ -243,16 +245,36 @@ pub fn run_tui(store: CwStore, session_id: Option<String>) -> Result<()> {
                 KeyCode::Enter | KeyCode::Char('a') => {
                     if let Some(idx) = app.strategy_idx
                         && let Some(plan) = app.optimization_plans.get(idx).cloned()
+                        && let Some(session) = app.sessions.get(app.session_idx)
                     {
-                        for item in &plan.items {
-                            app.apply_op(item.mutation_op.clone(), &item.title);
-                        }
-                        app.status_msg = format!(
-                            "⚡ Applied '{}' ({} operations, saved ~{} tokens)!",
-                            plan.name,
-                            plan.items.len(),
-                            plan.saved_tokens
-                        );
+                        let proposed: Vec<_> = plan
+                            .items
+                            .iter()
+                            .map(|item| MutationRule {
+                                id: format!("mut_{}", Uuid::new_v4().simple()),
+                                session_id: session.id.clone(),
+                                op: item.mutation_op.clone(),
+                                status: cw_core::ir::MutationStatus::Committed,
+                                estimated_saved_tokens: item.saved_tokens,
+                                estimated_kv_break_tokens: item.kv_break_tokens,
+                                created_at: chrono::Utc::now(),
+                            })
+                            .collect();
+                        app.status_msg = match app.store.save_generated_mutations_at_revision(
+                            &session.id,
+                            None,
+                            &proposed,
+                        ) {
+                            Ok(report) => format!(
+                                "{}: proposed {}, created {}, skipped {}. Measured savings unavailable.",
+                                plan.name,
+                                proposed.len(),
+                                report.created.len(),
+                                report.skipped.len()
+                            ),
+                            Err(error) => format!("Strategy not saved: {error}"),
+                        };
+                        app.reload(None);
                     }
                 }
                 _ => {}

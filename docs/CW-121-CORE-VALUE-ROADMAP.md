@@ -22,7 +22,7 @@ Target controls: explicit per-session/configuration opt-in, scope/expiry, visibl
 
 ### Why this is a policy change
 
-- **CW-104B patched local pair, PR #32 (open at decision time):** Both arms passed task constraints. M2 PinContext took 93.24 s vs 59.23 s, used 174,188 vs 144,272 input tokens, and had 6 vs 5 requests; the one-pair observation cannot establish causal or general harm. The pin appeared only on the first M2 request, so persistence and product value remain unproven. [Review PR #32](https://github.com/GionaGranchelli/context-watcher/pull/32).
+- **CW-104B patched local pair, PR #32 (merged 2026-11-03):** Both arms passed task constraints. M2 PinContext took 93.24 s vs 59.23 s, used 174,188 vs 144,272 input tokens, and had 6 vs 5 requests; the one-pair observation cannot establish causal or general harm. The pin appeared only on the first M2 request, so persistence and product value remain unproven. [Review PR #32](https://github.com/GionaGranchelli/context-watcher/pull/32).
 - **CW-115 cloud historical-prune-only (no PinContext):** One exploratory run reported 24.15% fewer input tokens and 25.49% lower usage-derived cost than passthrough with passing task acceptance. This is a promising observation, not repeatable product proof. See [CW-115 four-mode report](CW-115-FOUR-MODE-ISOLATION-REPORT.md).
 - **CW-115 earlier mixed optimization:** Across two repetitions, calculated cost rose 46.2% in aggregate when cache invalidation/behavioral divergence dominated the nominal token pruning. See [CW-115 performance qualification](CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md).
 
@@ -50,7 +50,7 @@ Target controls: explicit per-session/configuration opt-in, scope/expiry, visibl
 
 ## Sequencing and scope
 
-- **First:** CW-121 behavior/policy implementation and warning coverage in a dedicated implementation PR; preserve existing safe manual functionality. Complete the offline PinContext exposure investigation already underway without presuming automatic benefit.
+- **First:** CW-121 behavior/policy implementation and warning coverage in a dedicated implementation PR; preserve existing safe manual functionality. The completed [offline exposure investigation](PINCONTEXT-EXPOSURE-DIAGNOSIS.md) establishes one-shot treatment exposure, not product benefit.
 - **Then:** CW-122 + CW-123 and CW-125 make pruning-only value and safety measurable; CW-124 adds local real-inference timing; CW-126 validates long-session value.
 - **Finally:** CW-127 surfaces proven and unproven results clearly to users. UX warnings required for CW-121 should not wait for CW-127.
 - **Out of scope for this PR:** runtime toggle implementation, product UX coding, new proxy integrations, token optimizations, inference experiments, and any merge/approval of other PRs.

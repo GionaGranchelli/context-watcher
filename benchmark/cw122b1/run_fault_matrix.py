@@ -246,7 +246,10 @@ def matrix_from_output(output, return_code, evidence_root):
 
 def run_boundary_interruption(evidence, env, commit, boundary_id, timeout):
     boundary_root = private_subdirs(evidence, 'faults', 'partial-boundaries', boundary_id)
-    command = TASK_BOUNDARY_WORKER if boundary_id == 'after_task_before_final_manifest' else BOUNDARY_WORKER
+    task_campaign_boundary = boundary_id in {
+        'before_first_provider_dispatch', 'after_task_before_final_manifest',
+    }
+    command = TASK_BOUNDARY_WORKER if task_campaign_boundary else BOUNDARY_WORKER
     child_env = env.copy()
     child_env.update({
         'CW122B1_F1_BOUNDARY_ID': boundary_id,
@@ -256,7 +259,7 @@ def run_boundary_interruption(evidence, env, commit, boundary_id, timeout):
         'CW122B1_COMMIT_SHA': commit,
         'CW122B1_CW122A_FREEZE_SHA256': verify_freeze(),
     })
-    if boundary_id == 'after_task_before_final_manifest':
+    if task_campaign_boundary:
         campaign_root = boundary_root / 'campaign'
         campaign_root.mkdir(mode=0o700)
         campaign_root.chmod(0o700)
@@ -309,6 +312,8 @@ def run_boundary_interruption(evidence, env, commit, boundary_id, timeout):
         if boundary_id == 'before_first_provider_dispatch':
             valid = valid and marker.get('upstream_dispatch_count') == 0
             valid = valid and 'pre-dispatch-attempt.json' in artifact_names
+            valid = valid and not (boundary_root / 'campaign' / 'manifest.json').exists()
+            valid = valid and not any((boundary_root / 'campaign' / 'attempts').glob('*.json'))
         elif boundary_id == 'after_ingress_before_completed_egress':
             valid = valid and marker.get('accepted_admissions') == 0
             valid = valid and marker.get('upstream_dispatch_count') == 0
@@ -355,7 +360,7 @@ def run_boundary_interruption(evidence, env, commit, boundary_id, timeout):
     termination = (
         'Codex task exited normally; supervisor terminated campaign worker'
         if boundary_id == 'after_task_before_final_manifest'
-        else 'Codex not started in this boundary worker; supervisor terminated worker'
+        else 'Codex process not launched; supervisor terminated campaign test worker'
     )
     record = {
         'boundary_id': boundary_id,
@@ -378,7 +383,7 @@ def run_boundary_interruption(evidence, env, commit, boundary_id, timeout):
             'status': 'PRESERVED' if marker and files else 'NOT_VERIFIED',
             'directory': str(boundary_root), 'files': files,
         },
-        'qualification_layer': 'B' if boundary_id == 'after_task_before_final_manifest' else 'A',
+        'qualification_layer': 'B' if task_campaign_boundary else 'A',
         'result': result,
     }
     return record

@@ -851,32 +851,6 @@ async fn test_cw122b1_f1_partial_boundary_worker() {
     let fixture = QualificationFixture::setup_config(Some(guard), None, true).await;
     let session = format!("f1-boundary-{}", uuid::Uuid::new_v4());
     match boundary.as_str() {
-        "before_first_provider_dispatch" => {
-            let hook = fixture
-                .qualification_fault_hook
-                .as_ref()
-                .expect("boundary supervisor configured hook");
-            let attempt = serde_json::to_vec(&json!({
-                "session_id":session,
-                "provider_dispatch_count":0,
-                "phase":"campaign attempt initialized before first model-bound request",
-            }))
-            .unwrap();
-            hook.pause(
-                "before_first_provider_dispatch",
-                json!({
-                    "phase":"attempt initialized; no provider request has been dispatched",
-                    "session_id":session,
-                    "accepted_admissions":0,
-                    "rejected_admissions":0,
-                    "upstream_dispatch_count":0,
-                    "settlement":"NOT_APPLICABLE_BEFORE_ADMISSION",
-                }),
-                &[("pre-dispatch-attempt.json", attempt.as_slice())],
-            )
-            .await;
-            panic!("boundary supervisor did not stop before dispatch");
-        }
         "after_ingress_before_completed_egress"
         | "after_admission_before_dispatch"
         | "after_response_before_usage_settlement" => {
@@ -3196,6 +3170,28 @@ impl CodexStep<'_> {
     ) -> Result<(Value, u128), String> {
         if timeout.is_zero() {
             return Err("campaign_or_run_deadline_exceeded".into());
+        }
+        #[cfg(feature = "qualification-fault-hooks")]
+        if let Some(hook) = cw_proxy::state::QualificationFaultHook::from_env() {
+            let attempt = serde_json::to_vec(&json!({
+                "session_id":self.session_id,
+                "attempt":"campaign reached Codex launch boundary",
+                "first_provider_dispatch_count":0,
+            }))
+            .unwrap();
+            hook.pause(
+                "before_first_provider_dispatch",
+                json!({
+                    "phase":"real Codex campaign reached first launch boundary; Codex process and provider request not yet created",
+                    "session_id":self.session_id,
+                    "accepted_admissions":0,
+                    "rejected_admissions":0,
+                    "upstream_dispatch_count":0,
+                    "settlement":"NOT_APPLICABLE_BEFORE_ADMISSION",
+                }),
+                &[("pre-dispatch-attempt.json", attempt.as_slice())],
+            )
+            .await;
         }
         let path = std::env::var_os("PATH").unwrap_or_default();
         let started = tokio::time::Instant::now();

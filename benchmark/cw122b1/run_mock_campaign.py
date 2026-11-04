@@ -80,6 +80,7 @@ def public_aggregate(manifest):
         'status': manifest['status'],
         'codex_version': manifest['codex_version'],
         'campaign_sha256': manifest['campaign_sha256'],
+        'cw122a_freeze_sha256': manifest['cw122a_freeze_sha256'],
         'context_watcher_commit': manifest['context_watcher_commit'],
         'runs': manifest['runs'],
         'requests': manifest['requests'],
@@ -87,6 +88,8 @@ def public_aggregate(manifest):
         'provider_calls': manifest['inference_calls'],
         'provider_spend_usd': manifest['provider_spend'],
         'sampling_observed': manifest['sampling_observed'],
+        'codex_analytics_enabled': manifest['codex_analytics_enabled'],
+        'codex_tool_network_access': manifest['codex_tool_network_access'],
         'cache_fairness': manifest['cache_fairness'],
         'product_value': manifest['product_value'],
         'attempts': [{
@@ -138,6 +141,7 @@ def main(argv=None):
     ).stdout.strip()
     env['CW122B1_EVIDENCE_DIR'] = str(evidence)
     env['CW122B1_COMMIT_SHA'] = commit
+    env['CW122B1_CW122A_FREEZE_SHA256'] = freeze_sha256
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     write_private(evidence / 'launch.json', {
         'scope': 'MOCK_ONLY_CODEX_QUALIFICATION', 'live': False,

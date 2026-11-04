@@ -75,9 +75,11 @@ class MockRunnerTests(unittest.TestCase):
         }
         manifest = {
             'scope': 'mock', 'status': 'pass', 'codex_version': 'test',
-            'campaign_sha256': 'e', 'context_watcher_commit': 'f', 'runs': 1,
+            'campaign_sha256': 'e', 'cw122a_freeze_sha256': 'f',
+            'context_watcher_commit': 'g', 'runs': 1,
             'requests': 1, 'elapsed_ms': 2, 'inference_calls': 0,
             'provider_spend': 0, 'sampling_observed': {}, 'cache_fairness': 'NOT_EVALUATED',
+            'codex_analytics_enabled': False, 'codex_tool_network_access': 'DISABLED',
             'product_value': 'NOT_EVALUATED', 'attempts': [attempt],
         }
         aggregate = public_aggregate(manifest)

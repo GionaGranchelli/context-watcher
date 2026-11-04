@@ -20,7 +20,7 @@ The completed host run used `codex-cli 0.166.0` and passed all 12 attempts (six 
 
 For every request, the test compared the complete egress JSON with the exact expected payload, checked persisted egress against the mock's received bytes, reconciled provider-reported mock usage with the turn ledger, and required matching mutation IDs. The first probe tool result was complete and consumed in a subsequent assistant turn before M2 committed its pruning rule. The final implementation prompt contains no repeated task constraints.
 
-Observed request sampling fields matched across all attempts: temperature and top-p were unset, and reasoning summary was `auto`. Codex emitted a model-catalog fallback warning for the synthetic `gpt-4o-mini` label. This is recorded as a mock-runtime limitation; the campaign does not qualify a production model selection.
+Observed request sampling fields matched across all attempts: temperature and top-p were unset, and reasoning summary was `auto`. No Codex CLI warning events were recorded in the final campaign. The `gpt-4o-mini` value is only a synthetic request label used by the local SpendGuard accounting; the campaign does not qualify a production model selection.
 
 The run's provider call count and provider spend were both zero. Mock usage is synthetic. Cache hits, cache fairness, real token economics, provider latency, inference behavior and product value are **NOT_EVALUATED**. Both arms passing the scripted oracle cannot establish a correctness advantage. The mock's command responses include frozen fixture repairs, so this test validates CLI routing, resume lifecycle, treatment delivery and evidence accounting—not autonomous coding quality.
 

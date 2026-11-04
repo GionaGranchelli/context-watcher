@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -70,6 +71,16 @@ def matrix_from_output(output, return_code, evidence_root):
             if (not root.is_relative_to(evidence_root) or candidate.is_symlink()
                     or not path.is_relative_to(root) or not path.is_file()):
                 return None
+            if os.name == 'posix':
+                if stat.S_IMODE(evidence_root.stat().st_mode) != 0o700:
+                    return None
+                current = evidence_root
+                for part in root.relative_to(evidence_root).parts:
+                    current = current / part
+                    if current.is_symlink() or stat.S_IMODE(current.stat().st_mode) != 0o700:
+                        return None
+                if stat.S_IMODE(path.stat().st_mode) != 0o600:
+                    return None
             return path, hashlib.sha256(path.read_bytes()).hexdigest()
         except (KeyError, OSError, ValueError):
             return None

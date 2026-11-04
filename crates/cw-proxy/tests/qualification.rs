@@ -844,6 +844,7 @@ fn f1_capture_private_evidence(
         .join(scenario_id)
         .join(format!("attempt-{}-{capture_id:04}", std::process::id()));
     create_private_dir(&root.join("faults"));
+    create_private_dir(&root.join("faults").join(scenario_id));
     create_private_dir(&directory);
     let mut files = Vec::new();
     let requests = f.mock.captured.lock().unwrap().clone();

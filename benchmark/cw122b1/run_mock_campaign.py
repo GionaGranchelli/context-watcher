@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -33,7 +34,16 @@ TEST = [
 
 
 def write_private(path, value):
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    missing = []
+    parent = path.parent
+    while not parent.exists():
+        missing.append(parent)
+        parent = parent.parent
+    if os.name == 'posix' and stat.S_IMODE(parent.stat().st_mode) != 0o700:
+        raise PermissionError(f'private evidence parent has unsafe mode: {parent}')
+    for directory in reversed(missing):
+        directory.mkdir(mode=0o700)
+        directory.chmod(0o700)
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + '\n')
     path.chmod(0o600)
 

@@ -11,9 +11,9 @@
 
 Frozen six-pair pruning-only campaign, real proxy-to-mock isolation tests, independent oracles, matched analyzer and closed live admission merged in PR #41. [Readiness report](docs/CW-122A-READINESS.md). Product value remains NOT_EVALUATED.
 
-## CW-122B1 — In Review
+## CW-122B1 — Mock path passed; F1 in Review
 
-The installed Codex CLI and authenticated Responses path passed a 12-attempt loopback-mock campaign. This qualifies CLI routing, resume, pruning exposure, and evidence accounting only; fixture repairs and usage are scripted. [Qualification report](docs/CW-122B1-CODEX-MOCK-QUALIFICATION.md). Live inference remains NO-GO pending independent review and fresh spend authorization.
+The installed Codex CLI and authenticated Responses path passed a 12-attempt loopback-mock campaign. This qualifies CLI routing, resume, pruning exposure, and evidence accounting only; fixture repairs and usage are scripted. The separate [F1 fault qualification](docs/CW-122B1-F1-FAULT-QUALIFICATION.md) passes nine scenarios and leaves F1-09, four interruption boundaries, and the current successful-path rerun unverified. Live inference remains NO-GO pending those mock gates, independent review, provider qualification and fresh spend authorization.
 
 ## CW-121C2 — Merged
 

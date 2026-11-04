@@ -28,7 +28,7 @@ Before posting a grant, the TUI reads the policy again. A changed or failed snap
 
 Press **d** to revoke consent without deleting rules, including when a policy read has failed. Every attempted operation is followed by a new policy read. Failed, malformed or inconsistent responses leave consent unconfirmed and never report successful authorization. **r** refreshes policy and session listing. **q/Esc** returns to the local optimization workspace. **q** there exits the TUI.
 
-Normal exits, errors and Rust panic unwinding restore terminal mode and leave the alternate screen through a drop guard. Forced process termination cannot guarantee cleanup.
+The cleanup guard records successful alternate-screen entry. If entry fails, it restores raw mode without emitting alternate-screen exit or cursor controls. Deterministic writer-failure tests cover that path and verify successful cleanup runs once. Normal exits, errors and Rust panic unwinding restore terminal mode and leave the alternate screen through a drop guard. Forced process termination cannot guarantee cleanup.
 
 ## Inspect policy through MCP
 
@@ -57,7 +57,7 @@ No core application, automatic-creation or transcript-write behavior changes. Ge
 
 ## Verification and limitations
 
-Validation: 277 Rust tests passed, 19 ignored; workspace Clippy and formatting passed. All 15 web tests, Svelte check and build passed. The 12 Hermes plugin tests, 15 offline runner admission tests and sanitized offline lifecycle fixture passed. No ignored live-provider or harness-binary suite was invoked.
+Validation: 279 Rust tests passed, 19 ignored; workspace Clippy and formatting passed. All 15 web tests, Svelte check and build passed. The 12 Hermes plugin tests, 15 offline runner admission tests and sanitized offline lifecycle fixture passed. No ignored live-provider or harness-binary suite was invoked.
 
 TUI state tests use an isolated authenticated daemon API. They cover review/typed confirmation, revocation preserving stored rules, session switching, stale snapshots, terminated/Gemini/invalid sessions, API failures, malformed responses and loopback URL restrictions. Ratatui TestBackend tests exercise long-content scrolling and the confirmation prompt.
 
@@ -74,6 +74,6 @@ cargo build -p cw-cli
 python3 scripts/cw121c2_terminal_smoke.py --evidence-dir /tmp/cw121c2-new-run
 ```
 
-Only the [sanitized result and output hashes](../.audit/cw121c2/terminal-smoke.json) are committed. Raw fixture-only terminal output is retained locally. No provider inference, model-server execution, cloud spending, production configuration changes or historical benchmark rewrites occurred. Browser interaction was not repeated for this TUI/MCP-only change. Ignored harness/live suites remain outside default workspace coverage.
+The [terminal-lifecycle review rerun](../.audit/cw121c2/terminal-lifecycle-review.json) also passed against the updated binary. Only the [sanitized result and output hashes](../.audit/cw121c2/terminal-smoke.json) are committed. Raw fixture-only terminal output is retained locally. No provider inference, model-server execution, cloud spending, production configuration changes or historical benchmark rewrites occurred. Browser interaction was not repeated for this TUI/MCP-only change. Ignored harness/live suites remain outside default workspace coverage.
 
 After independent review, stop PinContext expansion and return to CW-122 pruning-only qualification. There are no new per-content approval or sustained-exposure claims.

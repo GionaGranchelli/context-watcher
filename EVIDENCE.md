@@ -2,7 +2,7 @@
 
 ## CW-121C2: TUI and MCP controls
 
-[Operator workflow and security inventory](docs/CW-121C2-TUI-MCP-CONTROLS.md). Daemon-backed TUI controls require review and typed session confirmation; MCP policy inspection is read-only and rejects self-authorization attempts. Scripted real-PTY interaction verifies grant/revoke and terminal restoration, including API failure, using a separate local optimization database. 277 Rust tests passed (19 ignored), 15 web tests passed, and Clippy/formatting/Svelte check/build passed. Hermes plugin and offline lifecycle/admission tests passed. [Sanitized PTY evidence](.audit/cw121c2/terminal-smoke.json). Human visual usability remains unverified. No inference, production changes or historical evidence rewrites.
+[Operator workflow and security inventory](docs/CW-121C2-TUI-MCP-CONTROLS.md). Daemon-backed TUI controls require review and typed session confirmation; MCP policy inspection is read-only and rejects self-authorization attempts. Scripted real-PTY interaction verifies grant/revoke and terminal restoration, including API failure, using a separate local optimization database. 279 Rust tests passed (19 ignored), 15 web tests passed, and Clippy/formatting/Svelte check/build passed. Hermes plugin and offline lifecycle/admission tests passed. [Sanitized PTY evidence](.audit/cw121c2/terminal-smoke.json). Deterministic entry-failure tests verify raw-mode restoration without screen-control writes when alternate entry fails; the [updated PTY smoke](.audit/cw121c2/terminal-lifecycle-review.json) passed. Human visual usability remains unverified. No inference, production changes or historical evidence rewrites.
 
 ## CW-121C1: Operator consent workflow
 

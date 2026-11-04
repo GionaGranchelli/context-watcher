@@ -3432,6 +3432,7 @@ fn save_cw122b1_raw_evidence(
     responses: &[CapturedResponse],
 ) {
     let Some(root) = evidence_dir else { return };
+    create_private_dir(&root.join("raw"));
     for (index, turn) in turns.iter().enumerate() {
         let name = format!("raw/{session_id}/request_{index:02}.json");
         let ingress = store
@@ -4168,6 +4169,19 @@ async fn test_cw122b1_codex_mock_campaign() {
         }
     }
     assert_eq!(attempt_summaries.len(), 12);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(evidence_dir.join("raw"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700,
+            "nested raw evidence directory must be private"
+        );
+    }
     assert_eq!(
         campaign_request_count,
         attempt_summaries

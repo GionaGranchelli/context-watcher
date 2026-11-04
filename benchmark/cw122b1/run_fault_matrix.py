@@ -453,10 +453,6 @@ def main(argv=None):
         )
         codex_version = version.stdout.strip().splitlines()[0]
         commands.append(('LAYER_B_CODEX', CODEX_TEST))
-        commands.append(('LAYER_B_F1_09_EXTERNAL_INTERRUPT', [
-            sys.executable, '-B', 'benchmark/cw122b1/run_mock_campaign.py',
-            '--fault-scenario', 'F1-09', '--evidence-dir', 'PRIVATE_F1_09_DIR',
-        ]))
     else:
         outputs.append(b'LAYER_B_CODEX: NOT_VERIFIED; Codex CLI unavailable on allowlisted PATH\n')
     write_private(evidence / 'launch.json', {

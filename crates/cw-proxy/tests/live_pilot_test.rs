@@ -1169,7 +1169,6 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
         session_reservation_usd: 0.15,
         max_session_cost_usd: 0.15,
         max_requests_per_session: 25,
-        max_requests_total: usize::MAX,
         require_verified_pricing: true,
         request_reservation_usd: 0.01,
     });

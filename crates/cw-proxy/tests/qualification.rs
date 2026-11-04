@@ -961,7 +961,6 @@ async fn test_cw122b1_f1_01_per_session_request_exhaustion_prevents_fourth_dispa
     let guard = SpendGuard::new(SpendGuardConfig {
         authorized_budget_usd: 1.0,
         max_requests_per_session: 3,
-        max_requests_total: 10,
         ..Default::default()
     });
     let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
@@ -979,7 +978,7 @@ async fn test_cw122b1_f1_01_per_session_request_exhaustion_prevents_fourth_dispa
     let rejected = f1_send_chat(&f, "f1-01-session").await;
     assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
     let body = rejected.text().await.unwrap();
-    assert!(body.contains("Session request count limit exceeded"));
+    assert!(body.contains("Provider request count limit exceeded"));
     assert_eq!(f.mock.captured.lock().unwrap().len(), 3);
     assert_eq!(guard.session_request_count("f1-01-session"), 3);
     assert_eq!(guard.total_request_count(), 3);
@@ -1012,12 +1011,14 @@ async fn test_cw122b1_f1_01_per_session_request_exhaustion_prevents_fourth_dispa
 
 #[tokio::test]
 async fn test_cw122b1_f1_02_campaign_request_exhaustion_crosses_sessions() {
-    let guard = SpendGuard::new(SpendGuardConfig {
-        authorized_budget_usd: 1.0,
-        max_requests_per_session: 10,
-        max_requests_total: 3,
-        ..Default::default()
-    });
+    let guard = SpendGuard::new_with_campaign_request_limit(
+        SpendGuardConfig {
+            authorized_budget_usd: 1.0,
+            max_requests_per_session: 10,
+            ..Default::default()
+        },
+        3,
+    );
     let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
     for session in ["f1-02-a", "f1-02-a", "f1-02-b"] {
         assert_eq!(f1_send_chat(&f, session).await.status(), StatusCode::OK);
@@ -1029,7 +1030,7 @@ async fn test_cw122b1_f1_02_campaign_request_exhaustion_crosses_sessions() {
             .text()
             .await
             .unwrap()
-            .contains("Campaign request limit exceeded")
+            .contains("Provider request count limit exceeded")
     );
     assert_eq!(f.mock.captured.lock().unwrap().len(), 3);
     assert_eq!(guard.total_request_count(), 3);
@@ -1066,7 +1067,6 @@ async fn test_cw122b1_f1_03_retryable_responses_consume_each_admission() {
     let guard = SpendGuard::new(SpendGuardConfig {
         authorized_budget_usd: 1.0,
         max_requests_per_session: 3,
-        max_requests_total: 10,
         require_verified_pricing: false,
         ..Default::default()
     });
@@ -1084,7 +1084,7 @@ async fn test_cw122b1_f1_03_retryable_responses_consume_each_admission() {
             .text()
             .await
             .unwrap()
-            .contains("Session request count limit exceeded")
+            .contains("Provider request count limit exceeded")
     );
     assert_eq!(f.mock.captured.lock().unwrap().len(), 3);
     assert_eq!(guard.session_request_count(session), 3);
@@ -1126,7 +1126,6 @@ async fn test_cw122b1_f1_04_http_failures_are_recorded_and_fail_closed() {
     ] {
         let guard = SpendGuard::new(SpendGuardConfig {
             authorized_budget_usd: 1.0,
-            max_requests_total: 3,
             ..Default::default()
         });
         let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
@@ -1391,7 +1390,6 @@ async fn test_cw122b1_f1_codex_request_caps_block_agent_continuation() {
     let per_session = SpendGuard::new(SpendGuardConfig {
         authorized_budget_usd: 1.0,
         max_requests_per_session: 1,
-        max_requests_total: 5,
         require_verified_pricing: false,
         ..Default::default()
     });
@@ -1477,13 +1475,15 @@ async fn test_cw122b1_f1_codex_request_caps_block_agent_continuation() {
     partial.complete();
     drop(fixture);
 
-    let campaign = SpendGuard::new(SpendGuardConfig {
-        authorized_budget_usd: 1.0,
-        max_requests_per_session: 5,
-        max_requests_total: 1,
-        require_verified_pricing: false,
-        ..Default::default()
-    });
+    let campaign = SpendGuard::new_with_campaign_request_limit(
+        SpendGuardConfig {
+            authorized_budget_usd: 1.0,
+            max_requests_per_session: 5,
+            require_verified_pricing: false,
+            ..Default::default()
+        },
+        1,
+    );
     let token = uuid::Uuid::new_v4().simple().to_string();
     let first_session = uuid::Uuid::new_v4().to_string();
     let second_session = uuid::Uuid::new_v4().to_string();
@@ -1590,7 +1590,6 @@ async fn test_cw122b1_f1_codex_retry_loop_is_counted_and_bounded() {
     let guard = SpendGuard::new(SpendGuardConfig {
         authorized_budget_usd: 1.0,
         max_requests_per_session: 3,
-        max_requests_total: 3,
         require_verified_pricing: false,
         ..Default::default()
     });
@@ -1697,7 +1696,6 @@ async fn test_cw122b1_f1_codex_retry_loop_is_counted_and_bounded() {
     let stall_guard = SpendGuard::new(SpendGuardConfig {
         authorized_budget_usd: 1.0,
         max_requests_per_session: 3,
-        max_requests_total: 3,
         ..Default::default()
     });
     let stall_token = uuid::Uuid::new_v4().simple().to_string();
@@ -3696,14 +3694,16 @@ async fn test_cw122b1_codex_mock_campaign() {
     })
     .collect();
 
-    let guard = SpendGuard::new(SpendGuardConfig {
-        authorized_budget_usd: 0.20,
-        max_requests_per_session: 30,
-        max_requests_total: 360,
-        require_verified_pricing: false,
-        request_reservation_usd: 0.005,
-        ..Default::default()
-    });
+    let guard = SpendGuard::new_with_campaign_request_limit(
+        SpendGuardConfig {
+            authorized_budget_usd: 0.20,
+            max_requests_per_session: 30,
+            require_verified_pricing: false,
+            request_reservation_usd: 0.005,
+            ..Default::default()
+        },
+        360,
+    );
     let campaign_started = tokio::time::Instant::now();
     let mut attempt_summaries = Vec::new();
     let mut pair_initial_hashes = BTreeMap::<String, Value>::new();

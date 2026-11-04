@@ -44,11 +44,8 @@ pub enum SpendGuardError {
     #[error("Session cost ceiling exceeded: ${cost_usd:.4} exceeds limit ${limit_usd:.4}")]
     SessionCostExceeded { cost_usd: f64, limit_usd: f64 },
 
-    #[error("Session request count limit exceeded: {count} requests exceeds cap {limit}")]
+    #[error("Provider request count limit exceeded: {count} requests exceeds cap {limit}")]
     RequestLimitExceeded { count: usize, limit: usize },
-
-    #[error("Campaign request limit exceeded: {count} requests exceeds cap {limit}")]
-    CampaignRequestLimitExceeded { count: usize, limit: usize },
 
     #[error("Unverified or missing pricing profile for model '{model}' on provider {provider:?}")]
     UnverifiedPricingModel {
@@ -71,8 +68,6 @@ pub struct SpendGuardConfig {
     pub require_verified_pricing: bool,
     /// Per-request admission reservation held while a provider request is in flight.
     pub request_reservation_usd: f64,
-    /// Hard ceiling across all sessions sharing this guard. `usize::MAX` disables it.
-    pub max_requests_total: usize,
 }
 
 impl Default for SpendGuardConfig {
@@ -84,7 +79,6 @@ impl Default for SpendGuardConfig {
             max_requests_per_session: 25,
             require_verified_pricing: true,
             request_reservation_usd: 0.01,
-            max_requests_total: usize::MAX,
         }
     }
 }
@@ -190,6 +184,7 @@ impl Drop for BudgetReservation {
 #[derive(Debug)]
 struct SpendGuardInner {
     config: SpendGuardConfig,
+    max_requests_total: usize,
     spent_micro_usd: AtomicU64,
     reserved_micro_usd: AtomicU64,
     killswitch_tripped: AtomicBool,
@@ -239,9 +234,18 @@ pub struct SpendGuard {
 
 impl SpendGuard {
     pub fn new(config: SpendGuardConfig) -> Self {
+        Self::new_with_campaign_request_limit(config, usize::MAX)
+    }
+
+    /// Create a guard with a hard request ceiling shared across all its sessions.
+    pub fn new_with_campaign_request_limit(
+        config: SpendGuardConfig,
+        max_requests_total: usize,
+    ) -> Self {
         Self {
             inner: Arc::new(SpendGuardInner {
                 config,
+                max_requests_total,
                 spent_micro_usd: AtomicU64::new(0),
                 reserved_micro_usd: AtomicU64::new(0),
                 killswitch_tripped: AtomicBool::new(false),
@@ -423,11 +427,11 @@ impl SpendGuard {
         self.inner
             .total_requests
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
-                (count < cfg.max_requests_total).then_some(count + 1)
+                (count < self.inner.max_requests_total).then_some(count + 1)
             })
-            .map_err(|count| SpendGuardError::CampaignRequestLimitExceeded {
+            .map_err(|count| SpendGuardError::RequestLimitExceeded {
                 count: count.saturating_add(1),
-                limit: cfg.max_requests_total,
+                limit: self.inner.max_requests_total,
             })?;
         let result = (|| {
             let req_micro = (cfg.request_reservation_usd * MICRO_USD_PER_USD).round() as u64;
@@ -796,12 +800,14 @@ mod tests {
 
     #[test]
     fn test_campaign_request_cap_is_shared_across_sessions() {
-        let guard = SpendGuard::new(SpendGuardConfig {
-            authorized_budget_usd: 1.0,
-            max_requests_per_session: 10,
-            max_requests_total: 3,
-            ..Default::default()
-        });
+        let guard = SpendGuard::new_with_campaign_request_limit(
+            SpendGuardConfig {
+                authorized_budget_usd: 1.0,
+                max_requests_per_session: 10,
+                ..Default::default()
+            },
+            3,
+        );
         let usage = json!({"input_tokens":0,"output_tokens":0});
         for session in ["a", "a", "b"] {
             guard
@@ -812,7 +818,7 @@ mod tests {
         }
         assert!(matches!(
             guard.admit_request("new-session"),
-            Err(SpendGuardError::CampaignRequestLimitExceeded { count: 4, limit: 3 })
+            Err(SpendGuardError::RequestLimitExceeded { count: 4, limit: 3 })
         ));
         assert_eq!(guard.total_request_count(), 3);
         assert_eq!(guard.session_request_count("a"), 2);
@@ -821,12 +827,14 @@ mod tests {
 
     #[test]
     fn test_failed_session_admission_does_not_consume_campaign_slot() {
-        let guard = SpendGuard::new(SpendGuardConfig {
-            authorized_budget_usd: 1.0,
-            max_requests_per_session: 1,
-            max_requests_total: 2,
-            ..Default::default()
-        });
+        let guard = SpendGuard::new_with_campaign_request_limit(
+            SpendGuardConfig {
+                authorized_budget_usd: 1.0,
+                max_requests_per_session: 1,
+                ..Default::default()
+            },
+            2,
+        );
         let usage = json!({"input_tokens":0,"output_tokens":0});
         guard
             .admit_request("rejected")
@@ -848,12 +856,14 @@ mod tests {
 
     #[test]
     fn test_campaign_request_cap_is_atomic_across_sessions() {
-        let guard = SpendGuard::new(SpendGuardConfig {
-            authorized_budget_usd: 1.0,
-            max_requests_per_session: 10,
-            max_requests_total: 3,
-            ..Default::default()
-        });
+        let guard = SpendGuard::new_with_campaign_request_limit(
+            SpendGuardConfig {
+                authorized_budget_usd: 1.0,
+                max_requests_per_session: 10,
+                ..Default::default()
+            },
+            3,
+        );
         let usage = json!({"input_tokens":0,"output_tokens":0});
         let accepted = std::thread::scope(|scope| {
             let tasks: Vec<_> = (0..16)

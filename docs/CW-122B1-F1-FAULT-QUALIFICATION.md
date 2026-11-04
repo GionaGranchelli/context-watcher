@@ -1,6 +1,6 @@
 # CW-122B1-F1 — Runtime fault-injection qualification
 
-**Status: `BLOCKED_WITH_UNVERIFIED_SCENARIOS`.** Nine fault scenarios passed the declared deterministic and real-Codex mock layers. F1-09 still lacks an interrupted real Codex attempt, four partial-evidence interruption boundaries remain untested, and the original 12-attempt success campaign was stopped by its historical source-freeze check. Live execution remains **NO-GO**.
+**Status: `BLOCKED_WITH_UNVERIFIED_SCENARIOS`.** Nine fault scenarios passed the declared deterministic and real-Codex mock layers. F1-09 still lacks an interrupted real Codex attempt, and four partial-evidence interruption boundaries remain untested. The separate successful-path regression now passes against a versioned CW-122A source baseline. Live execution remains **NO-GO**.
 
 Implementation is under independent review in [PR #43](https://github.com/GionaGranchelli/context-watcher/pull/43).
 
@@ -65,9 +65,9 @@ F1-09's Layer A test sent SIGTERM only to a dedicated disposable runner and veri
 
 ## Successful-path regression gate
 
-The previous 12-attempt Codex mock result remains historical and unchanged. Rerunning it through `benchmark/cw122b1/run_mock_campaign.py` at `d33ac821e90ec51409271c1debe27c381e95e4cd` stopped before launching Cargo or Codex: `verify_freeze()` found that `crates/cw-core/src/spend_guard.rs` no longer matches the CW-122A source freeze. This is the intended fail-closed behavior. The historical freeze and prior aggregate were not rewritten; the successful path after the request-cap change is `NOT_VERIFIED` in this F1 result.
+The prior 12-attempt result remains historical and unchanged. The initial rerun stopped before launching Cargo or Codex because `spend_guard.rs` differed from the original CW-122A freeze. We preserved that freeze byte-for-byte as `benchmark/cw122a/freeze-cw122a-1.json` and added a separately versioned active baseline at `benchmark/cw122a/freeze.json`; its only file-hash difference is `crates/cw-core/src/spend_guard.rs`. The task campaign, fixtures, oracles, and all other frozen files are unchanged.
 
-The valid preflight at PR head `d6117f0b0e2d935a27734410fb0977c73f135821` stopped at the CW-122A source-freeze check before launching Codex. Private raw output: `/tmp/cw122b1-f1-final-success-preflight-4/runner-output.log` (SHA-256 `a27f6d771702f9033755920de4d2130e6a9dc756bac7131a0f2f8530ab6d0bb1`). Its structured summary is a diagnostic record, not raw runner evidence (SHA-256 `cd1689d0d44419a877ea76b4aa290e682e1fbadd1c2aa5449c15255e5d831c9a`). The preceding capture attempt is preserved at `/tmp/cw122b1-f1-final-success-preflight-3`; it failed earlier because output was redirected into the directory before the runner's empty-directory check. Both attempts made zero provider calls. A future successful-path rerun needs a separately reviewed, versioned source baseline or an explicitly scoped current-code regression fixture; do not update the historical freeze in place.
+The first rerun at `a95ef0c` passed its task checks but failed the post-run privacy audit because the nested `raw/` directory was mode `0775`. That attempt is preserved at `/tmp/cw122b1-f1-success-path-final-a95ef0c` and is excluded from the qualification aggregate. The writer now creates `raw/` as `0700` and asserts that mode. The corrected rerun at commit `74821b1111e766ad8e05352700d28f83f9bb4d09` passed all 12 Codex mock attempts (six pairs, both task families), 48 loopback requests, and all 12 independent acceptance checks. Each M2 attempt recorded two applications of the intended pruning rule; no M1 attempt applied a rule. The runner observed zero provider calls and zero provider spend. This is adapter and regression evidence only; task responses, usage, and cache telemetry came from the local mock and do not evaluate product value. The sanitized [successful-path aggregate](../benchmark/cw122b1/fault-success-path-aggregate.json) is SHA-256 `54ed4fe760175ec13485f944cf24f77f25e4ae1d4124cdc80e53b4db63a439ee`. Private evidence is at `/tmp/cw122b1-f1-success-path-final-74821b1`: manifest SHA-256 `0cab3c01dfe24ee3e4f97927235c4a0786cac5568a6c21ada5d03d9bffce98eb`, raw runner-output SHA-256 `c9c374be0a4b10fb93777597ea34f26d99c5b84bd1b93a6ee734a4fc7d50ea51`; 173 files are `0600`, 14 directories are `0700`. The earlier freeze-rejection preflight records remain preserved separately and were not overwritten.
 
 ## Implementation corrections
 
@@ -80,12 +80,12 @@ The first matrix run exposed colliding evidence filenames under concurrent tests
 
 ## Evidence and remaining gate
 
-The sanitized [machine-readable matrix](../benchmark/cw122b1/fault-matrix.json) is bound to commit `5eefc162b95c1aa1f631d36930689bcbb0664a88`. SHA-256 values:
+The sanitized [machine-readable matrix](../benchmark/cw122b1/fault-matrix.json) is bound to commit `74821b1111e766ad8e05352700d28f83f9bb4d09`. The rerun took 5.4 seconds and records 9 PASS, 1 NOT_VERIFIED, zero provider calls, and zero provider spend. SHA-256 values:
 
-- Sanitized matrix: `85fd7222f65117afb22e5eef26b7085e156e21592e2c48c95306dd6fb65393de`
-- Private matrix: `9d693a640e62a6142d3594ae68f56ed875bd5ad66275b676cbd03fdfb0948959`
-- Private runner output: `11f9d9435714bc0a1b9b81d54a5897660fd7c477a8f1a1f24b174bcd90646923`
+- Sanitized matrix: `a14ab82f1f1e77576176c984095312f6c00497a31cddf6076b6d74998a5e7f72`
+- Private matrix: `11851a9c44900b15a2bb0256d723bc1100e0c7731de7675aab0fe31fd76caf7a`
+- Private runner output: `4e52ebf02fc4aa54c31a86a63facbcb02fe33642b7d0a1edd30c417ff19efa4c`
 
-Raw evidence is at `/tmp/cw122b1-f1-matrix-final-8`: 146 files with mode `0600` in 36 directories with mode `0700`; the root is `0700`. The private matrix parser recomputed every retained artifact hash and checked containment and file modes. Raw payloads and Codex data are not committed.
+Raw evidence is at `/tmp/cw122b1-f1-matrix-final-9`: 146 files with mode `0600` in 35 directories with mode `0700`; the root is `0700`. The private matrix parser recomputed every retained artifact hash and checked containment and file modes. Raw payloads and Codex data are not committed.
 
-Before CW-122B1-F1 can be called fully qualified, run F1-09 through an actual dedicated Codex campaign interruption, inject the four untested evidence boundaries, and rerun the original successful-path qualification using a separately reviewed source baseline without modifying historical results. Keep live provider execution **NO-GO**. CW-122B2 additionally requires separate provider/model compatibility, verified real usage and cache telemetry, cache fairness, financial-risk acceptance, and fresh written spend authorization. No synthetic test here measures product value or token savings.
+Before CW-122B1-F1 can be called fully qualified, run F1-09 through an actual dedicated Codex campaign interruption and inject the four untested evidence boundaries. Keep live provider execution **NO-GO**. CW-122B2 additionally requires separate provider/model compatibility, verified real usage and cache telemetry, cache fairness, financial-risk acceptance, and fresh written spend authorization. No synthetic test here measures product value or token savings.

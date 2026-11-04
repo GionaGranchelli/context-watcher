@@ -13,7 +13,7 @@ Frozen six-pair pruning-only campaign, real proxy-to-mock isolation tests, indep
 
 ## CW-122B1 — Mock path passed; F1 in Review
 
-The installed Codex CLI and authenticated Responses path passed a 12-attempt loopback-mock campaign. This qualifies CLI routing, resume, pruning exposure, and evidence accounting only; fixture repairs and usage are scripted. [PR #43](https://github.com/GionaGranchelli/context-watcher/pull/43) adds the separate [F1 fault qualification](docs/CW-122B1-F1-FAULT-QUALIFICATION.md): nine scenarios pass; F1-09, four interruption boundaries, and the current successful-path rerun remain unverified. Live inference remains NO-GO pending those mock gates, independent review, provider qualification and fresh spend authorization.
+The installed Codex CLI and authenticated Responses path passed a 12-attempt loopback-mock campaign. This qualifies CLI routing, resume, pruning exposure, and evidence accounting only; fixture repairs and usage are scripted. [PR #43](https://github.com/GionaGranchelli/context-watcher/pull/43) adds the separate [F1 fault qualification](docs/CW-122B1-F1-FAULT-QUALIFICATION.md): nine fault scenarios pass; F1-09 and four interruption boundaries remain unverified. The successful-path regression passes at `74821b1` against a versioned source baseline; its first rerun was rejected by the evidence-mode audit. Live inference remains NO-GO pending those mock gates, independent review, provider qualification and fresh spend authorization.
 
 ## CW-121C2 — Merged
 

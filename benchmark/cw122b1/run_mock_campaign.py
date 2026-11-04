@@ -21,6 +21,11 @@ finally:
 
 RUN_LIMIT_SECONDS = 600
 CAMPAIGN_LIMIT_SECONDS = 7200
+_received_signal = None
+
+
+class CancellationUnverified(RuntimeError):
+    pass
 TEST = [
     'cargo', 'test', '--offline', '--locked', '-p', 'cw-proxy', '--test', 'qualification',
     'test_cw122b1_codex_mock_campaign', '--', '--ignored', '--exact', '--nocapture',
@@ -49,29 +54,90 @@ def prepare_evidence(path):
     return path.resolve()
 
 
-def run_bounded(command, cwd, env, timeout):
+def run_bounded(command, cwd, env, timeout, cancel=None):
+    cancel = cancel or kill_process_tree
     proc = subprocess.Popen(
         command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         start_new_session=True,
     )
+    deadline = time.monotonic() + timeout
     try:
-        output, _ = proc.communicate(timeout=timeout)
-        return proc.returncode, output
-    except subprocess.TimeoutExpired as exc:
-        kill_process_tree(proc.pid)
-        output, _ = proc.communicate()
-        raise subprocess.TimeoutExpired(command, timeout, output=output) from exc
+        while True:
+            remaining = deadline - time.monotonic()
+            if _received_signal is not None:
+                cleanup = cancel(proc.pid)
+                if not cleanup['verified']:
+                    proc.poll()
+                    if proc.stdout:
+                        proc.stdout.close()
+                    if proc.stderr:
+                        proc.stderr.close()
+                    raise CancellationUnverified(f"process cleanup unverified: {cleanup}")
+                output, _ = proc.communicate()
+                error = InterruptedError(f'campaign interrupted by signal {_received_signal}')
+                error.output = output
+                raise error
+            if remaining <= 0:
+                cleanup = cancel(proc.pid)
+                if not cleanup['verified']:
+                    proc.poll()
+                    if proc.stdout:
+                        proc.stdout.close()
+                    if proc.stderr:
+                        proc.stderr.close()
+                    raise CancellationUnverified(f"process cleanup unverified: {cleanup}")
+                output, _ = proc.communicate()
+                raise subprocess.TimeoutExpired(command, timeout, output=output)
+            try:
+                output, _ = proc.communicate(timeout=min(remaining, 0.25))
+                if _received_signal is not None:
+                    error = InterruptedError(f'campaign interrupted by signal {_received_signal}')
+                    error.output = output
+                    raise error
+                return proc.returncode, output
+            except subprocess.TimeoutExpired:
+                continue
+    except (CancellationUnverified, InterruptedError, subprocess.TimeoutExpired):
+        raise
     except BaseException:
-        kill_process_tree(proc.pid)
+        cleanup = cancel(proc.pid)
+        if not cleanup['verified']:
+            proc.poll()
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+            raise CancellationUnverified(f"process cleanup unverified: {cleanup}")
         proc.communicate()
         raise
 
 
-def kill_process_tree(root_pid):
+def install_termination_handlers():
+    global _received_signal
+    _received_signal = None
+    previous = {}
+    def interrupted(signum, _frame):
+        global _received_signal
+        _received_signal = signum
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        previous[signum] = signal.signal(signum, interrupted)
+    return previous
+
+
+def restore_signal_handlers(previous):
+    global _received_signal
+    _received_signal = None
+    for signum, handler in previous.items():
+        signal.signal(signum, handler)
+
+
+def kill_process_tree(root_pid, *, killpg=os.killpg, proc_root=Path('/proc'), timeout=2):
+    if not proc_root.is_dir():
+        return {'verified': False, 'signaled_process_groups': [],
+                'remaining_pids': [root_pid], 'errors': ['process_inventory_unavailable']}
     descendants = {root_pid}
     groups = set()
-    proc_root = Path('/proc')
     if proc_root.is_dir():
         parents = {}
         groups_by_pid = {}
@@ -92,13 +158,39 @@ def kill_process_tree(root_pid):
                     descendants.add(pid)
                     changed = True
         groups.update(groups_by_pid[pid] for pid in descendants if pid in groups_by_pid)
-    if not groups:
-        groups.add(root_pid)
+    if root_pid not in groups_by_pid:
+        return {'verified': False, 'signaled_process_groups': [],
+                'remaining_pids': [root_pid], 'errors': ['root_absent_at_inventory']}
+    errors = []
     for group in groups:
         try:
-            os.killpg(group, signal.SIGKILL)
+            killpg(group, signal.SIGKILL)
         except ProcessLookupError:
             pass
+        except OSError as error:
+            errors.append(f'{type(error).__name__}:{error.errno}')
+    targets = set(descendants)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        alive = []
+        for pid in targets:
+            try:
+                fields = (proc_root / str(pid) / 'stat').read_text().split(') ', 1)[1].split()
+                if fields[0] != 'Z':
+                    alive.append(pid)
+            except (OSError, ValueError, IndexError):
+                pass
+        if not alive:
+            break
+        time.sleep(0.01)
+    else:
+        alive = sorted(pid for pid in targets if (proc_root / str(pid)).exists())
+    return {
+        'verified': not errors and not alive,
+        'signaled_process_groups': sorted(groups),
+        'remaining_pids': alive,
+        'errors': errors,
+    }
 
 
 def public_aggregate(manifest):
@@ -181,6 +273,7 @@ def main(argv=None):
     status = 'COMPLETED'
     return_code = 1
     output = b''
+    previous_handlers = install_termination_handlers()
     try:
         return_code, output = run_bounded(TEST, REPO, env, CAMPAIGN_LIMIT_SECONDS)
         status = 'PASSED' if return_code == 0 else 'FAILED'
@@ -196,8 +289,12 @@ def main(argv=None):
         write_private(evidence / 'runner-result.json', {
             'status': status, 'return_code': return_code,
             'elapsed_seconds': round(time.monotonic() - started, 3),
+            'failure_phase': 'campaign_subprocess',
+            'failure_reason': f'{type(exc).__name__}: {exc}',
         })
         raise
+    finally:
+        restore_signal_handlers(previous_handlers)
 
     output_path = evidence / 'runner-output.log'
     output_path.write_bytes(output)

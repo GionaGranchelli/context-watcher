@@ -84,6 +84,8 @@ pub async fn forward_to_upstream(
     let mut response_headers = upstream.headers().clone();
     response_headers.remove(header::CONNECTION);
     response_headers.remove(header::TRANSFER_ENCODING);
+    // The response body is re-streamed; keep EOF-driven recorder finalization reliable.
+    response_headers.remove(header::CONTENT_LENGTH);
 
     if let Some(rec) = recorder.as_mut() {
         rec.sse = response_headers

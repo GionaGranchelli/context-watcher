@@ -1,0 +1,5 @@
+ts	phase	decision	why	evidence	result
+2026-11-04T21:27:14Z	start	resumed CW-122B1-F1 work from merged main	continued the active fault-injection goal without provider inference	branch feat/cw122b1-f1-fault-qualification at a7fe2cd	active; no inference or spend
+2026-11-04T21:31:48Z	correction	initial phase label was incorrect	this is a continuation of the active F1 goal; keep the original append-only row	.audit/cw122b1-f1-decisions.tsv	continued work logged; prior row retained
+2026-11-04T21:31:48Z	validation	focused and workspace offline gates passed	run deterministic suites before mock executions	Rust workspace; Clippy; formatter; Python runner suites	296 Rust passed, 22 ignored; Clippy and formatting passed
+2026-11-04T21:31:48Z	baseline	original 12-attempt mock campaign not rerun	preserve the CW-122A freeze rather than silently rebasing source hashes	benchmark/cw122b1/run_mock_campaign.py	runner correctly rejected the changed frozen source

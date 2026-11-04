@@ -436,6 +436,89 @@ async fn handle_mock_responses(
 
     let body_str = String::from_utf8_lossy(&body);
 
+    if body_str.contains("CW122B1_F1-03_RETRY_LOOP") {
+        return Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("content-type", "application/json")
+            .header("retry-after", "0")
+            .body(Body::from(
+                json!({"error":{"message":"retry fault injection","type":"rate_limit_error","code":"rate_limit_exceeded"},"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}).to_string(),
+            ))
+            .unwrap();
+    }
+
+    let injected = if body_str.contains("CW122B1_F1-04_429") {
+        Some((StatusCode::TOO_MANY_REQUESTS, "rate limited".to_owned()))
+    } else if body_str.contains("CW122B1_F1-04_401") {
+        Some((StatusCode::UNAUTHORIZED, "unauthorized".to_owned()))
+    } else if body_str.contains("CW122B1_F1-04_403") {
+        Some((StatusCode::FORBIDDEN, "forbidden".to_owned()))
+    } else if body_str.contains("CW122B1_F1-04_500") {
+        Some((StatusCode::INTERNAL_SERVER_ERROR, "server error".to_owned()))
+    } else if body_str.contains("CW122B1_F1-04_503") {
+        Some((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "service unavailable".to_owned(),
+        ))
+    } else {
+        None
+    };
+    if let Some((status, message)) = injected {
+        return (status, message).into_response();
+    }
+    if body_str.contains("CW122B1_F1-05_INVALID_SSE") {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from("data: {not-json}\n\n"))
+            .unwrap();
+    }
+    if body_str.contains("CW122B1_F1-05_TRUNCATED_SSE") {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(
+                "data: {\"type\":\"response.completed\",\"response\":",
+            ))
+            .unwrap();
+    }
+    if body_str.contains("CW122B1_F1-05_CLOSE_BEFORE_COMPLETE") {
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+            ))
+            .unwrap();
+    }
+    if body_str.contains("CW122B1_F1-06_MISSING_USAGE")
+        || body_str.contains("CW122B1_F1-06_INVALID_USAGE")
+        || body_str.contains("CW122B1_F1-06_CONTRADICTORY_USAGE")
+    {
+        let usage = if body_str.contains("INVALID_USAGE") {
+            json!({"input_tokens":"unknown","output_tokens":4})
+        } else if body_str.contains("CONTRADICTORY_USAGE") {
+            json!({"input_tokens":1,"output_tokens":4,"input_tokens_details":{"cached_tokens":2}})
+        } else {
+            Value::Null
+        };
+        let mut response = json!({
+            "type":"response.completed",
+            "response":{"id":"resp-fault-complete","status":"completed","output":[]}
+        });
+        if !usage.is_null() {
+            response["response"]["usage"] = usage;
+        }
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/event-stream")
+            .body(Body::from(format!("data: {}\n\n", response)))
+            .unwrap();
+    }
+    if body_str.contains("CW122B1_F1-05_STALL") || body_str.contains("CW122B1_F1-07_STALL") {
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    }
+
     if body_str.contains("CW_FORCE_UPSTREAM_502") {
         return (StatusCode::BAD_GATEWAY, "Upstream mock gateway failure").into_response();
     }
@@ -700,6 +783,1046 @@ impl Drop for QualificationFixture {
     fn drop(&mut self) {
         self.proxy_task.abort();
     }
+}
+
+async fn f1_send_chat(f: &QualificationFixture, session: &str) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/chat/completions",
+            f.proxy_port
+        ))
+        .header("x-cw-session-id", session)
+        .header("x-cw-control-token", &f.control_token)
+        .json(&json!({
+            "model":"gpt-4o-mini",
+            "messages":[{"role":"user","content":"fault qualification probe"}]
+        }))
+        .send()
+        .await
+        .unwrap()
+}
+
+async fn f1_send_responses(
+    f: &QualificationFixture,
+    session: &str,
+    scenario_id: &str,
+) -> reqwest::Response {
+    reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/responses",
+            f.proxy_port
+        ))
+        .header("x-cw-session-id", session)
+        .header("x-cw-control-token", &f.control_token)
+        .json(&json!({
+            "model":"gpt-4o-mini",
+            "stream":true,
+            "input":[{"role":"user","content":[{"type":"input_text","text":scenario_id}]}]
+        }))
+        .send()
+        .await
+        .unwrap()
+}
+
+fn f1_capture_private_evidence(
+    scenario_id: &str,
+    session_ids: &[&str],
+    f: &QualificationFixture,
+    guard: &SpendGuard,
+    accepted_admissions: usize,
+    rejected_admissions: usize,
+    process_cleanup: &str,
+) -> Value {
+    let Some(root) = std::env::var_os("CW122B1_F1_EVIDENCE_DIR").map(PathBuf::from) else {
+        return json!({"status":"NOT_CONFIGURED_FOR_PRIVATE_CAPTURE"});
+    };
+    let directory = root.join("faults").join(scenario_id);
+    create_private_dir(&root.join("faults"));
+    create_private_dir(&root.join("faults").join(scenario_id));
+    create_private_dir(&directory);
+    let mut files = Vec::new();
+    let requests = f.mock.captured.lock().unwrap().clone();
+    let responses = f.mock.responses.lock().unwrap().clone();
+    for (index, request) in requests.iter().enumerate() {
+        let path = format!("provider_request_{index:02}.bin");
+        let bytes = &request.body;
+        write_private_file(&directory.join(&path), bytes);
+        files.push(json!({"path":path,"sha256":sha256_hex(bytes),"kind":"provider_request"}));
+    }
+    for (index, response) in responses.iter().enumerate() {
+        let path = format!("provider_response_{index:02}.bin");
+        write_private_file(&directory.join(&path), &response.body);
+        files.push(json!({"path":path,"sha256":sha256_hex(&response.body),"kind":"provider_response","status":response.status}));
+    }
+    let mut turns = Vec::new();
+    for session_id in session_ids {
+        for (index, turn) in f
+            .store
+            .list_turns(session_id)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            for (kind, payload) in [
+                ("ingress", f.store.get_wire_request(&turn.id).ok().flatten()),
+                ("egress", f.store.get_wire_egress(&turn.id).ok().flatten()),
+            ] {
+                if let Some(bytes) = payload {
+                    let path = format!("{session_id}_{kind}_{index:02}.json");
+                    write_private_file(&directory.join(&path), &bytes);
+                    files.push(json!({"path":path,"sha256":sha256_hex(&bytes),"kind":kind}));
+                }
+            }
+            turns.push(turn.clone());
+        }
+    }
+    let record = json!({
+        "scenario_id":scenario_id,
+        "fault_and_phase":match scenario_id {
+            "F1-01" => "Per-session request cap at proxy admission before dispatch",
+            "F1-02" => "Campaign request cap at shared pre-dispatch admission",
+            "F1-03" => "Retryable 429 returned by loopback provider after dispatch",
+            "F1-04" => "Loopback provider returns representative HTTP error status",
+            "F1-05" => "Loopback provider emits malformed, incomplete, or stalled SSE",
+            "F1-06" => "Completed response reaches provider usage settlement",
+            "F1-07" => "Codex per-run deadline while a mock response is stalled",
+            "F1-08" => "Campaign deadline bounds active attempt and blocks next attempt",
+            _ => "Unknown fault phase",
+        },
+        "session_ids":session_ids,
+        "accepted_admissions":accepted_admissions,
+        "rejected_admissions":rejected_admissions,
+        "upstream_dispatch_count":requests.len(),
+        "settlement":{"spent_usd":guard.total_spent_usd(),"reserved_usd":guard.total_reserved_usd(),"killswitch":guard.is_killswitch_tripped()},
+        "settlement_basis":"SpendGuard accounting over synthetic loopback usage or conservative reservation fallback",
+        "provider_usage_source":"LOCAL_MOCK_SYNTHETIC",
+        "economic_qualification":"NOT_EVALUATED",
+        "turns":turns.iter().map(|turn| json!({
+            "turn_id":turn.id,
+            "outcome":turn.outcome,
+            "usage":turn.observed_usage,
+            "applied_mutation_ids":turn.applied_mutation_ids,
+            "skipped_mutations":turn.skipped_mutations,
+        })).collect::<Vec<_>>(),
+        "final_attempt_classification":turns.iter().map(|turn| turn.outcome.as_deref().unwrap_or("NOT_AVAILABLE")).collect::<Vec<_>>(),
+        "process_cleanup":process_cleanup,
+        "files":files,
+    });
+    let record_bytes = serde_json::to_vec_pretty(&record).unwrap();
+    write_private_file(&directory.join("attempt.json"), &record_bytes);
+    files.push(
+        json!({"path":"attempt.json","sha256":sha256_hex(&record_bytes),"kind":"attempt_manifest"}),
+    );
+    json!({"status":"PRESERVED","directory":directory,"files":files})
+}
+
+#[allow(clippy::too_many_arguments)]
+fn f1_emit_result(
+    scenario_id: &str,
+    injection_boundary: &str,
+    expected_behavior: &str,
+    observed_behavior: &str,
+    dispatch_count: usize,
+    accepted: usize,
+    rejected: usize,
+    guard: &SpendGuard,
+    process_cleanup: &str,
+    evidence: Value,
+    layer: &str,
+    result: &str,
+) {
+    println!(
+        "CW122B1_F1_RESULT:{}",
+        json!({
+            "scenario_id":scenario_id,
+            "injection_boundary":injection_boundary,
+            "expected_behavior":expected_behavior,
+            "observed_behavior":observed_behavior,
+            "upstream_dispatch_count":dispatch_count,
+            "accepted_admissions":accepted,
+            "rejected_admissions":rejected,
+            "settlement":{"spent_usd":guard.total_spent_usd(),"reserved_usd":guard.total_reserved_usd(),"killswitch":guard.is_killswitch_tripped()},
+            "process_cleanup":process_cleanup,
+            "evidence_preservation":evidence,
+            "qualification_layer":layer,
+            "result":result,
+        })
+    );
+}
+
+#[tokio::test]
+async fn test_cw122b1_f1_01_per_session_request_exhaustion_prevents_fourth_dispatch() {
+    let guard = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        max_requests_per_session: 3,
+        max_requests_total: 10,
+        ..Default::default()
+    });
+    let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
+    for _ in 0..3 {
+        let response = f1_send_chat(&f, "f1-01-session").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_LENGTH)
+                .is_none()
+        );
+        assert!(serde_json::from_slice::<Value>(&response.bytes().await.unwrap()).is_ok());
+    }
+    let rejected = f1_send_chat(&f, "f1-01-session").await;
+    assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body = rejected.text().await.unwrap();
+    assert!(body.contains("Session request count limit exceeded"));
+    assert_eq!(f.mock.captured.lock().unwrap().len(), 3);
+    assert_eq!(guard.session_request_count("f1-01-session"), 3);
+    assert_eq!(guard.total_request_count(), 3);
+    assert_eq!(guard.total_reserved_usd(), 0.0);
+    assert!(!guard.is_killswitch_tripped());
+    let evidence = f1_capture_private_evidence(
+        "F1-01",
+        &["f1-01-session"],
+        &f,
+        &guard,
+        3,
+        1,
+        "NOT_APPLICABLE_LAYER_A",
+    );
+    f1_emit_result(
+        "F1-01",
+        "proxy admission before upstream dispatch",
+        "third admission succeeds; fourth rejected before dispatch",
+        "3 admitted; fourth returned 429; upstream saw 3",
+        3,
+        3,
+        1,
+        &guard,
+        "NOT_APPLICABLE_LAYER_A",
+        evidence,
+        "A",
+        "PASS",
+    );
+}
+
+#[tokio::test]
+async fn test_cw122b1_f1_02_campaign_request_exhaustion_crosses_sessions() {
+    let guard = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        max_requests_per_session: 10,
+        max_requests_total: 3,
+        ..Default::default()
+    });
+    let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
+    for session in ["f1-02-a", "f1-02-a", "f1-02-b"] {
+        assert_eq!(f1_send_chat(&f, session).await.status(), StatusCode::OK);
+    }
+    let rejected = f1_send_chat(&f, "f1-02-new-session").await;
+    assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        rejected
+            .text()
+            .await
+            .unwrap()
+            .contains("Campaign request limit exceeded")
+    );
+    assert_eq!(f.mock.captured.lock().unwrap().len(), 3);
+    assert_eq!(guard.total_request_count(), 3);
+    assert_eq!(guard.session_request_count("f1-02-new-session"), 0);
+    assert_eq!(guard.total_reserved_usd(), 0.0);
+    assert!(!guard.is_killswitch_tripped());
+    let evidence = f1_capture_private_evidence(
+        "F1-02",
+        &["f1-02-a", "f1-02-b", "f1-02-new-session"],
+        &f,
+        &guard,
+        3,
+        1,
+        "NOT_APPLICABLE_LAYER_A",
+    );
+    f1_emit_result(
+        "F1-02",
+        "shared SpendGuard pre-dispatch admission",
+        "global fourth request rejected across sessions",
+        "3 admitted across 2 sessions; new session rejected before dispatch",
+        3,
+        3,
+        1,
+        &guard,
+        "NOT_APPLICABLE_LAYER_A",
+        evidence,
+        "A",
+        "PASS",
+    );
+}
+
+#[tokio::test]
+async fn test_cw122b1_f1_03_retryable_responses_consume_each_admission() {
+    let guard = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        max_requests_per_session: 3,
+        max_requests_total: 10,
+        require_verified_pricing: false,
+        ..Default::default()
+    });
+    let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
+    let session = "f1-03-layer-a";
+    for _ in 0..3 {
+        let response = f1_send_responses(&f, session, "CW122B1_F1-03_RETRY_LOOP").await;
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        let _ = response.bytes().await.unwrap();
+    }
+    let blocked = f1_send_responses(&f, session, "CW122B1_F1-03_RETRY_LOOP").await;
+    assert_eq!(blocked.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        blocked
+            .text()
+            .await
+            .unwrap()
+            .contains("Session request count limit exceeded")
+    );
+    assert_eq!(f.mock.captured.lock().unwrap().len(), 3);
+    assert_eq!(guard.session_request_count(session), 3);
+    assert_eq!(guard.total_request_count(), 3);
+    assert!(!guard.is_killswitch_tripped());
+    let evidence = f1_capture_private_evidence(
+        "F1-03",
+        &[session],
+        &f,
+        &guard,
+        3,
+        1,
+        "NOT_APPLICABLE_LAYER_A",
+    );
+    f1_emit_result(
+        "F1-03",
+        "each mock HTTP 429 response settles before another proxy admission",
+        "all retries count toward request cap and fourth request is rejected before provider dispatch",
+        "three 429 dispatches admitted; fourth request blocked at session cap",
+        3,
+        3,
+        1,
+        &guard,
+        "NOT_APPLICABLE_LAYER_A",
+        evidence,
+        "A",
+        "PASS",
+    );
+}
+
+#[tokio::test]
+async fn test_cw122b1_f1_04_http_failures_are_recorded_and_fail_closed() {
+    for (scenario, expected) in [
+        ("429", StatusCode::TOO_MANY_REQUESTS),
+        ("500", StatusCode::INTERNAL_SERVER_ERROR),
+        ("503", StatusCode::SERVICE_UNAVAILABLE),
+        ("401", StatusCode::UNAUTHORIZED),
+        ("403", StatusCode::FORBIDDEN),
+    ] {
+        let guard = SpendGuard::new(SpendGuardConfig {
+            authorized_budget_usd: 1.0,
+            max_requests_total: 3,
+            ..Default::default()
+        });
+        let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
+        let session = format!("f1-04-{scenario}");
+        let marker = format!("CW122B1_F1-04_{scenario}");
+        let response = f1_send_responses(&f, &session, &marker).await;
+        assert_eq!(response.status(), expected, "scenario {scenario}");
+        assert!(
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_LENGTH)
+                .is_none()
+        );
+        let _ = response.bytes().await.unwrap();
+        assert_eq!(
+            f.mock.captured.lock().unwrap().len(),
+            1,
+            "scenario {scenario}"
+        );
+        assert_eq!(guard.session_request_count(&session), 1);
+        assert_eq!(guard.total_request_count(), 1);
+        assert_eq!(guard.total_reserved_usd(), 0.0);
+        assert!(guard.is_killswitch_tripped(), "scenario {scenario}");
+        let turns = f.store.list_turns(&session).unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(
+            turns[0].outcome.as_deref(),
+            Some("upstream_error"),
+            "scenario {scenario}"
+        );
+        assert!(turns[0].observed_usage.is_none());
+        let evidence = f1_capture_private_evidence(
+            "F1-04",
+            &[&session],
+            &f,
+            &guard,
+            1,
+            0,
+            "NOT_APPLICABLE_LAYER_A",
+        );
+        f1_emit_result(
+            "F1-04",
+            "mock provider HTTP response",
+            "provider HTTP error classified and reservation settled fail-closed",
+            &format!("HTTP {} recorded as upstream_error", expected.as_u16()),
+            1,
+            1,
+            0,
+            &guard,
+            "NOT_APPLICABLE_LAYER_A",
+            evidence,
+            "A",
+            "PASS",
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_cw122b1_f1_05_incomplete_sse_cannot_settle_or_complete() {
+    for (scenario, expected_body) in [
+        ("INVALID_SSE", "not-json"),
+        ("TRUNCATED_SSE", "response.completed"),
+        ("CLOSE_BEFORE_COMPLETE", "partial"),
+    ] {
+        let guard = SpendGuard::new(SpendGuardConfig {
+            authorized_budget_usd: 1.0,
+            ..Default::default()
+        });
+        let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
+        let session = format!("f1-05-{scenario}");
+        let marker = format!("CW122B1_F1-05_{scenario}");
+        let response = f1_send_responses(&f, &session, &marker).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response
+                .headers()
+                .get(reqwest::header::CONTENT_LENGTH)
+                .is_none()
+        );
+        let bytes = response.bytes().await.unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains(expected_body));
+        assert_eq!(f.mock.captured.lock().unwrap().len(), 1);
+        let turns = f.store.list_turns(&session).unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(
+            turns[0].outcome.as_deref(),
+            Some("stream_error"),
+            "scenario {scenario}"
+        );
+        assert!(turns[0].observed_usage.is_none());
+        assert!(guard.is_killswitch_tripped());
+        assert!(
+            guard.total_spent_usd() > 0.0,
+            "reservation fallback is an accounting estimate"
+        );
+        let evidence = f1_capture_private_evidence(
+            "F1-05",
+            &[&session],
+            &f,
+            &guard,
+            1,
+            0,
+            "NOT_APPLICABLE_LAYER_A",
+        );
+        f1_emit_result(
+            "F1-05",
+            "mock streaming response before terminal completion",
+            "incomplete SSE classified stream_error and no valid usage recorded",
+            &format!("{scenario} classified stream_error; usage unavailable"),
+            1,
+            1,
+            0,
+            &guard,
+            "NOT_APPLICABLE_LAYER_A",
+            evidence,
+            "A",
+            "PASS",
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_cw122b1_f1_05_stalled_response_times_out_with_no_usage() {
+    let guard = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        ..Default::default()
+    });
+    let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
+    let session = "f1-05-stall";
+    let request = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        f1_send_responses(&f, session, "CW122B1_F1-05_STALL"),
+    )
+    .await;
+    assert!(
+        request.is_err(),
+        "the delayed mock response must exceed the test deadline"
+    );
+    assert_eq!(f.mock.captured.lock().unwrap().len(), 1);
+    assert!(f.mock.responses.lock().unwrap().is_empty());
+    assert_eq!(guard.total_request_count(), 1);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if guard.total_reserved_usd() == 0.0 && guard.is_killswitch_tripped() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("cancelled upstream request must settle its reservation");
+    let turns = f.store.list_turns(session).unwrap();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].outcome.as_deref(), Some("cancelled"));
+    assert!(turns[0].observed_usage.is_none());
+    let evidence = f1_capture_private_evidence(
+        "F1-05",
+        &[session],
+        &f,
+        &guard,
+        1,
+        0,
+        "NOT_APPLICABLE_LAYER_A",
+    );
+    f1_emit_result(
+        "F1-05",
+        "mock stalls before response headers",
+        "client deadline cancels an admitted request with no provider usage",
+        "cancelled outcome recorded and reservation settled conservatively",
+        1,
+        1,
+        0,
+        &guard,
+        "NOT_APPLICABLE_LAYER_A",
+        evidence,
+        "A",
+        "PASS",
+    );
+    drop(f);
+}
+
+#[tokio::test]
+async fn test_cw122b1_f1_06_invalid_or_missing_usage_trips_settlement_guard() {
+    for (scenario, expected_usage) in [
+        ("MISSING_USAGE", None),
+        (
+            "INVALID_USAGE",
+            Some(json!({"input_tokens":"unknown","output_tokens":4})),
+        ),
+        (
+            "CONTRADICTORY_USAGE",
+            Some(
+                json!({"input_tokens":1,"output_tokens":4,"input_tokens_details":{"cached_tokens":2}}),
+            ),
+        ),
+    ] {
+        let guard = SpendGuard::new(SpendGuardConfig {
+            authorized_budget_usd: 1.0,
+            ..Default::default()
+        });
+        let f = QualificationFixture::setup_config(Some(guard.clone()), None, true).await;
+        let session = format!("f1-06-{scenario}");
+        let marker = format!("CW122B1_F1-06_{scenario}");
+        let response = f1_send_responses(&f, &session, &marker).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let _ = response.bytes().await.unwrap();
+        let turns = f.store.list_turns(&session).unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].outcome.as_deref(), Some("completed"));
+        assert_eq!(turns[0].observed_usage, expected_usage);
+        assert!(guard.is_killswitch_tripped());
+        assert!((guard.total_spent_usd() - guard.config().request_reservation_usd).abs() < 1e-6);
+        assert_eq!(guard.total_reserved_usd(), 0.0);
+        assert_eq!(guard.total_request_count(), 1);
+        assert_eq!(
+            f1_send_chat(&f, &session).await.status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(f.mock.captured.lock().unwrap().len(), 1);
+        let evidence = f1_capture_private_evidence(
+            "F1-06",
+            &[&session],
+            &f,
+            &guard,
+            1,
+            0,
+            "NOT_APPLICABLE_LAYER_A",
+        );
+        f1_emit_result(
+            "F1-06",
+            "provider usage settlement",
+            "missing or invalid telemetry remains unavailable; conservative reservation charged and killswitch trips",
+            &format!(
+                "{scenario} preserved as {:?}; no measured cost",
+                turns[0].observed_usage
+            ),
+            1,
+            1,
+            0,
+            &guard,
+            "NOT_APPLICABLE_LAYER_A",
+            evidence,
+            "A",
+            "PASS",
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "CW-122B1-F1 Codex request-cap faults; loopback mock only; run via benchmark/cw122b1/run_fault_matrix.py"]
+async fn test_cw122b1_f1_codex_request_caps_block_agent_continuation() {
+    use std::time::Duration;
+
+    let binary = std::fs::canonicalize(require_installed_binary("codex")).unwrap();
+    let root = std::env::temp_dir().join(format!("cw122b1-f1-caps-{}", uuid::Uuid::new_v4()));
+    create_private_dir(&root);
+    let env_root = PathBuf::from(
+        std::env::var_os("CW122B1_F1_EVIDENCE_DIR")
+            .expect("run Codex fault tests through run_fault_matrix.py"),
+    );
+
+    let per_session = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        max_requests_per_session: 1,
+        max_requests_total: 5,
+        require_verified_pricing: false,
+        ..Default::default()
+    });
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let session = uuid::Uuid::new_v4().to_string();
+    let fixture =
+        QualificationFixture::setup_config(Some(per_session.clone()), Some(token.clone()), true)
+            .await;
+    let paths: Vec<_> = ["home", "codex", "tmp", "workspace"]
+        .iter()
+        .map(|name| root.join(format!("session-{name}")))
+        .collect();
+    for path in &paths {
+        create_private_dir(path);
+    }
+    let codex = CodexStep {
+        binary: &binary,
+        workspace: &paths[3],
+        home: &paths[0],
+        codex_home: &paths[1],
+        temp_dir: &paths[2],
+        proxy_port: fixture.proxy_port,
+        session_id: &session,
+        control_token: &token,
+    };
+    let mut partial = PartialCodexEvidence {
+        root: env_root.clone(),
+        label: format!("F1-01_{session}"),
+        session_id: session.clone(),
+        store: fixture.store.clone(),
+        captured: fixture.mock.captured.clone(),
+        responses: fixture.mock.responses.clone(),
+        complete: false,
+    };
+    let result = codex
+        .run(
+            None,
+            "retry_delays: inspect the implementation and run diagnostics before editing",
+            Duration::from_secs(20),
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "Codex must see the blocked follow-up request"
+    );
+    let requests = fixture.mock.captured.lock().unwrap().len();
+    assert_eq!(
+        requests, 1,
+        "second Codex request must be blocked before dispatch"
+    );
+    assert_eq!(per_session.session_request_count(&session), 1);
+    let turns = fixture.store.list_turns(&session).unwrap();
+    assert!(
+        turns
+            .iter()
+            .any(|turn| turn.outcome.as_deref() == Some("blocked"))
+    );
+    let process_status =
+        format!("Codex termination status: {result:?}; no live process cleanup required");
+    let evidence = f1_capture_private_evidence(
+        "F1-01",
+        &[&session],
+        &fixture,
+        &per_session,
+        1,
+        1,
+        &process_status,
+    );
+    f1_emit_result(
+        "F1-01",
+        "Codex tool round trip reaches second request after one-request session cap",
+        "follow-up is rejected before dispatch and Codex cannot continue",
+        &format!("one request reached mock; Codex result: {result:?}"),
+        requests,
+        1,
+        1,
+        &per_session,
+        &process_status,
+        evidence.clone(),
+        "B",
+        "PASS",
+    );
+    partial.complete();
+    drop(fixture);
+
+    let campaign = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        max_requests_per_session: 5,
+        max_requests_total: 1,
+        require_verified_pricing: false,
+        ..Default::default()
+    });
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let first_session = uuid::Uuid::new_v4().to_string();
+    let second_session = uuid::Uuid::new_v4().to_string();
+    let fixture =
+        QualificationFixture::setup_config(Some(campaign.clone()), Some(token.clone()), true).await;
+    let first_paths: Vec<_> = ["home", "codex", "tmp", "workspace"]
+        .iter()
+        .map(|name| root.join(format!("first-{name}")))
+        .collect();
+    let second_paths: Vec<_> = ["home", "codex", "tmp", "workspace"]
+        .iter()
+        .map(|name| root.join(format!("second-{name}")))
+        .collect();
+    for path in first_paths.iter().chain(&second_paths) {
+        create_private_dir(path);
+    }
+    let first = CodexStep {
+        binary: &binary,
+        workspace: &first_paths[3],
+        home: &first_paths[0],
+        codex_home: &first_paths[1],
+        temp_dir: &first_paths[2],
+        proxy_port: fixture.proxy_port,
+        session_id: &first_session,
+        control_token: &token,
+    };
+    assert!(
+        first
+            .run(None, "complete one mock request", Duration::from_secs(20))
+            .await
+            .is_ok()
+    );
+    let second = CodexStep {
+        binary: &binary,
+        workspace: &second_paths[3],
+        home: &second_paths[0],
+        codex_home: &second_paths[1],
+        temp_dir: &second_paths[2],
+        proxy_port: fixture.proxy_port,
+        session_id: &second_session,
+        control_token: &token,
+    };
+    let result = second
+        .run(None, "try a new campaign session", Duration::from_secs(20))
+        .await;
+    assert!(result.is_err());
+    assert_eq!(fixture.mock.captured.lock().unwrap().len(), 1);
+    assert_eq!(campaign.total_request_count(), 1);
+    assert_eq!(campaign.session_request_count(&second_session), 0);
+    assert!(
+        fixture
+            .store
+            .list_turns(&second_session)
+            .unwrap()
+            .iter()
+            .any(|turn| turn.outcome.as_deref() == Some("blocked"))
+    );
+    let process_status =
+        format!("Second Codex termination status: {result:?}; no live process cleanup required");
+    let evidence = f1_capture_private_evidence(
+        "F1-02",
+        &[&first_session, &second_session],
+        &fixture,
+        &campaign,
+        1,
+        1,
+        &process_status,
+    );
+    f1_emit_result(
+        "F1-02",
+        "second Codex session hits shared campaign cap before upstream dispatch",
+        "a new session cannot exceed the campaign-wide request ceiling",
+        &format!("one total mock dispatch; second Codex run: {result:?}"),
+        1,
+        1,
+        1,
+        &campaign,
+        &process_status,
+        evidence,
+        "B",
+        "PASS",
+    );
+    drop(fixture);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+#[ignore = "CW-122B1-F1 Codex retry fault; loopback mock only; run via benchmark/cw122b1/run_fault_matrix.py"]
+async fn test_cw122b1_f1_codex_retry_loop_is_counted_and_bounded() {
+    use std::time::Duration;
+
+    let binary = std::fs::canonicalize(require_installed_binary("codex")).unwrap();
+    let root = std::env::temp_dir().join(format!("cw122b1-f1-codex-{}", uuid::Uuid::new_v4()));
+    create_private_dir(&root);
+    let home = root.join("home");
+    let codex_home = root.join("codex");
+    let temp_dir = root.join("tmp");
+    let workspace = root.join("workspace");
+    for path in [&home, &codex_home, &temp_dir, &workspace] {
+        create_private_dir(path);
+    }
+    let session = uuid::Uuid::new_v4().to_string();
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let guard = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        max_requests_per_session: 3,
+        max_requests_total: 3,
+        require_verified_pricing: false,
+        ..Default::default()
+    });
+    let f =
+        QualificationFixture::setup_config(Some(guard.clone()), Some(token.clone()), true).await;
+    let codex = CodexStep {
+        binary: &binary,
+        workspace: &workspace,
+        home: &home,
+        codex_home: &codex_home,
+        temp_dir: &temp_dir,
+        proxy_port: f.proxy_port,
+        session_id: &session,
+        control_token: &token,
+    };
+    let evidence_root = PathBuf::from(
+        std::env::var_os("CW122B1_F1_EVIDENCE_DIR")
+            .expect("run the Codex fault test through run_fault_matrix.py"),
+    );
+    let mut partial = PartialCodexEvidence {
+        root: evidence_root,
+        label: format!("F1-03_{session}"),
+        session_id: session.clone(),
+        store: f.store.clone(),
+        captured: f.mock.captured.clone(),
+        responses: f.mock.responses.clone(),
+        complete: false,
+    };
+    let run = codex
+        .run(
+            None,
+            "CW122B1_F1-03_RETRY_LOOP repeatedly receive retryable 429 responses",
+            Duration::from_secs(30),
+        )
+        .await;
+    let requests = f.mock.captured.lock().unwrap().len();
+    let responses = f.mock.responses.lock().unwrap().clone();
+    assert!(requests > 0, "fault was not triggered through Codex");
+    assert!(requests <= 3, "Codex exceeded the configured request cap");
+    assert_eq!(guard.total_request_count(), requests);
+    assert_eq!(responses.len(), requests);
+    assert!(responses.iter().all(|response| response.status == 429));
+    assert!(run.is_err(), "retry fault must not be reported as success");
+    let turns = f.store.list_turns(&session).unwrap();
+    let admitted = guard.session_request_count(&session);
+    let rejected = turns.len().saturating_sub(admitted);
+    assert_eq!(admitted, requests.min(3));
+    assert!(
+        turns
+            .iter()
+            .filter(|turn| turn.outcome.as_deref() == Some("upstream_error"))
+            .count()
+            >= requests
+    );
+    let process_status =
+        format!("Codex termination status: {run:?}; no live process cleanup required");
+    let evidence = f1_capture_private_evidence(
+        "F1-03",
+        &[&session],
+        &f,
+        &guard,
+        admitted,
+        rejected,
+        &process_status,
+    );
+    let observed_retry = requests > 1;
+    f1_emit_result(
+        "F1-03",
+        "Codex request routed through authenticated loopback proxy to retryable mock 429",
+        "each retry consumes admission; request cap prevents dispatch beyond three",
+        &format!("Codex made {requests} observed mock requests; run result: {run:?}"),
+        requests,
+        admitted,
+        rejected,
+        &guard,
+        &process_status,
+        evidence.clone(),
+        "B",
+        if observed_retry {
+            "PASS"
+        } else {
+            "NOT_VERIFIED"
+        },
+    );
+    f1_emit_result(
+        "F1-04",
+        "Codex receives HTTP 429 through the loopback proxy",
+        "provider failure is classified and does not fall back to another endpoint",
+        &format!(
+            "{} observed 429 response(s); Codex result: {run:?}",
+            responses.len()
+        ),
+        requests,
+        admitted,
+        rejected,
+        &guard,
+        &process_status,
+        evidence.clone(),
+        "B",
+        "PASS",
+    );
+    partial.complete();
+
+    let stall_guard = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        max_requests_per_session: 3,
+        max_requests_total: 3,
+        ..Default::default()
+    });
+    let stall_token = uuid::Uuid::new_v4().simple().to_string();
+    let stall_session = uuid::Uuid::new_v4().to_string();
+    let stall_fixture = QualificationFixture::setup_config(
+        Some(stall_guard.clone()),
+        Some(stall_token.clone()),
+        true,
+    )
+    .await;
+    let stall_home = root.join("stall-home");
+    let stall_codex_home = root.join("stall-codex");
+    let stall_tmp = root.join("stall-tmp");
+    let stall_workspace = root.join("stall-workspace");
+    for path in [&stall_home, &stall_codex_home, &stall_tmp, &stall_workspace] {
+        create_private_dir(path);
+    }
+    let stall_codex = CodexStep {
+        binary: &binary,
+        workspace: &stall_workspace,
+        home: &stall_home,
+        codex_home: &stall_codex_home,
+        temp_dir: &stall_tmp,
+        proxy_port: stall_fixture.proxy_port,
+        session_id: &stall_session,
+        control_token: &stall_token,
+    };
+    let mut stall_partial = PartialCodexEvidence {
+        root: PathBuf::from(std::env::var_os("CW122B1_F1_EVIDENCE_DIR").unwrap()),
+        label: format!("F1-07_{stall_session}"),
+        session_id: stall_session.clone(),
+        store: stall_fixture.store.clone(),
+        captured: stall_fixture.mock.captured.clone(),
+        responses: stall_fixture.mock.responses.clone(),
+        complete: false,
+    };
+    let remaining_campaign = bounded_codex_timeout(Duration::ZERO, Duration::from_secs(7199))
+        .expect("one second remains in the simulated campaign");
+    assert_eq!(remaining_campaign, Duration::from_secs(1));
+    let stall_result = stall_codex
+        .run(
+            None,
+            "CW122B1_F1-07_STALL wait for the hanging local mock response",
+            remaining_campaign,
+        )
+        .await;
+    assert!(
+        stall_result
+            .as_ref()
+            .is_err_and(|error| error.contains("process_group_reaped")),
+        "per-run deadline must kill and reap Codex: {stall_result:?}"
+    );
+    assert_eq!(stall_fixture.mock.captured.lock().unwrap().len(), 1);
+    assert!(stall_fixture.mock.responses.lock().unwrap().is_empty());
+    assert_eq!(
+        bounded_codex_timeout(Duration::ZERO, Duration::from_secs(7200)),
+        None,
+        "campaign expiry must prevent a subsequent Codex attempt"
+    );
+    let stall_process_status =
+        format!("Codex termination status: {stall_result:?}; process-group reap verified");
+    let stall_evidence = f1_capture_private_evidence(
+        "F1-07",
+        &[&stall_session],
+        &stall_fixture,
+        &stall_guard,
+        1,
+        0,
+        &stall_process_status,
+    );
+    f1_emit_result(
+        "F1-07",
+        "Codex run deadline expires while the mock provider stalls before response",
+        "Codex and its process group are reaped; no response is treated as completed",
+        &format!("one local request; Codex timeout: {stall_result:?}"),
+        1,
+        1,
+        0,
+        &stall_guard,
+        &stall_process_status,
+        stall_evidence.clone(),
+        "B",
+        "PASS",
+    );
+    f1_emit_result(
+        "F1-08",
+        "Codex request is active with one second left in the simulated campaign budget",
+        "active attempt is cancelled at the remaining budget and no subsequent attempt starts",
+        "one local dispatch was cancelled at the campaign budget; expired budget returned no next-run timeout",
+        1,
+        1,
+        0,
+        &stall_guard,
+        &stall_process_status,
+        f1_capture_private_evidence(
+            "F1-08",
+            &[&stall_session],
+            &stall_fixture,
+            &stall_guard,
+            1,
+            0,
+            &stall_process_status,
+        ),
+        "B",
+        "PASS",
+    );
+    f1_emit_result(
+        "F1-05",
+        "Codex receives a stalled streaming response until the per-run deadline",
+        "stalled response cannot produce success or valid usage and the Codex process is reaped",
+        &format!("one local dispatch; timed out and reaped: {stall_result:?}"),
+        1,
+        1,
+        0,
+        &stall_guard,
+        &stall_process_status,
+        f1_capture_private_evidence(
+            "F1-05",
+            &[&stall_session],
+            &stall_fixture,
+            &stall_guard,
+            1,
+            0,
+            &stall_process_status,
+        ),
+        "B",
+        "PASS",
+    );
+    stall_partial.complete();
+    drop(stall_fixture);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 fn which(bin: &str) -> Option<PathBuf> {
@@ -1957,40 +3080,181 @@ impl CodexStep<'_> {
             .env("OPENAI_API_KEY", "cw122b1-mock-only-key")
             .env("CW_SESSION_ID", self.session_id)
             .env("CW_CONTROL_TOKEN", self.control_token)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
             cmd.as_std_mut().process_group(0);
         }
-        let child = cmd.spawn().map_err(|_| "codex_spawn_failed".to_owned())?;
+        let mut child = cmd.spawn().map_err(|_| "codex_spawn_failed".to_owned())?;
         let pid = child.id().unwrap_or_default();
-        match tokio::time::timeout(timeout, child.wait_with_output()).await {
-            Ok(Ok(output)) if output.status.success() => Ok((
-                codex_cli_diagnostics(&output),
-                started.elapsed().as_millis(),
-            )),
-            Ok(Ok(output)) => Err(format!("codex_exit_{}", output.status.code().unwrap_or(-1))),
-            Ok(Err(_)) => Err("codex_wait_failed".into()),
+        let mut stdout = child.stdout.take().expect("piped Codex stdout");
+        let mut stderr = child.stderr.take().expect("piped Codex stderr");
+        let stdout_task = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut stdout, &mut bytes)
+                .await
+                .map(|_| bytes)
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut bytes = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut bytes)
+                .await
+                .map(|_| bytes)
+        });
+        let status = match tokio::time::timeout(timeout, child.wait()).await {
+            Ok(Ok(status)) => status,
+            Ok(Err(_)) => return Err("codex_wait_failed".into()),
             Err(_) => {
                 #[cfg(unix)]
                 if pid > 0 {
-                    // The process group includes Codex tool children and must stop with the run.
+                    // Kill the isolated Codex group, then wait for the direct child to be reaped.
                     unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
                 }
-                Err("codex_run_deadline_exceeded_and_process_group_killed".into())
+                #[cfg(not(unix))]
+                let _ = child.start_kill();
+                let status = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait())
+                    .await
+                    .ok()
+                    .and_then(Result::ok);
+                let reaped = status.is_some();
+                let exit_status = status
+                    .map(codex_exit_status)
+                    .unwrap_or_else(|| "unavailable".into());
+                #[cfg(unix)]
+                let group_gone = wait_for_process_group_exit(pid).await;
+                #[cfg(not(unix))]
+                let group_gone = reaped;
+                if group_gone {
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
+                } else {
+                    stdout_task.abort();
+                    stderr_task.abort();
+                }
+                return Err(if reaped && group_gone {
+                    format!("codex_run_deadline_exceeded_{exit_status}_and_process_group_reaped")
+                } else {
+                    "codex_run_deadline_exceeded_process_cleanup_unverified".into()
+                });
             }
+        };
+        let output = std::process::Output {
+            status,
+            stdout: stdout_task
+                .await
+                .map_err(|_| "codex_stdout_reader_failed")?
+                .map_err(|_| "codex_stdout_read_failed")?,
+            stderr: stderr_task
+                .await
+                .map_err(|_| "codex_stderr_reader_failed")?
+                .map_err(|_| "codex_stderr_read_failed")?,
+        };
+        if output.status.success() {
+            Ok((
+                codex_cli_diagnostics(&output),
+                started.elapsed().as_millis(),
+            ))
+        } else {
+            Err(format!("codex_exit_{}", output.status.code().unwrap_or(-1)))
         }
     }
+}
+
+fn codex_exit_status(status: std::process::ExitStatus) -> String {
+    if let Some(code) = status.code() {
+        return format!("exit_code_{code}");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return format!("exit_signal_{signal}");
+        }
+    }
+    "exit_status_unknown".into()
+}
+
+#[cfg(unix)]
+async fn wait_for_process_group_exit(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    for _ in 0..200 {
+        if unsafe { libc::kill(-(pid as i32), 0) } != 0 {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    false
+}
+
+fn bounded_codex_timeout(
+    run_elapsed: std::time::Duration,
+    campaign_elapsed: std::time::Duration,
+) -> Option<std::time::Duration> {
+    let campaign_remaining = std::time::Duration::from_secs(7200).saturating_sub(campaign_elapsed);
+    (!campaign_remaining.is_zero()).then(|| {
+        std::time::Duration::from_secs(600)
+            .saturating_sub(run_elapsed)
+            .min(campaign_remaining)
+    })
 }
 
 fn remaining_codex_timeout(
     run_started: tokio::time::Instant,
     campaign_started: tokio::time::Instant,
-) -> std::time::Duration {
-    std::time::Duration::from_secs(600)
-        .saturating_sub(run_started.elapsed())
-        .min(std::time::Duration::from_secs(7200).saturating_sub(campaign_started.elapsed()))
+) -> Option<std::time::Duration> {
+    bounded_codex_timeout(run_started.elapsed(), campaign_started.elapsed())
+}
+
+#[test]
+fn test_cw122b1_f1_08_campaign_deadline_bounds_current_and_next_run() {
+    use std::time::Duration;
+
+    assert_eq!(
+        bounded_codex_timeout(Duration::from_secs(10), Duration::from_secs(7199)),
+        Some(Duration::from_secs(1)),
+        "active run receives only the remaining campaign budget"
+    );
+    assert_eq!(
+        bounded_codex_timeout(Duration::ZERO, Duration::from_secs(7200)),
+        None,
+        "no subsequent run may begin at or after campaign expiry"
+    );
+    let evidence = if let Some(root) = std::env::var_os("CW122B1_F1_EVIDENCE_DIR") {
+        let path = PathBuf::from(root).join("faults/F1-08/deadline-admission.json");
+        let bytes = serde_json::to_vec_pretty(&json!({
+            "scenario_id":"F1-08",
+            "campaign_elapsed_ms":7200000,
+            "remaining_attempt_timeout_ms":null,
+            "next_attempt_started":false,
+            "provider_dispatches":0,
+        }))
+        .unwrap();
+        write_private_file(&path, &bytes);
+        json!({"status":"PRESERVED","directory":path.parent().unwrap(),"files":[
+            {"path":"deadline-admission.json","sha256":sha256_hex(&bytes),"kind":"deadline_guard"}
+        ]})
+    } else {
+        json!({"status":"NOT_CONFIGURED_FOR_PRIVATE_CAPTURE"})
+    };
+    f1_emit_result(
+        "F1-08",
+        "campaign budget calculation before starting the next attempt",
+        "active attempt is limited to remaining time and no attempt starts after expiry",
+        "one second remained at 7199 seconds; timeout became unavailable at 7200 seconds",
+        0,
+        0,
+        0,
+        &SpendGuard::new(SpendGuardConfig::default()),
+        "NOT_APPLICABLE_LAYER_A",
+        evidence,
+        "A",
+        "PASS",
+    );
 }
 
 fn cw122_oracle_check(family: &str, workspace: &std::path::Path) -> Value {
@@ -2274,7 +3538,13 @@ fn write_private_file_result(path: &std::path::Path, bytes: &[u8]) -> std::io::R
 
 #[test]
 fn test_cw122b1_failed_attempt_preserves_partial_wire_evidence() {
-    let root = std::env::temp_dir().join(format!("cw122b1-partial-{}", uuid::Uuid::new_v4()));
+    let persistent_root = std::env::var_os("CW122B1_F1_EVIDENCE_DIR").map(PathBuf::from);
+    let root = persistent_root
+        .as_ref()
+        .map(|path| path.join("partial-evidence-boundary"))
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("cw122b1-partial-{}", uuid::Uuid::new_v4()))
+        });
     create_private_dir(&root);
     let session_id = uuid::Uuid::new_v4().to_string();
     let store = CwStore::open_in_memory().unwrap();
@@ -2310,7 +3580,31 @@ fn test_cw122b1_failed_attempt_preserves_partial_wire_evidence() {
     let status: Value =
         serde_json::from_slice(&std::fs::read(failed.join("status.json")).unwrap()).unwrap();
     assert_eq!(status["status"], "INCOMPLETE_OR_FAILED");
-    std::fs::remove_dir_all(root).unwrap();
+    if persistent_root.is_some() {
+        let artifact_names = [
+            "provider_request_00.json",
+            "provider_response_00.bin",
+            "status.json",
+        ];
+        let files: Vec<_> = artifact_names
+            .iter()
+            .map(|name| {
+                let bytes = std::fs::read(failed.join(name)).unwrap();
+                json!({"path":name,"sha256":sha256_hex(&bytes)})
+            })
+            .collect();
+        println!(
+            "CW122B1_F1_BOUNDARY:{}",
+            json!({
+                "boundary_id":"after_task_before_manifest",
+                "injection_boundary":"failed attempt guard dropped before completion",
+                "result":"PASS",
+                "evidence_preservation":{"status":"PRESERVED","directory":failed,"files":files}
+            })
+        );
+    } else {
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[tokio::test]
@@ -2399,6 +3693,7 @@ async fn test_cw122b1_codex_mock_campaign() {
     let guard = SpendGuard::new(SpendGuardConfig {
         authorized_budget_usd: 0.20,
         max_requests_per_session: 30,
+        max_requests_total: 360,
         require_verified_pricing: false,
         request_reservation_usd: 0.005,
         ..Default::default()
@@ -2518,7 +3813,8 @@ async fn test_cw122b1_codex_mock_campaign() {
                 .run(
                     None,
                     &initial_prompt,
-                    remaining_codex_timeout(started, campaign_started),
+                    remaining_codex_timeout(started, campaign_started)
+                        .expect("campaign deadline expired before attempt"),
                 )
                 .await
             .unwrap_or_else(|error| panic!(
@@ -2624,7 +3920,8 @@ async fn test_cw122b1_codex_mock_campaign() {
                 .run(
                     Some(&thread_id),
                     implementation_prompt,
-                    remaining_codex_timeout(started, campaign_started),
+                    remaining_codex_timeout(started, campaign_started)
+                        .expect("campaign deadline expired before resumed attempt"),
                 )
                 .await
                 .unwrap_or_else(|error| {

@@ -1,42 +1,297 @@
 {
   "codex_version": "codex-cli 0.166.0",
-  "commit": "aa6d716db5ade7ccae63278761492f716fd7ef48",
-  "duration_ms": 6194,
+  "commit": "bdd3ba79714d5f1e34d94cdea5ed0df8840645cb",
+  "duration_ms": 8267,
   "evidence": {
     "private_directory_mode": "0700",
-    "runner_output_sha256": "d4cf1165459e5ae93837cc61943fe22f0baa05c14cbeb58b4eab639e3b944808"
+    "runner_output_sha256": "6454a56d4a0c560ffb0df4532b711b60bd405b23c939d3f383c4cb3e8b636621"
   },
   "evidence_directory": "PRIVATE_EVIDENCE",
   "partial_evidence_boundaries": [
     {
+      "accepted_admissions": 0,
+      "agent_process_termination": "Codex process not launched; supervisor terminated campaign test worker",
       "boundary_id": "before_first_provider_dispatch",
-      "evidence_source": "NONE",
-      "injection_boundary": "NOT_EXERCISED",
-      "result": "NOT_VERIFIED"
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "json",
+            "name": "boundary_before_first_provider_dispatch_000.json",
+            "sha256": "52747ebf970cc10d1bda5debffa7420a6ec93f6fe851159697aa80a800be3502"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_before_first_provider_dispatch_001.json",
+            "sha256": "461d404da5c690b896372c952a88b425c7d4050fe3561d19fada88f09fbac05a"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_before_first_provider_dispatch_002.json",
+            "sha256": "804630a1b6de492c61e1b20eee9f6b3471c581b4a75fcbe6c89de197849dbd79"
+          }
+        ],
+        "verified": true
+      },
+      "evidence_source": "boundary-injection",
+      "expected_behavior": "interruption at the named lifecycle point preserves every observed artifact and prevents a successful final classification",
+      "final_attempt_classification": "NOT_STARTED_NO_PROVIDER_REQUEST",
+      "injection_boundary": "real Codex campaign reached first launch boundary; Codex process and provider request not yet created",
+      "observed_behavior": "real Codex campaign reached first launch boundary; Codex process and provider request not yet created",
+      "process_cleanup": "VERIFIED",
+      "rejected_admissions": 0,
+      "result": "PASS",
+      "runner_exit_status": {
+        "exit_code": -9,
+        "signaled_process_groups": [
+          3343058
+        ],
+        "termination_signal": "SIGKILL"
+      },
+      "settlement": "NOT_APPLICABLE_BEFORE_ADMISSION",
+      "upstream_dispatch_count": 0
     },
     {
+      "accepted_admissions": 1,
+      "agent_process_termination": "Codex process not launched; supervisor terminated campaign test worker",
       "boundary_id": "after_admission_before_dispatch",
-      "evidence_source": "NONE",
-      "injection_boundary": "NOT_EXERCISED",
-      "result": "NOT_VERIFIED"
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "bin",
+            "name": "boundary_after_admission_before_dispatch_000.bin",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_admission_before_dispatch_001.json",
+            "sha256": "6377882290e2f590f32e7b3bfd7cf0d5e4450d247f8ae76023cbe93c8119bcf6"
+          }
+        ],
+        "verified": true
+      },
+      "evidence_source": "boundary-injection",
+      "expected_behavior": "interruption at the named lifecycle point preserves every observed artifact and prevents a successful final classification",
+      "final_attempt_classification": "ADMITTED_NOT_DISPATCHED_UNSETTLED",
+      "injection_boundary": "SpendGuard admission accepted; provider send not started",
+      "observed_behavior": "SpendGuard admission accepted; provider send not started",
+      "process_cleanup": "VERIFIED",
+      "rejected_admissions": 0,
+      "result": "PASS",
+      "runner_exit_status": {
+        "exit_code": -9,
+        "signaled_process_groups": [
+          3343104
+        ],
+        "termination_signal": "SIGKILL"
+      },
+      "settlement": "NOT_SETTLED_AT_INTERRUPTION",
+      "upstream_dispatch_count": 0
     },
     {
+      "accepted_admissions": 0,
+      "agent_process_termination": "Codex process not launched; supervisor terminated campaign test worker",
       "boundary_id": "after_ingress_before_completed_egress",
-      "evidence_source": "NONE",
-      "injection_boundary": "NOT_EXERCISED",
-      "result": "NOT_VERIFIED"
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "bin",
+            "name": "boundary_after_ingress_before_completed_egress_000.bin",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_ingress_before_completed_egress_001.json",
+            "sha256": "df69dd00334730d93aefa5da4579f63151d5e08fe27f7542542dae5114406583"
+          }
+        ],
+        "verified": true
+      },
+      "evidence_source": "boundary-injection",
+      "expected_behavior": "interruption at the named lifecycle point preserves every observed artifact and prevents a successful final classification",
+      "final_attempt_classification": "INTERRUPTED_BEFORE_DISPATCH",
+      "injection_boundary": "proxy ingress persisted; model-bound egress not yet dispatched",
+      "observed_behavior": "proxy ingress persisted; model-bound egress not yet dispatched",
+      "process_cleanup": "VERIFIED",
+      "rejected_admissions": 0,
+      "result": "PASS",
+      "runner_exit_status": {
+        "exit_code": -9,
+        "signaled_process_groups": [
+          3343121
+        ],
+        "termination_signal": "SIGKILL"
+      },
+      "settlement": "NOT_AVAILABLE",
+      "upstream_dispatch_count": 0
     },
     {
+      "accepted_admissions": 1,
+      "agent_process_termination": "Codex process not launched; supervisor terminated campaign test worker",
       "boundary_id": "after_response_before_usage_settlement",
-      "evidence_source": "NONE",
-      "injection_boundary": "NOT_EXERCISED",
-      "result": "NOT_VERIFIED"
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "bin",
+            "name": "boundary_after_response_before_usage_settlement_000.bin",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "bin",
+            "name": "boundary_after_response_before_usage_settlement_001.bin",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "bin",
+            "name": "boundary_after_response_before_usage_settlement_002.bin",
+            "sha256": "eba8f20472c41296fb250573e1bcccd6befab90bd617644c78ec15302dbe61de"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_response_before_usage_settlement_003.json",
+            "sha256": "869c21c7db59bf46ba42a3500eeffab78cfd5b88b52327384f240c1f7cb35b45"
+          }
+        ],
+        "verified": true
+      },
+      "evidence_source": "boundary-injection",
+      "expected_behavior": "interruption at the named lifecycle point preserves every observed artifact and prevents a successful final classification",
+      "final_attempt_classification": "RESPONSE_RECEIVED_USAGE_UNSETTLED",
+      "injection_boundary": "complete mock response body received; recorder has not settled the SpendGuard permit",
+      "observed_behavior": "complete mock response body received; recorder has not settled the SpendGuard permit",
+      "process_cleanup": "VERIFIED",
+      "rejected_admissions": 0,
+      "result": "PASS",
+      "runner_exit_status": {
+        "exit_code": -9,
+        "signaled_process_groups": [
+          3343135
+        ],
+        "termination_signal": "SIGKILL"
+      },
+      "settlement": "NOT_SETTLED_AT_INTERRUPTION",
+      "upstream_dispatch_count": 1
     },
     {
+      "accepted_admissions": 4,
+      "agent_process_termination": "Codex task exited normally; supervisor terminated campaign worker",
       "boundary_id": "after_task_before_final_manifest",
-      "evidence_source": "NONE",
-      "injection_boundary": "NOT_EXERCISED",
-      "result": "NOT_VERIFIED"
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_000.json",
+            "sha256": "52747ebf970cc10d1bda5debffa7420a6ec93f6fe851159697aa80a800be3502"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_001.json",
+            "sha256": "ea3999883ce44d95152068603d1e5a0917729a8485d1894655dd9282d9652634"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_002.json",
+            "sha256": "a65453a7027259fec0fc9ae399862fa2610c57f00b0da14abce2522ac65fff03"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_003.json",
+            "sha256": "b7141c2ce1082f9b52231f6525836eccf06f30b474674127b12e0647a3146637"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_004.json",
+            "sha256": "b74ea59974bf1f476bd94464f81f62d67364110b03b87242457bcac2815795f8"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_005.json",
+            "sha256": "ea3999883ce44d95152068603d1e5a0917729a8485d1894655dd9282d9652634"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_006.json",
+            "sha256": "a65453a7027259fec0fc9ae399862fa2610c57f00b0da14abce2522ac65fff03"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_007.json",
+            "sha256": "b7141c2ce1082f9b52231f6525836eccf06f30b474674127b12e0647a3146637"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_008.json",
+            "sha256": "b74ea59974bf1f476bd94464f81f62d67364110b03b87242457bcac2815795f8"
+          },
+          {
+            "kind": "sse",
+            "name": "boundary_after_task_before_final_manifest_009.sse",
+            "sha256": "c0dde27c2decacbef6a3b0caa67e33f7ccc25229a4b8f70c80e13dd3096a29c8"
+          },
+          {
+            "kind": "sse",
+            "name": "boundary_after_task_before_final_manifest_010.sse",
+            "sha256": "55f1e89332ef314144917b61df60ce950d9856ef7d56b8af7785da00e1fbc8c5"
+          },
+          {
+            "kind": "sse",
+            "name": "boundary_after_task_before_final_manifest_011.sse",
+            "sha256": "1bbf58c0f5acbaf8f6ec60de67f6000efc1e4759131a619ad1b444dd5828db72"
+          },
+          {
+            "kind": "sse",
+            "name": "boundary_after_task_before_final_manifest_012.sse",
+            "sha256": "15c5ce0368ed2f3304160d749f7585e1c959ae89e55e122064579a06be6f8672"
+          },
+          {
+            "kind": "jsonl",
+            "name": "boundary_after_task_before_final_manifest_013.jsonl",
+            "sha256": "6777320c85808028f9c1227df50f29b0b16ac0692ed840b66d9588e8aafd4526"
+          },
+          {
+            "kind": "bin",
+            "name": "boundary_after_task_before_final_manifest_014.bin",
+            "sha256": "b74ea59974bf1f476bd94464f81f62d67364110b03b87242457bcac2815795f8"
+          },
+          {
+            "kind": "bin",
+            "name": "boundary_after_task_before_final_manifest_015.bin",
+            "sha256": "b74ea59974bf1f476bd94464f81f62d67364110b03b87242457bcac2815795f8"
+          },
+          {
+            "kind": "bin",
+            "name": "boundary_after_task_before_final_manifest_016.bin",
+            "sha256": "15c5ce0368ed2f3304160d749f7585e1c959ae89e55e122064579a06be6f8672"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_017.json",
+            "sha256": "158f0b5f52bc3beeb7a646f797ea4724d9b0c21539c5eb0f494fb5831a5d4eae"
+          },
+          {
+            "kind": "json",
+            "name": "boundary_after_task_before_final_manifest_018.json",
+            "sha256": "d06580b6b50eab85407907ac49ba68d986edebad164e99bfceed5cfee1cc4ffc"
+          }
+        ],
+        "verified": true
+      },
+      "evidence_source": "boundary-injection",
+      "expected_behavior": "interruption at the named lifecycle point preserves every observed artifact and prevents a successful final classification",
+      "final_attempt_classification": "TASK_ACCEPTED_ATTEMPT_MANIFEST_MISSING",
+      "injection_boundary": "Codex coding task returned and independent acceptance passed; per-attempt and campaign manifests not yet written",
+      "observed_behavior": "Codex coding task returned and independent acceptance passed; per-attempt and campaign manifests not yet written",
+      "process_cleanup": "VERIFIED",
+      "rejected_admissions": 0,
+      "result": "PASS",
+      "runner_exit_status": {
+        "exit_code": -9,
+        "signaled_process_groups": [
+          3343148
+        ],
+        "termination_signal": "SIGKILL"
+      },
+      "settlement": "completed mock usage settled",
+      "upstream_dispatch_count": 4
     }
   ],
   "provider_calls": 0,
@@ -119,12 +374,12 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-01_010.attempt_manifest",
-            "sha256": "2f4f0ce38d810b6bff16445a3b786ed9730813091d913509f1a4b47aff09349e"
+            "sha256": "845233dce7a598f617a8b286d6c6712fcaf449d7f204754a3e7c0ff69ae0ff07"
           },
           {
             "kind": "provider_request",
             "name": "F1-01_011.provider_request",
-            "sha256": "e95582c5fe51e0344d86de4c2b9a800d27479ae1d7f06a92ad3a7f6a77b12eb8"
+            "sha256": "c32c33149f6ec56c5af218c90a9210ba9291899258f2c5cf3b1ea5ae96d69cac"
           },
           {
             "kind": "provider_response",
@@ -134,22 +389,22 @@
           {
             "kind": "ingress",
             "name": "F1-01_013.ingress",
-            "sha256": "e95582c5fe51e0344d86de4c2b9a800d27479ae1d7f06a92ad3a7f6a77b12eb8"
+            "sha256": "c32c33149f6ec56c5af218c90a9210ba9291899258f2c5cf3b1ea5ae96d69cac"
           },
           {
             "kind": "egress",
             "name": "F1-01_014.egress",
-            "sha256": "e95582c5fe51e0344d86de4c2b9a800d27479ae1d7f06a92ad3a7f6a77b12eb8"
+            "sha256": "c32c33149f6ec56c5af218c90a9210ba9291899258f2c5cf3b1ea5ae96d69cac"
           },
           {
             "kind": "ingress",
             "name": "F1-01_015.ingress",
-            "sha256": "63beed50d7a34b1e66d83ac549db2adc3f8f43e14601f0f5ae465f3acf7483df"
+            "sha256": "9a5504eafbc4426cd1f154f89f3d4ee4fd430935cb431a90d438d56cdb556ac2"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-01_016.attempt_manifest",
-            "sha256": "13aee492709200a7d298a04370388b3d8d065ddb5431b9abdef5ecc84a17d1b4"
+            "sha256": "e45180f33619f5f130d0e1123cd19f8dede56671fd6ad2c0f67065e1c9ce7ab6"
           }
         ],
         "verified": true
@@ -249,12 +504,12 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-02_010.attempt_manifest",
-            "sha256": "c14f0371d124911622d73aad9996f1b09ad0e5fbf559b91c4b82863a97e77681"
+            "sha256": "036791bdd154264f9b7312441cccf078560c3621a3016e60f0c493b59ef45fa2"
           },
           {
             "kind": "provider_request",
             "name": "F1-02_011.provider_request",
-            "sha256": "6d5189f3b92bd4a21dc6c2dc05f5228501fbd70805f9e7a28bd2d3aa8ef3486b"
+            "sha256": "5b92ceb5a734652c4bd0ca1020c275aa7289ea581714a589ea492834bac6246b"
           },
           {
             "kind": "provider_response",
@@ -264,22 +519,22 @@
           {
             "kind": "ingress",
             "name": "F1-02_013.ingress",
-            "sha256": "6d5189f3b92bd4a21dc6c2dc05f5228501fbd70805f9e7a28bd2d3aa8ef3486b"
+            "sha256": "5b92ceb5a734652c4bd0ca1020c275aa7289ea581714a589ea492834bac6246b"
           },
           {
             "kind": "egress",
             "name": "F1-02_014.egress",
-            "sha256": "6d5189f3b92bd4a21dc6c2dc05f5228501fbd70805f9e7a28bd2d3aa8ef3486b"
+            "sha256": "5b92ceb5a734652c4bd0ca1020c275aa7289ea581714a589ea492834bac6246b"
           },
           {
             "kind": "ingress",
             "name": "F1-02_015.ingress",
-            "sha256": "f34e9ef2383e266865faeecd36cecd3ae35ce11b4847b7a73c8ca53ba42eb902"
+            "sha256": "b03b41c3f42de3edbedde6e40a95835e005f93415ce37931606c29997a24e4c5"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-02_016.attempt_manifest",
-            "sha256": "01af04d29e57e1b3a7b0deeac8140a965a2aa92d2554580fe9954dd8020583a3"
+            "sha256": "7cdc0ed4268bc4f35778c905b9451415bfb7f95c0685070c8935e2609689334c"
           }
         ],
         "verified": true
@@ -394,22 +649,22 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-03_013.attempt_manifest",
-            "sha256": "5d82385d3e4746cf578f85263b9574e25b7bfb7c2eeeaf7f68d3744583391a45"
+            "sha256": "056cf18cd8c3b4789b5c9778b365f0fe46e67bf1fb1f062914b1ad6304c81885"
           },
           {
             "kind": "provider_request",
             "name": "F1-03_014.provider_request",
-            "sha256": "47b605653f8161ef420a2a5e2074059f5fdfa4c1b6bf6ec6dd60ba19d7e2a279"
+            "sha256": "b4d2b6aa9bc3ffe816f7e9506550483a968c371ba184564678af926f1c8b5537"
           },
           {
             "kind": "provider_request",
             "name": "F1-03_015.provider_request",
-            "sha256": "684acd0e9d5fad4111ca9b49ad8ed28bd26316a1ae81f5b878d2bdb409643ab5"
+            "sha256": "6cefe86e1b96a8af7d3b3d97487068b9af921d5a1685006ffd80cb0dad8ba2dd"
           },
           {
             "kind": "provider_request",
             "name": "F1-03_016.provider_request",
-            "sha256": "0b1ba8a422d94e1475512ac855ae96a30253eabe951a1c2bdd949b1208c08311"
+            "sha256": "7843e5e023e5a15d6d4182fdd6dbd35737fc0617e4a9d6f84fd6e671fa77ee55"
           },
           {
             "kind": "provider_response",
@@ -429,42 +684,42 @@
           {
             "kind": "ingress",
             "name": "F1-03_020.ingress",
-            "sha256": "47b605653f8161ef420a2a5e2074059f5fdfa4c1b6bf6ec6dd60ba19d7e2a279"
+            "sha256": "b4d2b6aa9bc3ffe816f7e9506550483a968c371ba184564678af926f1c8b5537"
           },
           {
             "kind": "egress",
             "name": "F1-03_021.egress",
-            "sha256": "47b605653f8161ef420a2a5e2074059f5fdfa4c1b6bf6ec6dd60ba19d7e2a279"
+            "sha256": "b4d2b6aa9bc3ffe816f7e9506550483a968c371ba184564678af926f1c8b5537"
           },
           {
             "kind": "ingress",
             "name": "F1-03_022.ingress",
-            "sha256": "684acd0e9d5fad4111ca9b49ad8ed28bd26316a1ae81f5b878d2bdb409643ab5"
+            "sha256": "6cefe86e1b96a8af7d3b3d97487068b9af921d5a1685006ffd80cb0dad8ba2dd"
           },
           {
             "kind": "egress",
             "name": "F1-03_023.egress",
-            "sha256": "684acd0e9d5fad4111ca9b49ad8ed28bd26316a1ae81f5b878d2bdb409643ab5"
+            "sha256": "6cefe86e1b96a8af7d3b3d97487068b9af921d5a1685006ffd80cb0dad8ba2dd"
           },
           {
             "kind": "ingress",
             "name": "F1-03_024.ingress",
-            "sha256": "0b1ba8a422d94e1475512ac855ae96a30253eabe951a1c2bdd949b1208c08311"
+            "sha256": "7843e5e023e5a15d6d4182fdd6dbd35737fc0617e4a9d6f84fd6e671fa77ee55"
           },
           {
             "kind": "egress",
             "name": "F1-03_025.egress",
-            "sha256": "0b1ba8a422d94e1475512ac855ae96a30253eabe951a1c2bdd949b1208c08311"
+            "sha256": "7843e5e023e5a15d6d4182fdd6dbd35737fc0617e4a9d6f84fd6e671fa77ee55"
           },
           {
             "kind": "ingress",
             "name": "F1-03_026.ingress",
-            "sha256": "6ee984b870a20a212789c654b083ecdace91ed875fb7499b4e33aa81d9398500"
+            "sha256": "25e81936d677f3f71e9a4ae8ed5f505e08606a64241054ec02c4c23bac3c1ff9"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-03_027.attempt_manifest",
-            "sha256": "2b52fc6de8886047eac0c5f934c5a1dc05ce8a9aa0c7fd8c71d89ec067d8387a"
+            "sha256": "75ce2d186d412970b0e9b7123f679f969cb6a47f8e5b30ef74367d8a66644a45"
           }
         ],
         "verified": true
@@ -570,7 +825,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_004.attempt_manifest",
-            "sha256": "bc8d8e5a25e4cb8d6e9dd2253d0271aa6bfe9554cedd9f12409080620f2c6a0c"
+            "sha256": "86b6105b8b412fa987ccea8f95815a10a71324ca83b37bf8bf5733c5965927f7"
           },
           {
             "kind": "provider_request",
@@ -595,7 +850,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_009.attempt_manifest",
-            "sha256": "0e0e323d548250789f9032a1e5699c7df8eb0e2768095af65a70328256ae3620"
+            "sha256": "c72905af116982339e75c51e14e2767db68b32114f8fe8178de73f4f4a01eb8d"
           },
           {
             "kind": "provider_request",
@@ -620,7 +875,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_014.attempt_manifest",
-            "sha256": "18256371ecfd1ace9bbe46eafdf9d9638bd647dc6d00455128c055848d883a60"
+            "sha256": "29697f16f954153e2e2d135fa971ed795da2873dc97b49cff9f0281317f2fb1d"
           },
           {
             "kind": "provider_request",
@@ -645,7 +900,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_019.attempt_manifest",
-            "sha256": "087908abedd8b7406a67bcafdeee9e4fe6825a1982aa150bb8e65c323bf8e503"
+            "sha256": "568b38f4ba62187866f984b3af90f267f7f3b1fddba45b6baa8d4ddabc460113"
           },
           {
             "kind": "provider_request",
@@ -670,22 +925,22 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_024.attempt_manifest",
-            "sha256": "652cf74515814c18e831fb82b796f839486cf970b87db36cb7057051bca22d00"
+            "sha256": "54811ea176f5fef73cd8e2a848a8bf0a4b44e250415b92d100e2f8d42f9c7f22"
           },
           {
             "kind": "provider_request",
             "name": "F1-04_025.provider_request",
-            "sha256": "47b605653f8161ef420a2a5e2074059f5fdfa4c1b6bf6ec6dd60ba19d7e2a279"
+            "sha256": "b4d2b6aa9bc3ffe816f7e9506550483a968c371ba184564678af926f1c8b5537"
           },
           {
             "kind": "provider_request",
             "name": "F1-04_026.provider_request",
-            "sha256": "684acd0e9d5fad4111ca9b49ad8ed28bd26316a1ae81f5b878d2bdb409643ab5"
+            "sha256": "6cefe86e1b96a8af7d3b3d97487068b9af921d5a1685006ffd80cb0dad8ba2dd"
           },
           {
             "kind": "provider_request",
             "name": "F1-04_027.provider_request",
-            "sha256": "0b1ba8a422d94e1475512ac855ae96a30253eabe951a1c2bdd949b1208c08311"
+            "sha256": "7843e5e023e5a15d6d4182fdd6dbd35737fc0617e4a9d6f84fd6e671fa77ee55"
           },
           {
             "kind": "provider_response",
@@ -705,42 +960,42 @@
           {
             "kind": "ingress",
             "name": "F1-04_031.ingress",
-            "sha256": "47b605653f8161ef420a2a5e2074059f5fdfa4c1b6bf6ec6dd60ba19d7e2a279"
+            "sha256": "b4d2b6aa9bc3ffe816f7e9506550483a968c371ba184564678af926f1c8b5537"
           },
           {
             "kind": "egress",
             "name": "F1-04_032.egress",
-            "sha256": "47b605653f8161ef420a2a5e2074059f5fdfa4c1b6bf6ec6dd60ba19d7e2a279"
+            "sha256": "b4d2b6aa9bc3ffe816f7e9506550483a968c371ba184564678af926f1c8b5537"
           },
           {
             "kind": "ingress",
             "name": "F1-04_033.ingress",
-            "sha256": "684acd0e9d5fad4111ca9b49ad8ed28bd26316a1ae81f5b878d2bdb409643ab5"
+            "sha256": "6cefe86e1b96a8af7d3b3d97487068b9af921d5a1685006ffd80cb0dad8ba2dd"
           },
           {
             "kind": "egress",
             "name": "F1-04_034.egress",
-            "sha256": "684acd0e9d5fad4111ca9b49ad8ed28bd26316a1ae81f5b878d2bdb409643ab5"
+            "sha256": "6cefe86e1b96a8af7d3b3d97487068b9af921d5a1685006ffd80cb0dad8ba2dd"
           },
           {
             "kind": "ingress",
             "name": "F1-04_035.ingress",
-            "sha256": "0b1ba8a422d94e1475512ac855ae96a30253eabe951a1c2bdd949b1208c08311"
+            "sha256": "7843e5e023e5a15d6d4182fdd6dbd35737fc0617e4a9d6f84fd6e671fa77ee55"
           },
           {
             "kind": "egress",
             "name": "F1-04_036.egress",
-            "sha256": "0b1ba8a422d94e1475512ac855ae96a30253eabe951a1c2bdd949b1208c08311"
+            "sha256": "7843e5e023e5a15d6d4182fdd6dbd35737fc0617e4a9d6f84fd6e671fa77ee55"
           },
           {
             "kind": "ingress",
             "name": "F1-04_037.ingress",
-            "sha256": "6ee984b870a20a212789c654b083ecdace91ed875fb7499b4e33aa81d9398500"
+            "sha256": "25e81936d677f3f71e9a4ae8ed5f505e08606a64241054ec02c4c23bac3c1ff9"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-04_038.attempt_manifest",
-            "sha256": "2b52fc6de8886047eac0c5f934c5a1dc05ce8a9aa0c7fd8c71d89ec067d8387a"
+            "sha256": "75ce2d186d412970b0e9b7123f679f969cb6a47f8e5b30ef74367d8a66644a45"
           }
         ],
         "verified": true
@@ -841,7 +1096,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-05_004.attempt_manifest",
-            "sha256": "2c999e08d7a0ce53308f13f7030fc640e6ee2059e8904d8b1290646d548c0ec5"
+            "sha256": "f75d88bc4eb7d038186a2918abb9ba114d657e1a62bb3b48b82836acf0d757a5"
           },
           {
             "kind": "provider_request",
@@ -866,7 +1121,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-05_009.attempt_manifest",
-            "sha256": "aef0c66d2557fca65538941f30b5b87663b7e5fad27fdf2925c0bce0c39b2ed5"
+            "sha256": "2a0452a41002fc81849c1d6bfba4c408c0493ac567965e97b518d6178042da5e"
           },
           {
             "kind": "provider_request",
@@ -891,7 +1146,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-05_014.attempt_manifest",
-            "sha256": "65db8163d5240f5dfe175121669bd321d23ee867abcedee6e312db9aacb10a28"
+            "sha256": "8654c841e2b079738414ca0b632c65fb21af48c41dbaae42617949632b28efc8"
           },
           {
             "kind": "provider_request",
@@ -911,27 +1166,27 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-05_018.attempt_manifest",
-            "sha256": "73bea2c2af9a88c16a960e7f14c225e9be8c260c4c5c1f33034b886cc05e0a19"
+            "sha256": "8b84b53eaa34db9e868e008c757eee877dcee9a038e2e8b57265a025a4a184e3"
           },
           {
             "kind": "provider_request",
             "name": "F1-05_019.provider_request",
-            "sha256": "fde1327134c282f95f4a5ca48f802bdaa9cb5af3886f7969b38309ffd247d515"
+            "sha256": "ae2aa30a5afb06ff161e6a3a4fe0610df5dc8cd66dfc724da008d318127d25cf"
           },
           {
             "kind": "ingress",
             "name": "F1-05_020.ingress",
-            "sha256": "fde1327134c282f95f4a5ca48f802bdaa9cb5af3886f7969b38309ffd247d515"
+            "sha256": "ae2aa30a5afb06ff161e6a3a4fe0610df5dc8cd66dfc724da008d318127d25cf"
           },
           {
             "kind": "egress",
             "name": "F1-05_021.egress",
-            "sha256": "fde1327134c282f95f4a5ca48f802bdaa9cb5af3886f7969b38309ffd247d515"
+            "sha256": "ae2aa30a5afb06ff161e6a3a4fe0610df5dc8cd66dfc724da008d318127d25cf"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-05_022.attempt_manifest",
-            "sha256": "86054c7135483ae178183f557cdb2d289f862e93946649babbf12f0393b84d43"
+            "sha256": "067fe28432c16c85ad3925b2a4228079402884ce01c7489e26793edd5817eafc"
           }
         ],
         "verified": true
@@ -1019,7 +1274,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-06_005.attempt_manifest",
-            "sha256": "f5e735176f9705a104b702db5182c8edf3a4c19d05be3e76be16de8806abd2a0"
+            "sha256": "77b6157942a3fcadbf58fc7d766b5ccbc48ca5168a5d220bab4ec579d20d3f0a"
           },
           {
             "kind": "provider_request",
@@ -1049,7 +1304,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-06_011.attempt_manifest",
-            "sha256": "5947f86d0b4e93fb9fb5060efbc2513c0c571fcd2ff1f4acb678e1224012ff80"
+            "sha256": "eccc472a4373064bec215e092b5c9fa47f7dcdb881c1cac0d41383da433029ea"
           },
           {
             "kind": "provider_request",
@@ -1079,7 +1334,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-06_017.attempt_manifest",
-            "sha256": "8a0ab440a4d78b67e860aad216d1bc4b625d7ae2baf081d34f6866236375dcc5"
+            "sha256": "e4f7894f82e04b0d84f216bcb1864d4c15fb01772763086794a2003c8b001ffe"
           }
         ],
         "verified": true
@@ -1129,22 +1384,22 @@
           {
             "kind": "provider_request",
             "name": "F1-07_001.provider_request",
-            "sha256": "fde1327134c282f95f4a5ca48f802bdaa9cb5af3886f7969b38309ffd247d515"
+            "sha256": "ae2aa30a5afb06ff161e6a3a4fe0610df5dc8cd66dfc724da008d318127d25cf"
           },
           {
             "kind": "ingress",
             "name": "F1-07_002.ingress",
-            "sha256": "fde1327134c282f95f4a5ca48f802bdaa9cb5af3886f7969b38309ffd247d515"
+            "sha256": "ae2aa30a5afb06ff161e6a3a4fe0610df5dc8cd66dfc724da008d318127d25cf"
           },
           {
             "kind": "egress",
             "name": "F1-07_003.egress",
-            "sha256": "fde1327134c282f95f4a5ca48f802bdaa9cb5af3886f7969b38309ffd247d515"
+            "sha256": "ae2aa30a5afb06ff161e6a3a4fe0610df5dc8cd66dfc724da008d318127d25cf"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-07_004.attempt_manifest",
-            "sha256": "19962249f27153e513eb93fa05ef939ca2b2e60007b731f257a284287c0371e0"
+            "sha256": "f666eda5fa1c8c515363d68aac80dc8a387eed354c75306ad54257caaea1d979"
           }
         ],
         "verified": true
@@ -1199,22 +1454,22 @@
           {
             "kind": "provider_request",
             "name": "F1-08_001.provider_request",
-            "sha256": "fde1327134c282f95f4a5ca48f802bdaa9cb5af3886f7969b38309ffd247d515"
+            "sha256": "ae2aa30a5afb06ff161e6a3a4fe0610df5dc8cd66dfc724da008d318127d25cf"
           },
           {
             "kind": "ingress",
             "name": "F1-08_002.ingress",
-            "sha256": "fde1327134c282f95f4a5ca48f802bdaa9cb5af3886f7969b38309ffd247d515"
+            "sha256": "ae2aa30a5afb06ff161e6a3a4fe0610df5dc8cd66dfc724da008d318127d25cf"
           },
           {
             "kind": "egress",
             "name": "F1-08_003.egress",
-            "sha256": "fde1327134c282f95f4a5ca48f802bdaa9cb5af3886f7969b38309ffd247d515"
+            "sha256": "ae2aa30a5afb06ff161e6a3a4fe0610df5dc8cd66dfc724da008d318127d25cf"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-08_004.attempt_manifest",
-            "sha256": "e9b4ea5407a977acbbd333a0f099ef20d262ac216c32d7f8d8ba151a3b11c9cf"
+            "sha256": "aea7f7e15bdb2ae7c4d3226d12205929e733a054ac2b6b6c73a71d13be8837b7"
           }
         ],
         "verified": true
@@ -1265,27 +1520,27 @@
           {
             "kind": "json",
             "name": "F1-09_001.json",
-            "sha256": "e60a6c1b388d791285235c4383d5ec60cb45c4d1e33d67a9d06f544838a62f83"
+            "sha256": "186cd03d24b52601e343c34675a7679c7a6954add7c10cf6aebb8d2bae0f989a"
           },
           {
             "kind": "bin",
             "name": "F1-09_002.bin",
-            "sha256": "1d5b164c87d253671f8166da941d256cbeddc4933055e23acee910d98928a274"
+            "sha256": "2a2f52466db102dac0aa9416b438505dfb37ffa8f524799b5e1a6f790cab10c4"
           },
           {
             "kind": "bin",
             "name": "F1-09_003.bin",
-            "sha256": "1d5b164c87d253671f8166da941d256cbeddc4933055e23acee910d98928a274"
+            "sha256": "2a2f52466db102dac0aa9416b438505dfb37ffa8f524799b5e1a6f790cab10c4"
           },
           {
             "kind": "bin",
             "name": "F1-09_004.bin",
-            "sha256": "1d5b164c87d253671f8166da941d256cbeddc4933055e23acee910d98928a274"
+            "sha256": "2a2f52466db102dac0aa9416b438505dfb37ffa8f524799b5e1a6f790cab10c4"
           },
           {
             "kind": "json",
             "name": "F1-09_005.json",
-            "sha256": "fe17d780b6aadd38d254b9d06a6ab30946f93439b41cff4e0742733395183660"
+            "sha256": "740e34c177b84bec7c40db07503bf74dbed1107be667ed8b66e9d7b8c0b25aac"
           },
           {
             "kind": "log",
@@ -1295,7 +1550,7 @@
           {
             "kind": "json",
             "name": "F1-09_007.json",
-            "sha256": "a1cdf299654de6641de5e8915b8696df5d6253ef73bde2c63e9a308c0ed7ccd0"
+            "sha256": "d2c9fbab468c3347b26ddc4a88f09ac6ddaf53225fae89a9e688b0ac82c8e79c"
           }
         ],
         "verified": true
@@ -1354,11 +1609,11 @@
     }
   ],
   "schema": "cw122b1-f1-fault-matrix-v1",
-  "status": "BLOCKED_WITH_UNVERIFIED_SCENARIOS",
+  "status": "READY_FOR_REVIEW",
   "successful_path_regression": {
-    "aggregate_sha256": "5e5a23af6c258f25403efcfb9a2873499d0cc214bb4b235d829198cc34e55a57",
-    "commit": "aa6d716db5ade7ccae63278761492f716fd7ef48",
-    "manifest_sha256": "4c7450f6f71b3ebd8d6e47a9ee1da42619189e02a77f9e989b54968b9c0c2d91",
+    "aggregate_sha256": "da6eea8645bc6fb9b7b95f572bbb0bf946f3a2dc886c25131c47d2d2352ca5ec",
+    "commit": "bdd3ba79714d5f1e34d94cdea5ed0df8840645cb",
+    "manifest_sha256": "fea04a8c2a08e721165fb52496c2cc9680ad288d3ffe3df63fa36217ad8eaef6",
     "provider_calls": 0,
     "provider_spend_usd": 0,
     "requests": 48,

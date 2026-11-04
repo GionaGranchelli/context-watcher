@@ -2225,7 +2225,23 @@ async fn test_cw122b1_codex_mock_campaign() {
             "raw evidence directory must be private"
         );
     }
-    assert!(std::fs::read_dir(&evidence_dir).unwrap().next().is_none());
+    let entries: Vec<_> = std::fs::read_dir(&evidence_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(entries, [std::ffi::OsString::from("launch.json")]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(evidence_dir.join("launch.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
     let evidence_dir = Some(evidence_dir.as_path());
 
     let source_files: BTreeMap<_, _> = [

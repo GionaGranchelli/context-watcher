@@ -3710,8 +3710,8 @@ fn test_cw122b1_failed_attempt_preserves_partial_wire_evidence() {
         println!(
             "CW122B1_F1_BOUNDARY:{}",
             json!({
-                "boundary_id":"after_task_before_manifest",
-                "injection_boundary":"failed attempt guard dropped before completion",
+                "boundary_id":"synthetic_failed_attempt_guard_fixture",
+                "injection_boundary":"synthetic PartialCodexEvidence drop; not a completed Codex task interruption",
                 "result":"PASS",
                 "evidence_preservation":{"status":"PRESERVED","directory":failed,"files":files}
             })

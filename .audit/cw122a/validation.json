@@ -1,0 +1,18 @@
+{
+  "rust_workspace": {
+    "passed": 282,
+    "ignored": 19
+  },
+  "cw122a_python_tests": 17,
+  "legacy_admission_tests": 15,
+  "hermes_plugin_tests": 12,
+  "clippy": "PASS",
+  "formatting": "PASS",
+  "legacy_offline_lifecycle": "PASS",
+  "cw122a_rehearsal": "PASS; 6 valid pairs; synthetic only",
+  "standalone_reanalysis": "BYTE_IDENTICAL",
+  "web": "NOT_CHANGED; local web checks not rerun; repository CI runs normal web gates",
+  "ignored_live_and_harness_binary_suites": "NOT_EXECUTED",
+  "inference": "NOT_EXECUTED",
+  "reviewer": "gpt-6-astra; no remaining offline code/readiness flags; not human approval; full suites not independently rerun"
+}

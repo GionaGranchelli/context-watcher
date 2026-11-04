@@ -1,0 +1,2 @@
+Preserve the public retry_delays signature. Only retry.py may change. Do not add dependencies.
+No test/process manipulation, dynamic imports, runtime introspection or filesystem access in module code.

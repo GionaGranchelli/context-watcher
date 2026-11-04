@@ -1,0 +1,290 @@
+{
+  "abstention_cases": [
+    "stateful",
+    "signed",
+    "unknown",
+    "unread",
+    "file_read"
+  ],
+  "artifacts_sha256": {
+    "abstentions.json": "eba95ac2e7d6eb6dc0341be1a6730897d677b36c07d6b6413f0061468b080a47",
+    "analysis.json": "ce3ee12c9a66b2c4a33c0569e063fb9d51edb2c946cdace2e260178af68de8f3",
+    "manifest.json": "471f0bafd80a6c5fb54c285db6c54c1b2328eeb299536828cfc89e78d9c95465",
+    "runs.json": "6a6e066b99010e22384d0cb36aed67c0e87093aac4af584845fc7568a4b6f8af",
+    "wire.json": "ec916102212cfb4a168ce1dba48901a13d8997b341ff0b793a9db91743028f4f"
+  },
+  "cli_reanalysis_identical": true,
+  "historical_hashes": {
+    "docs/CW-115-FOUR-MODE-ISOLATION-REPORT.md": "c2e3f3e228f4b35c015fa936562e0b2f5d8f6dd231a66b2c76e4f14e494da869",
+    "docs/CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md": "e5d0351e4d816a66b7e140d314465f309b612dd53847a11c8e5d1f66387e5ce5",
+    "docs/cw115_four_mode_benchmark_data.json": "fa63ea38e61c7e989cf20ffbc89985fa972210c94b76572fa61ac532932f2e10"
+  },
+  "inference_calls": 0,
+  "live_admission": "NO_GO; no authorization or qualified live adapter",
+  "overall": {
+    "changes": {
+      "cached_input_tokens": {
+        "absolute": {
+          "mean": 0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0,
+            0
+          ],
+          "sample_sd": 0.0
+        },
+        "relative_pct": {
+          "mean": 0.0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0.0,
+            0.0
+          ],
+          "sample_sd": 0.0
+        }
+      },
+      "calculated_cost_usd": {
+        "absolute": {
+          "mean": 0.0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0.0,
+            0.0
+          ],
+          "sample_sd": 0.0
+        },
+        "relative_pct": {
+          "mean": 0.0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0.0,
+            0.0
+          ],
+          "sample_sd": 0.0
+        }
+      },
+      "duration_ms": {
+        "absolute": {
+          "mean": 0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0,
+            0
+          ],
+          "sample_sd": 0.0
+        },
+        "relative_pct": {
+          "mean": 0.0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0.0,
+            0.0
+          ],
+          "sample_sd": 0.0
+        }
+      },
+      "input_tokens": {
+        "absolute": {
+          "mean": 0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0,
+            0
+          ],
+          "sample_sd": 0.0
+        },
+        "relative_pct": {
+          "mean": 0.0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0.0,
+            0.0
+          ],
+          "sample_sd": 0.0
+        }
+      },
+      "output_tokens": {
+        "absolute": {
+          "mean": 0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0,
+            0
+          ],
+          "sample_sd": 0.0
+        },
+        "relative_pct": {
+          "mean": 0.0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0.0,
+            0.0
+          ],
+          "sample_sd": 0.0
+        }
+      },
+      "provider_requests": {
+        "absolute": {
+          "mean": 0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0,
+            0
+          ],
+          "sample_sd": 0.0
+        },
+        "relative_pct": {
+          "mean": 0.0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0.0,
+            0.0
+          ],
+          "sample_sd": 0.0
+        }
+      },
+      "uncached_input_tokens": {
+        "absolute": {
+          "mean": 0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0,
+            0
+          ],
+          "sample_sd": 0.0
+        },
+        "relative_pct": {
+          "mean": 0.0,
+          "mean_se": 0.0,
+          "median": 0.0,
+          "n": 6,
+          "range": [
+            0.0,
+            0.0
+          ],
+          "sample_sd": 0.0
+        }
+      }
+    },
+    "complete_valid_pairs": 6,
+    "cost_change_pct": {
+      "mean": 0.0,
+      "mean_se": 0.0,
+      "median": 0.0,
+      "n": 6,
+      "range": [
+        0.0,
+        0.0
+      ],
+      "sample_sd": 0.0
+    },
+    "excluded_pairs": [],
+    "input_change_pct": {
+      "mean": 0.0,
+      "mean_se": 0.0,
+      "median": 0.0,
+      "n": 6,
+      "range": [
+        0.0,
+        0.0
+      ],
+      "sample_sd": 0.0
+    },
+    "planned_pairs": 6
+  },
+  "pairs": [
+    {
+      "acceptance_difference": 0,
+      "eligible_for_efficiency": true,
+      "family": "f1",
+      "issues": [],
+      "pair_id": "f1-r1",
+      "warnings": []
+    },
+    {
+      "acceptance_difference": 0,
+      "eligible_for_efficiency": true,
+      "family": "f1",
+      "issues": [],
+      "pair_id": "f1-r2",
+      "warnings": []
+    },
+    {
+      "acceptance_difference": 0,
+      "eligible_for_efficiency": true,
+      "family": "f1",
+      "issues": [],
+      "pair_id": "f1-r3",
+      "warnings": []
+    },
+    {
+      "acceptance_difference": 0,
+      "eligible_for_efficiency": true,
+      "family": "f2",
+      "issues": [],
+      "pair_id": "f2-r1",
+      "warnings": []
+    },
+    {
+      "acceptance_difference": 0,
+      "eligible_for_efficiency": true,
+      "family": "f2",
+      "issues": [],
+      "pair_id": "f2-r2",
+      "warnings": []
+    },
+    {
+      "acceptance_difference": 0,
+      "eligible_for_efficiency": true,
+      "family": "f2",
+      "issues": [],
+      "pair_id": "f2-r3",
+      "warnings": []
+    }
+  ],
+  "planned_pairs": 6,
+  "product_value": "NOT_EVALUATED",
+  "reliability": {
+    "M1": {
+      "accepted": 6,
+      "attempts": 6,
+      "failed_or_aborted": 0
+    },
+    "M2": {
+      "accepted": 6,
+      "attempts": 6,
+      "failed_or_aborted": 0
+    }
+  },
+  "reproduction": "python3 -B benchmark/cw122a/rehearse.py --output NEW_DIRECTORY; python3 -B benchmark/cw122a/analyze.py NEW_DIRECTORY/runs.json",
+  "runner_freeze_sha256": "f2840cc3727f3bfcfb6d3a6985ee39b36d3563196f322226229aa54a7774eac5",
+  "scope": "SYNTHETIC_REHEARSAL; NOT PRODUCT VALUE",
+  "status": "OFFLINE_GATES_PASS",
+  "valid_pairs": 6
+}

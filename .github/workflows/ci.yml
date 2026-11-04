@@ -56,3 +56,8 @@ jobs:
         run: |
           python3 -B -m unittest discover -s benchmark/cw104b -p test_smoke.py -v
           python3 -B benchmark/cw104b/smoke.py --manifest-dir "$RUNNER_TEMP/cw104b-offline"
+
+      - name: CW-122A offline pruning readiness
+        run: |
+          python3 -B -m unittest discover -s benchmark/cw122a -p test_campaign.py -v
+          python3 -B benchmark/cw122a/rehearse.py --output "$RUNNER_TEMP/cw122a-offline"

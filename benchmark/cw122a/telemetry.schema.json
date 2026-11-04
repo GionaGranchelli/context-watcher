@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CW-122A normalized campaign dataset",
+  "type": "object",
+  "required": [
+    "schema",
+    "scope",
+    "runs"
+  ],
+  "properties": {
+    "schema": {
+      "const": "cw122a-runs-v1"
+    },
+    "scope": {
+      "enum": [
+        "SYNTHETIC_REHEARSAL",
+        "LIVE_PROVIDER"
+      ]
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/run"
+      }
+    }
+  },
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": [
+        "input_tokens",
+        "cached_input_tokens",
+        "output_tokens",
+        "usage_provenance",
+        "raw_usage",
+        "first_byte_latency_ms"
+      ],
+      "properties": {
+        "input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "usage_provenance": {
+          "enum": [
+            "synthetic_mock_usage",
+            "provider_response_usage"
+          ]
+        },
+        "raw_usage": {
+          "type": "object"
+        },
+        "first_byte_latency_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "pair_id",
+        "family",
+        "task_id",
+        "repetition",
+        "mode",
+        "order",
+        "session_id",
+        "attempt_id",
+        "status",
+        "failure_reason",
+        "repository_hash",
+        "initial_fixture_hashes",
+        "configuration_hash",
+        "runtime",
+        "sampling",
+        "requests",
+        "duration_ms",
+        "duration_provenance",
+        "acceptance",
+        "wire"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "M1",
+            "M2"
+          ]
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "aborted",
+            "invalid"
+          ]
+        },
+        "requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/request"
+          }
+        },
+        "duration_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "runtime": {
+          "type": "object",
+          "required": [
+            "provider",
+            "model",
+            "agent_version",
+            "model_revision",
+            "server_version"
+          ]
+        },
+        "wire": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "required": [
+            "session_id",
+            "mode",
+            "original",
+            "outbound",
+            "applied_mutation_ids",
+            "skipped_mutations",
+            "estimated_pruned_tokens",
+            "estimated_kv_break_tokens",
+            "treatment_verified",
+            "request_count"
+          ]
+        },
+        "acceptance": {
+          "type": "object",
+          "required": [
+            "passed",
+            "functional_passed",
+            "constraint_violations"
+          ],
+          "properties": {
+            "passed": {
+              "type": "boolean"
+            },
+            "functional_passed": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "constraint_violations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "schema": "cw122a-campaign-v1",
+  "scope": "OFFLINE_SYNTHETIC_ONLY",
+  "tasks": {
+    "f1": {
+      "id": "retry-cap-validation",
+      "editable": [
+        "retry.py"
+      ],
+      "instructions": "Repair retry_delays: return attempts exponentially growing delays capped at cap. Reject negative attempts, nonpositive base, and cap smaller than base. Preserve the existing public API, change only retry.py and add no dependencies. Keep modules free of test/process manipulation, dynamic imports, runtime introspection and filesystem access.",
+      "stub": "[cw:pruned historical command log; consumed by assistant; initial acceptance run failed; original retained offline]",
+      "trace": "trace-f1.json"
+    },
+    "f2": {
+      "id": "namespace-ttl-cache",
+      "editable": [
+        "storage.py",
+        "service.py"
+      ],
+      "instructions": "Repair the cache across storage.py and service.py: isolate namespace/key pairs, expire at the exact deadline, retain falsy values, and reject negative TTL. Preserve all public signatures and the injected clock architecture. Change only storage.py and service.py; add no dependencies. Keep modules free of test/process manipulation, dynamic imports, runtime introspection and filesystem access.",
+      "stub": "[cw:pruned historical command log; consumed by assistant; initial acceptance run failed; original retained offline]",
+      "trace": "trace-f2.json"
+    }
+  },
+  "pairs": [
+    {
+      "pair_id": "f1-r1",
+      "family": "f1",
+      "repetition": 1,
+      "order": [
+        "M1",
+        "M2"
+      ]
+    },
+    {
+      "pair_id": "f1-r2",
+      "family": "f1",
+      "repetition": 2,
+      "order": [
+        "M2",
+        "M1"
+      ]
+    },
+    {
+      "pair_id": "f1-r3",
+      "family": "f1",
+      "repetition": 3,
+      "order": [
+        "M1",
+        "M2"
+      ]
+    },
+    {
+      "pair_id": "f2-r1",
+      "family": "f2",
+      "repetition": 1,
+      "order": [
+        "M2",
+        "M1"
+      ]
+    },
+    {
+      "pair_id": "f2-r2",
+      "family": "f2",
+      "repetition": 2,
+      "order": [
+        "M1",
+        "M2"
+      ]
+    },
+    {
+      "pair_id": "f2-r3",
+      "family": "f2",
+      "repetition": 3,
+      "order": [
+        "M2",
+        "M1"
+      ]
+    }
+  ],
+  "sampling": {
+    "temperature": 0,
+    "top_p": 1,
+    "seed": null,
+    "nondeterminism": "live provider/agent scheduling and unrecorded seed remain uncontrolled"
+  },
+  "runtime": {
+    "provider": "NOT_SELECTED",
+    "model": "NOT_SELECTED",
+    "agent": "Codex; exact version must be frozen at CW-122B admission",
+    "model_revision": "NOT_AVAILABLE",
+    "timeout_seconds_per_run": 600,
+    "max_requests_per_run": 30,
+    "max_runs": 12,
+    "serialized": true,
+    "m0": "optional, requires separate native-routing qualification; never pooled with M1/M2"
+  },
+  "treatment": {
+    "operator": "PruneOrStub",
+    "pointer": "/input/2/output",
+    "call_id": "old_tests",
+    "timing": "Only after old_tests completed and was consumed by an assistant response; never current unread results",
+    "disabled": [
+      "PinContext",
+      "automatic_pin_generation",
+      "behavioral_steering",
+      "gating",
+      "folding",
+      "summarization",
+      "dedupe",
+      "normalize_prefix",
+      "autopilot"
+    ],
+    "required_applied_rules": 1,
+    "master_switch": "M2 cfg.enabled=true is required to apply the sole committed rule; every automatic generation/hygiene/diet/window/heal policy remains false"
+  },
+  "pricing": {
+    "version": "synthetic-test-rates-v1",
+    "provenance": "SYNTHETIC_TEST_ONLY_NOT_A_PROVIDER_PRICE",
+    "uncached_input_per_million": "1.0",
+    "cached_input_per_million": "0.1",
+    "output_per_million": "2.0"
+  },
+  "decision": {
+    "minimum_valid_pairs": 6,
+    "minimum_pairs_per_family": 3,
+    "median_input_delta_pct_at_most": -5,
+    "median_cost_delta_pct_at_most": -5,
+    "require_no_added_acceptance_failures": true,
+    "inference_claims_from_rehearsal": false,
+    "require_nonincreasing_family_medians": true,
+    "require_no_pair_cost_inversion_for_positive": true
+  }
+}

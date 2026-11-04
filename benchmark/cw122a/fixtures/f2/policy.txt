@@ -1,0 +1,2 @@
+Preserve Cache and Storage method signatures. Only storage.py and service.py may change. Do not add dependencies or import wall-clock APIs; use the injected clock.
+No test/process manipulation, dynamic imports, runtime introspection or filesystem access in module code.

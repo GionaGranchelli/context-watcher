@@ -67,7 +67,7 @@ F1-09's Layer A test sent SIGTERM only to a dedicated disposable runner and veri
 
 The previous 12-attempt Codex mock result remains historical and unchanged. Rerunning it through `benchmark/cw122b1/run_mock_campaign.py` at `d33ac821e90ec51409271c1debe27c381e95e4cd` stopped before launching Cargo or Codex: `verify_freeze()` found that `crates/cw-core/src/spend_guard.rs` no longer matches the CW-122A source freeze. This is the intended fail-closed behavior. The historical freeze and prior aggregate were not rewritten; the successful path after the request-cap change is `NOT_VERIFIED` in this F1 result.
 
-Private preflight record SHA-256: `7dda1ca72e397147f0e1798cd0e998bb0186f47a3f7684a09668151df4932de0` at `/tmp/cw122b1-f1-final-success-preflight-2/preflight-failure.json`. The runner made zero provider calls. A future successful-path rerun needs a separately reviewed, versioned source baseline or an explicitly scoped current-code regression fixture; do not update the historical freeze in place.
+The final preflight was rerun at PR head `2ba46694fa0bbee1c3c46637d3961dee37052708` and stopped before launching Codex. Private raw output: `/tmp/cw122b1-f1-final-success-preflight-3/runner-output.log` (SHA-256 `d3e7ef004f910ba3629e4ea41b3f91a15a97a18aed64d8fb8a1ec5a0d0b8ee6c`). Its structured summary is explicitly a diagnostic record, not raw runner evidence (SHA-256 `23e194473e4fae2c9ea8445880e1fc976609fe957b1fa6b3c81482d8e1b3af5e`). The runner made zero provider calls. A future successful-path rerun needs a separately reviewed, versioned source baseline or an explicitly scoped current-code regression fixture; do not update the historical freeze in place.
 
 ## Implementation corrections
 

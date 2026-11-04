@@ -147,6 +147,30 @@ class MockRunnerTests(unittest.TestCase):
                     break
             else:
                 self.fail('timed-out command left a live descendant')
+            evidence_root = os.environ.get('CW122B1_F1_EVIDENCE_DIR')
+            if evidence_root:
+                artifact = Path(evidence_root) / 'faults' / 'F1-07' / 'layer-a-process-tree.json'
+                write_private(artifact, {
+                    'scenario_id': 'F1-07', 'qualification_layer': 'A',
+                    'injection_boundary': 'per-run timeout with detached nested descendant',
+                    'process_cleanup': 'VERIFIED', 'upstream_dispatch_count': 0,
+                    'result': 'PASS',
+                })
+                print('CW122B1_F1_RESULT:' + json.dumps({
+                    'scenario_id': 'F1-07',
+                    'injection_boundary': 'per-run timeout with detached nested descendant',
+                    'expected_behavior': 'runner kills and reaps nested child process groups',
+                    'observed_behavior': 'timed-out command returned non-success and detached child was reaped',
+                    'upstream_dispatch_count': 0, 'accepted_admissions': 0,
+                    'rejected_admissions': 0, 'settlement': 'NOT_APPLICABLE',
+                    'process_cleanup': 'VERIFIED',
+                    'evidence_preservation': {'status': 'PRESERVED',
+                        'directory': str(artifact.parent),
+                        'files': [{'path': artifact.name,
+                            'sha256': hashlib.sha256(artifact.read_bytes()).hexdigest(),
+                            'kind': 'process_tree_cleanup'}]},
+                    'qualification_layer': 'A', 'result': 'PASS',
+                }, sort_keys=True))
 
     @unittest.skipUnless(os.name == 'posix' and Path('/proc').is_dir(), 'signal cleanup requires Linux /proc')
     def test_external_sigterm_cleans_detached_descendant_and_preserves_partial_evidence(self):

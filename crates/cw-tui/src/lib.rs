@@ -1,3 +1,5 @@
+mod pin_policy;
+
 use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -43,7 +45,7 @@ impl TuiApp {
             optimization_plans: Vec::new(),
             strategy_idx: None,
             node_state: ListState::default(),
-            status_msg: "↑/↓ Nodes | [o] Optimization Studio (1-5) | [Enter] Apply Strategy | [p] Prune | [d] Dedupe | [f] Fold | [q] Quit".to_string(),
+            status_msg: "↑/↓ Nodes | [c] Daemon pin consent | [o] Optimization Studio (1-5) | [Enter] Apply Strategy | [p] Prune | [d] Dedupe | [f] Fold | [q] Quit".to_string(),
         };
         app.reload(initial_session.as_deref());
         app
@@ -98,8 +100,17 @@ impl TuiApp {
     }
 }
 
-pub fn run_tui(store: CwStore, session_id: Option<String>) -> Result<()> {
+struct TerminalRestore;
+impl Drop for TerminalRestore {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+    }
+}
+
+pub async fn run_tui(store: CwStore, session_id: Option<String>, daemon_url: &str) -> Result<()> {
     enable_raw_mode()?;
+    let _restore = TerminalRestore;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
@@ -118,6 +129,14 @@ pub fn run_tui(store: CwStore, session_id: Option<String>) -> Result<()> {
             }
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('c') => {
+                    let initial = app.sessions.get(app.session_idx).map(|s| s.id.clone());
+                    app.status_msg = match pin_policy::run_policy_view(&mut terminal, daemon_url, initial.as_deref()).await {
+                        Ok(()) => "Returned from daemon policy controls. Local optimization workspace unchanged.".into(),
+                        Err(_) => "Policy API unavailable or invalid. Consent unconfirmed; check daemon URL/credential and retry [c].".into(),
+                    };
+                    app.reload(None);
+                }
                 KeyCode::Char('r') => app.reload(None),
                 KeyCode::Tab => {
                     if !app.sessions.is_empty() {
@@ -343,7 +362,7 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
         ),
         Span::raw("│"),
         Span::styled(
-            format!(" Active Overlays: {} ", app.mutations.len()),
+            format!(" Stored Overlays: {} ", app.mutations.len()),
             Style::default().fg(Color::Magenta),
         ),
     ]))

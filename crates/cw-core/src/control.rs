@@ -89,6 +89,54 @@ fn validate(token: String) -> io::Result<String> {
     Ok(token)
 }
 
+/// Validate an authenticated operator policy snapshot before displaying or acting on it.
+pub fn validate_pin_policy_preview(
+    body: serde_json::Value,
+    session: &str,
+) -> io::Result<serde_json::Value> {
+    if body["session_id"].as_str() != Some(session)
+        || !body["enabled"].is_boolean()
+        || !body["session_terminated"].is_boolean()
+        || !body["reinforcement_supported"].is_boolean()
+        || body["risk_warning"]
+            .as_str()
+            .is_none_or(|s| s.trim().is_empty())
+        || body["activation_scope"]
+            .as_str()
+            .is_none_or(|s| s.trim().is_empty())
+        || !body["preview_basis"].is_string()
+        || !body["stored_pins"].is_array()
+        || !body["automatic_generation"]["may_generate_after_opt_in"].is_boolean()
+        || !body["automatic_generation"]["auto_cache_safe_pin"].is_boolean()
+        || !body["automatic_generation"]["auto_heal_low_health"].is_boolean()
+        || !body["automatic_generation"]["heal_strategy"].is_string()
+    {
+        return Err(io::Error::other(
+            "Invalid or unavailable policy preview; consent state is unconfirmed",
+        ));
+    }
+    for pin in body["stored_pins"]
+        .as_array()
+        .ok_or_else(|| io::Error::other("Missing stored pins"))?
+    {
+        if !pin["rule_id"].is_string()
+            || !matches!(
+                pin.get("eligible_in_latest_request_preview_after_opt_in"),
+                Some(serde_json::Value::Null | serde_json::Value::Bool(_))
+            )
+            || !pin["label"].is_string()
+            || !pin["content"].is_string()
+            || !matches!(
+                pin["status"].as_str(),
+                Some("draft" | "committed" | "disabled")
+            )
+        {
+            return Err(io::Error::other("Invalid stored pin in policy preview"));
+        }
+    }
+    Ok(body)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

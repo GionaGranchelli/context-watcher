@@ -29,48 +29,6 @@ fn endpoint(base: &str, session: &str) -> Result<reqwest::Url> {
     Ok(url)
 }
 
-fn validate_preview(body: Value, session: &str) -> Result<Value> {
-    if body["session_id"].as_str() != Some(session)
-        || !body["enabled"].is_boolean()
-        || !body["session_terminated"].is_boolean()
-        || !body["reinforcement_supported"].is_boolean()
-        || body["risk_warning"]
-            .as_str()
-            .is_none_or(|s| s.trim().is_empty())
-        || body["activation_scope"]
-            .as_str()
-            .is_none_or(|s| s.trim().is_empty())
-        || !body["preview_basis"].is_string()
-        || !body["stored_pins"].is_array()
-        || !body["automatic_generation"]["may_generate_after_opt_in"].is_boolean()
-        || !body["automatic_generation"]["auto_cache_safe_pin"].is_boolean()
-        || !body["automatic_generation"]["auto_heal_low_health"].is_boolean()
-        || !body["automatic_generation"]["heal_strategy"].is_string()
-    {
-        bail!("Invalid or unavailable policy preview; consent state is unconfirmed");
-    }
-    for pin in body["stored_pins"]
-        .as_array()
-        .context("Missing stored pins")?
-    {
-        if !pin["rule_id"].is_string()
-            || !matches!(
-                pin.get("eligible_in_latest_request_preview_after_opt_in"),
-                Some(Value::Null | Value::Bool(_))
-            )
-            || !pin["label"].is_string()
-            || !pin["content"].is_string()
-            || !matches!(
-                pin["status"].as_str(),
-                Some("draft" | "committed" | "disabled")
-            )
-        {
-            bail!("Invalid stored pin in policy preview");
-        }
-    }
-    Ok(body)
-}
-
 async fn response_body(response: reqwest::Response, session: &str) -> Result<Value> {
     if !response.status().is_success() {
         bail!(
@@ -78,13 +36,13 @@ async fn response_body(response: reqwest::Response, session: &str) -> Result<Val
             response.status().as_u16()
         );
     }
-    validate_preview(
+    Ok(cw_core::control::validate_pin_policy_preview(
         response
             .json()
             .await
             .context("Invalid policy API JSON; consent state is unconfirmed")?,
         session,
-    )
+    )?)
 }
 
 pub async fn run(session: &str, base: &str, action: PinPolicyAction) -> Result<()> {

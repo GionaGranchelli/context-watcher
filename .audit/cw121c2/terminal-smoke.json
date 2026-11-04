@@ -1,0 +1,35 @@
+{
+  "scope": "scripted real PTY; disposable daemon; not human visual qualification",
+  "inference": "NOT_EXECUTED",
+  "binary_sha256": "2c8386644cd93355d821365a07108879d24d8a0724c8157596003df788abdc4e",
+  "steps": [
+    "typed confirmation enabled daemon session with separate local TUI database",
+    "revocation preserved stored pin"
+  ],
+  "terminal_restoration": [
+    {
+      "failed_api": false,
+      "restored": true
+    },
+    {
+      "failed_api": true,
+      "restored": true
+    }
+  ],
+  "operator.ansi_sha256": "b8cb64ecd4ed892f1358aa25beb4b55cc414451a087852bb90d00857f01775d0",
+  "failed-api.ansi_sha256": "31cbdce344f384cbfd35c33f6e2a7da7ee0692cedb4775e740ba9beb1da42c4e",
+  "daemon_stopped": true,
+  "status": "PASS",
+  "prior_script_attempts": [
+    {
+      "status": "FAILED_SCRIPT_ASSERTION",
+      "reason": "Exact prompt assertion did not account for incremental terminal rendering",
+      "terminal_sha256": "NOT_AVAILABLE"
+    },
+    {
+      "status": "FAILED_SCRIPT_ASSERTION",
+      "reason": "Same assertion before correction",
+      "terminal_sha256": "f6212b5ea2ee68dea139b6231647c0967b8ea3b3834255b3c6273837ecba4863"
+    }
+  ]
+}

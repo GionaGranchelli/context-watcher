@@ -91,6 +91,9 @@ enum Commands {
     Tui {
         #[arg(long)]
         session: Option<String>,
+        /// Loopback daemon used by the separate consent policy workspace
+        #[arg(long, default_value = "http://127.0.0.1:4400")]
+        daemon_url: String,
     },
     /// Show context window token summary, KV cache hit ratio, and health score
     Status {
@@ -510,9 +513,12 @@ async fn main() -> Result<()> {
         } => {
             commands::wrap::run_wrap(proxy_port, session_id, cmd)?;
         }
-        Commands::Tui { session } => {
+        Commands::Tui {
+            session,
+            daemon_url,
+        } => {
             let store = CwStore::open(&db_path)?;
-            run_tui(store, session)?;
+            run_tui(store, session, &daemon_url).await?;
         }
         Commands::Status { session } => {
             let store = CwStore::open(&db_path)?;

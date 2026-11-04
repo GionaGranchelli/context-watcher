@@ -1,5 +1,7 @@
 # Spec 04: Harness Integrations (AGY, Codex, Pi, OpenCode, Claude), MCP Server & IntelliJ Plugin
 
+> Current PinContext operator contract: [CW-121C2 TUI and MCP controls](../docs/CW-121C2-TUI-MCP-CONTROLS.md). Only trusted human controls grant consent; MCP policy inspection is read-only.
+
 > Safety implementation contract (2026-10-29): [COMPATIBILITY.md](../docs/COMPATIBILITY.md) and [REMEDIATION.md](../docs/REMEDIATION.md) supersede conflicting guarantee language below. The remaining text describes the original target design, not proof of completed or measured capabilities.
 
 **Status:** Approved  

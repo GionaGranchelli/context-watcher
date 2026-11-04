@@ -139,3 +139,16 @@ test('revocation remains available while a preview request is pending', async ()
   finishPreview(response(fixture('session-a', true))); await pending;
   assert.equal(ready(flow).preview.enabled, false);
 });
+
+
+test('malformed JSON on GET and POST shows actionable unconfirmed state', async () => {
+  for (const method of ['GET', 'POST']) {
+    const flow = createPinPolicyWorkflow({ request: async (_path, init) =>
+      (init ? 'POST' : 'GET') === method ? new Response('invalid JSON') : response(fixture()), onChange() {} });
+    await flow.load('session-a');
+    if (method === 'POST') { flow.acknowledge(true); await flow.enable(); }
+    const state = flow.getState();
+    assert.equal(state.kind, 'error');
+    assert.equal(state.message, 'Policy API returned malformed JSON. Consent state is unconfirmed; refresh before retrying.');
+  }
+});

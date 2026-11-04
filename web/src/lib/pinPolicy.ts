@@ -61,7 +61,9 @@ export function createPinPolicyWorkflow({ request, onChange }: { request: Policy
   function publish(next: PinPolicyState) { state = next; onChange(next); }
   async function read(response: Response, id: string) {
     if (!response.ok) throw new Error(`Policy API failed (HTTP ${response.status}). Consent state is unconfirmed; refresh before retrying.`);
-    const value: unknown = await response.json();
+    const value: unknown = await response.json().catch(() => {
+      throw new Error('Policy API returned malformed JSON. Consent state is unconfirmed; refresh before retrying.');
+    });
     return parsePinPolicy(value, id);
   }
   async function load(id: string) {

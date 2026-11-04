@@ -34,7 +34,7 @@ The current session workspace includes a compact **PinContext reinforcement** se
 
 Enable requires a valid current preview and acknowledgement. Session changes and graph revisions reload the preview and clear acknowledgement. Late responses from an old session cannot update or authorize the newly selected session. HTTP failures, invalid JSON, and wrong-session bodies show unavailable/unconfirmed state. They never become a guessed disabled or successful state. A failed update may have reached the server; refresh or explicitly disable to establish current state.
 
-The section reuses the application's existing authenticated `apiFetch` path and the server's grant/revoke API. The server remains the authority. The read contract adds `session_terminated` and `reinforcement_supported` to explain why enablement is unavailable; neither is a new authorization mechanism.
+The section reuses the application's existing authenticated `apiFetch` path and the server's grant/revoke API. The server remains the authority. The read contract adds `session_terminated` and `reinforcement_supported` to explain why enablement is unavailable; neither is a new authorization mechanism. Support and per-pin authorization disclosure use the latest turn's normalization provider, falling back to stored session metadata, as does request eligibility. Automatic-creation scope retains the stored session provider used by the existing creation policy. Future request shapes and providers are checked again at application time.
 
 ## Meaning of feedback
 
@@ -57,9 +57,11 @@ Revocation deletes no rules. Strategies still cannot grant consent. CW-121A's ap
 
 A terminal operator smoke used a disposable daemon, isolated HOME/config/data/store/workspace and only control API routes. Preview, refusal without acknowledgement, explicit enable, and disable passed; the pin remained stored. The daemon was stopped. A sanitized record and terminal transcript hash are retained in [operator evidence](../.audit/cw121c1/operator-check.json).
 
+Review regressions verify support and authorization for mismatched stored/latest-turn providers in both directions, plus actionable malformed-JSON errors for GET and POST. Both checks failed before their respective corrections.
+
 Browser interaction is **UNVERIFIED**: computer-use inventory exposed no browsers, and opening an in-app browser returned `Browser is not available: iab`. No browser installation or production environment change was attempted.
 
-Final offline validation: 269 Rust tests passed, 19 ignored; workspace Clippy and formatting passed. All 14 web tests passed, Svelte reported zero errors and warnings, and the production build passed. The 15 runner admission tests and default sanitized offline lifecycle fixture passed. Ignored harness/live suites were not executed.
+Final offline validation: 269 Rust tests passed, 19 ignored; workspace Clippy and formatting passed. All 15 web tests passed, Svelte reported zero errors and warnings, and the production build passed. The 15 runner admission tests and default sanitized offline lifecycle fixture passed. Ignored harness/live suites were not executed.
 
 Run the required offline checks:
 

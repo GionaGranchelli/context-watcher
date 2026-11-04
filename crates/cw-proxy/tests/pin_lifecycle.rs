@@ -674,6 +674,12 @@ async fn activation_preview_uses_effective_turn_provider_with_session_fallback()
             responses.clone(),
             true,
         ),
+        (
+            ProviderKind::OpenAI,
+            Some(ProviderKind::Gemini),
+            json!({"contents":[{"role":"user","parts":[{"text":"Continue."}]}]}),
+            false,
+        ),
         // OpenAI permits this history; the Anthropic validator rejects an assistant-first request.
         (
             ProviderKind::Anthropic,
@@ -704,12 +710,23 @@ async fn activation_preview_uses_effective_turn_provider_with_session_fallback()
             preview["stored_pins"][0]["eligible_in_latest_request_preview_after_opt_in"], eligible,
             "session={session_provider:?}, turn={normalized_provider:?}"
         );
+        let supported = normalized_provider.unwrap_or(session_provider) != ProviderKind::Gemini;
+        assert_eq!(preview["reinforcement_supported"], supported);
+        assert_eq!(preview["stored_pins"][0]["currently_authorized"], false);
         assert_eq!(preview["enabled"], false);
         assert!(
             store
                 .list_pin_context_policy_events(SESSION)
                 .unwrap()
                 .is_empty()
+        );
+        store.set_pin_context_policy(SESSION, true, true).unwrap();
+        let authorized = policy_preview(&app, &token).await;
+        assert_eq!(authorized["enabled"], true);
+        assert_eq!(authorized["reinforcement_supported"], supported);
+        assert_eq!(
+            authorized["stored_pins"][0]["currently_authorized"],
+            supported
         );
         assert_eq!(store.get_turn_raw_payload(&turn.id).unwrap().unwrap(), raw);
     }

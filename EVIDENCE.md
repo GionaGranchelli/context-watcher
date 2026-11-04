@@ -4,7 +4,7 @@
 
 [CLI/Web controls and verification](docs/CW-121C1-OPERATOR-CONSENT.md). Actual CLI-to-control-API tests cover explicit acknowledgement, revocation, session scope, terminated/Gemini restrictions, and failed responses. Web workflow tests cover stale sessions, acknowledgement reset and unavailable/unconfirmed state. The isolated terminal smoke passed and its daemon was stopped; [sanitized evidence](.audit/cw121c1/operator-check.json) records the outcomes and transcript hash. Browser interaction remains unverified: no browser provider was available. No inference, model-server execution, production changes or historical rewrites.
 
-Validation: 269 Rust tests passed, 19 ignored; 14 web tests passed; Svelte check/build, workspace Clippy/formatting, 15 runner admission tests and the default offline fixture passed. Ignored harness/live suites were not executed.
+Validation: 269 Rust tests passed, 19 ignored; 15 web tests passed; Svelte check/build, workspace Clippy/formatting, 15 runner admission tests and the default offline fixture passed. Ignored harness/live suites were not executed.
 
 ## CW-121B: Consent-aware creation
 

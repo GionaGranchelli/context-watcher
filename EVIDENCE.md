@@ -1,8 +1,12 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## CW-122B1: Codex CLI mock qualification
+
+[Qualification report](docs/CW-122B1-CODEX-MOCK-QUALIFICATION.md). The installed Codex CLI completed 12 counterbalanced attempts and 48 requests through the authenticated Context-Watcher proxy to an in-process loopback mock. Full egress and ledger checks, fixture oracles, resume lifecycle and pruning exposure passed. Fixture repairs and usage were scripted, so correctness advantage and product value remain NOT_EVALUATED. No provider inference, spend, production server changes, or changes to the frozen CW-122A campaign.
+
 ## CW-122A: pruning-only offline readiness
 
-[Preregistration](docs/CW-122A-PREREGISTRATION.md) and [readiness gates](docs/CW-122A-READINESS.md) define six matched M1/M2 pairs across two task families. A real proxy-to-mock boundary verifies exact historical PruneOrStub-only egress and its ledger; external oracles and matched analysis are rehearsed with synthetic repairs/usage. Product value is NOT_EVALUATED. Live adapter, actual telemetry/cache fairness, fresh spend authorization and native M0 remain unqualified or closed. No inference, spending, production changes or historical rewrites.
+[Preregistration](docs/CW-122A-PREREGISTRATION.md) and [readiness gates](docs/CW-122A-READINESS.md) define six matched M1/M2 pairs across two task families. A real proxy-to-mock boundary verifies exact historical PruneOrStub-only egress and its ledger; external oracles and matched analysis are rehearsed with synthetic repairs/usage. Product value is NOT_EVALUATED. CW-122B live-provider telemetry/cache fairness, fresh spend authorization and native M0 remain unqualified or closed. No inference, spending, production changes or historical rewrites.
 
 ## CW-121C2: TUI and MCP controls
 

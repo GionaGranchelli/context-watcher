@@ -7,9 +7,13 @@
 
 ---
 
-## CW-122A — In Review
+## CW-122A — Merged
 
-Frozen six-pair pruning-only campaign, real proxy-to-mock isolation tests, independent oracles, matched analyzer and closed live admission prepared. [Readiness report](docs/CW-122A-READINESS.md). Offline gates pass; CW-122B adapter/environment/fresh-authorization gates remain unverified or closed. No inference or live authorization.
+Frozen six-pair pruning-only campaign, real proxy-to-mock isolation tests, independent oracles, matched analyzer and closed live admission merged in PR #41. [Readiness report](docs/CW-122A-READINESS.md). Product value remains NOT_EVALUATED.
+
+## CW-122B1 — In Review
+
+The installed Codex CLI and authenticated Responses path passed a 12-attempt loopback-mock campaign. This qualifies CLI routing, resume, pruning exposure, and evidence accounting only; fixture repairs and usage are scripted. [Qualification report](docs/CW-122B1-CODEX-MOCK-QUALIFICATION.md). Live inference remains NO-GO pending independent review and fresh spend authorization.
 
 ## CW-121C2 — Merged
 

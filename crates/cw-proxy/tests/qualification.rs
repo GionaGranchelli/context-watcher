@@ -447,6 +447,10 @@ async fn handle_mock_responses(
             .unwrap();
     }
 
+    if body_str.contains("CW122B1_F1-09_ACTIVE_CODEX") {
+        return std::future::pending::<Response>().await;
+    }
+
     let injected = if body_str.contains("CW122B1_F1-04_429") {
         Some((StatusCode::TOO_MANY_REQUESTS, "rate limited".to_owned()))
     } else if body_str.contains("CW122B1_F1-04_401") {
@@ -1372,6 +1376,111 @@ async fn test_cw122b1_f1_06_invalid_or_missing_usage_trips_settlement_guard() {
             "PASS",
         );
     }
+}
+
+#[tokio::test]
+#[ignore = "CW-122B1-F1 active Codex interruption; loopback mock only; run via benchmark/cw122b1/run_fault_matrix.py"]
+async fn test_cw122b1_f1_codex_active_request_holds_for_external_interruption() {
+    use std::time::Duration;
+
+    let binary = std::fs::canonicalize(require_installed_binary("codex")).unwrap();
+    let evidence_root = PathBuf::from(
+        std::env::var_os("CW122B1_EVIDENCE_DIR")
+            .expect("run the active interruption through run_mock_campaign.py"),
+    );
+    let fault_root = evidence_root.join("faults");
+    let scenario_root = fault_root.join("F1-09");
+    let layer_root = scenario_root.join("layer-b");
+    create_private_dir(&fault_root);
+    create_private_dir(&scenario_root);
+    create_private_dir(&layer_root);
+
+    let root = std::env::temp_dir().join(format!("cw122b1-f1-interrupt-{}", uuid::Uuid::new_v4()));
+    create_private_dir(&root);
+    let home = root.join("home");
+    let codex_home = root.join("codex");
+    let temp_dir = root.join("tmp");
+    let workspace = root.join("workspace");
+    for path in [&home, &codex_home, &temp_dir, &workspace] {
+        create_private_dir(path);
+    }
+    let session = uuid::Uuid::new_v4().to_string();
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let guard = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        require_verified_pricing: false,
+        ..Default::default()
+    });
+    let fixture =
+        QualificationFixture::setup_config(Some(guard.clone()), Some(token.clone()), true).await;
+    let codex = CodexStep {
+        binary: &binary,
+        workspace: &workspace,
+        home: &home,
+        codex_home: &codex_home,
+        temp_dir: &temp_dir,
+        proxy_port: fixture.proxy_port,
+        session_id: &session,
+        control_token: &token,
+    };
+    let captured = fixture.mock.captured.clone();
+    let store = fixture.store.clone();
+    let monitor_guard = guard.clone();
+    let monitor_session = session.clone();
+    tokio::spawn(async move {
+        loop {
+            let request = captured.lock().unwrap().first().cloned();
+            if let Some(request) = request {
+                let turns = store.list_turns(&monitor_session).unwrap();
+                if let Some(turn) = turns.first() {
+                    let ingress = store
+                        .get_wire_request(&turn.id)
+                        .unwrap()
+                        .expect("active attempt ingress was persisted");
+                    let egress = store
+                        .get_wire_egress(&turn.id)
+                        .unwrap()
+                        .expect("active attempt egress was persisted");
+                    let layer_root = PathBuf::from(
+                        std::env::var_os("CW122B1_EVIDENCE_DIR").expect("private evidence root"),
+                    )
+                    .join("faults/F1-09/layer-b");
+                    write_private_file(&layer_root.join("ingress.bin"), &ingress);
+                    write_private_file(&layer_root.join("egress.bin"), &egress);
+                    write_private_file(&layer_root.join("mock-request.bin"), &request.body);
+                    let record = json!({
+                        "scenario_id":"F1-09",
+                        "phase":"Codex request active; loopback mock received egress and withheld response",
+                        "session_id":monitor_session,
+                        "turn_id":turn.id,
+                        "accepted_admissions":monitor_guard.session_request_count(&monitor_session),
+                        "upstream_dispatch_count":captured.lock().unwrap().len(),
+                        "captured_response_count":0,
+                        "reserved_usd":monitor_guard.total_reserved_usd(),
+                        "settlement":"NOT_SETTLED_AT_INTERRUPTION",
+                        "ingress_sha256":sha256_hex(&ingress),
+                        "egress_sha256":sha256_hex(&egress),
+                        "mock_request_sha256":sha256_hex(&request.body),
+                    });
+                    write_private_file(
+                        &layer_root.join("active-attempt.json"),
+                        &serde_json::to_vec_pretty(&record).unwrap(),
+                    );
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+
+    let result = codex
+        .run(
+            None,
+            "CW122B1_F1-09_ACTIVE_CODEX wait for the interrupted local mock response",
+            Duration::from_secs(600),
+        )
+        .await;
+    panic!("active mock request unexpectedly completed: {result:?}");
 }
 
 #[tokio::test]

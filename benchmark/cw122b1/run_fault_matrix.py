@@ -76,7 +76,7 @@ def matrix_from_output(output, return_code, evidence_root):
                 if stat.S_IMODE(evidence_root.stat().st_mode) != 0o700:
                     return None
                 current = evidence_root
-                for part in root.relative_to(evidence_root).parts:
+                for part in path.relative_to(evidence_root).parts[:-1]:
                     current = current / part
                     if current.is_symlink() or stat.S_IMODE(current.stat().st_mode) != 0o700:
                         return None
@@ -182,28 +182,255 @@ def matrix_from_output(output, return_code, evidence_root):
 
     after_task = next((item for item in boundary_records
                        if item.get('boundary_id') == 'after_task_before_manifest'), None)
-    boundaries = [
-        {'boundary_id': 'before_first_provider_dispatch', 'injection_boundary': 'request admission rejection is tested, but runner interruption evidence is not',
-         'result': 'NOT_VERIFIED', 'evidence_source': 'F1-02 admission record; not an interruption'},
-        {'boundary_id': 'after_admission_before_dispatch', 'injection_boundary': 'no deterministic fault hook at this boundary',
-         'result': 'NOT_VERIFIED', 'evidence_source': 'NONE'},
-        {'boundary_id': 'after_ingress_before_completed_egress', 'injection_boundary': 'provider errors preserve wire records; exact interruption point is not injected',
-         'result': 'NOT_VERIFIED', 'evidence_source': 'F1-04 error records; not an interruption'},
-        {'boundary_id': 'after_response_before_usage_settlement', 'injection_boundary': 'settlement errors are tested; process interruption before settlement is not',
-         'result': 'NOT_VERIFIED', 'evidence_source': 'F1-06 settlement records; not an interruption'},
-        {'boundary_id': 'after_task_before_final_manifest',
-         'injection_boundary': after_task.get('injection_boundary', 'partial attempt guard drop') if after_task else 'NOT_EXERCISED',
-         'result': 'PASS' if after_task and after_task.get('result') == 'PASS' and evidence_valid(after_task) else 'NOT_VERIFIED',
-         'evidence_source': 'partial-evidence-boundary' if after_task else 'NONE'},
+    boundary_specs = [
+        ('before_first_provider_dispatch', 'before_first_provider_dispatch'),
+        ('after_admission_before_dispatch', 'after_admission_before_dispatch'),
+        ('after_ingress_before_completed_egress', 'after_ingress_before_completed_egress'),
+        ('after_response_before_usage_settlement', 'after_response_before_usage_settlement'),
+        ('after_task_before_final_manifest', 'after_task_before_manifest'),
     ]
+    boundaries = []
+    for boundary_id, output_id in boundary_specs:
+        record = next((item for item in boundary_records
+                       if item.get('boundary_id') == output_id), None)
+        if record is None and boundary_id == 'after_task_before_final_manifest':
+            record = after_task
+        valid = bool(record and record.get('result') == 'PASS' and evidence_valid(record))
+        boundaries.append({
+            'boundary_id': boundary_id,
+            'injection_boundary': record.get('injection_boundary', 'NOT_EXERCISED') if record else 'NOT_EXERCISED',
+            'result': 'PASS' if valid and return_code == 0 else (
+                'FAIL' if record and record.get('result') == 'FAIL' else 'NOT_VERIFIED'
+            ),
+            'evidence_source': 'boundary-injection' if record else 'NONE',
+        })
     return {'schema': 'cw122b1-f1-fault-matrix-v1', 'scenarios': matrix,
             'partial_evidence_boundaries': boundaries}
+
+
+def validate_success_path_evidence(path, commit):
+    path = Path(path)
+    if path.is_symlink() or not path.is_absolute() or path.resolve().is_relative_to(REPO.resolve()):
+        raise ValueError('successful-path evidence must be absolute and outside the checkout')
+    root = path.resolve(strict=True)
+    if os.name == 'posix' and stat.S_IMODE(root.stat().st_mode) != 0o700:
+        raise ValueError('successful-path evidence root must have mode 0700')
+    for item in root.rglob('*'):
+        if item.is_symlink():
+            raise ValueError('successful-path evidence contains a symlink')
+        if os.name == 'posix':
+            mode = stat.S_IMODE(item.stat().st_mode)
+            expected = 0o700 if item.is_dir() else 0o600
+            if mode != expected:
+                raise ValueError(f'unsafe successful-path evidence mode: {item}')
+    manifest_bytes = (root / 'manifest.json').read_bytes()
+    aggregate_bytes = (root / 'aggregate.json').read_bytes()
+    launch_bytes = (root / 'launch.json').read_bytes()
+    manifest = json.loads(manifest_bytes)
+    aggregate = json.loads(aggregate_bytes)
+    launch = json.loads(launch_bytes)
+    if (manifest['status'] != 'MOCK_CODEX_CAMPAIGN_PASS' or manifest['runs'] != 12
+            or manifest['requests'] != 48 or manifest['inference_calls'] != 0
+            or manifest['provider_spend'] != 0 or len(manifest['attempts']) != 12
+            or manifest['context_watcher_commit'] != commit
+            or launch.get('commit') != commit or launch.get('live') is not False
+            or launch.get('provider_calls') != 0 or launch.get('provider_spend_usd') != 0
+            or manifest['hash_algorithm'] != 'SHA-256'
+            or manifest['campaign_sha256'] != hashlib.sha256((CWA / 'campaign.json').read_bytes()).hexdigest()
+            or manifest['cw122a_freeze_sha256'] != hashlib.sha256((CWA / 'freeze.json').read_bytes()).hexdigest()
+            or aggregate.get('private_manifest_sha256') != hashlib.sha256(manifest_bytes).hexdigest()
+            or aggregate.get('private_launch_sha256') != hashlib.sha256(launch_bytes).hexdigest()
+            or aggregate.get('context_watcher_commit') != commit
+            or aggregate.get('status') != manifest['status']
+            or aggregate.get('runs') != 12 or aggregate.get('requests') != 48
+            or aggregate.get('provider_calls') != 0 or aggregate.get('provider_spend_usd') != 0):
+        raise ValueError('successful-path evidence disagrees with the frozen run contract or current commit')
+    matched_pairs = {}
+    for attempt in manifest['attempts']:
+        if not attempt['acceptance']['passed']:
+            raise ValueError(f"acceptance failed in {attempt['pair_id']}/{attempt['mode']}")
+        pair_inputs = (attempt['initial_fixture_hashes'], attempt['initial_prompt_sha256'],
+                       attempt['task_instructions_sha256'], attempt['model'],
+                       attempt['sampling_observed'])
+        prior = matched_pairs.setdefault(attempt['pair_id'], pair_inputs)
+        if prior != pair_inputs:
+            raise ValueError(f"matched arms differ in {attempt['pair_id']}")
+        for name, digest in attempt['initial_fixture_hashes'].items():
+            fixture = CWA / 'fixtures' / attempt['family'] / name
+            if hashlib.sha256(fixture.read_bytes()).hexdigest() != digest:
+                raise ValueError(f"frozen fixture hash mismatch in {attempt['pair_id']}: {name}")
+        requests = attempt['requests']
+        if len(requests) != 4:
+            raise ValueError(f"unexpected request count in {attempt['pair_id']}/{attempt['mode']}")
+        session_root = root / 'raw' / attempt['session_id']
+        for request in requests:
+            index = request['index']
+            for key, name in (
+                ('ingress_sha256', f'request_{index:02}.json'),
+                ('egress_sha256', f'egress_{index:02}.json'),
+                ('response_sha256', f'response_{index:02}.sse'),
+            ):
+                artifact = session_root / name
+                if hashlib.sha256(artifact.read_bytes()).hexdigest() != request[key]:
+                    raise ValueError(f"{key} mismatch in {attempt['pair_id']}/{attempt['mode']} request {index}")
+        for index, digest in enumerate(attempt['transcript']['sha256']):
+            rollout = session_root / f'rollout_{index:02}.jsonl'
+            if hashlib.sha256(rollout.read_bytes()).hexdigest() != digest:
+                raise ValueError(f"transcript hash mismatch in {attempt['pair_id']}/{attempt['mode']}")
+        if attempt['mode'] == 'M1':
+            if any(request['applied_rule_ids'] or request['ingress_sha256'] != request['egress_sha256']
+                   for request in requests):
+                raise ValueError(f"M1 mutation observed in {attempt['pair_id']}")
+        elif attempt['mode'] == 'M2':
+            rule_id = 'cw122b1-historical-prune'
+            if (attempt['treatment']['status'] != 'verified_mock_wire_treatment'
+                    or attempt['treatment']['verified_requests'] != 2
+                    or sum(rule_id in request['applied_rule_ids'] for request in requests) != 2
+                    or any(set(request['applied_rule_ids']) - {rule_id} for request in requests)
+                    or any((bool(request['applied_rule_ids']) ==
+                            (request['ingress_sha256'] == request['egress_sha256']))
+                           for request in requests)):
+                raise ValueError(f"M2 treatment mismatch in {attempt['pair_id']}")
+        else:
+            raise ValueError(f"unknown mode in {attempt['pair_id']}: {attempt['mode']}")
+    return {
+        'status': 'PASS', 'commit': commit, 'runs': manifest['runs'],
+        'requests': manifest['requests'], 'provider_calls': 0, 'provider_spend_usd': 0,
+        'aggregate_sha256': hashlib.sha256(aggregate_bytes).hexdigest(),
+        'manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
+    }
+
+
+def private_subdirs(root, *parts):
+    current = Path(root)
+    for part in parts:
+        current = current / part
+        current.mkdir(mode=0o700, exist_ok=True)
+        current.chmod(0o700)
+    return current
+
+
+def descendant_commands(root_pid):
+    proc_root = Path('/proc')
+    parents = {}
+    commands = {}
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / 'stat').read_text().split(') ', 1)[1].split()
+            parents[int(entry.name)] = int(fields[1])
+            commands[int(entry.name)] = (entry / 'cmdline').read_bytes().replace(b'\0', b' ').decode(errors='replace')
+        except (OSError, ValueError, IndexError):
+            continue
+    descendants = {root_pid}
+    changed = True
+    while changed:
+        changed = False
+        for pid, parent in parents.items():
+            if parent in descendants and pid not in descendants:
+                descendants.add(pid)
+                changed = True
+    return {pid: commands.get(pid, '') for pid in descendants if pid != root_pid}
+
+
+def run_interrupted_codex_campaign(evidence, env, timeout):
+    layer_root = private_subdirs(evidence, 'faults', 'F1-09', 'layer-b')
+    worker_root = private_subdirs(layer_root, 'codex-campaign')
+    command = [
+        sys.executable, '-B', 'benchmark/cw122b1/run_mock_campaign.py',
+        '--evidence-dir', str(worker_root), '--fault-scenario', 'F1-09',
+    ]
+    proc = subprocess.Popen(
+        command, cwd=REPO, env=env, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
+    )
+    ready_path = worker_root / 'faults/F1-09/layer-b/active-attempt.json'
+    deadline = time.monotonic() + timeout
+    codex_pid = None
+    result = 'NOT_VERIFIED'
+    observed = 'active Codex request marker was not observed before timeout or exit'
+    output = b''
+    while time.monotonic() < deadline:
+        if ready_path.is_file():
+            processes = descendant_commands(proc.pid)
+            codex = [(pid, command_line) for pid, command_line in processes.items()
+                     if 'codex' in command_line.lower() and 'exec' in command_line.lower()]
+            if codex:
+                codex_pid = codex[0][0]
+                observed = 'Codex exec process was active after the loopback mock received its request'
+                proc.send_signal(signal.SIGTERM)
+                break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.02)
+    else:
+        if proc.poll() is None:
+            proc.send_signal(signal.SIGTERM)
+            observed = 'runner deadline expired before active Codex request was confirmed'
+    try:
+        output, _ = proc.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        observed = 'dedicated runner did not exit after SIGTERM; cleanup is unverified'
+        proc.kill()
+        output, _ = proc.communicate()
+        result = 'FAIL'
+
+    result_path = worker_root / 'runner-result.json'
+    active = json.loads(ready_path.read_text()) if ready_path.is_file() else None
+    runner_result = json.loads(result_path.read_text()) if result_path.is_file() else {}
+    interruption = runner_result.get('interruption') or {}
+    cleanup = interruption.get('process_cleanup') or {}
+    if (result != 'FAIL' and active and proc.returncode == 130
+            and runner_result.get('status') == 'INTERRUPTED'
+            and interruption.get('signal') == 'SIGTERM'
+            and interruption.get('verified') is True and cleanup.get('verified') is True
+            and active.get('upstream_dispatch_count') == 1
+            and active.get('accepted_admissions') == 1):
+        result = 'PASS'
+        observed = 'SIGTERM stopped the active Codex attempt; the loopback request, admission and unsettled reservation were recorded'
+    elif result != 'FAIL':
+        result = 'NOT_VERIFIED'
+
+    files = []
+    for path in sorted(worker_root.rglob('*')):
+        if path.is_file():
+            files.append({
+                'path': path.relative_to(evidence).as_posix(),
+                'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                'kind': path.suffix.lstrip('.') or 'artifact',
+            })
+    record = {
+        'scenario_id': 'F1-09',
+        'injection_boundary': 'SIGTERM sent to dedicated campaign runner while Codex awaits the stalled loopback mock response',
+        'expected_behavior': 'runner terminates Codex process tree, records cleanup, and preserves observed private evidence',
+        'observed_behavior': observed,
+        'upstream_dispatch_count': int((active or {}).get('upstream_dispatch_count', 0)),
+        'accepted_admissions': int((active or {}).get('accepted_admissions', 0)),
+        'rejected_admissions': 0,
+        'settlement': {
+            'reserved_usd': (active or {}).get('reserved_usd'),
+            'status': (active or {}).get('settlement', 'NOT_AVAILABLE'),
+            'process_cleanup_verified': cleanup.get('verified', False),
+        },
+        'process_cleanup': 'VERIFIED' if cleanup.get('verified') is True else 'NOT_VERIFIED',
+        'evidence_preservation': {
+            'status': 'PRESERVED' if active and files else 'NOT_VERIFIED',
+            'directory': str(evidence), 'files': files,
+        },
+        'qualification_layer': 'B', 'result': result,
+        'codex_pid_observed': codex_pid is not None,
+    }
+    return (0 if result == 'PASS' else 0 if result == 'NOT_VERIFIED' else 1), (
+        output + b'\n' + RESULT_PREFIX.encode() + json.dumps(record, sort_keys=True).encode() + b'\n'
+    )
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--evidence-dir', required=True, type=Path)
     parser.add_argument('--timeout-seconds', type=float, default=120)
+    parser.add_argument('--success-path-evidence-dir', type=Path)
     args = parser.parse_args(argv)
     evidence = prepare_evidence(args.evidence_dir)
     env = build_environment(os.environ)
@@ -226,6 +453,10 @@ def main(argv=None):
         )
         codex_version = version.stdout.strip().splitlines()[0]
         commands.append(('LAYER_B_CODEX', CODEX_TEST))
+        commands.append(('LAYER_B_F1_09_EXTERNAL_INTERRUPT', [
+            sys.executable, '-B', 'benchmark/cw122b1/run_mock_campaign.py',
+            '--fault-scenario', 'F1-09', '--evidence-dir', 'PRIVATE_F1_09_DIR',
+        ]))
     else:
         outputs.append(b'LAYER_B_CODEX: NOT_VERIFIED; Codex CLI unavailable on allowlisted PATH\n')
     write_private(evidence / 'launch.json', {
@@ -251,6 +482,11 @@ def main(argv=None):
             if code != 0:
                 return_code = code
                 break
+        if return_code == 0 and codex_path:
+            code, output = run_interrupted_codex_campaign(evidence, env, args.timeout_seconds)
+            outputs.extend([b'=== LAYER_B_F1_09_EXTERNAL_INTERRUPT ===\n', output])
+            if code != 0:
+                return_code = code
     finally:
         restore_signal_handlers(previous_handlers)
     output = b''.join(outputs)
@@ -264,11 +500,21 @@ def main(argv=None):
     matrix['provider_calls'] = 0
     matrix['provider_spend_usd'] = 0
     matrix['runner_exit_code'] = return_code
-    matrix['successful_path_regression'] = {
-        'status': 'NOT_VERIFIED',
-        'reason': 'The original 12-attempt runner stopped at its CW-122A source-freeze check after the F1 SpendGuard change; the historical freeze was preserved.',
-        'provider_calls': 0,
-    }
+    if args.success_path_evidence_dir:
+        try:
+            matrix['successful_path_regression'] = validate_success_path_evidence(
+                args.success_path_evidence_dir, commit
+            )
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+            matrix['successful_path_regression'] = {
+                'status': 'FAIL', 'reason': f'{type(error).__name__}: {error}',
+                'provider_calls': 0, 'provider_spend_usd': 0,
+            }
+    else:
+        matrix['successful_path_regression'] = {
+            'status': 'NOT_VERIFIED', 'reason': 'No current-commit success-path evidence supplied.',
+            'provider_calls': 0, 'provider_spend_usd': 0,
+        }
     matrix['evidence'] = {
         'private_directory_mode': '0700',
         'runner_output_sha256': hashlib.sha256(output).hexdigest(),
@@ -277,6 +523,7 @@ def main(argv=None):
                      for result in ('PASS', 'FAIL', 'NOT_VERIFIED')}
     status = (
         'FAILED' if any(item['result'] == 'FAIL' for item in matrix['scenarios']) else
+        'FAILED' if matrix['successful_path_regression']['status'] == 'FAIL' else
         'BLOCKED_WITH_UNVERIFIED_SCENARIOS' if (
             any(item['result'] == 'NOT_VERIFIED' for item in matrix['scenarios'])
             or matrix['successful_path_regression']['status'] != 'PASS'

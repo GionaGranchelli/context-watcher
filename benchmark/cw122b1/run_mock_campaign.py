@@ -31,6 +31,13 @@ TEST = [
     'cargo', 'test', '--offline', '--locked', '-p', 'cw-proxy', '--test', 'qualification',
     'test_cw122b1_codex_mock_campaign', '--', '--ignored', '--exact', '--nocapture',
 ]
+FAULT_TESTS = {
+    'F1-09': [
+        'cargo', 'test', '--offline', '--locked', '-p', 'cw-proxy', '--test', 'qualification',
+        'test_cw122b1_f1_codex_active_request_holds_for_external_interruption',
+        '--', '--ignored', '--exact', '--nocapture',
+    ],
+}
 
 
 def write_private(path, value):
@@ -87,6 +94,8 @@ def run_bounded(command, cwd, env, timeout, cancel=None):
                 output, _ = proc.communicate()
                 error = InterruptedError(f'campaign interrupted by signal {_received_signal}')
                 error.output = output
+                error.cleanup = cleanup
+                error.signal_number = _received_signal
                 raise error
             if remaining <= 0:
                 cleanup = cancel(proc.pid)
@@ -254,6 +263,7 @@ def public_aggregate(manifest):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--evidence-dir', required=True, type=Path)
+    parser.add_argument('--fault-scenario', choices=sorted(FAULT_TESTS))
     args = parser.parse_args(argv)  # There is deliberately no --live mode.
     if not Path('/proc').is_dir():
         raise SystemExit('bounded nested-process cleanup requires Linux /proc')
@@ -268,29 +278,43 @@ def main(argv=None):
     ).stdout.strip().splitlines()[0]
     freeze_sha256 = verify_freeze()
     commit = verified_git_commit(REPO, env)
+    command = FAULT_TESTS[args.fault_scenario] if args.fault_scenario else TEST
     env['CW122B1_EVIDENCE_DIR'] = str(evidence)
     env['CW122B1_COMMIT_SHA'] = commit
     env['CW122B1_CW122A_FREEZE_SHA256'] = freeze_sha256
+    if args.fault_scenario:
+        env['CW122B1_F1_FAULT_SCENARIO'] = args.fault_scenario
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     write_private(evidence / 'launch.json', {
         'scope': 'MOCK_ONLY_CODEX_QUALIFICATION', 'live': False,
         'provider_calls': 0, 'provider_spend_usd': 0,
         'codex_version': version, 'cw122a_freeze_sha256': freeze_sha256,
-        'commit': commit, 'command': TEST, 'environment_policy': 'offline_env.build_environment allowlist',
+        'commit': commit, 'command': command, 'fault_scenario': args.fault_scenario,
+        'environment_policy': 'offline_env.build_environment allowlist',
     })
 
     started = time.monotonic()
     status = 'COMPLETED'
     return_code = 1
     output = b''
+    interruption = None
     previous_handlers = install_termination_handlers()
     try:
-        return_code, output = run_bounded(TEST, REPO, env, CAMPAIGN_LIMIT_SECONDS)
+        return_code, output = run_bounded(command, REPO, env, CAMPAIGN_LIMIT_SECONDS)
         status = 'PASSED' if return_code == 0 else 'FAILED'
     except subprocess.TimeoutExpired as exc:
         output = exc.output or b''
         status = 'CAMPAIGN_TIMEOUT'
         return_code = 124
+    except InterruptedError as exc:
+        output = getattr(exc, 'output', b'') or b''
+        interruption = {
+            'signal': signal.Signals(exc.signal_number).name,
+            'process_cleanup': exc.cleanup,
+            'verified': exc.cleanup['verified'],
+        }
+        status = 'INTERRUPTED'
+        return_code = 130
     except BaseException as exc:
         output = f'{type(exc).__name__}: {exc}'.encode()
         status = 'CANCELLED_OR_RUNNER_ERROR'
@@ -321,6 +345,7 @@ def main(argv=None):
         'status': status, 'return_code': return_code,
         'elapsed_seconds': round(time.monotonic() - started, 3),
         'output_sha256': hashlib.sha256(output).hexdigest(),
+        'interruption': interruption,
     })
     print(json.dumps({'status': status, 'codex_version': version,
                       'evidence_dir': str(evidence), 'live': False}))

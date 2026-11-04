@@ -18,7 +18,7 @@ CWA = HERE.parent / 'cw122a'
 sys.path[:0] = [str(HERE), str(CWA)]
 try:
     from offline_env import build_environment
-    from run_fault_matrix import matrix_from_output
+    from run_fault_matrix import matrix_from_output, validate_success_path_evidence
     from run_mock_campaign import (
         REPO, kill_process_tree, main, prepare_evidence, public_aggregate,
         run_bounded, verified_git_commit, write_private,
@@ -157,6 +157,97 @@ class MockRunnerTests(unittest.TestCase):
             first = next(item for item in matrix['scenarios'] if item['scenario_id'] == 'F1-01')
             self.assertEqual(first['result'], 'NOT_VERIFIED')
             self.assertFalse(first['evidence_preservation']['verified'])
+
+    def test_success_path_gate_requires_hash_bound_current_commit_and_exact_treatment(self):
+        with tempfile.TemporaryDirectory(prefix='cw122b1-success-gate-') as directory:
+            root = Path(directory) / 'evidence'
+            root.mkdir(mode=0o700)
+            (root / 'raw').mkdir(mode=0o700)
+            commit = 'a' * 40
+            attempts = []
+            for family in ('f1', 'f2'):
+                for repetition in range(1, 4):
+                    for mode in ('M1', 'M2'):
+                        rule = 'cw122b1-historical-prune'
+                        session_id = f'{family}-r{repetition}-{mode}'
+                        raw = root / 'raw' / session_id
+                        raw.mkdir(mode=0o700, parents=True)
+                        requests = []
+                        for index in range(4):
+                            ingress = f'{session_id}-ingress-{index}'.encode()
+                            mutated = mode == 'M2' and index < 2
+                            egress = ingress + b'-pruned' if mutated else ingress
+                            response = f'{session_id}-response-{index}'.encode()
+                            hashes = []
+                            for name, content in (
+                                (f'request_{index:02}.json', ingress),
+                                (f'egress_{index:02}.json', egress),
+                                (f'response_{index:02}.sse', response),
+                            ):
+                                artifact = raw / name
+                                artifact.write_bytes(content)
+                                artifact.chmod(0o600)
+                                hashes.append(hashlib.sha256(content).hexdigest())
+                            requests.append({
+                                'index': index, 'applied_rule_ids': [rule] if mutated else [],
+                                'ingress_sha256': hashes[0], 'egress_sha256': hashes[1],
+                                'response_sha256': hashes[2],
+                            })
+                        rollout = b'{"type":"rollout"}\n'
+                        (raw / 'rollout_00.jsonl').write_bytes(rollout)
+                        (raw / 'rollout_00.jsonl').chmod(0o600)
+                        fixture_hashes = {
+                            name: hashlib.sha256((CWA / 'fixtures' / family / name).read_bytes()).hexdigest()
+                            for name in ('policy.txt', 'retry.py' if family == 'f1' else 'service.py')
+                        }
+                        attempts.append({
+                            'pair_id': f'{family}-r{repetition}', 'family': family,
+                            'repetition': repetition, 'mode': mode,
+                            'session_id': session_id, 'request_count': 4,
+                            'acceptance': {'passed': True},
+                            'initial_fixture_hashes': fixture_hashes,
+                            'initial_prompt_sha256': 'b' * 64,
+                            'task_instructions_sha256': 'c' * 64,
+                            'model': 'gpt-4o-mini', 'sampling_observed': {'temperature': None, 'top_p': None},
+                            'transcript': {'sha256': [hashlib.sha256(rollout).hexdigest()]},
+                            'treatment': {
+                                'rule_id': rule,
+                                'status': 'verified_mock_wire_treatment' if mode == 'M2' else 'not_applied_passthrough',
+                                'verified_requests': 2 if mode == 'M2' else 0,
+                            },
+                            'requests': requests,
+                        })
+            manifest = {
+                'status': 'MOCK_CODEX_CAMPAIGN_PASS', 'runs': 12, 'requests': 48,
+                'inference_calls': 0, 'provider_spend': 0,
+                'hash_algorithm': 'SHA-256', 'context_watcher_commit': commit,
+                'campaign_sha256': hashlib.sha256((CWA / 'campaign.json').read_bytes()).hexdigest(),
+                'cw122a_freeze_sha256': hashlib.sha256((CWA / 'freeze.json').read_bytes()).hexdigest(),
+                'attempts': attempts,
+            }
+            launch = {'commit': commit, 'live': False, 'provider_calls': 0, 'provider_spend_usd': 0}
+            write_private(root / 'manifest.json', manifest)
+            write_private(root / 'launch.json', launch)
+            manifest_bytes = (root / 'manifest.json').read_bytes()
+            launch_bytes = (root / 'launch.json').read_bytes()
+            aggregate = {
+                'status': manifest['status'], 'context_watcher_commit': commit,
+                'runs': 12, 'requests': 48, 'provider_calls': 0, 'provider_spend_usd': 0,
+                'private_manifest_sha256': hashlib.sha256(manifest_bytes).hexdigest(),
+                'private_launch_sha256': hashlib.sha256(launch_bytes).hexdigest(),
+            }
+            write_private(root / 'aggregate.json', aggregate)
+            result = validate_success_path_evidence(root, commit)
+            self.assertEqual(result['status'], 'PASS')
+            self.assertEqual((result['runs'], result['requests']), (12, 48))
+
+            manifest['attempts'][7]['requests'][0]['applied_rule_ids'] = ['unexpected-rule']
+            write_private(root / 'manifest.json', manifest)
+            manifest_bytes = (root / 'manifest.json').read_bytes()
+            aggregate['private_manifest_sha256'] = hashlib.sha256(manifest_bytes).hexdigest()
+            write_private(root / 'aggregate.json', aggregate)
+            with self.assertRaisesRegex(ValueError, 'M2 treatment mismatch'):
+                validate_success_path_evidence(root, commit)
 
     @unittest.skipUnless(os.name == 'posix' and Path('/proc').is_dir(), 'nested process groups require Linux /proc')
     def test_timeout_kills_codex_nested_process_group(self):

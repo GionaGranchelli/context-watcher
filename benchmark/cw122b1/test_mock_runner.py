@@ -15,7 +15,9 @@ CWA = HERE.parent / 'cw122a'
 sys.path[:0] = [str(HERE), str(CWA)]
 try:
     from offline_env import build_environment
-    from run_mock_campaign import REPO, main, prepare_evidence, public_aggregate, run_bounded
+    from run_mock_campaign import (
+        REPO, main, prepare_evidence, public_aggregate, run_bounded, verified_git_commit,
+    )
 finally:
     del sys.path[:2]
 
@@ -54,6 +56,11 @@ class MockRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'empty'):
                 prepare_evidence(path)
 
+    def test_source_archive_without_git_metadata_fails_explicitly(self):
+        with tempfile.TemporaryDirectory(prefix='cw122b1-no-git-') as directory:
+            with self.assertRaisesRegex(SystemExit, 'requires a Git checkout'):
+                verified_git_commit(directory, {'PATH': os.environ.get('PATH', '')})
+
     def test_public_aggregate_omits_session_and_host_paths(self):
         request = {
             'index': 0, 'status': 200, 'ingress_sha256': 'a', 'egress_sha256': 'b',
@@ -75,6 +82,7 @@ class MockRunnerTests(unittest.TestCase):
         }
         manifest = {
             'scope': 'mock', 'status': 'pass', 'codex_version': 'test',
+            'hash_algorithm': 'SHA-256',
             'campaign_sha256': 'e', 'cw122a_freeze_sha256': 'f',
             'context_watcher_commit': 'g', 'runs': 1,
             'requests': 1, 'elapsed_ms': 2, 'inference_calls': 0,
@@ -83,6 +91,7 @@ class MockRunnerTests(unittest.TestCase):
             'product_value': 'NOT_EVALUATED', 'attempts': [attempt],
         }
         aggregate = public_aggregate(manifest)
+        self.assertEqual(aggregate['hash_algorithm'], 'SHA-256')
         self.assertNotIn('private-session-id', repr(aggregate))
         self.assertNotIn('/private/codex', repr(aggregate))
 

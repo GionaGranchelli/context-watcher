@@ -105,6 +105,7 @@ def public_aggregate(manifest):
     return {
         'scope': manifest['scope'],
         'status': manifest['status'],
+        'hash_algorithm': manifest['hash_algorithm'],
         'codex_version': manifest['codex_version'],
         'campaign_sha256': manifest['campaign_sha256'],
         'cw122a_freeze_sha256': manifest['cw122a_freeze_sha256'],
@@ -164,10 +165,7 @@ def main(argv=None):
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10, check=True,
     ).stdout.strip().splitlines()[0]
     freeze_sha256 = verify_freeze()
-    commit = subprocess.run(
-        ['git', 'rev-parse', 'HEAD'], cwd=REPO, env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True,
-    ).stdout.strip()
+    commit = verified_git_commit(REPO, env)
     env['CW122B1_EVIDENCE_DIR'] = str(evidence)
     env['CW122B1_COMMIT_SHA'] = commit
     env['CW122B1_CW122A_FREEZE_SHA256'] = freeze_sha256
@@ -220,6 +218,21 @@ def main(argv=None):
     print(json.dumps({'status': status, 'codex_version': version,
                       'evidence_dir': str(evidence), 'live': False}))
     return return_code
+
+
+def verified_git_commit(cwd, env):
+    try:
+        commit = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'], cwd=cwd, env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(
+            'runner requires a Git checkout; no unverified commit override is accepted'
+        ) from exc
+    if len(commit) not in (40, 64) or any(char not in '0123456789abcdef' for char in commit):
+        raise SystemExit('Git returned an invalid commit identifier')
+    return commit
 
 
 if __name__ == '__main__':

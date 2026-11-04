@@ -15,6 +15,7 @@ use cw_core::{
 use cw_proxy::{DaemonState, build_proxy_router};
 use cw_store::CwStore;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     path::PathBuf,
     process::Command,
@@ -1835,8 +1836,19 @@ fn cw122a_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmark/cw122a")
 }
 
-fn digest_bytes(bytes: &[u8]) -> String {
-    blake3::hash(bytes).to_hex().to_string()
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[test]
+fn test_cw122b1_sha256_known_vector() {
+    assert_eq!(
+        sha256_hex(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
 }
 
 #[cfg(unix)]
@@ -2379,7 +2391,7 @@ async fn test_cw122b1_codex_mock_campaign() {
     .map(|name| {
         (
             name.to_owned(),
-            digest_bytes(&std::fs::read(cwa.join(name)).unwrap()),
+            sha256_hex(&std::fs::read(cwa.join(name)).unwrap()),
         )
     })
     .collect();
@@ -2405,7 +2417,7 @@ async fn test_cw122b1_codex_mock_campaign() {
         let initial_prompt = format!(
             "{instructions}\n\nFirst inspect the implementation and run relevant diagnostics. Report what needs fixing without editing files yet."
         );
-        let task_prompt_hash = digest_bytes(initial_prompt.as_bytes());
+        let task_prompt_hash = sha256_hex(initial_prompt.as_bytes());
         let implementation_prompt = "Implement the requested change now.";
 
         for mode in pair["order"].as_array().unwrap() {
@@ -2438,7 +2450,7 @@ async fn test_cw122b1_codex_mock_campaign() {
                     let bytes = std::fs::read(entry.path()).unwrap();
                     (
                         entry.file_name().to_string_lossy().into_owned(),
-                        digest_bytes(&bytes),
+                        sha256_hex(&bytes),
                     )
                 })
                 .collect();
@@ -2757,9 +2769,9 @@ async fn test_cw122b1_codex_mock_campaign() {
                     "index":index,
                     "path":captured.path,
                     "status":response.status,
-                    "ingress_sha256":digest_bytes(&ingress),
-                    "egress_sha256":digest_bytes(&captured.body),
-                    "response_sha256":digest_bytes(&response.body),
+                    "ingress_sha256":sha256_hex(&ingress),
+                    "egress_sha256":sha256_hex(&captured.body),
+                    "response_sha256":sha256_hex(&response.body),
                     "model":original.get("model"),
                     "sampling":request_sampling,
                     "codex_analytics_enabled":codex_analytics_enabled(&original),
@@ -2796,7 +2808,7 @@ async fn test_cw122b1_codex_mock_campaign() {
                     !contents.contains(stub),
                     "proxy stub leaked into Codex's persisted transcript"
                 );
-                rollout_hashes.push(digest_bytes(&bytes));
+                rollout_hashes.push(sha256_hex(&bytes));
                 write_private_file(
                     &evidence_dir.join(format!("raw/{session_id}/rollout_{index:02}.jsonl")),
                     &bytes,
@@ -2817,9 +2829,9 @@ async fn test_cw122b1_codex_mock_campaign() {
                 "model":"gpt-4o-mini",
                 "model_revision":"SYNTHETIC_NOT_A_MODEL_REVISION",
                 "codex_thread_id":thread_id,
-                "task_instructions_sha256":digest_bytes(instructions.as_bytes()),
+                "task_instructions_sha256":sha256_hex(instructions.as_bytes()),
                 "initial_prompt_sha256":task_prompt_hash,
-                "implementation_prompt_sha256":digest_bytes(implementation_prompt.as_bytes()),
+                "implementation_prompt_sha256":sha256_hex(implementation_prompt.as_bytes()),
                 "initial_fixture_hashes":initial_files,
                 "acceptance":acceptance,
                 "request_count":captures.len(),
@@ -2874,7 +2886,7 @@ async fn test_cw122b1_codex_mock_campaign() {
         .into_iter()
         .map(|name| (
             name.to_owned(),
-            digest_bytes(&std::fs::read(cwa.join(name)).unwrap())
+            sha256_hex(&std::fs::read(cwa.join(name)).unwrap())
         ))
         .collect()
     );
@@ -2882,6 +2894,7 @@ async fn test_cw122b1_codex_mock_campaign() {
     let manifest = json!({
         "scope":"SYNTHETIC_CODEX_MOCK_QUALIFICATION",
         "status":"MOCK_CODEX_CAMPAIGN_PASS",
+        "hash_algorithm":"SHA-256",
         "live_execution":"NO_GO; this test only routes to local mock",
         "inference_calls":0,
         "provider_spend":0,
@@ -2892,7 +2905,7 @@ async fn test_cw122b1_codex_mock_campaign() {
         "proxy_protocol":"OpenAI Responses SSE through authenticated loopback Context-Watcher proxy",
         "codex_analytics_enabled":false,
         "codex_tool_network_access":"DISABLED",
-        "campaign_sha256":digest_bytes(&std::fs::read(cwa.join("campaign.json")).unwrap()),
+        "campaign_sha256":sha256_hex(&std::fs::read(cwa.join("campaign.json")).unwrap()),
         "requests":campaign_request_count,
         "runs":attempt_summaries.len(),
         "elapsed_ms":campaign_started.elapsed().as_millis(),

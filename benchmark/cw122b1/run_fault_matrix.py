@@ -249,22 +249,31 @@ def main(argv=None):
     matrix['provider_calls'] = 0
     matrix['provider_spend_usd'] = 0
     matrix['runner_exit_code'] = return_code
+    matrix['successful_path_regression'] = {
+        'status': 'NOT_VERIFIED',
+        'reason': 'The original 12-attempt runner stopped at its CW-122A source-freeze check after the F1 SpendGuard change; the historical freeze was preserved.',
+        'provider_calls': 0,
+    }
     matrix['evidence'] = {
         'private_directory_mode': '0700',
         'runner_output_sha256': hashlib.sha256(output).hexdigest(),
     }
+    result_counts = {result: sum(item['result'] == result for item in matrix['scenarios'])
+                     for result in ('PASS', 'FAIL', 'NOT_VERIFIED')}
+    status = (
+        'FAILED' if any(item['result'] == 'FAIL' for item in matrix['scenarios']) else
+        'BLOCKED_WITH_UNVERIFIED_SCENARIOS' if (
+            any(item['result'] == 'NOT_VERIFIED' for item in matrix['scenarios'])
+            or matrix['successful_path_regression']['status'] != 'PASS'
+        ) else
+        'READY_FOR_REVIEW'
+    )
+    matrix['status'] = status
     write_private(evidence / 'fault-matrix.json', matrix)
     sanitized = dict(matrix)
     sanitized['evidence_directory'] = 'PRIVATE_EVIDENCE'
     target = REPO / 'benchmark' / 'cw122b1' / 'fault-matrix.json'
     target.write_text(json.dumps(sanitized, indent=2, sort_keys=True) + '\n')
-    result_counts = {result: sum(item['result'] == result for item in matrix['scenarios'])
-                     for result in ('PASS', 'FAIL', 'NOT_VERIFIED')}
-    status = (
-        'FAILED' if any(item['result'] == 'FAIL' for item in matrix['scenarios']) else
-        'BLOCKED_WITH_UNVERIFIED_SCENARIOS' if any(item['result'] == 'NOT_VERIFIED' for item in matrix['scenarios']) else
-        'READY_FOR_REVIEW'
-    )
     print(json.dumps({
         'status': status,
         'commit': commit, 'matrix': str(target), 'private_evidence': str(evidence),

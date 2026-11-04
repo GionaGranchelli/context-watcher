@@ -2,6 +2,8 @@
 
 **Status: `BLOCKED_WITH_UNVERIFIED_SCENARIOS`.** Nine fault scenarios passed the declared deterministic and real-Codex mock layers. F1-09 still lacks an interrupted real Codex attempt, four partial-evidence interruption boundaries remain untested, and the original 12-attempt success campaign was stopped by its historical source-freeze check. Live execution remains **NO-GO**.
 
+Implementation is under independent review in [PR #43](https://github.com/GionaGranchelli/context-watcher/pull/43).
+
 No real provider, cloud API, local model, or production model server was contacted. The real Codex CLI 0.166.0 sent requests only to the in-process loopback mock. The aggregate reports zero provider calls and zero provider spend. Product value remains `NOT_EVALUATED`.
 
 ## Reproduce

@@ -151,6 +151,13 @@ class MockRunnerTests(unittest.TestCase):
                 'boundary_id': 'after_ingress_before_completed_egress',
                 'injection_boundary': 'proxy ingress persisted; egress not dispatched',
                 'result': 'PASS', 'process_cleanup': 'VERIFIED',
+                'expected_behavior': 'retain ingress and prevent dispatch',
+                'observed_behavior': 'interrupted before egress',
+                'upstream_dispatch_count': 0, 'accepted_admissions': 0,
+                'rejected_admissions': 0, 'settlement': 'NOT_APPLICABLE',
+                'agent_process_termination': 'worker terminated',
+                'runner_exit_status': {'exit_code': -9},
+                'final_attempt_classification': 'INTERRUPTED_BEFORE_DISPATCH',
                 'evidence_preservation': {'status': 'PRESERVED', 'directory': str(root),
                     'files': [{'path': artifact.name,
                         'sha256': hashlib.sha256(artifact.read_bytes()).hexdigest(),
@@ -161,6 +168,10 @@ class MockRunnerTests(unittest.TestCase):
             actual = next(item for item in matrix['partial_evidence_boundaries']
                           if item['boundary_id'] == record['boundary_id'])
             self.assertEqual(actual['result'], 'PASS')
+            self.assertEqual(actual['process_cleanup'], 'VERIFIED')
+            self.assertTrue(actual['evidence_preservation']['verified'])
+            self.assertEqual(actual['upstream_dispatch_count'], 0)
+            self.assertEqual(actual['final_attempt_classification'], 'INTERRUPTED_BEFORE_DISPATCH')
 
             record['process_cleanup'] = 'NOT_VERIFIED'
             output = ('CW122B1_F1_BOUNDARY:' + json.dumps(record)).encode()
@@ -168,6 +179,7 @@ class MockRunnerTests(unittest.TestCase):
             actual = next(item for item in matrix['partial_evidence_boundaries']
                           if item['boundary_id'] == record['boundary_id'])
             self.assertEqual(actual['result'], 'NOT_VERIFIED')
+            self.assertEqual(actual['process_cleanup'], 'NOT_VERIFIED')
 
     @unittest.skipUnless(os.name == 'posix', 'POSIX evidence modes')
     def test_fault_matrix_rejects_world_readable_evidence_parent(self):

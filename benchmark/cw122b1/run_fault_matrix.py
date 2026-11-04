@@ -211,9 +211,30 @@ def matrix_from_output(output, return_code, evidence_root):
             and record.get('process_cleanup') == 'VERIFIED'
             and evidence_valid(record)
         )
+        evidence = record.get('evidence_preservation', {}) if record else {}
+        artifacts = []
+        if valid:
+            for index, item in enumerate(evidence.get('files', [])):
+                verified = artifact_digest(evidence.get('directory', ''), item)
+                if verified:
+                    artifacts.append({
+                        'name': f"boundary_{boundary_id}_{index:03d}.{item.get('kind', 'artifact')}",
+                        'sha256': verified[1], 'kind': item.get('kind', 'artifact'),
+                    })
         boundaries.append({
             'boundary_id': boundary_id,
             'injection_boundary': record.get('injection_boundary', 'NOT_EXERCISED') if record else 'NOT_EXERCISED',
+            'expected_behavior': record.get('expected_behavior') if record else 'Interrupt at the named lifecycle point and retain observed evidence.',
+            'observed_behavior': record.get('observed_behavior') if record else 'No structured boundary record emitted',
+            'upstream_dispatch_count': record.get('upstream_dispatch_count') if record else None,
+            'accepted_admissions': record.get('accepted_admissions') if record else None,
+            'rejected_admissions': record.get('rejected_admissions') if record else None,
+            'settlement': record.get('settlement', 'NOT_AVAILABLE') if record else 'NOT_AVAILABLE',
+            'agent_process_termination': record.get('agent_process_termination', 'NOT_VERIFIED') if record else 'NOT_VERIFIED',
+            'runner_exit_status': record.get('runner_exit_status', 'NOT_AVAILABLE') if record else 'NOT_AVAILABLE',
+            'process_cleanup': record.get('process_cleanup', 'NOT_VERIFIED') if record else 'NOT_VERIFIED',
+            'final_attempt_classification': record.get('final_attempt_classification', 'NOT_AVAILABLE') if record else 'NOT_AVAILABLE',
+            'evidence_preservation': {'verified': valid, 'artifacts': artifacts},
             'result': 'PASS' if valid and return_code == 0 else (
                 'FAIL' if record and record.get('result') == 'FAIL' else 'NOT_VERIFIED'
             ),
@@ -322,6 +343,20 @@ def run_boundary_interruption(evidence, env, commit, boundary_id, timeout):
         and marker.get('result') == 'BOUNDARY_REACHED'
     )
     result = 'PASS' if valid else ('FAIL' if triggered else 'NOT_VERIFIED')
+    return_code = proc.returncode
+    termination_signal = -return_code if return_code is not None and return_code < 0 else None
+    classifications = {
+        'before_first_provider_dispatch': 'NOT_STARTED_NO_PROVIDER_REQUEST',
+        'after_ingress_before_completed_egress': 'INTERRUPTED_BEFORE_DISPATCH',
+        'after_admission_before_dispatch': 'ADMITTED_NOT_DISPATCHED_UNSETTLED',
+        'after_response_before_usage_settlement': 'RESPONSE_RECEIVED_USAGE_UNSETTLED',
+        'after_task_before_final_manifest': 'TASK_ACCEPTED_ATTEMPT_MANIFEST_MISSING',
+    }
+    termination = (
+        'Codex task exited normally; supervisor terminated campaign worker'
+        if boundary_id == 'after_task_before_final_manifest'
+        else 'Codex not started in this boundary worker; supervisor terminated worker'
+    )
     record = {
         'boundary_id': boundary_id,
         'injection_boundary': marker.get('phase', boundary_id) if marker else 'NOT_EXERCISED',
@@ -332,6 +367,13 @@ def run_boundary_interruption(evidence, env, commit, boundary_id, timeout):
         'rejected_admissions': (marker or {}).get('rejected_admissions'),
         'settlement': (marker or {}).get('settlement', 'NOT_AVAILABLE'),
         'process_cleanup': 'VERIFIED' if cleanup_verified else 'NOT_VERIFIED',
+        'agent_process_termination': termination,
+        'runner_exit_status': {
+            'exit_code': return_code,
+            'termination_signal': signal.Signals(termination_signal).name if termination_signal else None,
+            'signaled_process_groups': (cleanup or {}).get('signaled_process_groups', []),
+        },
+        'final_attempt_classification': classifications[boundary_id],
         'evidence_preservation': {
             'status': 'PRESERVED' if marker and files else 'NOT_VERIFIED',
             'directory': str(boundary_root), 'files': files,

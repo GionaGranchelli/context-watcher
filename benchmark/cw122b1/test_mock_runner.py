@@ -86,13 +86,13 @@ class MockRunnerTests(unittest.TestCase):
         self.assertNotIn('private-session-id', repr(aggregate))
         self.assertNotIn('/private/codex', repr(aggregate))
 
-    @unittest.skipUnless(os.name == 'posix', 'process-group cancellation requires POSIX')
-    def test_timeout_kills_codex_descendant_process_group(self):
+    @unittest.skipUnless(os.name == 'posix' and Path('/proc').is_dir(), 'nested process groups require Linux /proc')
+    def test_timeout_kills_codex_nested_process_group(self):
         with tempfile.TemporaryDirectory(prefix='cw122b1-cancel-') as directory:
             pid_file = Path(directory) / 'child.pid'
             script = (
                 'import subprocess,sys,time; '
-                f'p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"]); '
+                f'p=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"],start_new_session=True); '
                 f'open({str(pid_file)!r},"w").write(str(p.pid)); time.sleep(60)'
             )
             with self.assertRaises(subprocess.TimeoutExpired):

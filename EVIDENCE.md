@@ -2,7 +2,7 @@
 
 ## CW-122B1: Codex CLI mock qualification
 
-[Qualification report](docs/CW-122B1-CODEX-MOCK-QUALIFICATION.md). The installed Codex CLI completed 12 counterbalanced attempts and 48 requests through the authenticated Context-Watcher proxy to an in-process loopback mock. Full egress and ledger checks, fixture oracles, resume lifecycle and pruning exposure passed. Fixture repairs and usage were scripted, so correctness advantage and product value remain NOT_EVALUATED. No provider inference, spend, production server changes, or changes to the frozen CW-122A campaign.
+[Qualification report](docs/CW-122B1-CODEX-MOCK-QUALIFICATION.md) and [sanitized aggregate](benchmark/cw122b1/mock-aggregate.json). On Codex CLI 0.166.0, 12 counterbalanced attempts completed 48 requests through the authenticated Context-Watcher proxy to an in-process loopback mock. Full egress and ledger checks, fixture oracles, resume lifecycle, analytics-off metadata and pruning exposure passed. Fixture repairs and usage were scripted, so correctness advantage and product value remain NOT_EVALUATED. Raw evidence remains private and outside the checkout. No provider inference, spend, production server changes, or changes to the frozen CW-122A campaign.
 
 ## CW-122A: pruning-only offline readiness
 

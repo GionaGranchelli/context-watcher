@@ -11,3 +11,5 @@ The evidence directory must be empty, outside the checkout, and mode `0700`. Raw
 The ignored Rust test is intentionally launched through this runner. Default CI runs the deterministic redirect regression and normal tests, but does not require a local Codex installation or run the mock campaign.
 
 See [the qualification report](../../docs/CW-122B1-CODEX-MOCK-QUALIFICATION.md) for scope, results, limitations and the live gate.
+
+The accepted host run's [sanitized aggregate](mock-aggregate.json) is safe to commit. It contains hashes and synthetic mock telemetry, not raw conversations.

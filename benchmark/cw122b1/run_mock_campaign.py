@@ -59,19 +59,46 @@ def run_bounded(command, cwd, env, timeout):
         output, _ = proc.communicate(timeout=timeout)
         return proc.returncode, output
     except subprocess.TimeoutExpired as exc:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        kill_process_tree(proc.pid)
         output, _ = proc.communicate()
         raise subprocess.TimeoutExpired(command, timeout, output=output) from exc
     except BaseException:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        kill_process_tree(proc.pid)
         proc.communicate()
         raise
+
+
+def kill_process_tree(root_pid):
+    descendants = {root_pid}
+    groups = set()
+    proc_root = Path('/proc')
+    if proc_root.is_dir():
+        parents = {}
+        groups_by_pid = {}
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                fields = (entry / 'stat').read_text().split(') ', 1)[1].split()
+                parents[int(entry.name)] = int(fields[1])
+                groups_by_pid[int(entry.name)] = int(fields[2])
+            except (OSError, ValueError, IndexError):
+                continue
+        changed = True
+        while changed:
+            changed = False
+            for pid, parent in parents.items():
+                if parent in descendants and pid not in descendants:
+                    descendants.add(pid)
+                    changed = True
+        groups.update(groups_by_pid[pid] for pid in descendants if pid in groups_by_pid)
+    if not groups:
+        groups.add(root_pid)
+    for group in groups:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 
 def public_aggregate(manifest):
@@ -125,6 +152,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--evidence-dir', required=True, type=Path)
     args = parser.parse_args(argv)  # There is deliberately no --live mode.
+    if not Path('/proc').is_dir():
+        raise SystemExit('bounded nested-process cleanup requires Linux /proc')
     evidence = prepare_evidence(args.evidence_dir)
     env = build_environment(os.environ)
     codex = shutil.which('codex', path=env.get('PATH'))

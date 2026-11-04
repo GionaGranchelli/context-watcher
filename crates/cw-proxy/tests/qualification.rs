@@ -2176,6 +2176,131 @@ fn save_cw122b1_raw_evidence(
     }
 }
 
+struct PartialCodexEvidence {
+    root: PathBuf,
+    label: String,
+    session_id: String,
+    store: CwStore,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
+    responses: Arc<Mutex<Vec<CapturedResponse>>>,
+    complete: bool,
+}
+
+impl PartialCodexEvidence {
+    fn complete(&mut self) {
+        self.complete = true;
+    }
+}
+
+impl Drop for PartialCodexEvidence {
+    fn drop(&mut self) {
+        if self.complete {
+            return;
+        }
+        let directory = self.root.join("failed").join(&self.label);
+        create_private_dir(&self.root.join("failed"));
+        create_private_dir(&directory);
+        let turns = self.store.list_turns(&self.session_id).unwrap_or_default();
+        for (index, turn) in turns.iter().enumerate() {
+            if let Ok(Some(bytes)) = self.store.get_wire_request(&turn.id) {
+                let _ = write_private_file_result(
+                    &directory.join(format!("ingress_{index:02}.json")),
+                    &bytes,
+                );
+            }
+            if let Ok(Some(bytes)) = self.store.get_wire_egress(&turn.id) {
+                let _ = write_private_file_result(
+                    &directory.join(format!("egress_{index:02}.json")),
+                    &bytes,
+                );
+            }
+        }
+        if let Ok(captured) = self.captured.lock() {
+            for (index, request) in captured.iter().enumerate() {
+                let _ = write_private_file_result(
+                    &directory.join(format!("provider_request_{index:02}.json")),
+                    &request.body,
+                );
+            }
+        }
+        if let Ok(responses) = self.responses.lock() {
+            for (index, response) in responses.iter().enumerate() {
+                let _ = write_private_file_result(
+                    &directory.join(format!("provider_response_{index:02}.bin")),
+                    &response.body,
+                );
+            }
+        }
+        let status = json!({
+            "status":"INCOMPLETE_OR_FAILED",
+            "session_id":self.session_id,
+            "persisted_turns":turns.len(),
+            "captured_provider_requests":self.captured.lock().map(|items| items.len()).unwrap_or(0),
+            "captured_provider_responses":self.responses.lock().map(|items| items.len()).unwrap_or(0),
+        });
+        if let Ok(bytes) = serde_json::to_vec_pretty(&status) {
+            let _ = write_private_file_result(&directory.join("status.json"), &bytes);
+        }
+    }
+}
+
+fn write_private_file_result(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        create_private_dir(parent);
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    use std::io::Write;
+    let mut file = options.open(path)?;
+    file.write_all(bytes)
+}
+
+#[test]
+fn test_cw122b1_failed_attempt_preserves_partial_wire_evidence() {
+    let root = std::env::temp_dir().join(format!("cw122b1-partial-{}", uuid::Uuid::new_v4()));
+    create_private_dir(&root);
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let store = CwStore::open_in_memory().unwrap();
+    let captured = Arc::new(Mutex::new(vec![CapturedRequest {
+        path: "/v1/responses".into(),
+        headers: HeaderMap::new(),
+        body: br#"{"input":[]}"#.to_vec(),
+        json_body: Some(json!({"input":[]})),
+    }]));
+    let responses = Arc::new(Mutex::new(vec![CapturedResponse {
+        status: 200,
+        body: b"data: partial".to_vec(),
+    }]));
+    let evidence = PartialCodexEvidence {
+        root: root.clone(),
+        label: "f1-r1_M1_session".into(),
+        session_id,
+        store,
+        captured,
+        responses,
+        complete: false,
+    };
+    drop(evidence);
+    let failed = root.join("failed/f1-r1_M1_session");
+    assert_eq!(
+        std::fs::read(failed.join("provider_request_00.json")).unwrap(),
+        br#"{"input":[]}"#
+    );
+    assert_eq!(
+        std::fs::read(failed.join("provider_response_00.bin")).unwrap(),
+        b"data: partial"
+    );
+    let status: Value =
+        serde_json::from_slice(&std::fs::read(failed.join("status.json")).unwrap()).unwrap();
+    assert_eq!(status["status"], "INCOMPLETE_OR_FAILED");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 #[ignore = "CW-122B1 local Codex mock campaign; no provider access; run benchmark/cw122b1/run_mock_campaign.py"]
 async fn test_cw122b1_codex_mock_campaign() {
@@ -2242,8 +2367,6 @@ async fn test_cw122b1_codex_mock_campaign() {
             0o600
         );
     }
-    let evidence_dir = Some(evidence_dir.as_path());
-
     let source_files: BTreeMap<_, _> = [
         "campaign.json",
         "trace-f1.json",
@@ -2341,6 +2464,15 @@ async fn test_cw122b1_codex_mock_campaign() {
                 true,
             )
             .await;
+            let mut partial_evidence = PartialCodexEvidence {
+                root: evidence_dir.clone(),
+                label: format!("{pair_id}_{mode}_{session_id}"),
+                session_id: session_id.clone(),
+                store: f.store.clone(),
+                captured: f.mock.captured.clone(),
+                responses: f.mock.responses.clone(),
+                complete: false,
+            };
             f.store
                 .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
                     enabled: mode == "M2",
@@ -2508,7 +2640,13 @@ async fn test_cw122b1_codex_mock_campaign() {
             assert_eq!(turns.len(), captures.len());
             assert_eq!(responses.len(), captures.len());
             assert_eq!(guard.session_request_count(&session_id), captures.len());
-            save_cw122b1_raw_evidence(evidence_dir, &session_id, &turns, &f.store, &responses);
+            save_cw122b1_raw_evidence(
+                Some(evidence_dir.as_path()),
+                &session_id,
+                &turns,
+                &f.store,
+                &responses,
+            );
             let mut verified_prunes = 0usize;
             let mut request_records = Vec::new();
             let mut unique_tool_calls = BTreeSet::new();
@@ -2659,12 +2797,10 @@ async fn test_cw122b1_codex_mock_campaign() {
                     "proxy stub leaked into Codex's persisted transcript"
                 );
                 rollout_hashes.push(digest_bytes(&bytes));
-                if let Some(root) = evidence_dir {
-                    write_private_file(
-                        &root.join(format!("raw/{session_id}/rollout_{index:02}.jsonl")),
-                        &bytes,
-                    );
-                }
+                write_private_file(
+                    &evidence_dir.join(format!("raw/{session_id}/rollout_{index:02}.jsonl")),
+                    &bytes,
+                );
             }
 
             let duration_ms = started.elapsed().as_millis();
@@ -2705,12 +2841,11 @@ async fn test_cw122b1_codex_mock_campaign() {
                 "transcript":{"files":rollouts.len(),"sha256":rollout_hashes,"stub_absent":true,"source_fixture_unchanged":true},
                 "status":"SYNTHETIC_MOCK_EXECUTION_ACCEPTED",
             });
-            if let Some(root) = evidence_dir {
-                write_private_file(
-                    &root.join(format!("attempts/{pair_id}_{mode}.json")),
-                    &(serde_json::to_vec_pretty(&report).unwrap()),
-                );
-            }
+            write_private_file(
+                &evidence_dir.join(format!("attempts/{pair_id}_{mode}.json")),
+                &(serde_json::to_vec_pretty(&report).unwrap()),
+            );
+            partial_evidence.complete();
             attempt_summaries.push(report);
 
             drop(f);
@@ -2766,12 +2901,10 @@ async fn test_cw122b1_codex_mock_campaign() {
         "product_value":"NOT_EVALUATED",
         "attempts":attempt_summaries,
     });
-    if let Some(root) = evidence_dir {
-        write_private_file(
-            &root.join("manifest.json"),
-            &serde_json::to_vec_pretty(&manifest).unwrap(),
-        );
-    }
+    write_private_file(
+        &evidence_dir.join("manifest.json"),
+        &serde_json::to_vec_pretty(&manifest).unwrap(),
+    );
     println!("CW122B1_MOCK_CAMPAIGN: {}", serde_json::to_string(&json!({"status":manifest["status"],"runs":manifest["runs"],"requests":manifest["requests"],"provider_spend":0,"product_value":"NOT_EVALUATED"})).unwrap());
 }
 

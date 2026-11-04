@@ -32,6 +32,7 @@ TEST = [
     'f1_', '--', '--nocapture',
 ]
 PYTHON_TEST = ['python3', '-B', 'benchmark/cw122b1/test_mock_runner.py']
+CW122A_TEST = ['python3', '-B', '-m', 'unittest', 'discover', '-s', 'benchmark/cw122a', '-p', 'test_campaign.py']
 PARTIAL_TEST = [
     'cargo', 'test', '--offline', '--locked', '-p', 'cw-proxy', '--test', 'qualification',
     'test_cw122b1_failed_attempt_preserves_partial_wire_evidence', '--', '--exact', '--nocapture',
@@ -212,7 +213,10 @@ def main(argv=None):
     started = time.monotonic()
     outputs = []
     return_code = 0
-    commands = [('LAYER_A_RUST', TEST), ('PARTIAL_EVIDENCE', PARTIAL_TEST), ('RUNNER_TESTS', PYTHON_TEST)]
+    commands = [
+        ('LAYER_A_RUST', TEST), ('PARTIAL_EVIDENCE', PARTIAL_TEST),
+        ('CW122A_REGRESSION', CW122A_TEST), ('RUNNER_TESTS', PYTHON_TEST),
+    ]
     codex_path = shutil.which('codex', path=env.get('PATH'))
     codex_version = 'NOT_AVAILABLE'
     if codex_path:

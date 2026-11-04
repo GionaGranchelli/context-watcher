@@ -4,7 +4,7 @@ Verdict: **offline treatment and analysis controls pass; live execution is NO-GO
 
 Validation: 282 Rust tests passed, 19 ignored; 17 CW-122A Python tests passed; workspace Clippy and formatting passed. The 15 legacy admission tests, existing offline lifecycle fixture and 12 Hermes plugin tests passed. Web code is unchanged, so local web checks were not repeated. Ignored harness-binary/live suites were not invoked.
 
-[Compact rehearsal results and raw-artifact hashes](../.audit/cw122a/rehearsal.json), [validation record](../.audit/cw122a/validation.json), and [append-only decision trail](../.audit/cw122a/decisions.tsv) retain the evidence. Standalone CLI reanalysis is byte-identical. A separate gpt-6-astra review reproduced the initial oracle/early-abort/path defects, verified their corrections and the final hashes, and found no remaining offline code/readiness flags. That review is not independent human approval and did not rerun the full suites.
+[Compact rehearsal results and raw-artifact hashes](../.audit/cw122a/rehearsal.json), [validation record](../.audit/cw122a/validation.json), [offline host versions](../.audit/cw122a/environment.json), and [append-only decision trail](../.audit/cw122a/decisions.tsv) retain the evidence. Standalone CLI reanalysis is byte-identical. A separate gpt-6-astra review reproduced the initial oracle/early-abort/path defects, verified their corrections and the final hashes, and found no remaining offline code/readiness flags. That review is not independent human approval and did not rerun the full suites.
 
 ## Evidence and gates
 

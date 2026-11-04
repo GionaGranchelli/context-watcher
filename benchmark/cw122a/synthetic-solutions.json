@@ -1,0 +1,12 @@
+{
+  "scope": "SIMULATION_ONLY; predefined repairs, never inserted into model prompts",
+  "solutions": {
+    "f1": {
+      "retry.py": "\"\"\"HTTP job retry scheduling; public function signature must remain stable.\"\"\"\ndef retry_delays(attempts, base=0.25, cap=10.0):\n    if attempts < 0 or base <= 0 or cap < base:\n        raise ValueError(\"invalid retry bounds\")\n    return [min(cap, base * (2 ** index)) for index in range(attempts)]\n"
+    },
+    "f2": {
+      "storage.py": "\"\"\"In-memory storage used by the namespace cache service.\"\"\"\nclass Storage:\n    def __init__(self):\n        self.entries = {}\n\n    def put(self, namespace, key, value, expires):\n        self.entries[(namespace, key)] = (value, expires)\n\n    def get(self, namespace, key, now, default=None):\n        entry = self.entries.get((namespace, key))\n        if entry is None or entry[1] <= now:\n            return default\n        return entry[0]\n",
+      "service.py": "from storage import Storage\n\nclass Cache:\n    def __init__(self, clock):\n        self.clock = clock\n        self.storage = Storage()\n\n    def put(self, namespace, key, value, ttl):\n        if ttl < 0:\n            raise ValueError(\"negative TTL\")\n        self.storage.put(namespace, key, value, self.clock() + ttl)\n\n    def get(self, namespace, key, default=None):\n        return self.storage.get(namespace, key, self.clock(), default)\n"
+    }
+  }
+}

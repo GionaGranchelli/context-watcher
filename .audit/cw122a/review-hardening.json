@@ -1,0 +1,27 @@
+{
+  "scope": "OFFLINE_SYNTHETIC_REVIEW_HARDENING",
+  "inference_calls": 0,
+  "python_tests": 20,
+  "proxy_tests": 3,
+  "clippy": "PASS",
+  "formatting": "PASS",
+  "valid_pairs": 6,
+  "product_value": "NOT_EVALUATED",
+  "live_admission": "NO_GO; no authorization or qualified live adapter",
+  "freeze_sha256": "01eb953849498db57aeca96115080f85f1a4c52fb5464ddbf31b2edff0b9e0d2",
+  "cli_reanalysis_identical": true,
+  "artifacts_sha256": {
+    "wire.json": "ec916102212cfb4a168ce1dba48901a13d8997b341ff0b793a9db91743028f4f",
+    "abstentions.json": "eba95ac2e7d6eb6dc0341be1a6730897d677b36c07d6b6413f0061468b080a47",
+    "runs.json": "6a6e066b99010e22384d0cb36aed67c0e87093aac4af584845fc7568a4b6f8af",
+    "analysis.json": "ce3ee12c9a66b2c4a33c0569e063fb9d51edb2c946cdace2e260178af68de8f3",
+    "manifest.json": "7b4a282bb8a9d7b12eb97afb3fd076d02a566d24669a905a716ac1df470c36e6"
+  },
+  "changes": [
+    "valid control token",
+    "minimal subprocess environment allowlist",
+    "strict schema and independent negative tests",
+    "exception-safe sys.path"
+  ],
+  "review": "gpt-6-astra: no code flags; not OS sandbox or human approval"
+}

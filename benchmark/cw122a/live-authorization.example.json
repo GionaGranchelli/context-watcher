@@ -1,0 +1,21 @@
+{
+  "campaign_id": "CW-122B",
+  "authorization_id": "UNAPPROVED_TEMPLATE",
+  "approved_by": "",
+  "approval_reference": "",
+  "issued_at": null,
+  "expires_at": null,
+  "provider": "NOT_SELECTED",
+  "model": "NOT_SELECTED",
+  "endpoint": "NOT_SELECTED",
+  "campaign_sha256": "REQUIRED_CURRENT_HASH",
+  "runner_freeze_sha256": "REQUIRED_CURRENT_HASH",
+  "max_runs": 12,
+  "max_provider_requests": 360,
+  "max_seconds": 7200,
+  "spend_ceiling_usd": null,
+  "accept_reservation_overrun": false,
+  "credential_file": "REQUIRED_PRIVATE_0600_FILE",
+  "evidence_dir": "REQUIRED_PRIVATE_0700_DIRECTORY_OUTSIDE_CHECKOUT",
+  "credentials_handling": "private_file_outside_agent_environment"
+}

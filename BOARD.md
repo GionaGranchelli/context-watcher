@@ -7,7 +7,11 @@
 
 ---
 
-## CW-121C2 — In Review
+## CW-122A — In Review
+
+Frozen six-pair pruning-only campaign, real proxy-to-mock isolation tests, independent oracles, matched analyzer and closed live admission prepared. [Readiness report](docs/CW-122A-READINESS.md). Offline gates pass; CW-122B adapter/environment/fresh-authorization gates remain unverified or closed. No inference or live authorization.
+
+## CW-121C2 — Merged
 
 Daemon-backed human TUI consent controls and read-only MCP policy inspection implemented for independent review. Deterministic and scripted terminal checks passed. No inference, new authorization model, or automatic merge. See [workflow, evidence and security inventory](docs/CW-121C2-TUI-MCP-CONTROLS.md).
 

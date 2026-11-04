@@ -29,6 +29,8 @@ tracing.workspace = true
 [dev-dependencies]
 blake3.workspace = true
 rusqlite.workspace = true
+libc = "0.2"
+sha2 = "0.11"
 
 [[test]]
 name = "r11a_qualification"

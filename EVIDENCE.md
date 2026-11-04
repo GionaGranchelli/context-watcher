@@ -1,8 +1,12 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## CW-122B1: Codex CLI mock qualification
+
+[Qualification report](docs/CW-122B1-CODEX-MOCK-QUALIFICATION.md) and [sanitized aggregate](benchmark/cw122b1/mock-aggregate.json). The SHA-256-corrected run at `9525252be75be1d1e04825b5fc52404b10b316c8` used Codex CLI 0.166.0: 12 counterbalanced attempts, 48 requests, and 12 verified M2 transformations through the authenticated proxy to an in-process loopback mock. Independently recomputed SHA-256 digests match all 144 request/egress/response artifacts, 12 transcripts, and the campaign file. Fixture repairs and usage were scripted, so correctness advantage and product value remain NOT_EVALUATED. Raw evidence remains private outside the checkout. No provider inference, spend, production server changes, or changes to the frozen CW-122A campaign.
+
 ## CW-122A: pruning-only offline readiness
 
-[Preregistration](docs/CW-122A-PREREGISTRATION.md) and [readiness gates](docs/CW-122A-READINESS.md) define six matched M1/M2 pairs across two task families. A real proxy-to-mock boundary verifies exact historical PruneOrStub-only egress and its ledger; external oracles and matched analysis are rehearsed with synthetic repairs/usage. Product value is NOT_EVALUATED. Live adapter, actual telemetry/cache fairness, fresh spend authorization and native M0 remain unqualified or closed. No inference, spending, production changes or historical rewrites.
+[Preregistration](docs/CW-122A-PREREGISTRATION.md) and [readiness gates](docs/CW-122A-READINESS.md) define six matched M1/M2 pairs across two task families. A real proxy-to-mock boundary verifies exact historical PruneOrStub-only egress and its ledger; external oracles and matched analysis are rehearsed with synthetic repairs/usage. Product value is NOT_EVALUATED. CW-122B live-provider telemetry/cache fairness, fresh spend authorization and native M0 remain unqualified or closed. No inference, spending, production changes or historical rewrites.
 
 ## CW-121C2: TUI and MCP controls
 

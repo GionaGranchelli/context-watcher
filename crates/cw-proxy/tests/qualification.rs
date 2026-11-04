@@ -6,14 +6,23 @@ use axum::{
     routing::{get, post},
 };
 use chrono::Utc;
-use cw_core::{ir::*, validator::validate_protocol_invariants};
+use cw_core::{
+    ir::*,
+    normalizer::parse_request_to_nodes,
+    spend_guard::{SpendGuard, SpendGuardConfig},
+    validator::validate_protocol_invariants,
+};
 use cw_proxy::{DaemonState, build_proxy_router};
 use cw_store::CwStore;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     path::PathBuf,
     process::Command,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -24,11 +33,19 @@ struct CapturedRequest {
     json_body: Option<Value>,
 }
 
+#[derive(Debug, Clone)]
+struct CapturedResponse {
+    status: u16,
+    body: Vec<u8>,
+}
+
 struct MockProvider {
     url: String,
     #[allow(dead_code)]
     port: u16,
     captured: Arc<Mutex<Vec<CapturedRequest>>>,
+    responses: Arc<Mutex<Vec<CapturedResponse>>>,
+    redirect_target: Arc<Mutex<Option<String>>>,
     server_task: tokio::task::JoinHandle<()>,
 }
 
@@ -36,6 +53,10 @@ impl MockProvider {
     async fn start() -> Self {
         let captured = Arc::new(Mutex::new(Vec::<CapturedRequest>::new()));
         let captured_clone = captured.clone();
+        let responses = Arc::new(Mutex::new(Vec::<CapturedResponse>::new()));
+        let responses_clone = responses.clone();
+        let redirect_target = Arc::new(Mutex::new(None::<String>));
+        let redirect_target_clone = redirect_target.clone();
 
         let app = Router::new()
             .route(
@@ -92,9 +113,39 @@ impl MockProvider {
                 "/v1/responses",
                 post({
                     let captured = captured_clone.clone();
+                    let responses = responses_clone.clone();
+                    let redirect_target = redirect_target_clone.clone();
                     move |headers: HeaderMap, body: axum::body::Bytes| {
                         let captured = captured.clone();
-                        async move { handle_mock_responses(headers, body, captured).await }
+                        let responses = responses.clone();
+                        let redirect_target = redirect_target.clone();
+                        async move {
+                            let response = if headers.contains_key("x-test-redirect") {
+                                captured.lock().unwrap().push(CapturedRequest {
+                                    path: "/v1/responses".into(),
+                                    headers: headers.clone(),
+                                    body: body.to_vec(),
+                                    json_body: serde_json::from_slice(&body).ok(),
+                                });
+                                let target = redirect_target.lock().unwrap().clone().unwrap();
+                                Response::builder()
+                                    .status(StatusCode::TEMPORARY_REDIRECT)
+                                    .header("location", target)
+                                    .body(Body::empty())
+                                    .unwrap()
+                            } else {
+                                handle_mock_responses(headers, body, captured).await
+                            };
+                            let (parts, body) = response.into_parts();
+                            let bytes = axum::body::to_bytes(body, 16 * 1024 * 1024)
+                                .await
+                                .expect("mock Responses body is bounded");
+                            responses.lock().unwrap().push(CapturedResponse {
+                                status: parts.status.as_u16(),
+                                body: bytes.to_vec(),
+                            });
+                            Response::from_parts(parts, Body::from(bytes))
+                        }
                     }
                 }),
             )
@@ -189,8 +240,16 @@ impl MockProvider {
             url: format!("http://127.0.0.1:{port}"),
             port,
             captured,
+            responses,
+            redirect_target,
             server_task,
         }
+    }
+}
+
+impl Drop for MockProvider {
+    fn drop(&mut self) {
+        self.server_task.abort();
     }
 }
 
@@ -255,10 +314,105 @@ async fn handle_mock_chat_completion(
     }
 }
 
-impl Drop for MockProvider {
-    fn drop(&mut self) {
-        self.server_task.abort();
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn cw122b1_diagnostic_command(family: &str) -> String {
+    let script = if family == "f1" {
+        "import os; from retry import retry_delays; cases=[(5,0.25,2.0),(3,1,4),(-1,1,4)]; [print((a,b,c), retry_delays(a,b,c)) for a,b,c in cases]; print('secret-env-present', any(k in os.environ for k in ('CW_CONTROL_TOKEN','OPENAI_API_KEY','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY')))"
+    } else {
+        "import os; from storage import Storage; s=Storage(); s.put('red','k','v',5); print('cross-namespace',s.get('blue','k',0)); print('at-expiry',s.get('red','k',5)); print('negative-ttl-check-is-not-implemented'); print('secret-env-present', any(k in os.environ for k in ('CW_CONTROL_TOKEN','OPENAI_API_KEY','HTTP_PROXY','HTTPS_PROXY','ALL_PROXY')))"
+    };
+    format!("python3 -B -c {}", shell_quote(script))
+}
+
+fn cw122b1_solution_command(family: &str) -> String {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmark/cw122a");
+    let solutions: Value = serde_json::from_slice(
+        &std::fs::read(root.join("synthetic-solutions.json")).expect("frozen mock solutions"),
+    )
+    .expect("valid frozen mock solutions");
+    let mut commands = Vec::new();
+    for (name, content) in solutions["solutions"][family]
+        .as_object()
+        .expect("family solution object")
+    {
+        let content = content.as_str().expect("solution contents");
+        commands.push(format!(
+            "cat > {} <<'CW122B1_EOF'\n{}\nCW122B1_EOF",
+            shell_quote(name),
+            content
+        ));
     }
+    commands.join("\n")
+}
+
+fn codex_tool_response(call_id: &str, command: &str, turn: usize, is_stream: bool) -> Response {
+    let arguments = serde_json::to_string(&json!({"cmd": command})).expect("mock tool arguments");
+    let item_id = format!("cw122b1_fc_{turn}");
+    let response_id = format!("cw122b1_resp_{turn}");
+    let usage = if turn.is_multiple_of(2) {
+        json!({"input_tokens": 120 + turn as u64, "output_tokens": 20, "total_tokens": 140 + turn as u64})
+    } else {
+        json!({"input_tokens": 120 + turn as u64, "input_tokens_details":{"cached_tokens": 0}, "output_tokens": 20, "total_tokens": 140 + turn as u64})
+    };
+    let output = json!({"id":item_id,"type":"function_call","call_id":call_id,"name":"exec_command","arguments":arguments});
+    if !is_stream {
+        return Json(json!({"id":response_id,"output":[output],"usage":usage})).into_response();
+    }
+    let events = [
+        json!({"type":"response.created","response":{"id":response_id,"status":"in_progress"}}),
+        json!({"type":"response.output_item.added","output_index":0,"item":{"id":item_id,"type":"function_call","call_id":call_id,"name":"exec_command","arguments":""}}),
+        json!({"type":"response.function_call_arguments.delta","output_index":0,"call_id":call_id,"delta":arguments}),
+        json!({"type":"response.function_call_arguments.done","output_index":0,"call_id":call_id,"arguments":arguments}),
+        json!({"type":"response.output_item.done","output_index":0,"item":output}),
+        json!({"type":"response.completed","response":{"id":response_id,"status":"completed","output":[output],"usage":usage}}),
+    ];
+    let mut body = String::new();
+    for event in events {
+        body.push_str(&format!(
+            "data: {}\n\n",
+            serde_json::to_string(&event).expect("mock event")
+        ));
+    }
+    body.push_str("data: [DONE]\n\n");
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(body))
+        .expect("mock SSE response")
+}
+
+fn codex_text_response(text: &str, response_id: &str, is_stream: bool) -> Response {
+    let item = json!({"id":format!("{response_id}_item"),"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]});
+    let usage = json!({"input_tokens":160,"input_tokens_details":{"cached_tokens":32},"output_tokens":8,"total_tokens":168});
+    if !is_stream {
+        return Json(json!({"id":response_id,"output":[item],"usage":usage})).into_response();
+    }
+    let events = [
+        json!({"type":"response.created","response":{"id":response_id,"status":"in_progress"}}),
+        json!({"type":"response.output_item.added","output_index":0,"item":{"id":format!("{response_id}_item"),"type":"message","role":"assistant","content":[]}}),
+        json!({"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}),
+        json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":text}),
+        json!({"type":"response.output_text.done","output_index":0,"content_index":0,"text":text}),
+        json!({"type":"response.content_part.done","output_index":0,"content_index":0,"part":{"type":"output_text","text":text}}),
+        json!({"type":"response.output_item.done","output_index":0,"item":item}),
+        json!({"type":"response.completed","response":{"id":response_id,"status":"completed","output":[item],"usage":usage}}),
+    ];
+    let mut body = String::new();
+    for event in events {
+        body.push_str(&format!(
+            "data: {}\n\n",
+            serde_json::to_string(&event).expect("mock event")
+        ));
+    }
+    body.push_str("data: [DONE]\n\n");
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/event-stream")
+        .body(Body::from(body))
+        .expect("mock SSE response")
 }
 
 async fn handle_mock_responses(
@@ -284,6 +438,47 @@ async fn handle_mock_responses(
 
     if body_str.contains("CW_FORCE_UPSTREAM_502") {
         return (StatusCode::BAD_GATEWAY, "Upstream mock gateway failure").into_response();
+    }
+
+    if body_str.contains("retry_delays") || body_str.contains("namespace/key pairs") {
+        let family = if body_str.contains("retry_delays") {
+            "f1"
+        } else {
+            "f2"
+        };
+        let implementing = body_str.contains("Implement the requested change now.");
+        let output_call = if implementing {
+            "cw122b1_patch"
+        } else {
+            "cw122b1_probe"
+        };
+        let has_output = json_val
+            .as_ref()
+            .and_then(|payload| payload.get("input"))
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items.iter().any(|item| {
+                    item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                        && item.get("call_id").and_then(Value::as_str) == Some(output_call)
+                })
+            });
+        if !implementing && has_output {
+            return codex_text_response("Inspection complete.", "cw122b1_inspected", is_stream);
+        }
+        if implementing && has_output {
+            return codex_text_response("Implementation complete.", "cw122b1_complete", is_stream);
+        }
+        let command = if implementing {
+            cw122b1_solution_command(family)
+        } else {
+            cw122b1_diagnostic_command(family)
+        };
+        return codex_tool_response(
+            output_call,
+            &command,
+            captured.lock().unwrap().len(),
+            is_stream,
+        );
     }
 
     if body_str.contains("CW112_TASK_TURN_1")
@@ -454,6 +649,14 @@ struct QualificationFixture {
 
 impl QualificationFixture {
     async fn setup() -> Self {
+        Self::setup_config(None, None, false).await
+    }
+
+    async fn setup_config(
+        spend_guard: Option<SpendGuard>,
+        private_control_token: Option<String>,
+        capture_wire_egress: bool,
+    ) -> Self {
         let mock = MockProvider::start().await;
         let store = CwStore::open_in_memory().unwrap();
         store
@@ -464,12 +667,16 @@ impl QualificationFixture {
             .unwrap();
 
         let mut state = DaemonState::new(store.clone());
-        if let Ok(tok) = cw_core::control::control_token(false) {
+        if let Some(tok) = private_control_token {
+            state.control_token = tok;
+        } else if let Ok(tok) = cw_core::control::control_token(false) {
             state.control_token = tok;
         }
         state.openai_upstream = mock.url.clone();
         state.anthropic_upstream = mock.url.clone();
         state.deepseek_upstream = mock.url.clone();
+        state.spend_guard = spend_guard;
+        state.capture_wire_egress = capture_wire_egress;
         let control_token = state.control_token.clone();
 
         let app = build_proxy_router(state);
@@ -1113,6 +1320,54 @@ async fn test_core_contract_ac6_control_token_stripped_and_tool_sandboxing() {
 }
 
 #[tokio::test]
+async fn test_cw122b1_proxy_does_not_follow_upstream_redirect() {
+    let f = QualificationFixture::setup().await;
+    let redirect_hits = Arc::new(AtomicUsize::new(0));
+    let hits = redirect_hits.clone();
+    let trap = Router::new().route(
+        "/tripwire",
+        get(move || {
+            let hits = hits.clone();
+            async move {
+                hits.fetch_add(1, Ordering::SeqCst);
+                StatusCode::OK
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let trap_url = format!("http://{}/tripwire", listener.local_addr().unwrap());
+    let trap_task = tokio::spawn(async move { axum::serve(listener, trap).await.unwrap() });
+    *f.mock.redirect_target.lock().unwrap() = Some(trap_url.clone());
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let response = client
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/responses",
+            f.proxy_port
+        ))
+        .header("x-cw-session-id", &session_id)
+        .header("x-cw-control-token", &f.control_token)
+        .header("x-test-redirect", "yes")
+        .json(&json!({"model":"gpt-4o-mini","input":[]}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        response.headers().get("location").unwrap(),
+        trap_url.as_str()
+    );
+    assert_eq!(redirect_hits.load(Ordering::SeqCst), 0);
+    assert_eq!(f.mock.captured.lock().unwrap().len(), 1);
+    trap_task.abort();
+}
+
+#[tokio::test]
 async fn test_core_contract_ac7_original_transcripts_untouched_bit_for_bit() {
     let f = QualificationFixture::setup().await;
     let client = reqwest::Client::new();
@@ -1556,6 +1811,1114 @@ fn find_rollout_files(dir: &std::path::Path) -> Vec<PathBuf> {
         }
     }
     files
+}
+
+fn codex_thread_id_from_rollout(codex_home: &std::path::Path) -> Option<String> {
+    find_rollout_files(&codex_home.join("sessions"))
+        .into_iter()
+        .find_map(|path| {
+            let contents = std::fs::read_to_string(path).ok()?;
+            contents.lines().find_map(|line| {
+                let value: Value = serde_json::from_str(line).ok()?;
+                (value.get("type").and_then(Value::as_str) == Some("session_meta"))
+                    .then(|| {
+                        value
+                            .pointer("/payload/id")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .flatten()
+            })
+        })
+}
+
+fn cw122a_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmark/cw122a")
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[test]
+fn test_cw122b1_sha256_known_vector() {
+    assert_eq!(
+        sha256_hex(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}
+
+#[cfg(unix)]
+fn create_private_dir(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(path).expect("create isolated directory");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .expect("restrict isolated directory");
+}
+
+#[cfg(not(unix))]
+fn create_private_dir(path: &std::path::Path) {
+    std::fs::create_dir_all(path).expect("create isolated directory");
+}
+
+fn write_private_file(path: &std::path::Path, bytes: &[u8]) {
+    if let Some(parent) = path.parent() {
+        create_private_dir(parent);
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    use std::io::Write;
+    let mut file = options.open(path).expect("create private evidence file");
+    file.write_all(bytes).expect("write private evidence file");
+}
+
+struct CodexStep<'a> {
+    binary: &'a std::path::Path,
+    workspace: &'a std::path::Path,
+    home: &'a std::path::Path,
+    codex_home: &'a std::path::Path,
+    temp_dir: &'a std::path::Path,
+    proxy_port: u16,
+    session_id: &'a str,
+    control_token: &'a str,
+}
+
+impl CodexStep<'_> {
+    async fn run(
+        &self,
+        resume_thread: Option<&str>,
+        prompt: &str,
+        timeout: std::time::Duration,
+    ) -> Result<(Value, u128), String> {
+        if timeout.is_zero() {
+            return Err("campaign_or_run_deadline_exceeded".into());
+        }
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let started = tokio::time::Instant::now();
+        let mut cmd = tokio::process::Command::new(self.binary);
+        if resume_thread.is_some() {
+            cmd.args(["exec", "resume"]);
+        } else {
+            cmd.args(["exec"]);
+        }
+        cmd.args([
+            "--json",
+            "--skip-git-repo-check",
+            "--ignore-user-config",
+            "--config",
+            "approval_policy=\"never\"",
+            "--config",
+            "sandbox_mode=\"workspace-write\"",
+            "--config",
+            "sandbox_workspace_write.network_access=false",
+            "--config",
+            "analytics.enabled=false",
+            "--config",
+            "otel.metrics_exporter=\"none\"",
+        ])
+        .args(cw_harnesses::qualification::codex_proxy_config_args(
+            self.proxy_port,
+        ));
+        for key in [
+            "CW_CONTROL_TOKEN",
+            "CW_SESSION_ID",
+            "OPENAI_API_KEY",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+        ] {
+            cmd.args([
+                "--config",
+                &format!("shell_environment_policy.filters.{key}=\"exclude\""),
+            ]);
+        }
+        cmd.args(["-m", "gpt-4o-mini"]);
+        if let Some(thread) = resume_thread {
+            cmd.arg(thread);
+        }
+        cmd.arg(prompt)
+            .current_dir(self.workspace)
+            .env_clear()
+            .env("PATH", path)
+            .env("HOME", self.home)
+            .env("CODEX_HOME", self.codex_home)
+            .env("TMPDIR", self.temp_dir)
+            .env("LANG", "C.UTF-8")
+            .env("LC_ALL", "C.UTF-8")
+            .env("OPENAI_API_KEY", "cw122b1-mock-only-key")
+            .env("CW_SESSION_ID", self.session_id)
+            .env("CW_CONTROL_TOKEN", self.control_token)
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.as_std_mut().process_group(0);
+        }
+        let child = cmd.spawn().map_err(|_| "codex_spawn_failed".to_owned())?;
+        let pid = child.id().unwrap_or_default();
+        match tokio::time::timeout(timeout, child.wait_with_output()).await {
+            Ok(Ok(output)) if output.status.success() => Ok((
+                codex_cli_diagnostics(&output),
+                started.elapsed().as_millis(),
+            )),
+            Ok(Ok(output)) => Err(format!("codex_exit_{}", output.status.code().unwrap_or(-1))),
+            Ok(Err(_)) => Err("codex_wait_failed".into()),
+            Err(_) => {
+                #[cfg(unix)]
+                if pid > 0 {
+                    // The process group includes Codex tool children and must stop with the run.
+                    unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+                }
+                Err("codex_run_deadline_exceeded_and_process_group_killed".into())
+            }
+        }
+    }
+}
+
+fn remaining_codex_timeout(
+    run_started: tokio::time::Instant,
+    campaign_started: tokio::time::Instant,
+) -> std::time::Duration {
+    std::time::Duration::from_secs(600)
+        .saturating_sub(run_started.elapsed())
+        .min(std::time::Duration::from_secs(7200).saturating_sub(campaign_started.elapsed()))
+}
+
+fn cw122_oracle_check(family: &str, workspace: &std::path::Path) -> Value {
+    let root = cw122a_root();
+    let code = "import json,sys; from oracle import check; print(json.dumps(check(sys.argv[1],sys.argv[2],json.load(open(sys.argv[3])))))";
+    let output = Command::new("python3")
+        .args(["-B", "-c", code, family])
+        .arg(workspace)
+        .arg(root.join("campaign.json"))
+        .current_dir(workspace)
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", workspace)
+        .env("PYTHONPATH", &root)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .output()
+        .expect("run independent CW-122A oracle");
+    assert!(
+        output.status.success(),
+        "independent oracle subprocess failed"
+    );
+    serde_json::from_slice(&output.stdout).expect("oracle JSON result")
+}
+
+fn is_function_output(value: &Value, call_id: &str) -> bool {
+    value.get("type").and_then(Value::as_str) == Some("function_call_output")
+        && value.get("call_id").and_then(Value::as_str) == Some(call_id)
+}
+
+fn has_consumed_historical_probe(payload: &Value) -> bool {
+    let Some(input) = payload.get("input").and_then(Value::as_array) else {
+        return false;
+    };
+    let Some(probe_index) = input
+        .iter()
+        .position(|item| is_function_output(item, "cw122b1_probe"))
+    else {
+        return false;
+    };
+    let assistant_after = input.iter().enumerate().any(|(index, item)| {
+        index > probe_index
+            && item.get("type").and_then(Value::as_str) == Some("message")
+            && item.get("role").and_then(Value::as_str) == Some("assistant")
+    });
+    let implementation_prompt_after = input.iter().enumerate().any(|(index, item)| {
+        index > probe_index
+            && item.get("type").and_then(Value::as_str) == Some("message")
+            && item.get("role").and_then(Value::as_str) == Some("user")
+            && item
+                .to_string()
+                .contains("Implement the requested change now.")
+    });
+    assistant_after && implementation_prompt_after
+}
+
+fn verified_tool_output_pointer(
+    payload: &Value,
+    target_pointer: &str,
+    call_id: &str,
+) -> Option<String> {
+    let target = payload.pointer(target_pointer)?;
+    if !is_function_output(target, call_id) {
+        return None;
+    }
+    let output_pointer = format!("{target_pointer}/output");
+    payload
+        .pointer(&output_pointer)?
+        .is_string()
+        .then_some(output_pointer)
+}
+
+fn codex_analytics_enabled(payload: &Value) -> Option<bool> {
+    let metadata = payload
+        .pointer("/client_metadata/x-codex-turn-metadata")?
+        .as_str()?;
+    let metadata: Value = serde_json::from_str(metadata).ok()?;
+    metadata.get("analytics_enabled")?.as_bool()
+}
+
+fn codex_cli_diagnostics(output: &std::process::Output) -> Value {
+    use std::collections::BTreeSet;
+    let mut warnings = BTreeSet::new();
+    let mut tool_error_count = 0u64;
+    for line in output
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .chain(output.stderr.split(|byte| *byte == b'\n'))
+    {
+        let Ok(event) = serde_json::from_slice::<Value>(line) else {
+            continue;
+        };
+        if event.get("type").and_then(Value::as_str) != Some("item.completed") {
+            continue;
+        }
+        let Some(item) = event.get("item") else {
+            continue;
+        };
+        match item.get("type").and_then(Value::as_str) {
+            Some("error") => {
+                let message = item
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                warnings.insert(if message.contains("Model metadata") {
+                    "MODEL_METADATA_FALLBACK"
+                } else {
+                    "CODEX_ERROR_EVENT"
+                });
+            }
+            Some("command_execution")
+                if item
+                    .get("exit_code")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|code| code != 0) =>
+            {
+                tool_error_count += 1;
+            }
+            _ => {}
+        }
+    }
+    json!({
+        "warning_codes": warnings,
+        "tool_error_count": tool_error_count,
+        "retry_count": null,
+        "retry_count_status": "NOT_AVAILABLE",
+    })
+}
+
+fn differing_json_paths(left: &Value, right: &Value) -> Vec<String> {
+    use std::collections::BTreeSet;
+    fn walk(left: &Value, right: &Value, path: &str, out: &mut Vec<String>) {
+        match (left, right) {
+            (Value::Object(left), Value::Object(right)) => {
+                let keys: BTreeSet<_> = left.keys().chain(right.keys()).collect();
+                for key in keys {
+                    let child = format!("{path}/{key}");
+                    match (left.get(key), right.get(key)) {
+                        (Some(a), Some(b)) => walk(a, b, &child, out),
+                        _ => out.push(child),
+                    }
+                    if out.len() >= 12 {
+                        return;
+                    }
+                }
+            }
+            (Value::Array(left), Value::Array(right)) => {
+                if left.len() != right.len() {
+                    out.push(format!("{path}/length"));
+                }
+                for (index, (a, b)) in left.iter().zip(right).enumerate() {
+                    walk(a, b, &format!("{path}/{index}"), out);
+                    if out.len() >= 12 {
+                        return;
+                    }
+                }
+            }
+            _ if left != right => out.push(path.to_owned()),
+            _ => {}
+        }
+    }
+    let mut paths = Vec::new();
+    walk(left, right, "", &mut paths);
+    paths
+}
+
+fn save_cw122b1_raw_evidence(
+    evidence_dir: Option<&std::path::Path>,
+    session_id: &str,
+    turns: &[cw_core::ir::ContextTurn],
+    store: &CwStore,
+    responses: &[CapturedResponse],
+) {
+    let Some(root) = evidence_dir else { return };
+    for (index, turn) in turns.iter().enumerate() {
+        let name = format!("raw/{session_id}/request_{index:02}.json");
+        let ingress = store
+            .get_wire_request(&turn.id)
+            .expect("read captured ingress")
+            .expect("wire ingress present");
+        write_private_file(&root.join(&name), &ingress);
+        let egress = store
+            .get_wire_egress(&turn.id)
+            .expect("read persisted egress")
+            .expect("wire egress present");
+        write_private_file(
+            &root.join(format!("raw/{session_id}/egress_{index:02}.json")),
+            &egress,
+        );
+        if let Some(response) = responses.get(index) {
+            write_private_file(
+                &root.join(format!("raw/{session_id}/response_{index:02}.sse")),
+                &response.body,
+            );
+        }
+    }
+}
+
+struct PartialCodexEvidence {
+    root: PathBuf,
+    label: String,
+    session_id: String,
+    store: CwStore,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
+    responses: Arc<Mutex<Vec<CapturedResponse>>>,
+    complete: bool,
+}
+
+impl PartialCodexEvidence {
+    fn complete(&mut self) {
+        self.complete = true;
+    }
+}
+
+impl Drop for PartialCodexEvidence {
+    fn drop(&mut self) {
+        if self.complete {
+            return;
+        }
+        let directory = self.root.join("failed").join(&self.label);
+        create_private_dir(&self.root.join("failed"));
+        create_private_dir(&directory);
+        let turns = self.store.list_turns(&self.session_id).unwrap_or_default();
+        for (index, turn) in turns.iter().enumerate() {
+            if let Ok(Some(bytes)) = self.store.get_wire_request(&turn.id) {
+                let _ = write_private_file_result(
+                    &directory.join(format!("ingress_{index:02}.json")),
+                    &bytes,
+                );
+            }
+            if let Ok(Some(bytes)) = self.store.get_wire_egress(&turn.id) {
+                let _ = write_private_file_result(
+                    &directory.join(format!("egress_{index:02}.json")),
+                    &bytes,
+                );
+            }
+        }
+        if let Ok(captured) = self.captured.lock() {
+            for (index, request) in captured.iter().enumerate() {
+                let _ = write_private_file_result(
+                    &directory.join(format!("provider_request_{index:02}.json")),
+                    &request.body,
+                );
+            }
+        }
+        if let Ok(responses) = self.responses.lock() {
+            for (index, response) in responses.iter().enumerate() {
+                let _ = write_private_file_result(
+                    &directory.join(format!("provider_response_{index:02}.bin")),
+                    &response.body,
+                );
+            }
+        }
+        let status = json!({
+            "status":"INCOMPLETE_OR_FAILED",
+            "session_id":self.session_id,
+            "persisted_turns":turns.len(),
+            "captured_provider_requests":self.captured.lock().map(|items| items.len()).unwrap_or(0),
+            "captured_provider_responses":self.responses.lock().map(|items| items.len()).unwrap_or(0),
+        });
+        if let Ok(bytes) = serde_json::to_vec_pretty(&status) {
+            let _ = write_private_file_result(&directory.join("status.json"), &bytes);
+        }
+    }
+}
+
+fn write_private_file_result(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        create_private_dir(parent);
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    use std::io::Write;
+    let mut file = options.open(path)?;
+    file.write_all(bytes)
+}
+
+#[test]
+fn test_cw122b1_failed_attempt_preserves_partial_wire_evidence() {
+    let root = std::env::temp_dir().join(format!("cw122b1-partial-{}", uuid::Uuid::new_v4()));
+    create_private_dir(&root);
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let store = CwStore::open_in_memory().unwrap();
+    let captured = Arc::new(Mutex::new(vec![CapturedRequest {
+        path: "/v1/responses".into(),
+        headers: HeaderMap::new(),
+        body: br#"{"input":[]}"#.to_vec(),
+        json_body: Some(json!({"input":[]})),
+    }]));
+    let responses = Arc::new(Mutex::new(vec![CapturedResponse {
+        status: 200,
+        body: b"data: partial".to_vec(),
+    }]));
+    let evidence = PartialCodexEvidence {
+        root: root.clone(),
+        label: "f1-r1_M1_session".into(),
+        session_id,
+        store,
+        captured,
+        responses,
+        complete: false,
+    };
+    drop(evidence);
+    let failed = root.join("failed/f1-r1_M1_session");
+    assert_eq!(
+        std::fs::read(failed.join("provider_request_00.json")).unwrap(),
+        br#"{"input":[]}"#
+    );
+    assert_eq!(
+        std::fs::read(failed.join("provider_response_00.bin")).unwrap(),
+        b"data: partial"
+    );
+    let status: Value =
+        serde_json::from_slice(&std::fs::read(failed.join("status.json")).unwrap()).unwrap();
+    assert_eq!(status["status"], "INCOMPLETE_OR_FAILED");
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "CW-122B1 local Codex mock campaign; no provider access; run benchmark/cw122b1/run_mock_campaign.py"]
+async fn test_cw122b1_codex_mock_campaign() {
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::time::Duration;
+
+    let codex_bin = require_installed_binary("codex");
+    let codex_bin = std::fs::canonicalize(codex_bin).expect("canonical Codex path");
+    let version = Command::new(&codex_bin)
+        .arg("--version")
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .output()
+        .expect("run Codex version")
+        .stdout;
+    let version = String::from_utf8_lossy(&version).trim().to_owned();
+    assert!(
+        version.starts_with("codex-cli "),
+        "Codex version not identified"
+    );
+
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let cwa = cw122a_root();
+    let campaign: Value =
+        serde_json::from_slice(&std::fs::read(cwa.join("campaign.json")).expect("frozen campaign"))
+            .expect("valid frozen campaign");
+    assert_eq!(campaign["pairs"].as_array().map(Vec::len), Some(6));
+    assert_eq!(campaign["runtime"]["max_runs"], 12);
+    assert_eq!(campaign["runtime"]["max_requests_per_run"], 30);
+
+    let evidence_dir = PathBuf::from(
+        std::env::var_os("CW122B1_EVIDENCE_DIR")
+            .expect("run the ignored campaign through benchmark/cw122b1/run_mock_campaign.py"),
+    );
+    let evidence_dir = std::fs::canonicalize(evidence_dir).expect("existing evidence directory");
+    assert!(!evidence_dir.starts_with(std::fs::canonicalize(&repo).unwrap()));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&evidence_dir)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700,
+            "raw evidence directory must be private"
+        );
+    }
+    let entries: Vec<_> = std::fs::read_dir(&evidence_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(entries, [std::ffi::OsString::from("launch.json")]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(evidence_dir.join("launch.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    let source_files: BTreeMap<_, _> = [
+        "campaign.json",
+        "trace-f1.json",
+        "trace-f2.json",
+        "synthetic-solutions.json",
+        "oracles/f1.py",
+        "oracles/f2.py",
+    ]
+    .into_iter()
+    .map(|name| {
+        (
+            name.to_owned(),
+            sha256_hex(&std::fs::read(cwa.join(name)).unwrap()),
+        )
+    })
+    .collect();
+
+    let guard = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 0.20,
+        max_requests_per_session: 30,
+        require_verified_pricing: false,
+        request_reservation_usd: 0.005,
+        ..Default::default()
+    });
+    let campaign_started = tokio::time::Instant::now();
+    let mut attempt_summaries = Vec::new();
+    let mut pair_initial_hashes = BTreeMap::<String, Value>::new();
+    let mut sampling_reference: Option<Value> = None;
+    let mut campaign_request_count = 0usize;
+
+    for pair in campaign["pairs"].as_array().unwrap() {
+        let pair_id = pair["pair_id"].as_str().unwrap();
+        let family = pair["family"].as_str().unwrap();
+        let repetition = pair["repetition"].as_u64().unwrap();
+        let instructions = campaign["tasks"][family]["instructions"].as_str().unwrap();
+        let initial_prompt = format!(
+            "{instructions}\n\nFirst inspect the implementation and run relevant diagnostics. Report what needs fixing without editing files yet."
+        );
+        let task_prompt_hash = sha256_hex(initial_prompt.as_bytes());
+        let implementation_prompt = "Implement the requested change now.";
+
+        for mode in pair["order"].as_array().unwrap() {
+            assert!(
+                campaign_started.elapsed() < Duration::from_secs(7200),
+                "campaign deadline expired"
+            );
+            let mode = mode.as_str().unwrap();
+            let session_id = uuid::Uuid::new_v4().to_string();
+            let control_token = uuid::Uuid::new_v4().simple().to_string();
+            let attempt_root = std::env::temp_dir().join(format!("cw122b1-{session_id}"));
+            create_private_dir(&attempt_root);
+            let home = attempt_root.join("home");
+            let codex_home = attempt_root.join("codex");
+            let temp_dir = attempt_root.join("tmp");
+            let workspace = attempt_root.join("workspace");
+            for path in [&home, &codex_home, &temp_dir, &workspace] {
+                create_private_dir(path);
+            }
+            for entry in std::fs::read_dir(cwa.join("fixtures").join(family)).unwrap() {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_file() {
+                    std::fs::copy(entry.path(), workspace.join(entry.file_name())).unwrap();
+                }
+            }
+            let initial_files: BTreeMap<_, _> = std::fs::read_dir(&workspace)
+                .unwrap()
+                .map(|entry| {
+                    let entry = entry.unwrap();
+                    let bytes = std::fs::read(entry.path()).unwrap();
+                    (
+                        entry.file_name().to_string_lossy().into_owned(),
+                        sha256_hex(&bytes),
+                    )
+                })
+                .collect();
+            assert!(
+                !cw122_oracle_check(family, &workspace)["passed"]
+                    .as_bool()
+                    .unwrap()
+            );
+            if let Some(previous) =
+                pair_initial_hashes.insert(pair_id.to_owned(), json!(initial_files))
+            {
+                assert_eq!(
+                    previous,
+                    json!(initial_files),
+                    "matched arms began from different fixtures"
+                );
+            }
+
+            let spend_guard = guard.clone();
+            let f = QualificationFixture::setup_config(
+                Some(spend_guard),
+                Some(control_token.clone()),
+                true,
+            )
+            .await;
+            let mut partial_evidence = PartialCodexEvidence {
+                root: evidence_dir.clone(),
+                label: format!("{pair_id}_{mode}_{session_id}"),
+                session_id: session_id.clone(),
+                store: f.store.clone(),
+                captured: f.mock.captured.clone(),
+                responses: f.mock.responses.clone(),
+                complete: false,
+            };
+            f.store
+                .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
+                    enabled: mode == "M2",
+                    auto_diet_at_breakpoint: false,
+                    local_model_window_guard: false,
+                    auto_heal_low_health: false,
+                    auto_cache_safe_pin: false,
+                    zero_break_tail_hygiene: false,
+                    auto_sync_to_disk: false,
+                    ..Default::default()
+                })
+                .unwrap();
+            assert!(
+                !f.store
+                    .get_pin_context_policy(&session_id)
+                    .unwrap()
+                    .is_enabled_for(&session_id)
+            );
+            let codex = CodexStep {
+                binary: &codex_bin,
+                workspace: &workspace,
+                home: &home,
+                codex_home: &codex_home,
+                temp_dir: &temp_dir,
+                proxy_port: f.proxy_port,
+                session_id: &session_id,
+                control_token: &control_token,
+            };
+            let started = tokio::time::Instant::now();
+            let (first_diagnostics, first_ms) = codex
+                .run(
+                    None,
+                    &initial_prompt,
+                    remaining_codex_timeout(started, campaign_started),
+                )
+                .await
+            .unwrap_or_else(|error| panic!(
+                "{pair_id}/{mode} initial Codex run failed: {error}; provider_requests={}; responses={:?}; guard_requests={}; killswitch={}; turns={:?}",
+                f.mock.captured.lock().unwrap().len(),
+                f.mock.responses.lock().unwrap().iter().map(|r| r.status).collect::<Vec<_>>(),
+                guard.session_request_count(&session_id),
+                guard.is_killswitch_tripped(),
+                f.store.list_turns(&session_id).unwrap().iter().map(|turn| (&turn.outcome, &turn.observed_usage)).collect::<Vec<_>>()
+            ));
+            let thread_id = codex_thread_id_from_rollout(&codex_home)
+                .expect("Codex persisted native session identity");
+            assert!(!thread_id.is_empty());
+
+            let first_captures = f.mock.captured.lock().unwrap().clone();
+            let first_responses = f.mock.responses.lock().unwrap().clone();
+            let first_turns = f.store.list_turns(&session_id).unwrap();
+            assert!(
+                first_captures.len() >= 2,
+                "Codex did not perform the probe tool round trip"
+            );
+            assert_eq!(first_turns.len(), first_captures.len());
+            assert_eq!(first_responses.len(), first_captures.len());
+            let probe_index = first_captures
+                .iter()
+                .position(|request| {
+                    request
+                        .json_body
+                        .as_ref()
+                        .and_then(|body| body.get("input"))
+                        .and_then(Value::as_array)
+                        .is_some_and(|items| {
+                            items
+                                .iter()
+                                .any(|item| is_function_output(item, "cw122b1_probe"))
+                        })
+                })
+                .expect("completed probe result reached the provider");
+            let probe_raw = f
+                .store
+                .get_wire_request(&first_turns[probe_index].id)
+                .unwrap()
+                .unwrap();
+            let probe_payload: Value =
+                serde_json::from_slice(&probe_raw).expect("probe request JSON");
+            assert!(
+                probe_payload["input"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|item| {
+                        is_function_output(item, "cw122b1_probe")
+                            && item
+                                .get("output")
+                                .is_some_and(|output| !output.to_string().is_empty())
+                    }),
+                "tool result was not completed with output"
+            );
+            assert!(
+                probe_payload["input"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|item| {
+                        is_function_output(item, "cw122b1_probe")
+                            && item["output"]
+                                .as_str()
+                                .is_some_and(|output| output.contains("secret-env-present False"))
+                    }),
+                "Codex tool environment exposed a credential or proxy variable"
+            );
+            let consumed_response = &first_responses[probe_index].body;
+            assert!(String::from_utf8_lossy(consumed_response).contains("Inspection complete."));
+            assert!(first_turns[probe_index].applied_mutation_ids.is_empty());
+
+            let target = parse_request_to_nodes(&probe_payload, ProviderKind::OpenAI, 2)
+                .expect("parse historical Codex probe result")
+                .into_iter()
+                .find(|node| matches!(&node.kind, NodeKind::ToolResult { call_id, .. } if call_id == "cw122b1_probe"))
+                .expect("probe result has a canonical tool-result node");
+            let stub =
+                "[cw:pruned completed diagnostic output; consumed by assistant; original retained]";
+            if mode == "M2" {
+                f.store
+                    .save_mutation(&MutationRule {
+                        id: "cw122b1-historical-prune".into(),
+                        session_id: session_id.clone(),
+                        op: MutationOp::PruneOrStub {
+                            target_fingerprint: Some(target.fingerprint.0.clone()),
+                            target_call_id: Some("cw122b1_probe".into()),
+                            target_json_pointer: Some(target.raw_json_pointer.clone()),
+                            stub_text: stub.into(),
+                        },
+                        status: MutationStatus::Committed,
+                        estimated_saved_tokens: 0,
+                        estimated_kv_break_tokens: 0,
+                        created_at: Utc::now(),
+                    })
+                    .unwrap();
+            }
+
+            let (second_diagnostics, coding_ms) = codex
+                .run(
+                    Some(&thread_id),
+                    implementation_prompt,
+                    remaining_codex_timeout(started, campaign_started),
+                )
+                .await
+                .unwrap_or_else(|error| {
+                    panic!("{pair_id}/{mode} resumed Codex run failed: {error}")
+                });
+            assert_eq!(
+                codex_thread_id_from_rollout(&codex_home).as_deref(),
+                Some(thread_id.as_str())
+            );
+            let acceptance = cw122_oracle_check(family, &workspace);
+            assert!(
+                acceptance["passed"].as_bool().unwrap(),
+                "independent acceptance failed"
+            );
+
+            let captures = f.mock.captured.lock().unwrap().clone();
+            let responses = f.mock.responses.lock().unwrap().clone();
+            let turns = f.store.list_turns(&session_id).unwrap();
+            assert!(captures.len() <= 30, "per-run request cap exceeded");
+            campaign_request_count = campaign_request_count.saturating_add(captures.len());
+            assert!(
+                campaign_request_count <= 360,
+                "fixed 12-run campaign request cap exceeded"
+            );
+            assert_eq!(turns.len(), captures.len());
+            assert_eq!(responses.len(), captures.len());
+            assert_eq!(guard.session_request_count(&session_id), captures.len());
+            save_cw122b1_raw_evidence(
+                Some(evidence_dir.as_path()),
+                &session_id,
+                &turns,
+                &f.store,
+                &responses,
+            );
+            let mut verified_prunes = 0usize;
+            let mut request_records = Vec::new();
+            let mut unique_tool_calls = BTreeSet::new();
+            let mut unique_tool_outputs = BTreeSet::new();
+            for (index, ((captured, response), turn)) in
+                captures.iter().zip(&responses).zip(&turns).enumerate()
+            {
+                assert_eq!(captured.path, "/v1/responses");
+                assert!(response.status == StatusCode::OK.as_u16());
+                assert!(!captured.headers.contains_key("x-cw-control-token"));
+                assert!(!captured.headers.contains_key("x-cw-session-id"));
+                assert!(!String::from_utf8_lossy(&captured.body).contains(&control_token));
+                assert!(!String::from_utf8_lossy(&captured.body).contains("cw122b1-mock-only-key"));
+                let ingress = f.store.get_wire_request(&turn.id).unwrap().unwrap();
+                let persisted = f.store.get_wire_egress(&turn.id).unwrap().unwrap();
+                assert_eq!(
+                    persisted, captured.body,
+                    "persisted egress differs from mock provider request"
+                );
+                assert_eq!(
+                    f.store.get_turn_raw_payload(&turn.id).unwrap().unwrap(),
+                    serde_json::from_slice::<Value>(&ingress).unwrap()
+                );
+                let original: Value = serde_json::from_slice(&ingress).expect("ingress JSON");
+                let actual: Value =
+                    serde_json::from_slice(&captured.body).expect("provider egress JSON");
+                assert_eq!(
+                    codex_analytics_enabled(&original),
+                    Some(false),
+                    "Codex analytics metadata was not disabled"
+                );
+                let historical = has_consumed_historical_probe(&original);
+                let output_pointer = verified_tool_output_pointer(
+                    &original,
+                    &target.raw_json_pointer,
+                    "cw122b1_probe",
+                );
+                let contains_target = output_pointer.is_some();
+                let should_prune = mode == "M2" && historical && contains_target;
+                let mut expected = original.clone();
+                if should_prune {
+                    *expected
+                        .pointer_mut(output_pointer.as_ref().unwrap())
+                        .expect("prune output pointer") = json!(stub);
+                    verified_prunes += 1;
+                }
+                assert_eq!(
+                    actual,
+                    expected,
+                    "unexpected full request transformation at request {index}; differing_paths={:?}; mode={mode}; historical={historical}; contains_target={contains_target}; target_pointer={}",
+                    differing_json_paths(&actual, &expected),
+                    target.raw_json_pointer
+                );
+                if mode == "M1" || !should_prune {
+                    assert_eq!(captured.body, ingress, "unmodified request bytes changed");
+                    assert!(
+                        turn.applied_mutation_ids.is_empty(),
+                        "unexpected rule application"
+                    );
+                } else {
+                    assert_eq!(turn.applied_mutation_ids, vec!["cw122b1-historical-prune"]);
+                }
+                if let Some(input) = original.get("input").and_then(Value::as_array) {
+                    for item in input {
+                        if item.get("type").and_then(Value::as_str) == Some("function_call")
+                            && let Some(call_id) = item.get("call_id").and_then(Value::as_str)
+                        {
+                            unique_tool_calls.insert(call_id.to_owned());
+                        }
+                        if item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                            && let Some(call_id) = item.get("call_id").and_then(Value::as_str)
+                        {
+                            unique_tool_outputs.insert(call_id.to_owned());
+                        }
+                    }
+                }
+                let usage = response
+                    .body
+                    .split(|byte| *byte == b'\n')
+                    .filter_map(|line| {
+                        let line = line.strip_prefix(b"data: ")?;
+                        serde_json::from_slice::<Value>(line).ok()
+                    })
+                    .find(|event| {
+                        event.get("type").and_then(Value::as_str) == Some("response.completed")
+                    })
+                    .and_then(|event| event.pointer("/response/usage").cloned());
+                let provider_usage = turn.observed_usage.clone();
+                assert!(
+                    usage.is_some() && provider_usage.is_some(),
+                    "mock provider usage missing"
+                );
+                assert_eq!(provider_usage.as_ref().unwrap(), usage.as_ref().unwrap());
+                let request_sampling = json!({
+                    "temperature": original.get("temperature"),
+                    "top_p": original.get("top_p"),
+                    "reasoning": original.get("reasoning"),
+                });
+                if let Some(previous) = sampling_reference.as_ref() {
+                    assert_eq!(
+                        previous, &request_sampling,
+                        "effective request sampling fields changed"
+                    );
+                } else {
+                    sampling_reference = Some(request_sampling.clone());
+                }
+                request_records.push(json!({
+                    "index":index,
+                    "path":captured.path,
+                    "status":response.status,
+                    "ingress_sha256":sha256_hex(&ingress),
+                    "egress_sha256":sha256_hex(&captured.body),
+                    "response_sha256":sha256_hex(&response.body),
+                    "model":original.get("model"),
+                    "sampling":request_sampling,
+                    "codex_analytics_enabled":codex_analytics_enabled(&original),
+                    "provider_reported_usage":usage,
+                    "usage_provenance":"synthetic_local_mock_response",
+                    "cached_tokens":turn.observed_usage.as_ref().and_then(|value| value.pointer("/input_tokens_details/cached_tokens").and_then(Value::as_u64)),
+                    "first_byte_latency_ms":null,
+                    "first_byte_latency_provenance":"NOT_AVAILABLE",
+                    "applied_rule_ids":turn.applied_mutation_ids,
+                    "mutation_skips":turn.skipped_mutations,
+                }));
+            }
+            if mode == "M2" {
+                assert!(
+                    verified_prunes > 0,
+                    "no verified stateful/historical pruning treatment reached Codex"
+                );
+            } else {
+                assert_eq!(verified_prunes, 0);
+            }
+
+            let rollouts = find_rollout_files(&codex_home.join("sessions"));
+            assert!(
+                !rollouts.is_empty(),
+                "Codex did not persist an isolated native transcript"
+            );
+            let mut rollout_hashes = Vec::new();
+            for (index, path) in rollouts.iter().enumerate() {
+                let bytes = std::fs::read(path).expect("read isolated Codex transcript");
+                let contents = String::from_utf8_lossy(&bytes);
+                assert!(!contents.contains(&control_token));
+                assert!(!contents.contains("cw122b1-mock-only-key"));
+                assert!(
+                    !contents.contains(stub),
+                    "proxy stub leaked into Codex's persisted transcript"
+                );
+                rollout_hashes.push(sha256_hex(&bytes));
+                write_private_file(
+                    &evidence_dir.join(format!("raw/{session_id}/rollout_{index:02}.jsonl")),
+                    &bytes,
+                );
+            }
+
+            let duration_ms = started.elapsed().as_millis();
+            let report = json!({
+                "pair_id":pair_id,
+                "family":family,
+                "repetition":repetition,
+                "mode":mode,
+                "session_id":session_id,
+                "codex_path":codex_bin,
+                "codex_version":version,
+                "provider":"local_mock_only",
+                "protocol":"openai_responses_sse",
+                "model":"gpt-4o-mini",
+                "model_revision":"SYNTHETIC_NOT_A_MODEL_REVISION",
+                "codex_thread_id":thread_id,
+                "task_instructions_sha256":sha256_hex(instructions.as_bytes()),
+                "initial_prompt_sha256":task_prompt_hash,
+                "implementation_prompt_sha256":sha256_hex(implementation_prompt.as_bytes()),
+                "initial_fixture_hashes":initial_files,
+                "acceptance":acceptance,
+                "request_count":captures.len(),
+                "tool_call_ids":unique_tool_calls,
+                "tool_output_ids":unique_tool_outputs,
+                "tool_error_count":first_diagnostics["tool_error_count"].as_u64().unwrap_or(0)+second_diagnostics["tool_error_count"].as_u64().unwrap_or(0),
+                "provider_error_count":responses.iter().filter(|response| !(200..300).contains(&response.status)).count(),
+                "retry_count":null,
+                "retry_count_status":"NOT_AVAILABLE",
+                "codex_cli_diagnostics":{"probe":first_diagnostics,"implementation":second_diagnostics},
+                "bootstrap_wall_ms":first_ms,
+                "coding_wall_ms":coding_ms,
+                "complete_session_wall_ms":duration_ms,
+                "timing_provenance":"local_codex_subprocess_wall_clock",
+                "sampling_observed":sampling_reference,
+                "requests":request_records,
+                "treatment":{"rule_id":"cw122b1-historical-prune","verified_requests":verified_prunes,"status":if mode=="M2" {"verified_mock_wire_treatment"} else {"not_applied_passthrough"}},
+                "cache":{"initial_state":"MOCK_PROVIDER_NO_CACHE","cached_token_telemetry":"synthetic_mock_only","cache_fairness":"NOT_EVALUATED_FOR_PROVIDER"},
+                "transcript":{"files":rollouts.len(),"sha256":rollout_hashes,"stub_absent":true,"source_fixture_unchanged":true},
+                "status":"SYNTHETIC_MOCK_EXECUTION_ACCEPTED",
+            });
+            write_private_file(
+                &evidence_dir.join(format!("attempts/{pair_id}_{mode}.json")),
+                &(serde_json::to_vec_pretty(&report).unwrap()),
+            );
+            partial_evidence.complete();
+            attempt_summaries.push(report);
+
+            drop(f);
+            std::fs::remove_dir_all(attempt_root).expect("remove isolated run workspace and HOME");
+        }
+    }
+    assert_eq!(attempt_summaries.len(), 12);
+    assert_eq!(
+        campaign_request_count,
+        attempt_summaries
+            .iter()
+            .map(|r| r["request_count"].as_u64().unwrap() as usize)
+            .sum::<usize>()
+    );
+    assert!(campaign_started.elapsed() < Duration::from_secs(7200));
+    assert_eq!(
+        source_files,
+        [
+            "campaign.json",
+            "trace-f1.json",
+            "trace-f2.json",
+            "synthetic-solutions.json",
+            "oracles/f1.py",
+            "oracles/f2.py",
+        ]
+        .into_iter()
+        .map(|name| (
+            name.to_owned(),
+            sha256_hex(&std::fs::read(cwa.join(name)).unwrap())
+        ))
+        .collect()
+    );
+
+    let manifest = json!({
+        "scope":"SYNTHETIC_CODEX_MOCK_QUALIFICATION",
+        "status":"MOCK_CODEX_CAMPAIGN_PASS",
+        "hash_algorithm":"SHA-256",
+        "live_execution":"NO_GO; this test only routes to local mock",
+        "inference_calls":0,
+        "provider_spend":0,
+        "codex_path":codex_bin,
+        "codex_version":version,
+        "context_watcher_commit":std::env::var("CW122B1_COMMIT_SHA").unwrap_or_else(|_|"NOT_AVAILABLE".into()),
+        "cw122a_freeze_sha256":std::env::var("CW122B1_CW122A_FREEZE_SHA256").unwrap_or_else(|_|"NOT_AVAILABLE".into()),
+        "proxy_protocol":"OpenAI Responses SSE through authenticated loopback Context-Watcher proxy",
+        "codex_analytics_enabled":false,
+        "codex_tool_network_access":"DISABLED",
+        "campaign_sha256":sha256_hex(&std::fs::read(cwa.join("campaign.json")).unwrap()),
+        "requests":campaign_request_count,
+        "runs":attempt_summaries.len(),
+        "elapsed_ms":campaign_started.elapsed().as_millis(),
+        "sampling_observed":sampling_reference,
+        "cache_fairness":"NOT_EVALUATED; synthetic mock endpoint has no provider cache",
+        "product_value":"NOT_EVALUATED",
+        "attempts":attempt_summaries,
+    });
+    write_private_file(
+        &evidence_dir.join("manifest.json"),
+        &serde_json::to_vec_pretty(&manifest).unwrap(),
+    );
+    println!("CW122B1_MOCK_CAMPAIGN: {}", serde_json::to_string(&json!({"status":manifest["status"],"runs":manifest["runs"],"requests":manifest["requests"],"provider_spend":0,"product_value":"NOT_EVALUATED"})).unwrap());
 }
 
 #[tokio::test]

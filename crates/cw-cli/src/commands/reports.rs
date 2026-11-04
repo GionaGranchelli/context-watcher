@@ -431,7 +431,7 @@ pub fn run_hud_report(
             }
         }
         println!(
-            "\n💡 Tip: Context Pinning (`cw pin`) injects critical instructions at the high-attention Recency tail!\n"
+            "\n💡 Tip: Context Pinning (`cw pin`) stores a rule. Inspect contents and consent with `cw pin-policy --session <ID> preview`; storing is not provider-request application.\n"
         );
         return Ok(());
     }

@@ -2,6 +2,7 @@
   import { hierarchy, treemap } from 'd3-hierarchy';
   import { strategyConfirmation } from './lib/strategyConfirmation';
   import HelpTip from './lib/HelpTip.svelte';
+  import PinContextPolicy from './lib/PinContextPolicy.svelte';
   import MarkdownText from './lib/MarkdownText.svelte';
   import type {
     Session,
@@ -1176,7 +1177,7 @@
     }
   }
 
-  async function applyMutation(op: Record<string, any>, status: 'committed' | 'draft' = 'committed', msg = 'Mutation applied') {
+  async function applyMutation(op: Record<string, any>, status: 'committed' | 'draft' = 'committed', msg = 'Mutation rule stored; application is separate') {
     if (!activeSessionId) return;
     await apiFetch(`/api/v1/sessions/${activeSessionId}/mutations`, {
       method: 'POST',
@@ -1190,7 +1191,7 @@
   async function commitDrafts() {
     if (!activeSessionId) return;
     await apiFetch(`/api/v1/sessions/${activeSessionId}/mutations/commit-drafts`, { method: 'POST' });
-    statusBanner = 'Committed all staged draft mutations (cache impact estimated).';
+    statusBanner = 'Stored status changed to committed. Session consent and request eligibility still govern application; savings remain estimates.';
     await fetchSessionGraph(activeSessionId);
   }
 
@@ -1893,6 +1894,11 @@
 
       <!-- Main Scrollable Content Area (Full-Width Central Workspace) -->
       <main style="flex: 1; overflow-y: auto; padding: 20px 28px; width: 100%; max-width: none; box-sizing: border-box;">
+        {#if activeSessionId}
+          {#key activeSessionId}
+            <PinContextPolicy sessionId={activeSessionId} revision={loadedRevision} request={apiFetch} />
+          {/key}
+        {/if}
         {#if !latestTurn}
           <div style="text-align: center; padding: 90px 20px; color: #71717a;">
             <h2 style="color: #e4e4e7; font-size: 16px; font-weight: 600; margin-bottom: 6px;">Select a Session</h2>
@@ -2734,7 +2740,7 @@
                                 source_node_id: activeCandleNode!.id
                               },
                               'committed',
-                              'Pinned instruction to high-attention tail (0 KV cache break).'
+                              'Stored committed PinContext rule. Separate session consent is required; provider application is not established.'
                             )}
                           style="background: #d97706; color: #ffffff; border: none; border-radius: 5px; padding: 5px 10px; font-size: 11.5px; font-weight: 600; cursor: pointer;"
                         >
@@ -3085,7 +3091,7 @@
           {:else if settingsSubView === 'overlays'}
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
               <span style="font-size: 13px; font-weight: 600; color: #e4e4e7;">
-                Active Mutation Overlays ({mutations.length})
+                Stored Mutation Overlays ({mutations.length})
               </span>
               <button
                 onclick={triggerForkReplay}
@@ -3117,7 +3123,7 @@
                     </span>
                     <strong style="color: #e4e4e7;">{m.op.op}</strong>
                     <span style="color: #71717a; margin-left: 8px;">
-                      Saved: {m.estimated_saved_tokens} tok · KV Impact: {m.estimated_kv_break_tokens} tok
+                      Estimated reduction: {m.estimated_saved_tokens} tok · Estimated KV impact: {m.estimated_kv_break_tokens} tok
                     </span>
                   </div>
                   <button
@@ -3247,7 +3253,7 @@
 
         <!-- Tail Pinning -->
         <div style="border-top: 1px solid #1f1f26; padding-top: 12px;">
-          <div style="font-size: 12px; font-weight: 600; color: #e4e4e7; margin-bottom: 8px;">Pin to Tail (0% KV Break)</div>
+          <div style="font-size: 12px; font-weight: 600; color: #e4e4e7; margin-bottom: 8px;">Store PinContext rule (does not grant consent)</div>
           <div style="display: flex; gap: 6px; margin-bottom: 6px;">
             <input
               type="text"
@@ -3260,7 +3266,7 @@
                 applyMutation(
                   { op: 'pin_context', label: pinLabel, content: pinContent, source_node_id: selectedNode?.id ?? null },
                   'committed',
-                  `Pinned '${pinLabel}' to prompt tail`
+                  `Stored committed PinContext rule '${pinLabel}'. Separate consent is required; application is not established.`
                 )}
               style="background: #059669; color: white; border: none; border-radius: 4px; padding: 5px 10px; font-size: 11.5px; cursor: pointer;"
             >

@@ -89,6 +89,7 @@ pub async fn get_policy(State(state): State<DaemonState>, Path(id): Path<String>
             && session.provider != cw_core::ir::ProviderKind::Gemini;
         Ok(
             json!({"session_id":id,"enabled":policy.is_enabled_for(&id),"events":events,"risk_warning":RISK_WARNING,
+                "session_terminated":terminated,"reinforcement_supported":session.provider!=cw_core::ir::ProviderKind::Gemini,
                 "activation_scope":"All eligible stored and future PinContext rules in this session until revocation or session end; not approval of individual content",
                 "stored_pins":pins,"preview_basis":"Latest recorded request only; null eligibility means no request is available; future request shape must be checked again",
                 "automatic_generation":{"autopilot_enabled":config.enabled,"auto_cache_safe_pin":config.auto_cache_safe_pin,

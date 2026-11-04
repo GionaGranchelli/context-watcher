@@ -4,6 +4,8 @@ This document establishes the verified evidence baseline for **CW-110 / CW-110A 
 
 Qualification requires proving that contextWatcher (`cw`) observes the correct native session, optimizes the context actually transmitted to the model, preserves agent tool-calling functionality, and survives multi-turn sessions, restarts, and errors without data loss or credential leakage.
 
+Current PinContext activation additionally requires explicit session consent. [CW-121C1](CW-121C1-OPERATOR-CONSENT.md) adds operator CLI/Web controls; the historical harness evidence below does not qualify the new UI or imply automatic consent. No new inference was run for these controls.
+
 ---
 
 ## 1. Qualification Status Tiers

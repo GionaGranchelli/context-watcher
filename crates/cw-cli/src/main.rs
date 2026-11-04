@@ -51,6 +51,15 @@ enum Commands {
         #[arg(long)]
         session: String,
     },
+    /// Inspect, authorize, or revoke experimental PinContext reinforcement through the control API
+    PinPolicy {
+        #[arg(long)]
+        session: String,
+        #[arg(long, default_value = "http://127.0.0.1:4400")]
+        daemon_url: String,
+        #[command(subcommand)]
+        action: PinPolicyAction,
+    },
     /// Start the contextWatcher daemon (Control/Web UI server + HTTP/SSE Proxy + Transcript Watcher)
     Serve {
         #[arg(long, default_value_t = 4400)]
@@ -169,7 +178,7 @@ enum Commands {
         #[arg(long)]
         session: Option<String>,
     },
-    /// Pin a critical constraint or code note to the high-attention tail of the prompt (0% KV break)
+    /// Store a committed PinContext rule; reinforcement requires separate session consent
     Pin {
         label: String,
         content: String,
@@ -328,6 +337,20 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum PinPolicyAction {
+    /// Show consent, stored pin contents/status, request eligibility and future-generation scope
+    Preview,
+    /// Display the preview and full warning before explicitly enabling session reinforcement
+    Enable {
+        /// Acknowledge the displayed latency, cache, cost and behavior risks and session-wide scope
+        #[arg(long)]
+        acknowledge_risk: bool,
+    },
+    /// Revoke consent without deleting stored rules
+    Disable,
+}
+
+#[derive(Subcommand)]
 enum DaemonAction {
     /// Start the contextWatcher daemon in the background
     Start {
@@ -388,6 +411,13 @@ async fn main() -> Result<()> {
         Commands::Preview { session } => {
             let store = CwStore::open(&db_path)?;
             commands::session::run_preview(&store, &session)?;
+        }
+        Commands::PinPolicy {
+            session,
+            daemon_url,
+            action,
+        } => {
+            commands::pin_policy::run(&session, &daemon_url, action).await?;
         }
         Commands::AuthToken => {
             println!("{}", cw_core::control::control_token(true)?);

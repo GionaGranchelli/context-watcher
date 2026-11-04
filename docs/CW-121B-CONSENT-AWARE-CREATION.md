@@ -67,6 +67,8 @@ Run `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warn
 
 Validation: 265 Rust tests passed, 19 ignored. Five web confirmation tests, Svelte check/build, workspace Clippy/formatting, 15 runner-admission tests, and the offline lifecycle preflight passed. No live-provider or model-server tests ran. Browser/terminal interaction testing and broader activation workflows were not executed. Historical evidence and the original freeze remain unchanged.
 
+The [CW-121C1 CLI/Web workflow](CW-121C1-OPERATOR-CONSENT.md) now implements the corresponding operator controls in this revision. The following original follow-up scope remains relevant to TUI/MCP and any future narrower approval contract.
+
 ## CW-121C remaining scope
 
 Build operator-facing preview/enable/revoke controls in the existing CLI/TUI/web/MCP interfaces. Show stored pin contents, status, activation destinations, and possible future automatic sources before enabling. Consider explicit approval of specific content or a narrower future-generation scope. Make manual-creation feedback and inactive-state display consistent across clients. Keep hypothetical estimates distinct from observed provider usage. No full workflow, new Protect from Pruning feature, persistent pin exposure, or live-runner requalification is included here.

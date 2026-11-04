@@ -1,5 +1,11 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## CW-121C1: Operator consent workflow
+
+[CLI/Web controls and verification](docs/CW-121C1-OPERATOR-CONSENT.md). Actual CLI-to-control-API tests cover explicit acknowledgement, revocation, session scope, terminated/Gemini restrictions, and failed responses. Web workflow tests cover stale sessions, acknowledgement reset and unavailable/unconfirmed state. The isolated terminal smoke passed and its daemon was stopped; [sanitized evidence](.audit/cw121c1/operator-check.json) records the outcomes and transcript hash. Browser interaction remains unverified: no browser provider was available. No inference, model-server execution, production changes or historical rewrites.
+
+Validation: 269 Rust tests passed, 19 ignored; 14 web tests passed; Svelte check/build, workspace Clippy/formatting, 15 runner admission tests and the default offline fixture passed. Ignored harness/live suites were not executed.
+
 ## CW-121B: Consent-aware creation
 
 [Creation contract, activation preview, and path inventory](docs/CW-121B-CONSENT-AWARE-CREATION.md). Offline core/store/API tests cover disabled/default and legacy policies, opt-in and revocation, non-pin preservation, manual inactive staging, transactional stale-grant and session protections, Gemini blocking, and inspectable activation scope. 265 Rust tests passed, 19 ignored; five web reporting tests, Svelte check/build, Clippy/formatting, and offline runner checks passed. Reporting distinguishes proposals from creation and measured savings. No inference, model-server access, historical rewrite, or production changes.

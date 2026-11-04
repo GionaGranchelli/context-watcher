@@ -34,7 +34,7 @@ TEST = [
 FAULT_TESTS = {
     'F1-09': [
         'cargo', 'test', '--offline', '--locked', '-p', 'cw-proxy', '--test', 'qualification',
-        'test_cw122b1_f1_codex_active_request_holds_for_external_interruption',
+        'test_cw122b1_interruption_active_mock_request',
         '--', '--ignored', '--exact', '--nocapture',
     ],
 }

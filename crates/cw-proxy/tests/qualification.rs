@@ -1380,7 +1380,7 @@ async fn test_cw122b1_f1_06_invalid_or_missing_usage_trips_settlement_guard() {
 
 #[tokio::test]
 #[ignore = "CW-122B1-F1 active Codex interruption; loopback mock only; run via benchmark/cw122b1/run_fault_matrix.py"]
-async fn test_cw122b1_f1_codex_active_request_holds_for_external_interruption() {
+async fn test_cw122b1_interruption_active_mock_request() {
     use std::time::Duration;
 
     let binary = std::fs::canonicalize(require_installed_binary("codex")).unwrap();

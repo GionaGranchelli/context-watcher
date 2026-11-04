@@ -645,7 +645,9 @@ pub fn run_pin(
         },
         false,
     )?;
-    println!("Pinned '{label}' to high-attention tail on session {sess_id}.");
+    println!(
+        "Stored committed PinContext rule '{label}' on session {sess_id}. Reinforcement requires separate session consent; provider application is not established. Use `cw pin-policy --session {sess_id} preview`."
+    );
     Ok(())
 }
 

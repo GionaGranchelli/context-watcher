@@ -1,0 +1,34 @@
+{
+  "scope": "isolated CLI operator smoke; no model endpoints",
+  "provider_inference": "NOT_EXECUTED; control API routes only",
+  "browser": "UNVERIFIED: computer-use inventory has no browsers; createBrowserTab(iab) returned Browser is not available",
+  "steps": [
+    {
+      "command": "preview",
+      "exit_success": true,
+      "enabled": false,
+      "stored_pins": 1
+    },
+    {
+      "command": "enable",
+      "exit_success": false,
+      "enabled": false,
+      "stored_pins": 1
+    },
+    {
+      "command": "enable --acknowledge-risk",
+      "exit_success": true,
+      "enabled": true,
+      "stored_pins": 1
+    },
+    {
+      "command": "disable",
+      "exit_success": true,
+      "enabled": false,
+      "stored_pins": 1
+    }
+  ],
+  "terminal_transcript_sha256": "41fb51e3eaa90c7c158342b239f12165f70bd8555c4bf967b7787667a8fb8613",
+  "status": "PASS",
+  "daemon_stopped": true
+}

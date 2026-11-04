@@ -27,6 +27,10 @@
 
 ---
 
+## CW-121C1 implementation
+
+In Review: operator CLI/Web preview, acknowledgement, enable and disable controls using the existing policy API. TUI/MCP activation remains CW-121C2. Terminal smoke passed; browser interactions unverified because no browser provider is available. No inference or production changes. See [controls and evidence](docs/CW-121C1-OPERATOR-CONSENT.md).
+
 ## CW-121B implementation
 
 In Review: gate automatic/strategy PinContext creation on session consent, preserve explicit inactive manual pins, and expose activation scope. No inference or production changes. Broader controls remain CW-121C. See [creation contract and complete path inventory](docs/CW-121B-CONSENT-AWARE-CREATION.md).

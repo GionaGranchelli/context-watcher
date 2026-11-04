@@ -1,5 +1,5 @@
 {
-  "version": "CW-121B-OFFLINE-CREATION-1",
+  "version": "CW-121C1-OFFLINE-CONTROLS-1",
   "default": "sanitized offline fixture",
   "historical_freeze": "benchmark/cw104b/freeze.json is retained unchanged for CW-104B-1 observations",
   "live_scope": "one-local-m1-m2-smoke-pair; explicit live switch plus current single-use operator authorization required",
@@ -21,7 +21,7 @@
     "benchmark/cw104b/request_options.js": "05deb68b9cc718ed9a6fe454d989ccefff1c728deda913f1dba86c810066de97",
     "benchmark/cw104b/smoke.py": "cda5758edc458433907c3bafca4bc4de77ab5dcecc7c41f518aa91e2b1f98da8",
     "benchmark/cw104b/test_smoke.py": "48778bd5a220c7bfa212eed0de4048b202724ba09ec22261f4ca8007f92193ff",
-    "crates/cw-cli/src/commands/session.rs": "eaaee5a80b99ffd89e0a9079a4e3dbb9a0a240e566e0a1c88555c9df74357b47",
+    "crates/cw-cli/src/commands/session.rs": "ddbbbe044988866558a5b9dace248c02c1581a6d3f1354780fd54e3c93ed6ec0",
     "crates/cw-core/src/autopilot.rs": "0fa844c8a9ac8dee86785d87334ecb296484c3f55e4cacae447bf181740e2a95",
     "crates/cw-core/src/control.rs": "350d7bb40c099d4a3e2780fdd41e06c5146e4eac5d9b7ba016456d6411078bf4",
     "crates/cw-core/src/mutation.rs": "d83261abacafabf952d8a358b9fbe028049d229f3da89bf6a1b79e19067c0372",
@@ -30,13 +30,17 @@
     "crates/cw-harnesses/src/error.rs": "605692c3a827574c592c9a7809da99d10aebf703cc2e8bdb5541b1cb16bb5ad1",
     "crates/cw-proxy/src/api/mod.rs": "bdc3bc3e517b41939eccece3ed66bbcd956d5f859c506b830969a4de9602b23a",
     "crates/cw-proxy/src/api/mutations.rs": "460114501ec41b7d8566c55e90a6c60dc7f2aa31f2c0e20618396eb0fe752f69",
-    "crates/cw-proxy/src/api/pin_policy.rs": "3e74212067efc541cb3fb2d87120fc316c9ca9bab5f4819b4bc8dfd44ea0a079",
+    "crates/cw-proxy/src/api/pin_policy.rs": "8e57e86a92c884b1065bc6a257d0a772a53045c8653525512045a6966803ca3e",
     "crates/cw-proxy/src/api/transform.rs": "249d9e257908c94376d5cb0b9ab3eefcb20a935ab8b32cdae12a15d1d9fd13c1",
     "crates/cw-proxy/src/proxy/mod.rs": "2bd7834725607ead9454d062dffd3f2336e3ee9fd555d6abc3da14d985cf821f",
-    "crates/cw-proxy/tests/pin_lifecycle.rs": "1b767c9a97a5e53e832309a78c71716ddaa2e7d4ccc83ac93667589a591cf8f8",
+    "crates/cw-proxy/tests/pin_lifecycle.rs": "34bd4d5f49dca9853c0789b3becd5541574228c952005f6ac46471a693b81511",
     "crates/cw-store/src/lib.rs": "548fd530d778c2d8d1363e9cc7bfd6aa1b271331eb8c25961b000933011425ee",
     "crates/cw-tui/src/lib.rs": "98bcb47bcf58d103c8e7e776862256a51a7cffcb7dd369dee226dcaa12e59b11",
-    "plugins/pi-opencode/index.js": "9623aeefb02ac6da1346eca42567fb75c4e1a9e1bbc8469c4e950c8827a1a08e"
+    "plugins/pi-opencode/index.js": "9623aeefb02ac6da1346eca42567fb75c4e1a9e1bbc8469c4e950c8827a1a08e",
+    "crates/cw-cli/src/commands/pin_policy.rs": "c292f85294efb074f5ec061aa745f6406bc871ca879fd610aa0b19b4877249a0",
+    "crates/cw-cli/src/main.rs": "0e65174708f3ef01d96ca4dd55ed4528357bd529db9bf920f5d812eb30e47f59",
+    "web/src/lib/pinPolicy.ts": "f37159c76351c436f29e966466ab85f5d81525f43ddcf763c7939a5cabac93aa",
+    "web/src/lib/PinContextPolicy.svelte": "83a30ebd821df5f3de25ec42a1c14937e348fc9fe21d26e89f759c8cca2bc63b"
   },
-  "qualification": "Offline lifecycle/creation fixtures only; live runner not requalified"
+  "qualification": "Offline consent controls and lifecycle/creation fixtures only; live runner not requalified"
 }

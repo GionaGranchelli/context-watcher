@@ -305,6 +305,27 @@ class MockRunnerTests(unittest.TestCase):
                     'qualification_layer': 'A', 'result': 'PASS',
                 }, sort_keys=True))
 
+    @unittest.skipUnless(os.name == 'posix' and Path('/proc').is_dir(), 'process groups require Linux /proc')
+    def test_cleanup_kills_group_when_root_exited_before_inventory(self):
+        with tempfile.TemporaryDirectory(prefix='cw122b1-orphaned-group-') as directory:
+            root = subprocess.Popen(
+                [sys.executable, '-c',
+                 'import subprocess,sys; p=subprocess.Popen([sys.executable,"-c",'
+                 '"import time; time.sleep(60)"]); print(p.pid,flush=True)'],
+                cwd=directory, stdout=subprocess.PIPE, text=True, start_new_session=True,
+            )
+            child_pid = int(root.stdout.readline())
+            self.assertEqual(root.wait(timeout=5), 0)
+            root.stdout.close()
+            self.assertFalse(Path(f'/proc/{root.pid}').exists(), 'root process must be reaped first')
+
+            cleanup = kill_process_tree(root.pid)
+            self.assertTrue(cleanup['verified'], cleanup)
+            self.assertIn(root.pid, cleanup['signaled_process_groups'])
+            self.assertNotIn(root.pid, cleanup['remaining_pids'])
+            self.assertNotIn(child_pid, cleanup['remaining_pids'])
+            self.assertTrue(kill_process_tree(root.pid)['verified'])
+
     @unittest.skipUnless(os.name == 'posix' and Path('/proc').is_dir(), 'signal cleanup requires Linux /proc')
     def test_external_sigterm_cleans_detached_descendant_and_preserves_partial_evidence(self):
         with tempfile.TemporaryDirectory(prefix='cw122b1-sigterm-') as directory:

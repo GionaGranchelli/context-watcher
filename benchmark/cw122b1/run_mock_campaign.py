@@ -111,8 +111,13 @@ def run_bounded(command, cwd, env, timeout, cancel=None):
             try:
                 output, _ = proc.communicate(timeout=min(remaining, 0.25))
                 if _received_signal is not None:
+                    cleanup = cancel(proc.pid)
+                    if not cleanup['verified']:
+                        raise CancellationUnverified(f"process cleanup unverified: {cleanup}")
                     error = InterruptedError(f'campaign interrupted by signal {_received_signal}')
                     error.output = output
+                    error.cleanup = cleanup
+                    error.signal_number = _received_signal
                     raise error
                 return proc.returncode, output
             except subprocess.TimeoutExpired:
@@ -177,9 +182,8 @@ def kill_process_tree(root_pid, *, killpg=os.killpg, proc_root=Path('/proc'), ti
                     descendants.add(pid)
                     changed = True
         groups.update(groups_by_pid[pid] for pid in descendants if pid in groups_by_pid)
-    if root_pid not in groups_by_pid:
-        return {'verified': False, 'signaled_process_groups': [],
-                'remaining_pids': [root_pid], 'errors': ['root_absent_at_inventory']}
+    # The leader may exit before cancellation while its children still share its session.
+    groups.add(root_pid)
     errors = []
     for group in groups:
         try:
@@ -188,22 +192,23 @@ def kill_process_tree(root_pid, *, killpg=os.killpg, proc_root=Path('/proc'), ti
             pass
         except OSError as error:
             errors.append(f'{type(error).__name__}:{error.errno}')
-    targets = set(descendants)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         alive = []
-        for pid in targets:
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
             try:
-                fields = (proc_root / str(pid) / 'stat').read_text().split(') ', 1)[1].split()
-                if fields[0] != 'Z':
-                    alive.append(pid)
+                fields = (entry / 'stat').read_text().split(') ', 1)[1].split()
+                if fields[0] != 'Z' and int(fields[2]) in groups:
+                    alive.append(int(entry.name))
             except (OSError, ValueError, IndexError):
-                pass
+                continue
         if not alive:
             break
         time.sleep(0.01)
     else:
-        alive = sorted(pid for pid in targets if (proc_root / str(pid)).exists())
+        alive = sorted(alive)
     return {
         'verified': not errors and not alive,
         'signaled_process_groups': sorted(groups),

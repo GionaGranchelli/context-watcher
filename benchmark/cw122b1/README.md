@@ -13,7 +13,10 @@ The ignored Rust test is intentionally launched through this runner. Default CI 
 Run the CW-122B1-F1 fault matrix without contacting a model provider:
 
 ```sh
-python3 -B benchmark/cw122b1/run_fault_matrix.py --evidence-dir /absolute/private/path/cw122b1-f1
+python3 -B benchmark/cw122b1/run_mock_campaign.py --evidence-dir /absolute/private/path/cw122b1-success
+python3 -B benchmark/cw122b1/run_fault_matrix.py \
+  --evidence-dir /absolute/private/path/cw122b1-f1 \
+  --success-path-evidence-dir /absolute/private/path/cw122b1-success
 ```
 
 It runs deterministic proxy and runner tests, then the Codex loopback fault cases when `codex` is available on the minimal allowlisted `PATH`. It writes raw evidence outside the checkout with mode `0700` directories and `0600` files, and updates the sanitized `fault-matrix.json`. `BLOCKED_WITH_UNVERIFIED_SCENARIOS` means every executed test passed but at least one required execution layer or interruption boundary remains unverified. It never enables live provider traffic.

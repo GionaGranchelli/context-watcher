@@ -185,9 +185,11 @@ def kill_process_tree(root_pid, *, killpg=os.killpg, proc_root=Path('/proc'), ti
     # The leader may exit before cancellation while its children still share its session.
     groups.add(root_pid)
     errors = []
+    signaled_groups = []
     for group in groups:
         try:
             killpg(group, signal.SIGKILL)
+            signaled_groups.append(group)
         except ProcessLookupError:
             pass
         except OSError as error:
@@ -211,7 +213,7 @@ def kill_process_tree(root_pid, *, killpg=os.killpg, proc_root=Path('/proc'), ti
         alive = sorted(alive)
     return {
         'verified': not errors and not alive,
-        'signaled_process_groups': sorted(groups),
+        'signaled_process_groups': sorted(signaled_groups),
         'remaining_pids': alive,
         'errors': errors,
     }

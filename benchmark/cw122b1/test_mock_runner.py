@@ -324,7 +324,9 @@ class MockRunnerTests(unittest.TestCase):
             self.assertIn(root.pid, cleanup['signaled_process_groups'])
             self.assertNotIn(root.pid, cleanup['remaining_pids'])
             self.assertNotIn(child_pid, cleanup['remaining_pids'])
-            self.assertTrue(kill_process_tree(root.pid)['verified'])
+            already_gone = kill_process_tree(root.pid)
+            self.assertTrue(already_gone['verified'], already_gone)
+            self.assertNotIn(root.pid, already_gone['signaled_process_groups'])
 
     @unittest.skipUnless(os.name == 'posix' and Path('/proc').is_dir(), 'signal cleanup requires Linux /proc')
     def test_external_sigterm_cleans_detached_descendant_and_preserves_partial_evidence(self):

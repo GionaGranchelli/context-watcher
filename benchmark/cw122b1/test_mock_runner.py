@@ -18,7 +18,7 @@ CWA = HERE.parent / 'cw122a'
 sys.path[:0] = [str(HERE), str(CWA)]
 try:
     from offline_env import build_environment
-    from run_fault_matrix import matrix_from_output, validate_success_path_evidence
+    from run_fault_matrix import matrix_from_output, matrix_status, validate_success_path_evidence
     from run_mock_campaign import (
         REPO, kill_process_tree, main, prepare_evidence, public_aggregate,
         run_bounded, verified_git_commit, write_private,
@@ -28,6 +28,13 @@ finally:
 
 
 class MockRunnerTests(unittest.TestCase):
+    def test_unverified_partial_boundary_blocks_matrix_readiness(self):
+        matrix = {
+            'scenarios': [{'result': 'PASS'}],
+            'partial_evidence_boundaries': [{'result': 'NOT_VERIFIED'}],
+        }
+        self.assertEqual(matrix_status(matrix, 'PASS'), 'BLOCKED_WITH_UNVERIFIED_SCENARIOS')
+
     def test_child_environment_is_an_allowlist(self):
         source = {
             'PATH': '/usr/bin', 'HOME': '/tmp/home', 'CARGO_HOME': '/tmp/cargo',

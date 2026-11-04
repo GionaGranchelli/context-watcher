@@ -302,6 +302,17 @@ def validate_success_path_evidence(path, commit):
     }
 
 
+def matrix_status(matrix, successful_path_status):
+    scenarios = [item['result'] for item in matrix['scenarios']]
+    boundaries = [item['result'] for item in matrix['partial_evidence_boundaries']]
+    if 'FAIL' in scenarios or 'FAIL' in boundaries or successful_path_status == 'FAIL':
+        return 'FAILED'
+    if (any(result != 'PASS' for result in scenarios + boundaries)
+            or successful_path_status != 'PASS'):
+        return 'BLOCKED_WITH_UNVERIFIED_SCENARIOS'
+    return 'READY_FOR_REVIEW'
+
+
 def private_subdirs(root, *parts):
     current = Path(root)
     for part in parts:
@@ -518,15 +529,7 @@ def main(argv=None):
     }
     result_counts = {result: sum(item['result'] == result for item in matrix['scenarios'])
                      for result in ('PASS', 'FAIL', 'NOT_VERIFIED')}
-    status = (
-        'FAILED' if any(item['result'] == 'FAIL' for item in matrix['scenarios']) else
-        'FAILED' if matrix['successful_path_regression']['status'] == 'FAIL' else
-        'BLOCKED_WITH_UNVERIFIED_SCENARIOS' if (
-            any(item['result'] == 'NOT_VERIFIED' for item in matrix['scenarios'])
-            or matrix['successful_path_regression']['status'] != 'PASS'
-        ) else
-        'READY_FOR_REVIEW'
-    )
+    status = matrix_status(matrix, matrix['successful_path_regression']['status'])
     matrix['status'] = status
     write_private(evidence / 'fault-matrix.json', matrix)
     sanitized = dict(matrix)

@@ -424,15 +424,24 @@ impl SpendGuard {
             });
         }
         let cfg = &self.inner.config;
-        self.inner
-            .total_requests
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
-                (count < self.inner.max_requests_total).then_some(count + 1)
-            })
-            .map_err(|count| SpendGuardError::RequestLimitExceeded {
-                count: count.saturating_add(1),
-                limit: self.inner.max_requests_total,
-            })?;
+        let mut count = self.inner.total_requests.load(Ordering::SeqCst);
+        loop {
+            if count >= self.inner.max_requests_total {
+                return Err(SpendGuardError::RequestLimitExceeded {
+                    count: count.saturating_add(1),
+                    limit: self.inner.max_requests_total,
+                });
+            }
+            match self.inner.total_requests.compare_exchange_weak(
+                count,
+                count + 1,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(actual) => count = actual,
+            }
+        }
         let result = (|| {
             let req_micro = (cfg.request_reservation_usd * MICRO_USD_PER_USD).round() as u64;
             let max_session_micro = (cfg.max_session_cost_usd * MICRO_USD_PER_USD).round() as u64;

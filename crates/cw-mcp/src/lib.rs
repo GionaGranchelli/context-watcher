@@ -178,8 +178,13 @@ pub fn mcp_tool_definitions() -> Value {
             }
         },
         {
+            "name": "cw_pin_policy_status",
+            "description": "Read-only PinContext consent, stored contents/status, request-preview eligibility, future automatic-generation scope and risks. Cannot authorize reinforcement. A human must use cw pin-policy, Web or TUI controls to enable or revoke consent. Preview is not observed provider application; benefits are unproven.",
+            "inputSchema": {"type":"object", "properties":{"session_id":{"type":"string"}}, "additionalProperties":false}
+        },
+        {
             "name": "cw_pin_context",
-            "description": "Pins a critical architectural constraint or code snippet to the high-attention tail of the prompt without breaking the KV cache prefix.",
+            "description": "Stores a committed PinContext rule without granting consent. Reinforcement requires separate human session consent and request eligibility. Benefits are unproven; tokens, latency, cache disruption and behavior risks may increase. Inspect cw_pin_policy_status; humans use CLI, Web or TUI controls.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -192,7 +197,7 @@ pub fn mcp_tool_definitions() -> Value {
         },
         {
             "name": "cw_unpin_context",
-            "description": "Removes pinned `<cw_pinned_context>` items from the session (all pins by default, or filtered by `label`), or clears all active session mutations when `clear_all_mutations` is true.",
+            "description": "Deletes stored PinContext rules without changing session consent (all pins by default, or filtered by `label`), or clears all active session mutations when `clear_all_mutations` is true.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -216,7 +221,7 @@ pub fn mcp_tool_definitions() -> Value {
         },
         {
             "name": "cw_optimize_strategy",
-            "description": "Applies a context optimization intensity level (`min`, `mid`, `max`) or named strategy (`cache_safe_boost`, `clean_code_state`, `surgical_log_diet`, `max_token_diet`) as a session overlay, and optionally exports a separate compacted `.jsonl` copy (leaving the source harness transcript unchanged).",
+            "description": "Creates eligible strategy rules without granting PinContext consent; estimates are not measured savings. Selects a context optimization intensity level (`min`, `mid`, `max`) or named strategy (`cache_safe_boost`, `clean_code_state`, `surgical_log_diet`, `max_token_diet`) as a session overlay, and optionally exports a separate compacted `.jsonl` copy (leaving the source harness transcript unchanged).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -254,6 +259,7 @@ async fn execute_mcp_tool(
             | "cw_fold_turns"
             | "cw_prune_tool_output"
             | "cw_pin_context"
+            | "cw_pin_policy_status"
             | "cw_unpin_context"
             | "cw_gate_tools"
             | "cw_optimize_strategy"
@@ -261,8 +267,45 @@ async fn execute_mcp_tool(
         anyhow::bail!("Unknown tool: {tool_name}");
     }
 
+    if tool_name == "cw_pin_policy_status"
+        && args.as_object().is_none_or(|a| {
+            a.keys().any(|k| k != "session_id")
+                || a.get("session_id").is_some_and(|id| {
+                    id.as_str()
+                        .is_none_or(|s| !cw_core::control::is_valid_session_id(s))
+                })
+        })
+    {
+        anyhow::bail!(
+            "Policy inspection is read-only and requires a valid session ID. A human must use CLI, Web or TUI consent controls."
+        );
+    }
     let base = base_url.trim_end_matches('/');
     let session_id = resolve_mcp_session_id(client, base, args).await?;
+    if !cw_core::control::is_valid_session_id(&session_id) {
+        anyhow::bail!("Invalid session ID");
+    }
+
+    if tool_name == "cw_pin_policy_status" {
+        let body: Value = client
+            .get(format!(
+                "{base}/api/v1/sessions/{session_id}/pin-context-policy"
+            ))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "Malformed policy JSON; consent state unconfirmed. Refresh before retrying."
+                )
+            })?;
+        let body = cw_core::control::validate_pin_policy_preview(body, &session_id)?;
+        return Ok(serde_json::to_string_pretty(
+            &json!({"policy":body,"interpretation":"Stored/committed is not consent; authorization and preview eligibility are not observed provider application. Measured savings unavailable. Human CLI/Web/TUI controls are required for consent changes."}),
+        )?);
+    }
 
     let graph: Value = client
         .get(format!("{base}/api/v1/sessions/{session_id}/graph"))
@@ -350,7 +393,10 @@ async fn execute_mcp_tool(
                 content,
                 source_node_id: None,
             };
-            post_mutation(client, base, &session_id, op).await
+            let stored = post_mutation(client, base, &session_id, op).await?;
+            Ok(format!(
+                "Committed rule stored. Consent is unchanged; reinforcement and provider application are not established. Inspect cw_pin_policy_status. Measured savings unavailable.\n{stored}"
+            ))
         }
         "cw_unpin_context" => {
             let clear_all = args
@@ -451,11 +497,17 @@ async fn resolve_mcp_session_id(
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
+        if !cw_core::control::is_valid_session_id(s) {
+            anyhow::bail!("Invalid session ID");
+        }
         return Ok(s.to_string());
     }
     if let Ok(env_id) = std::env::var("CW_SESSION_ID") {
         let trimmed = env_id.trim();
         if !trimmed.is_empty() {
+            if !cw_core::control::is_valid_session_id(trimmed) {
+                anyhow::bail!("Invalid session ID");
+            }
             return Ok(trimmed.to_string());
         }
     }
@@ -570,7 +622,7 @@ mod tests {
         .await
         .unwrap();
         let tools = list_resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 9);
+        assert_eq!(tools.len(), 10);
         assert!(tools.iter().any(|t| t["name"] == "cw_shadow_dedupe"));
         assert!(tools.iter().any(|t| t["name"] == "cw_evict_stale_reads"));
         assert!(tools.iter().any(|t| t["name"] == "cw_unpin_context"));

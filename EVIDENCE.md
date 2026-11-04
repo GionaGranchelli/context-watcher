@@ -1,5 +1,9 @@
 # contextWatcher (`cw`) — Empirical Evidence & Value Claims
 
+## CW-121C2: TUI and MCP controls
+
+[Operator workflow and security inventory](docs/CW-121C2-TUI-MCP-CONTROLS.md). Daemon-backed TUI controls require review and typed session confirmation; MCP policy inspection is read-only and rejects self-authorization attempts. Scripted real-PTY interaction verifies grant/revoke and terminal restoration, including API failure, using a separate local optimization database. 279 Rust tests passed (19 ignored), 15 web tests passed, and Clippy/formatting/Svelte check/build passed. Hermes plugin and offline lifecycle/admission tests passed. [Sanitized PTY evidence](.audit/cw121c2/terminal-smoke.json). Deterministic entry-failure tests verify raw-mode restoration without screen-control writes when alternate entry fails; the [updated PTY smoke](.audit/cw121c2/terminal-lifecycle-review.json) passed. Human visual usability remains unverified. No inference, production changes or historical evidence rewrites.
+
 ## CW-121C1: Operator consent workflow
 
 [CLI/Web controls and verification](docs/CW-121C1-OPERATOR-CONSENT.md). Actual CLI-to-control-API tests cover explicit acknowledgement, revocation, session scope, terminated/Gemini restrictions, and failed responses. Web workflow tests cover stale sessions, acknowledgement reset and unavailable/unconfirmed state. The isolated terminal smoke passed and its daemon was stopped; [sanitized evidence](.audit/cw121c1/operator-check.json) records the outcomes and transcript hash. Browser interaction remains unverified: no browser provider was available. No inference, model-server execution, production changes or historical rewrites.

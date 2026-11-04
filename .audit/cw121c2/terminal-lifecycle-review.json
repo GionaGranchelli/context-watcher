@@ -1,0 +1,23 @@
+{
+  "scope": "scripted real PTY; disposable daemon; not human visual qualification",
+  "inference": "NOT_EXECUTED",
+  "binary_sha256": "72973182bf53d3163ad916a587a1c0e96feffe6188a81529b23d0b4787590f60",
+  "steps": [
+    "typed confirmation enabled daemon session with separate local TUI database",
+    "revocation preserved stored pin"
+  ],
+  "terminal_restoration": [
+    {
+      "failed_api": false,
+      "restored": true
+    },
+    {
+      "failed_api": true,
+      "restored": true
+    }
+  ],
+  "operator.ansi_sha256": "4fccda42ff11b44f9ecf8c756c6593521fac8604ac831b0ed3e9df5a3aac57d5",
+  "failed-api.ansi_sha256": "5df6d7d2beb8895e302f585fc6cb0b71b9eab13d802d2987ae1bd1b9a4794c02",
+  "daemon_stopped": true,
+  "status": "PASS"
+}

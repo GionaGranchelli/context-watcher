@@ -15,3 +15,7 @@ crossterm.workspace = true
 reqwest.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+cw-proxy.workspace = true
+axum.workspace = true

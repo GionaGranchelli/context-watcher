@@ -7,6 +7,10 @@
 
 ---
 
+## CW-121C2 — In Review
+
+Daemon-backed human TUI consent controls and read-only MCP policy inspection implemented for independent review. Deterministic and scripted terminal checks passed. No inference, new authorization model, or automatic merge. See [workflow, evidence and security inventory](docs/CW-121C2-TUI-MCP-CONTROLS.md).
+
 ## Current product direction — 2026-11-03 (planned, not implemented)
 
 **Core claim to qualify:** Context-Watcher can reduce redundant context *without PinContext*, while preserving agent correctness and avoiding unjustified prompt-cache rebuilding. The next qualification baseline is native agent / CW passthrough / CW **historical-pruning-only**; automatic instruction reinforcement is not part of the core performance experiment.

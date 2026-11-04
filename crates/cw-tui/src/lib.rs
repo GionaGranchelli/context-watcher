@@ -1,3 +1,5 @@
+mod pin_policy;
+
 use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -43,7 +45,7 @@ impl TuiApp {
             optimization_plans: Vec::new(),
             strategy_idx: None,
             node_state: ListState::default(),
-            status_msg: "↑/↓ Nodes | [o] Optimization Studio (1-5) | [Enter] Apply Strategy | [p] Prune | [d] Dedupe | [f] Fold | [q] Quit".to_string(),
+            status_msg: "↑/↓ Nodes | [c] Daemon pin consent | [o] Optimization Studio (1-5) | [Enter] Apply Strategy | [p] Prune | [d] Dedupe | [f] Fold | [q] Quit".to_string(),
         };
         app.reload(initial_session.as_deref());
         app
@@ -98,11 +100,54 @@ impl TuiApp {
     }
 }
 
-pub fn run_tui(store: CwStore, session_id: Option<String>) -> Result<()> {
+struct TerminalRestore<W: io::Write, F: FnMut() -> io::Result<()>> {
+    output: W,
+    restore_raw: F,
+    raw_enabled: bool,
+    alternate_screen_entered: bool,
+}
+impl<W: io::Write, F: FnMut() -> io::Result<()>> TerminalRestore<W, F> {
+    fn enter_alternate_screen(&mut self) -> io::Result<()> {
+        execute!(self.output, EnterAlternateScreen)?;
+        self.alternate_screen_entered = true;
+        Ok(())
+    }
+    fn restore(&mut self) -> io::Result<()> {
+        let raw = if self.raw_enabled {
+            (self.restore_raw)()
+        } else {
+            Ok(())
+        };
+        if raw.is_ok() {
+            self.raw_enabled = false;
+        }
+        let screen = if self.alternate_screen_entered {
+            execute!(self.output, LeaveAlternateScreen, crossterm::cursor::Show)
+        } else {
+            Ok(())
+        };
+        if screen.is_ok() {
+            self.alternate_screen_entered = false;
+        }
+        raw.and(screen)
+    }
+}
+impl<W: io::Write, F: FnMut() -> io::Result<()>> Drop for TerminalRestore<W, F> {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
+}
+
+pub async fn run_tui(store: CwStore, session_id: Option<String>, daemon_url: &str) -> Result<()> {
     enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
+    let mut restore = TerminalRestore {
+        output: io::stdout(),
+        restore_raw: disable_raw_mode,
+        raw_enabled: true,
+        alternate_screen_entered: false,
+    };
+    restore.enter_alternate_screen()?;
+    let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = TuiApp::new(store, session_id);
@@ -118,6 +163,14 @@ pub fn run_tui(store: CwStore, session_id: Option<String>) -> Result<()> {
             }
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => break,
+                KeyCode::Char('c') => {
+                    let initial = app.sessions.get(app.session_idx).map(|s| s.id.clone());
+                    app.status_msg = match pin_policy::run_policy_view(&mut terminal, daemon_url, initial.as_deref()).await {
+                        Ok(()) => "Returned from daemon policy controls. Local optimization workspace unchanged.".into(),
+                        Err(_) => "Policy API unavailable or invalid. Consent unconfirmed; check daemon URL/credential and retry [c].".into(),
+                    };
+                    app.reload(None);
+                }
                 KeyCode::Char('r') => app.reload(None),
                 KeyCode::Tab => {
                     if !app.sessions.is_empty() {
@@ -282,9 +335,7 @@ pub fn run_tui(store: CwStore, session_id: Option<String>) -> Result<()> {
         }
     }
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    restore.restore()?;
     Ok(())
 }
 
@@ -343,7 +394,7 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
         ),
         Span::raw("│"),
         Span::styled(
-            format!(" Active Overlays: {} ", app.mutations.len()),
+            format!(" Stored Overlays: {} ", app.mutations.len()),
             Style::default().fg(Color::Magenta),
         ),
     ]))
@@ -531,4 +582,87 @@ fn draw_ui(f: &mut Frame, app: &mut TuiApp) {
             .title(" Shortcuts & Actions "),
     );
     f.render_widget(footer, chunks[2]);
+}
+
+#[cfg(test)]
+mod terminal_cleanup_tests {
+    use super::*;
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
+
+    struct Output {
+        fail: bool,
+        bytes: Rc<RefCell<Vec<u8>>>,
+        attempts: Rc<Cell<usize>>,
+    }
+    impl io::Write for Output {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.attempts.set(self.attempts.get() + 1);
+            if self.fail {
+                return Err(io::Error::other("entry failed"));
+            }
+            self.bytes.borrow_mut().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    #[test]
+    fn failed_alternate_entry_restores_raw_without_screen_output() {
+        let attempts = Rc::new(Cell::new(0));
+        let bytes = Rc::new(RefCell::new(Vec::new()));
+        let restored = Cell::new(0);
+        let mut guard = TerminalRestore {
+            output: Output {
+                fail: true,
+                bytes: bytes.clone(),
+                attempts: attempts.clone(),
+            },
+            restore_raw: || {
+                restored.set(restored.get() + 1);
+                Ok(())
+            },
+            raw_enabled: true,
+            alternate_screen_entered: false,
+        };
+        assert!(guard.enter_alternate_screen().is_err());
+        let entry_attempts = attempts.get();
+        // Even a now-working writer must receive no exit/cursor controls after failed entry.
+        guard.output.fail = false;
+        drop(guard);
+        assert_eq!(restored.get(), 1);
+        assert_eq!(attempts.get(), entry_attempts);
+        assert!(bytes.borrow().is_empty());
+    }
+    #[test]
+    fn successful_entry_cleans_up_once_on_normal_or_error_exit() {
+        for explicit_restore in [false, true] {
+            let bytes = Rc::new(RefCell::new(Vec::new()));
+            let restored = Cell::new(0);
+            let mut guard = TerminalRestore {
+                output: Output {
+                    fail: false,
+                    bytes: bytes.clone(),
+                    attempts: Rc::new(Cell::new(0)),
+                },
+                restore_raw: || {
+                    restored.set(restored.get() + 1);
+                    Ok(())
+                },
+                raw_enabled: true,
+                alternate_screen_entered: false,
+            };
+            guard.enter_alternate_screen().unwrap();
+            bytes.borrow_mut().clear();
+            if explicit_restore {
+                guard.restore().unwrap();
+            }
+            drop(guard);
+            assert_eq!(restored.get(), 1);
+            assert_eq!(&*bytes.borrow(), b"\x1b[?1049l\x1b[?25h");
+        }
+    }
 }

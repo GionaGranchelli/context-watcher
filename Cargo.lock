@@ -598,7 +598,10 @@ name = "cw-mcp"
 version = "0.2.4"
 dependencies = [
  "anyhow",
+ "axum",
+ "chrono",
  "cw-core",
+ "cw-proxy",
  "cw-store",
  "reqwest",
  "serde",
@@ -652,9 +655,11 @@ name = "cw-tui"
 version = "0.2.4"
 dependencies = [
  "anyhow",
+ "axum",
  "chrono",
  "crossterm 0.28.1",
  "cw-core",
+ "cw-proxy",
  "cw-store",
  "ratatui",
  "reqwest",

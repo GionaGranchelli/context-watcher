@@ -77,6 +77,6 @@ npm run build
 
 No live provider, model-server, cloud-spend, or benchmark qualification is performed. Historical evidence and the original experiment freeze remain unchanged; only the current offline source freeze is refreshed.
 
-## CW-121C2 remaining gaps
+## CW-121C2 follow-up (now implemented for review)
 
-TUI and MCP still lack an operator activation workflow. Their explicit pin paths can store inactive records but cannot implicitly grant consent. Add preview/acknowledge/enable/revoke controls and consistent feedback there separately. Per-content or narrower future-generation approval would need its own contract. Browser interaction qualification remains outstanding. None of these gaps authorizes another inference experiment.
+The [CW-121C2 implementation](CW-121C2-TUI-MCP-CONTROLS.md) now adds human TUI activation and read-only MCP inspection. At the CW-121C1 baseline, TUI and MCP lacked those workflows. Their explicit pin paths can store inactive records but cannot implicitly grant consent. MCP deliberately remains inspection-only for consent; it directs humans to trusted controls. Per-content or narrower future-generation approval would need its own contract. Browser interaction qualification remains outstanding. None of these gaps authorizes another inference experiment.

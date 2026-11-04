@@ -109,7 +109,7 @@ async fn wire(raw: Value, mode: &str, id: &str, stub: &str, should_apply: bool) 
     assert!(!store.get_pin_context_policy(id).unwrap().is_enabled_for(id));
     let mut state = DaemonState::new(store.clone());
     state.openai_upstream = url;
-    state.control_token = "offline-control-only".into();
+    state.control_token = "cw122a-offline-control-fixture-token-0001".into();
     state.capture_wire_egress = true;
     let app = build_proxy_router(state);
     let original = serde_json::to_vec_pretty(&raw).unwrap();
@@ -119,7 +119,10 @@ async fn wire(raw: Value, mode: &str, id: &str, stub: &str, should_apply: bool) 
         .header("host", "127.0.0.1")
         .header("content-type", "application/json")
         .header("x-cw-session-id", id)
-        .header("x-cw-control-token", "offline-control-only")
+        .header(
+            "x-cw-control-token",
+            "cw122a-offline-control-fixture-token-0001",
+        )
         .body(Body::from(original.clone()))
         .unwrap();
     let response = app.oneshot(request).await.unwrap();
@@ -143,7 +146,10 @@ async fn wire(raw: Value, mode: &str, id: &str, stub: &str, should_apply: bool) 
         );
     }
     assert!(!String::from_utf8_lossy(&actual_bytes).contains("cw_pinned_context"));
-    assert!(!String::from_utf8_lossy(&actual_bytes).contains("offline-control-only"));
+    assert!(
+        !String::from_utf8_lossy(&actual_bytes)
+            .contains("cw122a-offline-control-fixture-token-0001")
+    );
     if should_apply {
         validate_protocol_invariants(&actual, ProviderKind::OpenAI).unwrap();
         assert_ne!(actual, raw);
@@ -235,7 +241,7 @@ async fn cw122_unsafe_and_unread_history_abstains() {
 async fn cw122_unapproved_spend_guard_blocks_before_upstream_dispatch() {
     use cw_core::spend_guard::{SpendGuard, SpendGuardConfig};
     let mut state = DaemonState::new(CwStore::open_in_memory().unwrap());
-    state.control_token = "offline-control-only".into();
+    state.control_token = "cw122a-offline-control-fixture-token-0001".into();
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let count = calls.clone();
     let upstream = Router::new().route(
@@ -262,7 +268,10 @@ async fn cw122_unapproved_spend_guard_blocks_before_upstream_dispatch() {
                 .header("host", "127.0.0.1")
                 .header("content-type", "application/json")
                 .header("x-cw-session-id", "unauthorized-live")
-                .header("x-cw-control-token", "offline-control-only")
+                .header(
+                    "x-cw-control-token",
+                    "cw122a-offline-control-fixture-token-0001",
+                )
                 .body(Body::from(load("trace-f1.json").to_string()))
                 .unwrap(),
         )

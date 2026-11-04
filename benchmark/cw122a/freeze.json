@@ -2,8 +2,8 @@
   "version": "CW-122A-1",
   "files": {
     "benchmark/cw104b/smoke.py": "cda5758edc458433907c3bafca4bc4de77ab5dcecc7c41f518aa91e2b1f98da8",
-    "benchmark/cw122a/README.md": "609b8cd4e6abd9b149c9df55e674a1c935d8653c0b4f57ac5e321c1f5dcebe8e",
-    "benchmark/cw122a/admission.py": "e85d0d098095a86497d8e7cbb1e8dffec2404bf8b8e695b8c214c72897805a33",
+    "benchmark/cw122a/README.md": "0ba41c87438c0c820545ee02257c1b6ee2dcc94e875c10d7f3ffae8aa9a7d1a7",
+    "benchmark/cw122a/admission.py": "7d12f1a389c143e9faeee4ef0f9fdfeb21d2c1bd1179463fd60161e9444a119a",
     "benchmark/cw122a/analyze.py": "a6097d8a5106bce714e8c4491ca8b4d0ffce5d88874ac85f703c1eb0097a1f84",
     "benchmark/cw122a/campaign.json": "a1bd8c4bbcefc1872dca4c2f0ad48b427c673966593ebee69de9897e6992a03f",
     "benchmark/cw122a/fixtures/f1/policy.txt": "3723f4f86d823030c7506a4121829358c77124d22f203099c2086220912a68cd",
@@ -15,10 +15,10 @@
     "benchmark/cw122a/oracle.py": "5193c1974740fe1ccbf53acee1247dcad35237277d0c08cc064df14cfc32053a",
     "benchmark/cw122a/oracles/f1.py": "099edc9d0e93dce7b89834085c8cb4bfb1a4efca9aece29c0f42872788c32ef5",
     "benchmark/cw122a/oracles/f2.py": "67ea950b1ad901f2736072d00fac847a49ebe3a63d79ee27db1674ebab5ff146",
-    "benchmark/cw122a/rehearse.py": "e7ba0052f40be71a07df53e36b540186989cc55a901fe6f6872db589d2f93715",
+    "benchmark/cw122a/rehearse.py": "4ac3099ac32b27c108c9a83b7edfdf459f994d20ea688ef00a8a67c1b229b01b",
     "benchmark/cw122a/synthetic-solutions.json": "1bd12d0a0fb903164cbe9266947e8aeb5349cde5c6c23891ae0e4a6a0e4e9cb1",
-    "benchmark/cw122a/telemetry.schema.json": "9db4f08e2b0588adb94ceda86e8b87d9be3984d1afa3ba9aa01990ca7aa25a62",
-    "benchmark/cw122a/test_campaign.py": "4d8e0d4a975bd75b8d5db96a9f0e4d84057b685fddee99a96a11568c875d4687",
+    "benchmark/cw122a/telemetry.schema.json": "3e6dd4e6ede1fbc9a88ddf390bf4b3dbd95b53e89273cb10c342eefaab344663",
+    "benchmark/cw122a/test_campaign.py": "b6a29d6509f427016148550627b444983b04448876cb779a08c443338d3a9be7",
     "benchmark/cw122a/trace-f1.json": "21629502c972829166a3f8a75ff61afeebea38a8341f6c9f57e125a2372154de",
     "benchmark/cw122a/trace-f2.json": "2d20559fc3ca7c34752c75d230ca6fb495a0342bbbcb24162c12034e18448d6b",
     "crates/cw-core/src/mutation.rs": "d83261abacafabf952d8a358b9fbe028049d229f3da89bf6a1b79e19067c0372",
@@ -26,7 +26,9 @@
     "crates/cw-core/src/spend_guard.rs": "73307df3982ef09425bd9e523ba7e13312348ea17ab5f21f9ae157c4746c1d2e",
     "crates/cw-core/src/validator.rs": "ca29feab5d18b00d9466386e6f80b181d5e6a3922b866564fa2d2b43447d00dc",
     "crates/cw-proxy/src/proxy/mod.rs": "2bd7834725607ead9454d062dffd3f2336e3ee9fd555d6abc3da14d985cf821f",
-    "crates/cw-proxy/tests/cw122_pruning.rs": "6d9d6b8ada22b311498a07d7bfa1b1ae602925175f143ea02c1d6d7ea4cf5339",
-    "docs/CW-122A-PREREGISTRATION.md": "3ec48b71baaa89c9429fa9c115cae65bb3361f3f2a0fe1a3eca857d88d7ea3d3"
+    "crates/cw-proxy/tests/cw122_pruning.rs": "0fb3e99ac319f0f27a1a74cfa2628d54634c137c5f77a979acc41c1a287a43f2",
+    "docs/CW-122A-PREREGISTRATION.md": "3ec48b71baaa89c9429fa9c115cae65bb3361f3f2a0fe1a3eca857d88d7ea3d3",
+    "benchmark/cw122a/offline_env.py": "2ea652cc029bc2218eb3f14ee9ec7b812221694f580ee9477481ca0885eb260b",
+    "benchmark/cw122a/requirements-test.txt": "49026b67905a6c42bd426e6f8b3d2d08dc24ec6fe51cb2f706aea0a3fb5f8e08"
   }
 }

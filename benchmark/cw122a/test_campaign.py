@@ -2,7 +2,6 @@
 import copy
 from datetime import datetime, timedelta, timezone
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -15,6 +14,10 @@ from admission import claim, validate
 from analyze import analyze, verify_wire
 from oracle import ROOT, check, digest
 from rehearse import REPO, build_dataset, main
+from offline_env import build_environment
+from jsonschema import Draft202012Validator, ValidationError
+import runpy
+import sys
 
 
 class CampaignTests(unittest.TestCase):
@@ -23,7 +26,7 @@ class CampaignTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory(prefix='cw122a-unit-')
         cls.addClassCleanup(cls.temporary.cleanup)
         evidence = Path(cls.temporary.name) / 'wire'
-        env = {k:v for k,v in os.environ.items() if not any(w in k.upper() for w in ['TOKEN','API_KEY','SECRET'])}
+        env = build_environment()
         env['CW122_OFFLINE_EVIDENCE'] = str(evidence)
         subprocess.run(['cargo','test','-p','cw-proxy','--test','cw122_pruning','cw122_pruning_only_wire_matrix'],cwd=REPO,env=env,check=True,timeout=300,capture_output=True)
         cls.campaign=json.loads((ROOT/'campaign.json').read_text())
@@ -32,6 +35,24 @@ class CampaignTests(unittest.TestCase):
 
     def report(self, dataset=None):
         return analyze(dataset or self.dataset,self.campaign,self.traces)
+
+    def test_schema_rejects_malformed_runtime_and_wire_independently(self):
+        schema=json.loads((ROOT/'telemetry.schema.json').read_text())
+        Draft202012Validator.check_schema(schema)
+        validator=Draft202012Validator(schema)
+        validator.validate(self.dataset)
+        changes=[('runtime','model',None),('runtime','server_version',{}),
+                 ('wire','treatment_verified','yes'),('wire','request_count','1'),
+                 ('wire','applied_mutation_ids',['rule',123]),('wire','original',[]),
+                 ('wire','skipped_mutations',[{'rule_id':'rule','reason':None}])]
+        for section,key,value in changes:
+            data=copy.deepcopy(self.dataset);data['runs'][0][section][key]=value
+            with self.subTest(section=section,key=key),self.assertRaises(ValidationError):validator.validate(data)
+        nullable=copy.deepcopy(self.dataset)
+        nullable['runs'][0].update(status='aborted',wire=None,duration_ms=None)
+        for key in ['input_tokens','cached_input_tokens','output_tokens']:
+            nullable['runs'][0]['requests'][0][key]=None
+        validator.validate(nullable)
 
     def test_both_orders_six_matched_pairs_and_repeatable_analysis(self):
         result=self.report()
@@ -158,7 +179,7 @@ class CampaignTests(unittest.TestCase):
 
     def test_oracle_failure_detected_under_python_optimized_mode(self):
         code='from oracle import check,ROOT; import json; c=json.loads((ROOT/"campaign.json").read_text()); raise SystemExit(1 if check("f1",ROOT/"fixtures"/"f1",c)["passed"] else 0)'
-        result=subprocess.run(['python3','-O','-B','-c',code],cwd=ROOT,capture_output=True,timeout=15)
+        result=subprocess.run(['python3','-O','-B','-c',code],cwd=ROOT,env=build_environment(),capture_output=True,timeout=15)
         self.assertEqual(result.returncode,0)
 
 
@@ -195,6 +216,28 @@ class AdmissionTests(unittest.TestCase):
             with self.subTest(key=key),self.assertRaises(ValueError):validate(document,self.selection,self.now)
         Path(self.document['credential_file']).chmod(0o644)
         with self.assertRaises(ValueError):validate(self.document,self.selection,self.now)
+
+
+
+class OfflineEnvironmentTests(unittest.TestCase):
+    def test_only_required_build_environment_is_inherited(self):
+        source={'PATH':'/tools/bin','HOME':'/private-home','CARGO_HOME':'/cargo',
+                'PASSWORD':'secret','PRIVATE_KEY':'secret','GENERIC_KEY':'secret',
+                'OPENAI_API_KEY':'secret','AUTHORIZATION':'secret','OTHER':'secret'}
+        env=build_environment(source)
+        self.assertEqual(set(env),{'PATH','HOME','CARGO_HOME','LANG','LC_ALL','PYTHONDONTWRITEBYTECODE'})
+        self.assertNotIn('secret',env.values())
+        self.assertEqual(env['PATH'],'/tools/bin')
+
+    def test_failed_legacy_import_restores_sys_path(self):
+        original=list(sys.path)
+        real_import=__import__
+        def fail_smoke(name,*args,**kwargs):
+            if name=='smoke':raise ImportError('deliberate fixture failure')
+            return real_import(name,*args,**kwargs)
+        with patch('builtins.__import__',side_effect=fail_smoke):
+            with self.assertRaises(ImportError):runpy.run_path(str(ROOT/'admission.py'))
+        self.assertEqual(sys.path,original)
 
 if __name__=='__main__':
     unittest.main()

@@ -59,5 +59,7 @@ jobs:
 
       - name: CW-122A offline pruning readiness
         run: |
-          python3 -B -m unittest discover -s benchmark/cw122a -p test_campaign.py -v
-          python3 -B benchmark/cw122a/rehearse.py --output "$RUNNER_TEMP/cw122a-offline"
+          python3 -m venv "$RUNNER_TEMP/cw122a-tests"
+          "$RUNNER_TEMP/cw122a-tests/bin/python" -m pip install -r benchmark/cw122a/requirements-test.txt
+          "$RUNNER_TEMP/cw122a-tests/bin/python" -B -m unittest discover -s benchmark/cw122a -p test_campaign.py -v
+          "$RUNNER_TEMP/cw122a-tests/bin/python" -B benchmark/cw122a/rehearse.py --output "$RUNNER_TEMP/cw122a-offline"

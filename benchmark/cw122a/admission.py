@@ -11,9 +11,12 @@ from analyze import require
 from oracle import ROOT, digest
 
 # Reuse the existing exclusive, durable authorization-consumption marker.
+original_path = list(sys.path)
 sys.path.insert(0, str(ROOT.parent / 'cw104b'))
-from smoke import claim_authorization
-sys.path.pop(0)
+try:
+    from smoke import claim_authorization
+finally:
+    sys.path[:] = original_path
 
 FIELDS = {'campaign_id','authorization_id','approved_by','approval_reference','issued_at','expires_at','provider','model','endpoint',
           'campaign_sha256','runner_freeze_sha256','max_runs','max_provider_requests','max_seconds','spend_ceiling_usd',

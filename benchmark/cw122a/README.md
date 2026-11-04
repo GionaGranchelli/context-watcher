@@ -2,8 +2,12 @@
 
 This directory qualifies controls and analysis, **not product value**. No provider, agent binary or model server is invoked. The only network traffic is from the Rust proxy fixture to a mock upstream bound on loopback.
 
+The schema tests use the pinned test-only `jsonschema` dependency. Install it in an isolated environment:
+
 ```sh
-python3 -B -m unittest discover -s benchmark/cw122a -p test_campaign.py
+python3 -m venv /tmp/cw122a-tests
+/tmp/cw122a-tests/bin/python -m pip install -r benchmark/cw122a/requirements-test.txt
+/tmp/cw122a-tests/bin/python -B -m unittest discover -s benchmark/cw122a -p test_campaign.py
 python3 -B benchmark/cw122a/rehearse.py --output /tmp/cw122a-new-evidence
 python3 -B benchmark/cw122a/analyze.py /tmp/cw122a-new-evidence/runs.json
 ```

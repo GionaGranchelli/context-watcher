@@ -2,7 +2,6 @@
 import argparse
 import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,6 +9,7 @@ import tempfile
 
 from analyze import analyze, require, verify_wire
 from oracle import ROOT, check, digest
+from offline_env import build_environment
 
 REPO = ROOT.parent.parent
 HISTORICAL = ['docs/CW-115-FOUR-MODE-ISOLATION-REPORT.md', 'docs/CW-115-PERFORMANCE-SAVINGS-QUALIFICATION.md', 'docs/cw115_four_mode_benchmark_data.json']
@@ -66,7 +66,7 @@ def main(argv=None):
     require(not args.output.exists(), 'evidence directory must be new; never overwrite runs')
     args.output.mkdir(parents=True)
     before = {name:digest(REPO/name) for name in HISTORICAL}
-    env = {k:v for k,v in os.environ.items() if not any(word in k.upper() for word in ['API_KEY','TOKEN','SECRET','AUTHORIZATION'])}
+    env = build_environment()
     env['CW122_OFFLINE_EVIDENCE'] = str(args.output.resolve())
     subprocess.run(['cargo','test','-p','cw-proxy','--test','cw122_pruning','--','--test-threads=1'], cwd=REPO, env=env, check=True, timeout=300)
     campaign = json.loads((ROOT/'campaign.json').read_text())

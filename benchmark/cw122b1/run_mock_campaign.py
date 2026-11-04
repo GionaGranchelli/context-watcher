@@ -178,7 +178,11 @@ def main(argv=None):
     if status == 'PASSED':
         manifest_path = evidence / 'manifest.json'
         if manifest_path.is_file():
-            write_private(evidence / 'aggregate.json', public_aggregate(json.loads(manifest_path.read_text())))
+            manifest_bytes = manifest_path.read_bytes()
+            aggregate = public_aggregate(json.loads(manifest_bytes))
+            aggregate['private_manifest_sha256'] = hashlib.sha256(manifest_bytes).hexdigest()
+            aggregate['private_launch_sha256'] = hashlib.sha256((evidence / 'launch.json').read_bytes()).hexdigest()
+            write_private(evidence / 'aggregate.json', aggregate)
     write_private(evidence / 'runner-result.json', {
         'status': status, 'return_code': return_code,
         'elapsed_seconds': round(time.monotonic() - started, 3),

@@ -141,6 +141,34 @@ class MockRunnerTests(unittest.TestCase):
             finally:
                 outside.unlink(missing_ok=True)
 
+    def test_partial_boundary_requires_real_marker_and_verified_process_cleanup(self):
+        with tempfile.TemporaryDirectory(prefix='cw122b1-boundary-') as directory:
+            root = Path(directory)
+            artifact = root / 'ingress.bin'
+            artifact.write_bytes(b'captured ingress')
+            artifact.chmod(0o600)
+            record = {
+                'boundary_id': 'after_ingress_before_completed_egress',
+                'injection_boundary': 'proxy ingress persisted; egress not dispatched',
+                'result': 'PASS', 'process_cleanup': 'VERIFIED',
+                'evidence_preservation': {'status': 'PRESERVED', 'directory': str(root),
+                    'files': [{'path': artifact.name,
+                        'sha256': hashlib.sha256(artifact.read_bytes()).hexdigest(),
+                        'kind': 'request'}]},
+            }
+            output = ('CW122B1_F1_BOUNDARY:' + json.dumps(record)).encode()
+            matrix = matrix_from_output(output, 0, root)
+            actual = next(item for item in matrix['partial_evidence_boundaries']
+                          if item['boundary_id'] == record['boundary_id'])
+            self.assertEqual(actual['result'], 'PASS')
+
+            record['process_cleanup'] = 'NOT_VERIFIED'
+            output = ('CW122B1_F1_BOUNDARY:' + json.dumps(record)).encode()
+            matrix = matrix_from_output(output, 0, root)
+            actual = next(item for item in matrix['partial_evidence_boundaries']
+                          if item['boundary_id'] == record['boundary_id'])
+            self.assertEqual(actual['result'], 'NOT_VERIFIED')
+
     @unittest.skipUnless(os.name == 'posix', 'POSIX evidence modes')
     def test_fault_matrix_rejects_world_readable_evidence_parent(self):
         with tempfile.TemporaryDirectory(prefix='cw122b1-matrix-mode-') as directory:

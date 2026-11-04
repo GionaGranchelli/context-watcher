@@ -19,7 +19,7 @@ python3 -B benchmark/cw122b1/run_fault_matrix.py \
   --success-path-evidence-dir /absolute/private/path/cw122b1-success
 ```
 
-It runs deterministic proxy and runner tests, then the Codex loopback fault cases when `codex` is available on the minimal allowlisted `PATH`. It writes raw evidence outside the checkout with mode `0700` directories and `0600` files, and updates the sanitized `fault-matrix.json`. `BLOCKED_WITH_UNVERIFIED_SCENARIOS` means every executed test passed but at least one required execution layer or interruption boundary remains unverified. It never enables live provider traffic.
+It runs deterministic proxy and runner tests, then the Codex loopback fault cases when `codex` is available on the minimal allowlisted `PATH`. It also runs five supervised boundary interruptions. Proxy lifecycle hooks are compiled only by the explicit `qualification-fault-hooks` feature; the supervisor kills each dedicated Cargo process group after the private marker and evidence are durable, then verifies cleanup and hashes. The after-task boundary uses the Codex mock campaign and its independent task oracle, stopping before the per-attempt manifest is written. Raw evidence stays outside the checkout with mode `0700` directories and `0600` files, and the runner updates sanitized `fault-matrix.json`. `BLOCKED_WITH_UNVERIFIED_SCENARIOS` means at least one required execution layer or interruption boundary remains unverified. It never enables live provider traffic.
 
 See [the qualification report](../../docs/CW-122B1-CODEX-MOCK-QUALIFICATION.md) for scope, results, limitations and the live gate.
 

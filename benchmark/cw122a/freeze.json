@@ -1,5 +1,5 @@
 {
-  "version": "CW-122A-1-F1-SOURCE-BASELINE",
+  "version": "CW-122A-1-F1-BOUNDARY-HOOKS-BASELINE",
   "files": {
     "benchmark/cw104b/smoke.py": "cda5758edc458433907c3bafca4bc4de77ab5dcecc7c41f518aa91e2b1f98da8",
     "benchmark/cw122a/README.md": "0ba41c87438c0c820545ee02257c1b6ee2dcc94e875c10d7f3ffae8aa9a7d1a7",
@@ -25,7 +25,7 @@
     "crates/cw-core/src/normalizer.rs": "74d4738f29846838b3722b16e0035c81e1696592919b67223c9a6a962b429312",
     "crates/cw-core/src/spend_guard.rs": "6a45f8b8cab445dcf39acdeb66888ea36f6a9f812243c4dc2b04c996b7e0053a",
     "crates/cw-core/src/validator.rs": "ca29feab5d18b00d9466386e6f80b181d5e6a3922b866564fa2d2b43447d00dc",
-    "crates/cw-proxy/src/proxy/mod.rs": "2bd7834725607ead9454d062dffd3f2336e3ee9fd555d6abc3da14d985cf821f",
+    "crates/cw-proxy/src/proxy/mod.rs": "362d18fe1a71809bf37e6d37ca22f31d923e1984722ed542e2210863d72fdf42",
     "crates/cw-proxy/tests/cw122_pruning.rs": "0fb3e99ac319f0f27a1a74cfa2628d54634c137c5f77a979acc41c1a287a43f2",
     "docs/CW-122A-PREREGISTRATION.md": "3ec48b71baaa89c9429fa9c115cae65bb3361f3f2a0fe1a3eca857d88d7ea3d3",
     "benchmark/cw122a/offline_env.py": "2ea652cc029bc2218eb3f14ee9ec7b812221694f580ee9477481ca0885eb260b",

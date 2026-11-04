@@ -454,6 +454,26 @@ pub async fn handle_proxy_request(
                     tracing::warn!(%error,"Wire recording unavailable; forwarding original request");
                     break 'capture;
                 }
+                #[cfg(feature = "qualification-fault-hooks")]
+                if let Some(hook) = state.qualification_fault_hook.as_ref() {
+                    let ingress = body.to_vec();
+                    hook.pause(
+                        "after_ingress_before_completed_egress",
+                        serde_json::json!({
+                            "phase":"proxy ingress persisted; model-bound egress not yet dispatched",
+                            "session_id":session_id,
+                            "turn_id":turn.id,
+                            "accepted_admissions":0,
+                            "rejected_admissions":0,
+                            "upstream_dispatch_count":0,
+                            "applied_mutation_ids":turn.applied_mutation_ids,
+                            "skipped_mutations":turn.skipped_mutations,
+                            "process_cleanup":"supervisor_verified",
+                        }),
+                        &[("ingress.bin", &ingress)],
+                    )
+                    .await;
+                }
                 if headers.contains_key("x-cw-dry-run") {
                     return render_dry_run_response(&state, turn, outbound);
                 }

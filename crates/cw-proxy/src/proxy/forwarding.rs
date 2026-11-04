@@ -39,6 +39,34 @@ pub async fn forward_to_upstream(
                 if let Some(rec) = recorder.as_mut() {
                     rec.spend_permit = Some(permit);
                 }
+                #[cfg(feature = "qualification-fault-hooks")]
+                if let Some(hook) = state.qualification_fault_hook.as_ref()
+                    && let Some(turn) = recorder.as_ref().and_then(|rec| rec.turn.as_ref())
+                {
+                    let ingress = state
+                        .store
+                        .get_wire_request(&turn.id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    hook.pause(
+                        "after_admission_before_dispatch",
+                        serde_json::json!({
+                            "phase":"SpendGuard admission accepted; provider send not started",
+                            "session_id":session_id,
+                            "turn_id":turn.id,
+                            "accepted_admissions":guard.session_request_count(&session_id),
+                            "rejected_admissions":0,
+                            "upstream_dispatch_count":0,
+                            "reservation_usd":guard.total_reserved_usd(),
+                            "settlement":"NOT_SETTLED_AT_INTERRUPTION",
+                            "applied_mutation_ids":turn.applied_mutation_ids,
+                            "skipped_mutations":turn.skipped_mutations,
+                        }),
+                        &[("ingress.bin", ingress.as_slice())],
+                    )
+                    .await;
+                }
             }
             Err(error) => {
                 if let Some(mut rec) = recorder {
@@ -112,6 +140,50 @@ pub async fn forward_to_upstream(
                     Some((Err(error), (source, recorder)))
                 }
                 None => {
+                    #[cfg(feature = "qualification-fault-hooks")]
+                    if let Some(rec) = recorder.as_ref()
+                        && let Some(hook) = rec.state.qualification_fault_hook.as_ref()
+                        && let Some(turn) = rec.turn.as_ref()
+                    {
+                        let ingress = rec
+                            .state
+                            .store
+                            .get_wire_request(&turn.id)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+                        let egress = rec
+                            .state
+                            .store
+                            .get_wire_egress(&turn.id)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_default();
+                        let response = rec.buffer.clone();
+                        let guard = rec.state.spend_guard.as_ref();
+                        hook.pause(
+                            "after_response_before_usage_settlement",
+                            serde_json::json!({
+                                "phase":"complete mock response body received; recorder has not settled the SpendGuard permit",
+                                "session_id":turn.session_id,
+                                "turn_id":turn.id,
+                                "accepted_admissions":guard.map(|g|g.session_request_count(&turn.session_id)).unwrap_or(0),
+                                "rejected_admissions":0,
+                                "upstream_dispatch_count":1,
+                                "reservation_usd":guard.map(|g|g.total_reserved_usd()),
+                                "settlement":"NOT_SETTLED_AT_INTERRUPTION",
+                                "observed_usage_before_settlement":rec.usage,
+                                "applied_mutation_ids":turn.applied_mutation_ids,
+                                "skipped_mutations":turn.skipped_mutations,
+                            }),
+                            &[
+                                ("ingress.bin", ingress.as_slice()),
+                                ("egress.bin", egress.as_slice()),
+                                ("provider_response.bin", response.as_slice()),
+                            ],
+                        )
+                        .await;
+                    }
                     if let Some(rec) = recorder.as_mut() {
                         let terminal = rec.terminal_outcome.clone();
                         let outcome = if !status.is_success() {

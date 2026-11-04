@@ -16,13 +16,14 @@ CWA = REPO / 'benchmark' / 'cw122a'
 sys.path.insert(0, str(CWA))
 try:
     from offline_env import build_environment
+    from rehearse import verify_freeze
 finally:
     sys.path.pop(0)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from run_mock_campaign import (
-        install_termination_handlers, prepare_evidence, restore_signal_handlers,
+        install_termination_handlers, kill_process_tree, prepare_evidence, restore_signal_handlers,
         run_bounded, verified_git_commit, write_private,
     )
 finally:
@@ -41,6 +42,25 @@ PARTIAL_TEST = [
 CODEX_TEST = [
     'cargo', 'test', '--offline', '--locked', '-p', 'cw-proxy', '--test', 'qualification',
     'test_cw122b1_f1_codex_', '--', '--ignored', '--nocapture', '--test-threads=1',
+]
+BOUNDARY_IDS = [
+    'before_first_provider_dispatch',
+    'after_admission_before_dispatch',
+    'after_ingress_before_completed_egress',
+    'after_response_before_usage_settlement',
+    'after_task_before_final_manifest',
+]
+BOUNDARY_WORKER = [
+    'cargo', 'test', '--offline', '--locked', '-p', 'cw-proxy',
+    '--features', 'qualification-fault-hooks', '--test', 'qualification',
+    'test_cw122b1_f1_partial_boundary_worker', '--', '--ignored', '--exact',
+    '--nocapture', '--test-threads=1',
+]
+TASK_BOUNDARY_WORKER = [
+    'cargo', 'test', '--offline', '--locked', '-p', 'cw-proxy',
+    '--features', 'qualification-fault-hooks', '--test', 'qualification',
+    'test_cw122b1_codex_mock_campaign', '--', '--ignored', '--exact',
+    '--nocapture', '--test-threads=1',
 ]
 RESULT_PREFIX = 'CW122B1_F1_RESULT:'
 BOUNDARY_PREFIX = 'CW122B1_F1_BOUNDARY:'
@@ -181,22 +201,16 @@ def matrix_from_output(output, return_code, evidence_root):
             for item in files
         )
 
-    after_task = next((item for item in boundary_records
-                       if item.get('boundary_id') == 'after_task_before_manifest'), None)
-    boundary_specs = [
-        ('before_first_provider_dispatch', 'before_first_provider_dispatch'),
-        ('after_admission_before_dispatch', 'after_admission_before_dispatch'),
-        ('after_ingress_before_completed_egress', 'after_ingress_before_completed_egress'),
-        ('after_response_before_usage_settlement', 'after_response_before_usage_settlement'),
-        ('after_task_before_final_manifest', 'after_task_before_manifest'),
-    ]
+    boundary_specs = [(boundary_id, boundary_id) for boundary_id in BOUNDARY_IDS]
     boundaries = []
     for boundary_id, output_id in boundary_specs:
         record = next((item for item in boundary_records
                        if item.get('boundary_id') == output_id), None)
-        if record is None and boundary_id == 'after_task_before_final_manifest':
-            record = after_task
-        valid = bool(record and record.get('result') == 'PASS' and evidence_valid(record))
+        valid = bool(
+            record and record.get('result') == 'PASS'
+            and record.get('process_cleanup') == 'VERIFIED'
+            and evidence_valid(record)
+        )
         boundaries.append({
             'boundary_id': boundary_id,
             'injection_boundary': record.get('injection_boundary', 'NOT_EXERCISED') if record else 'NOT_EXERCISED',
@@ -207,6 +221,125 @@ def matrix_from_output(output, return_code, evidence_root):
         })
     return {'schema': 'cw122b1-f1-fault-matrix-v1', 'scenarios': matrix,
             'partial_evidence_boundaries': boundaries}
+
+
+def run_boundary_interruption(evidence, env, commit, boundary_id, timeout):
+    boundary_root = private_subdirs(evidence, 'faults', 'partial-boundaries', boundary_id)
+    command = TASK_BOUNDARY_WORKER if boundary_id == 'after_task_before_final_manifest' else BOUNDARY_WORKER
+    child_env = env.copy()
+    child_env.update({
+        'CW122B1_F1_BOUNDARY_ID': boundary_id,
+        'CW122B1_F1_BOUNDARY_DIR': str(boundary_root),
+        'CW122B1_F1_EVIDENCE_DIR': str(evidence),
+        'CW122B1_EVIDENCE_DIR': str(boundary_root / 'campaign'),
+        'CW122B1_COMMIT_SHA': commit,
+        'CW122B1_CW122A_FREEZE_SHA256': verify_freeze(),
+    })
+    if boundary_id == 'after_task_before_final_manifest':
+        campaign_root = boundary_root / 'campaign'
+        campaign_root.mkdir(mode=0o700)
+        campaign_root.chmod(0o700)
+        write_private(campaign_root / 'launch.json', {
+            'scope': 'CW122B1_F1_AFTER_TASK_BEFORE_MANIFEST', 'live': False,
+            'provider_calls': 0, 'provider_spend_usd': 0, 'commit': commit,
+            'environment_policy': 'CW-122A minimal offline allowlist',
+        })
+    proc = subprocess.Popen(
+        command, cwd=REPO, env=child_env, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
+    )
+    marker_path = boundary_root / 'ready.json'
+    deadline = time.monotonic() + timeout
+    reached = False
+    while time.monotonic() < deadline:
+        if marker_path.is_file():
+            reached = True
+            break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.02)
+    cleanup = kill_process_tree(proc.pid)
+    try:
+        proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+
+    marker = None
+    marker_error = None
+    if reached:
+        try:
+            marker = json.loads(marker_path.read_text())
+        except (OSError, json.JSONDecodeError) as error:
+            marker_error = f'{type(error).__name__}: {error}'
+    cleanup_verified = bool(cleanup and cleanup.get('verified'))
+    observed = marker.get('phase', 'boundary marker unavailable') if marker else (
+        marker_error or 'worker exited or timed out before reaching the boundary'
+    )
+    valid = bool(
+        marker and marker.get('boundary_id') == boundary_id
+        and marker.get('result') == 'BOUNDARY_REACHED'
+        and marker.get('evidence_preservation', {}).get('status') == 'PRESERVED'
+        and cleanup_verified
+    )
+    if marker:
+        artifact_names = {item.get('path') for item in
+                          marker.get('evidence_preservation', {}).get('files', [])}
+        if boundary_id == 'before_first_provider_dispatch':
+            valid = valid and marker.get('upstream_dispatch_count') == 0
+            valid = valid and 'pre-dispatch-attempt.json' in artifact_names
+        elif boundary_id == 'after_ingress_before_completed_egress':
+            valid = valid and marker.get('accepted_admissions') == 0
+            valid = valid and marker.get('upstream_dispatch_count') == 0
+            valid = valid and 'ingress.bin' in artifact_names
+        elif boundary_id == 'after_admission_before_dispatch':
+            valid = valid and marker.get('accepted_admissions', 0) >= 1
+            valid = valid and marker.get('upstream_dispatch_count') == 0
+            valid = valid and marker.get('settlement') == 'NOT_SETTLED_AT_INTERRUPTION'
+            valid = valid and (marker.get('reservation_usd') or 0) > 0
+            valid = valid and 'ingress.bin' in artifact_names
+        elif boundary_id == 'after_response_before_usage_settlement':
+            valid = valid and marker.get('accepted_admissions', 0) >= 1
+            valid = valid and marker.get('upstream_dispatch_count') == 1
+            valid = valid and marker.get('settlement') == 'NOT_SETTLED_AT_INTERRUPTION'
+            valid = valid and (marker.get('reservation_usd') or 0) > 0
+            valid = valid and {'ingress.bin', 'egress.bin', 'provider_response.bin'} <= artifact_names
+    if boundary_id == 'after_task_before_final_manifest':
+        valid = bool(
+            valid and marker and marker.get('acceptance_passed') is True
+            and marker.get('upstream_dispatch_count', 0) > 0
+            and not (boundary_root / 'campaign' / 'manifest.json').exists()
+            and not (boundary_root / 'campaign' / 'attempts' /
+                     f"{marker.get('pair_id')}_{marker.get('mode')}.json").exists()
+        )
+    files = [{
+        'path': path.relative_to(boundary_root).as_posix(),
+        'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+        'kind': path.suffix.lstrip('.') or 'artifact',
+    } for path in sorted(boundary_root.rglob('*')) if path.is_file()]
+    triggered = bool(
+        marker and marker.get('boundary_id') == boundary_id
+        and marker.get('result') == 'BOUNDARY_REACHED'
+    )
+    result = 'PASS' if valid else ('FAIL' if triggered else 'NOT_VERIFIED')
+    record = {
+        'boundary_id': boundary_id,
+        'injection_boundary': marker.get('phase', boundary_id) if marker else 'NOT_EXERCISED',
+        'expected_behavior': 'interruption at the named lifecycle point preserves every observed artifact and prevents a successful final classification',
+        'observed_behavior': observed,
+        'upstream_dispatch_count': (marker or {}).get('upstream_dispatch_count'),
+        'accepted_admissions': (marker or {}).get('accepted_admissions'),
+        'rejected_admissions': (marker or {}).get('rejected_admissions'),
+        'settlement': (marker or {}).get('settlement', 'NOT_AVAILABLE'),
+        'process_cleanup': 'VERIFIED' if cleanup_verified else 'NOT_VERIFIED',
+        'evidence_preservation': {
+            'status': 'PRESERVED' if marker and files else 'NOT_VERIFIED',
+            'directory': str(boundary_root), 'files': files,
+        },
+        'qualification_layer': 'B' if boundary_id == 'after_task_before_final_manifest' else 'A',
+        'result': result,
+    }
+    return record
 
 
 def validate_success_path_evidence(path, commit):
@@ -495,6 +628,12 @@ def main(argv=None):
             outputs.extend([b'=== LAYER_B_F1_09_EXTERNAL_INTERRUPT ===\n', output])
             if code != 0:
                 return_code = code
+        if return_code == 0:
+            for boundary_id in BOUNDARY_IDS:
+                record = run_boundary_interruption(
+                    evidence, env, commit, boundary_id, args.timeout_seconds,
+                )
+                outputs.append(BOUNDARY_PREFIX.encode() + json.dumps(record, sort_keys=True).encode() + b'\n')
     finally:
         restore_signal_handlers(previous_handlers)
     output = b''.join(outputs)

@@ -732,6 +732,8 @@ struct QualificationFixture {
     control_token: String,
     store: CwStore,
     proxy_task: tokio::task::JoinHandle<()>,
+    #[cfg(feature = "qualification-fault-hooks")]
+    qualification_fault_hook: Option<cw_proxy::state::QualificationFaultHook>,
 }
 
 impl QualificationFixture {
@@ -764,6 +766,12 @@ impl QualificationFixture {
         state.deepseek_upstream = mock.url.clone();
         state.spend_guard = spend_guard;
         state.capture_wire_egress = capture_wire_egress;
+        #[cfg(feature = "qualification-fault-hooks")]
+        {
+            state.qualification_fault_hook = cw_proxy::state::QualificationFaultHook::from_env();
+        }
+        #[cfg(feature = "qualification-fault-hooks")]
+        let qualification_fault_hook = state.qualification_fault_hook.clone();
         let control_token = state.control_token.clone();
 
         let app = build_proxy_router(state);
@@ -779,6 +787,8 @@ impl QualificationFixture {
             control_token,
             store,
             proxy_task,
+            #[cfg(feature = "qualification-fault-hooks")]
+            qualification_fault_hook,
         }
     }
 }
@@ -826,6 +836,56 @@ async fn f1_send_responses(
         .send()
         .await
         .unwrap()
+}
+
+#[cfg(feature = "qualification-fault-hooks")]
+#[tokio::test]
+#[ignore = "CW-122B1-F1 boundary worker; only run under the private supervisor"]
+async fn test_cw122b1_f1_partial_boundary_worker() {
+    let boundary = std::env::var("CW122B1_F1_BOUNDARY_ID").expect("boundary id");
+    let guard = SpendGuard::new(SpendGuardConfig {
+        authorized_budget_usd: 1.0,
+        require_verified_pricing: false,
+        ..Default::default()
+    });
+    let fixture = QualificationFixture::setup_config(Some(guard), None, true).await;
+    let session = format!("f1-boundary-{}", uuid::Uuid::new_v4());
+    match boundary.as_str() {
+        "before_first_provider_dispatch" => {
+            let hook = fixture
+                .qualification_fault_hook
+                .as_ref()
+                .expect("boundary supervisor configured hook");
+            let attempt = serde_json::to_vec(&json!({
+                "session_id":session,
+                "provider_dispatch_count":0,
+                "phase":"campaign attempt initialized before first model-bound request",
+            }))
+            .unwrap();
+            hook.pause(
+                "before_first_provider_dispatch",
+                json!({
+                    "phase":"attempt initialized; no provider request has been dispatched",
+                    "session_id":session,
+                    "accepted_admissions":0,
+                    "rejected_admissions":0,
+                    "upstream_dispatch_count":0,
+                    "settlement":"NOT_APPLICABLE_BEFORE_ADMISSION",
+                }),
+                &[("pre-dispatch-attempt.json", attempt.as_slice())],
+            )
+            .await;
+            panic!("boundary supervisor did not stop before dispatch");
+        }
+        "after_ingress_before_completed_egress"
+        | "after_admission_before_dispatch"
+        | "after_response_before_usage_settlement" => {
+            let response = f1_send_chat(&fixture, &session).await;
+            let _ = response.bytes().await;
+            panic!("boundary supervisor did not stop the request");
+        }
+        _ => panic!("unknown boundary id: {boundary}"),
+    }
 }
 
 static F1_EVIDENCE_CAPTURE_ID: AtomicUsize = AtomicUsize::new(0);
@@ -4226,6 +4286,40 @@ async fn test_cw122b1_codex_mock_campaign() {
                     &evidence_dir.join(format!("raw/{session_id}/rollout_{index:02}.jsonl")),
                     &bytes,
                 );
+            }
+
+            #[cfg(feature = "qualification-fault-hooks")]
+            if let Some(hook) = f.qualification_fault_hook.as_ref() {
+                let turn = turns.last().expect("accepted task has a provider turn");
+                let acceptance_bytes = serde_json::to_vec_pretty(&acceptance).unwrap();
+                let ingress = f.store.get_wire_request(&turn.id).unwrap().unwrap();
+                let egress = f.store.get_wire_egress(&turn.id).unwrap().unwrap();
+                let response = &responses.last().expect("accepted task has a response").body;
+                hook.pause(
+                    "after_task_before_final_manifest",
+                    json!({
+                        "phase":"Codex coding task returned and independent acceptance passed; per-attempt and campaign manifests not yet written",
+                        "pair_id":pair_id,
+                        "mode":mode,
+                        "family":family,
+                        "session_id":session_id,
+                        "acceptance_passed":acceptance["passed"],
+                        "upstream_dispatch_count":captures.len(),
+                        "accepted_admissions":guard.session_request_count(&session_id),
+                        "rejected_admissions":0,
+                        "settlement":"completed mock usage settled",
+                        "applied_mutation_ids":turn.applied_mutation_ids,
+                        "skipped_mutations":turn.skipped_mutations,
+                        "process_cleanup":"supervisor_verified",
+                    }),
+                    &[
+                        ("task_acceptance.json", acceptance_bytes.as_slice()),
+                        ("final_ingress.bin", ingress.as_slice()),
+                        ("final_egress.bin", egress.as_slice()),
+                        ("final_provider_response.bin", response.as_slice()),
+                    ],
+                )
+                .await;
             }
 
             let duration_ms = started.elapsed().as_millis();

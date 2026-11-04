@@ -80,12 +80,12 @@ The first matrix run exposed colliding evidence filenames under concurrent tests
 
 ## Evidence and remaining gate
 
-The sanitized [machine-readable matrix](../benchmark/cw122b1/fault-matrix.json) is bound to commit `8fa0baa84a5ee8a2311f5d42be2db125d4d68867`. SHA-256 values:
+The sanitized [machine-readable matrix](../benchmark/cw122b1/fault-matrix.json) is bound to commit `5eefc162b95c1aa1f631d36930689bcbb0664a88`. SHA-256 values:
 
-- Sanitized matrix: `20860e9a7c25f96fc49e388116c53c82b0d4f0726c7a42f8fb63814c866e2607`
-- Private matrix: `1928c6c81c4532e49941810c760d02ccda1e5d3a36f2fd946025158fd792015d`
-- Private runner output: `d338100160e8ca7f07c103bbd45440f336add882202aa421fde7fb97579e81ec`
+- Sanitized matrix: `85fd7222f65117afb22e5eef26b7085e156e21592e2c48c95306dd6fb65393de`
+- Private matrix: `9d693a640e62a6142d3594ae68f56ed875bd5ad66275b676cbd03fdfb0948959`
+- Private runner output: `11f9d9435714bc0a1b9b81d54a5897660fd7c477a8f1a1f24b174bcd90646923`
 
-Raw evidence is at `/tmp/cw122b1-f1-matrix-final-7`: 146 files with mode `0600` in 36 directories with mode `0700`; the root is `0700`. The private matrix parser recomputed every retained artifact hash and checked containment and file modes. Raw payloads and Codex data are not committed.
+Raw evidence is at `/tmp/cw122b1-f1-matrix-final-8`: 146 files with mode `0600` in 36 directories with mode `0700`; the root is `0700`. The private matrix parser recomputed every retained artifact hash and checked containment and file modes. Raw payloads and Codex data are not committed.
 
 Before CW-122B1-F1 can be called fully qualified, run F1-09 through an actual dedicated Codex campaign interruption, inject the four untested evidence boundaries, and rerun the original successful-path qualification using a separately reviewed source baseline without modifying historical results. Keep live provider execution **NO-GO**. CW-122B2 additionally requires separate provider/model compatibility, verified real usage and cache telemetry, cache fairness, financial-risk acceptance, and fresh written spend authorization. No synthetic test here measures product value or token savings.

@@ -6,7 +6,7 @@
 
 ## CW-122B1-F1: Runtime fault injection
 
-[PR #43](https://github.com/GionaGranchelli/context-watcher/pull/43), the [fault qualification](docs/CW-122B1-F1-FAULT-QUALIFICATION.md), and [sanitized matrix](benchmark/cw122b1/fault-matrix.json) record nine passing cases and F1-09 `NOT_VERIFIED`. Four exact interruption boundaries and the post-change 12-attempt success-path rerun remain unverified; the historical source freeze was preserved after the runner rejected the changed SpendGuard source. Private evidence is at `/tmp/cw122b1-f1-matrix-final-7` (146 files, mode `0600`; 36 directories, mode `0700`); private matrix SHA-256 `1928c6c81c4532e49941810c760d02ccda1e5d3a36f2fd946025158fd792015d`. No provider inference or spend occurred. Live execution remains NO-GO; product value remains NOT_EVALUATED.
+[PR #43](https://github.com/GionaGranchelli/context-watcher/pull/43), the [fault qualification](docs/CW-122B1-F1-FAULT-QUALIFICATION.md), and [sanitized matrix](benchmark/cw122b1/fault-matrix.json) record nine passing cases and F1-09 `NOT_VERIFIED`. Four exact interruption boundaries and the post-change 12-attempt success-path rerun remain unverified; the historical source freeze was preserved after the runner rejected the changed SpendGuard source. Private evidence is at `/tmp/cw122b1-f1-matrix-final-8` (146 files, mode `0600`; 36 directories, mode `0700`); private matrix SHA-256 `9d693a640e62a6142d3594ae68f56ed875bd5ad66275b676cbd03fdfb0948959`. No provider inference or spend occurred. Live execution remains NO-GO; product value remains NOT_EVALUATED.
 
 ## CW-122A: pruning-only offline readiness
 

@@ -1,10 +1,10 @@
 {
   "codex_version": "codex-cli 0.166.0",
-  "commit": "8fa0baa84a5ee8a2311f5d42be2db125d4d68867",
-  "duration_ms": 5502,
+  "commit": "5eefc162b95c1aa1f631d36930689bcbb0664a88",
+  "duration_ms": 7016,
   "evidence": {
     "private_directory_mode": "0700",
-    "runner_output_sha256": "d338100160e8ca7f07c103bbd45440f336add882202aa421fde7fb97579e81ec"
+    "runner_output_sha256": "11f9d9435714bc0a1b9b81d54a5897660fd7c477a8f1a1f24b174bcd90646923"
   },
   "evidence_directory": "PRIVATE_EVIDENCE",
   "partial_evidence_boundaries": [
@@ -119,12 +119,12 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-01_010.attempt_manifest",
-            "sha256": "0abf379978a9598926eefc79748198c7eb4c8ee246fc7e7880426a9aa8ae8c5c"
+            "sha256": "3eb34c9451db9c07f16466dc8b0b5858659ba2202354d1f4770a2b2f0faae087"
           },
           {
             "kind": "provider_request",
             "name": "F1-01_011.provider_request",
-            "sha256": "1a1ec3edc62c50855a637803f9093f76c1c0008fd560bd2e1d1e26010c5ef279"
+            "sha256": "ef696959bc4e189ba24bad903382e3c4c4baed62a38fc2f2d2eb2086211a2ac9"
           },
           {
             "kind": "provider_response",
@@ -134,22 +134,22 @@
           {
             "kind": "ingress",
             "name": "F1-01_013.ingress",
-            "sha256": "1a1ec3edc62c50855a637803f9093f76c1c0008fd560bd2e1d1e26010c5ef279"
+            "sha256": "ef696959bc4e189ba24bad903382e3c4c4baed62a38fc2f2d2eb2086211a2ac9"
           },
           {
             "kind": "egress",
             "name": "F1-01_014.egress",
-            "sha256": "1a1ec3edc62c50855a637803f9093f76c1c0008fd560bd2e1d1e26010c5ef279"
+            "sha256": "ef696959bc4e189ba24bad903382e3c4c4baed62a38fc2f2d2eb2086211a2ac9"
           },
           {
             "kind": "ingress",
             "name": "F1-01_015.ingress",
-            "sha256": "96829e3b6d9f7aedb751a90dfc44a6629ede51ae9d35981bc5b97a2ffc2fd406"
+            "sha256": "f8c47391b258c400d09a6d72f451809c671e1de9993f906a3ea06ae0bdeb4cec"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-01_016.attempt_manifest",
-            "sha256": "338ed00ac708cbdf90aa8b5abc4993a6ba60f551cc0d68aa406aa12ffb35ddc2"
+            "sha256": "7b1379da15c0e002666f1687c6d6ac4557b70755d7c78058fde9b5769aea3ee1"
           }
         ],
         "verified": true
@@ -249,12 +249,12 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-02_010.attempt_manifest",
-            "sha256": "7f0f8e1e80e6872b9d99bd439ab6de48b698750681713cbffde6df3ee7bf0542"
+            "sha256": "7cd67fffe7cb86d12eb9a894c1cf1521c951aa1ff179cca8b43bc0b25228b1fa"
           },
           {
             "kind": "provider_request",
             "name": "F1-02_011.provider_request",
-            "sha256": "925673293baa8c80d335fa576433944d35e58a40c125461fb1b8762702c90f81"
+            "sha256": "332f7591048015f030509676a460ba9d1541a85b1438b26d68820d06ebb0510e"
           },
           {
             "kind": "provider_response",
@@ -264,22 +264,22 @@
           {
             "kind": "ingress",
             "name": "F1-02_013.ingress",
-            "sha256": "925673293baa8c80d335fa576433944d35e58a40c125461fb1b8762702c90f81"
+            "sha256": "332f7591048015f030509676a460ba9d1541a85b1438b26d68820d06ebb0510e"
           },
           {
             "kind": "egress",
             "name": "F1-02_014.egress",
-            "sha256": "925673293baa8c80d335fa576433944d35e58a40c125461fb1b8762702c90f81"
+            "sha256": "332f7591048015f030509676a460ba9d1541a85b1438b26d68820d06ebb0510e"
           },
           {
             "kind": "ingress",
             "name": "F1-02_015.ingress",
-            "sha256": "1d1dfc9ff9b89685ac83ea7146a01a0e5f694a72d270c1b5472a3441268b4f12"
+            "sha256": "9000d8c0e567060730446882599d70af8c9e6aa082d831ffae3d0091d4cbbe2a"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-02_016.attempt_manifest",
-            "sha256": "70daa6672fa2206ae0a41315e76b655dd5f92c88cd489773de528aa7a49de2a8"
+            "sha256": "04be21b3e66bd02e8a6c17c1f97283d530fb658fd517c09fdef63d1f145c1d50"
           }
         ],
         "verified": true
@@ -394,22 +394,22 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-03_013.attempt_manifest",
-            "sha256": "1c415a7ab85a22a3a568f696f0f765692c6920be900310de1f461af6ab6735f5"
+            "sha256": "68f76b1add1553458bde4c0831e01941304424d7ea29bf166f3632eeb0fa2551"
           },
           {
             "kind": "provider_request",
             "name": "F1-03_014.provider_request",
-            "sha256": "f76e3c8bd8d696d628b9b62b4030b2d4a39b6a5126e52078b949321a5c32e923"
+            "sha256": "3dce821041187a56aa9f80a5d856f832a59c68f6b58ecea0755809574bf79fcf"
           },
           {
             "kind": "provider_request",
             "name": "F1-03_015.provider_request",
-            "sha256": "70cce7cecaea7639880eca878aaa311140ab4dd19a07c59db61c737e26579853"
+            "sha256": "fb2f3000d544ec4854b16410a3e9a17d06049bb42dbde7a8ef171f973e476be2"
           },
           {
             "kind": "provider_request",
             "name": "F1-03_016.provider_request",
-            "sha256": "a71d7ef3aa65ef696859afe77572c27bfd799edf8751f0c9b23e09270dffef99"
+            "sha256": "e8430dcd6fc0e04c4dd35ca3ae039ac71e9e676976ed14d0fe9d5361b6aae14d"
           },
           {
             "kind": "provider_response",
@@ -429,42 +429,42 @@
           {
             "kind": "ingress",
             "name": "F1-03_020.ingress",
-            "sha256": "f76e3c8bd8d696d628b9b62b4030b2d4a39b6a5126e52078b949321a5c32e923"
+            "sha256": "3dce821041187a56aa9f80a5d856f832a59c68f6b58ecea0755809574bf79fcf"
           },
           {
             "kind": "egress",
             "name": "F1-03_021.egress",
-            "sha256": "f76e3c8bd8d696d628b9b62b4030b2d4a39b6a5126e52078b949321a5c32e923"
+            "sha256": "3dce821041187a56aa9f80a5d856f832a59c68f6b58ecea0755809574bf79fcf"
           },
           {
             "kind": "ingress",
             "name": "F1-03_022.ingress",
-            "sha256": "70cce7cecaea7639880eca878aaa311140ab4dd19a07c59db61c737e26579853"
+            "sha256": "fb2f3000d544ec4854b16410a3e9a17d06049bb42dbde7a8ef171f973e476be2"
           },
           {
             "kind": "egress",
             "name": "F1-03_023.egress",
-            "sha256": "70cce7cecaea7639880eca878aaa311140ab4dd19a07c59db61c737e26579853"
+            "sha256": "fb2f3000d544ec4854b16410a3e9a17d06049bb42dbde7a8ef171f973e476be2"
           },
           {
             "kind": "ingress",
             "name": "F1-03_024.ingress",
-            "sha256": "a71d7ef3aa65ef696859afe77572c27bfd799edf8751f0c9b23e09270dffef99"
+            "sha256": "e8430dcd6fc0e04c4dd35ca3ae039ac71e9e676976ed14d0fe9d5361b6aae14d"
           },
           {
             "kind": "egress",
             "name": "F1-03_025.egress",
-            "sha256": "a71d7ef3aa65ef696859afe77572c27bfd799edf8751f0c9b23e09270dffef99"
+            "sha256": "e8430dcd6fc0e04c4dd35ca3ae039ac71e9e676976ed14d0fe9d5361b6aae14d"
           },
           {
             "kind": "ingress",
             "name": "F1-03_026.ingress",
-            "sha256": "d01e658d2f000cc6ecdf68fac6004f662895500acd09f9d539a7e4dbce5816eb"
+            "sha256": "162b0f6ec3be27d4ac6e3af3ef56f979587b75b3f9d5bb7ba3b00a776bb87fc8"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-03_027.attempt_manifest",
-            "sha256": "1d3a7afbd7608f216fd81231531a6824b83683e02194e42c77aebabfe31645b2"
+            "sha256": "08376607154561973d9a866dbf6e9d180fcccf5213581cb8019d1b888ed1960e"
           }
         ],
         "verified": true
@@ -570,7 +570,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_004.attempt_manifest",
-            "sha256": "cb262c21bc99ccda2472451344ba67f8670760a08b094210ac15c51c7dee3f91"
+            "sha256": "2481673e70944d407ee65ec6c990a458901b32eb88b4ce21e3200ac2acad4b82"
           },
           {
             "kind": "provider_request",
@@ -595,7 +595,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_009.attempt_manifest",
-            "sha256": "da6c485a6c0cb7ed8cc8aa56fd0144e8bd8951efc7974db17f212103ce5ffbb7"
+            "sha256": "84e300e076f3d46ffbd66d1621ca0a791c4fc2203b40fb5c3b9878ba8e32d11f"
           },
           {
             "kind": "provider_request",
@@ -620,7 +620,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_014.attempt_manifest",
-            "sha256": "2e8ae94ba24caa90a9eace54a37e1a6f387cee4c8861fbe3483d7624eb1a6f74"
+            "sha256": "d6994bb91a15182239f2afab89603d943b0e7cc5a3ada80d8aa74a6d5638dbf1"
           },
           {
             "kind": "provider_request",
@@ -645,7 +645,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_019.attempt_manifest",
-            "sha256": "5a58201cdff72aa663b5982b41929123704a003fe31ef52a7b8d9f05bb40156a"
+            "sha256": "4676bf562955e8aa363fcd34ddb915b18eaab1f7557b8be0504f74f503a1a8d4"
           },
           {
             "kind": "provider_request",
@@ -670,22 +670,22 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-04_024.attempt_manifest",
-            "sha256": "1a3a763f65770c31812470696e9aca5588e425ca2ab4a601c47d34e3b73331dd"
+            "sha256": "ec719703c35df6efa51390f95b633a76d1e7faaa7490ac154d145a821e72e1bb"
           },
           {
             "kind": "provider_request",
             "name": "F1-04_025.provider_request",
-            "sha256": "f76e3c8bd8d696d628b9b62b4030b2d4a39b6a5126e52078b949321a5c32e923"
+            "sha256": "3dce821041187a56aa9f80a5d856f832a59c68f6b58ecea0755809574bf79fcf"
           },
           {
             "kind": "provider_request",
             "name": "F1-04_026.provider_request",
-            "sha256": "70cce7cecaea7639880eca878aaa311140ab4dd19a07c59db61c737e26579853"
+            "sha256": "fb2f3000d544ec4854b16410a3e9a17d06049bb42dbde7a8ef171f973e476be2"
           },
           {
             "kind": "provider_request",
             "name": "F1-04_027.provider_request",
-            "sha256": "a71d7ef3aa65ef696859afe77572c27bfd799edf8751f0c9b23e09270dffef99"
+            "sha256": "e8430dcd6fc0e04c4dd35ca3ae039ac71e9e676976ed14d0fe9d5361b6aae14d"
           },
           {
             "kind": "provider_response",
@@ -705,42 +705,42 @@
           {
             "kind": "ingress",
             "name": "F1-04_031.ingress",
-            "sha256": "f76e3c8bd8d696d628b9b62b4030b2d4a39b6a5126e52078b949321a5c32e923"
+            "sha256": "3dce821041187a56aa9f80a5d856f832a59c68f6b58ecea0755809574bf79fcf"
           },
           {
             "kind": "egress",
             "name": "F1-04_032.egress",
-            "sha256": "f76e3c8bd8d696d628b9b62b4030b2d4a39b6a5126e52078b949321a5c32e923"
+            "sha256": "3dce821041187a56aa9f80a5d856f832a59c68f6b58ecea0755809574bf79fcf"
           },
           {
             "kind": "ingress",
             "name": "F1-04_033.ingress",
-            "sha256": "70cce7cecaea7639880eca878aaa311140ab4dd19a07c59db61c737e26579853"
+            "sha256": "fb2f3000d544ec4854b16410a3e9a17d06049bb42dbde7a8ef171f973e476be2"
           },
           {
             "kind": "egress",
             "name": "F1-04_034.egress",
-            "sha256": "70cce7cecaea7639880eca878aaa311140ab4dd19a07c59db61c737e26579853"
+            "sha256": "fb2f3000d544ec4854b16410a3e9a17d06049bb42dbde7a8ef171f973e476be2"
           },
           {
             "kind": "ingress",
             "name": "F1-04_035.ingress",
-            "sha256": "a71d7ef3aa65ef696859afe77572c27bfd799edf8751f0c9b23e09270dffef99"
+            "sha256": "e8430dcd6fc0e04c4dd35ca3ae039ac71e9e676976ed14d0fe9d5361b6aae14d"
           },
           {
             "kind": "egress",
             "name": "F1-04_036.egress",
-            "sha256": "a71d7ef3aa65ef696859afe77572c27bfd799edf8751f0c9b23e09270dffef99"
+            "sha256": "e8430dcd6fc0e04c4dd35ca3ae039ac71e9e676976ed14d0fe9d5361b6aae14d"
           },
           {
             "kind": "ingress",
             "name": "F1-04_037.ingress",
-            "sha256": "d01e658d2f000cc6ecdf68fac6004f662895500acd09f9d539a7e4dbce5816eb"
+            "sha256": "162b0f6ec3be27d4ac6e3af3ef56f979587b75b3f9d5bb7ba3b00a776bb87fc8"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-04_038.attempt_manifest",
-            "sha256": "1d3a7afbd7608f216fd81231531a6824b83683e02194e42c77aebabfe31645b2"
+            "sha256": "08376607154561973d9a866dbf6e9d180fcccf5213581cb8019d1b888ed1960e"
           }
         ],
         "verified": true
@@ -841,7 +841,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-05_004.attempt_manifest",
-            "sha256": "f20380d1f01b3ba84b535478ff906eec94581231aa37f64e86bbbea471b2e8a4"
+            "sha256": "3e22d72f64825830df571c49a1d6df912c4acdf6fa8af593c2adacb57c6e1539"
           },
           {
             "kind": "provider_request",
@@ -866,7 +866,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-05_009.attempt_manifest",
-            "sha256": "f5fe07dbe3fb0bafb5c5f132858b6217041df81aa8446ad8ce85ca2ab32e1ad9"
+            "sha256": "9b56b686fddf00a6af13f264aca8c5aa3cb519ea4b345bd0570833ee0883f285"
           },
           {
             "kind": "provider_request",
@@ -891,7 +891,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-05_014.attempt_manifest",
-            "sha256": "b5797f3a7a7abf05166a1ec9b23e23d4e22bd09b1c44db83acc887baa1e4a7fb"
+            "sha256": "17223c303a77c1a1d77c44fd414c3928f5ed5f12f2bec76b091b01d3f776d96a"
           },
           {
             "kind": "provider_request",
@@ -911,27 +911,27 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-05_018.attempt_manifest",
-            "sha256": "a1309664695cdd279458e82e8280c316194fbb388fd28a6690dbd0d2b37bba0a"
+            "sha256": "3c62676cb312627b3a3df2b03945571502cb97e1f6f10e05377912cff2bd8c1f"
           },
           {
             "kind": "provider_request",
             "name": "F1-05_019.provider_request",
-            "sha256": "29a0e53c135492d074fe326e1ac54a3dad778c6469591832214506b84a20558a"
+            "sha256": "66f3ece852b537ad7d7565eb1a353beb72c44f6bf9a20b852c9977ee14a25e01"
           },
           {
             "kind": "ingress",
             "name": "F1-05_020.ingress",
-            "sha256": "29a0e53c135492d074fe326e1ac54a3dad778c6469591832214506b84a20558a"
+            "sha256": "66f3ece852b537ad7d7565eb1a353beb72c44f6bf9a20b852c9977ee14a25e01"
           },
           {
             "kind": "egress",
             "name": "F1-05_021.egress",
-            "sha256": "29a0e53c135492d074fe326e1ac54a3dad778c6469591832214506b84a20558a"
+            "sha256": "66f3ece852b537ad7d7565eb1a353beb72c44f6bf9a20b852c9977ee14a25e01"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-05_022.attempt_manifest",
-            "sha256": "f8972fee35e6f9eeb85197831157c36573feb2f8b2ecc1a2c5f950ef87d60c3f"
+            "sha256": "7423f98f5f81a38ed8f48545c9ba4ce9225938d1cb6af518fc82e5d5783c03fe"
           }
         ],
         "verified": true
@@ -1019,7 +1019,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-06_005.attempt_manifest",
-            "sha256": "9948166b26626a7a73372a1a001908ae841f36a49bc8b615d8e65a0df50c2ece"
+            "sha256": "1059b3ec359257cc90aaa6eea19ac1772aa99b8a5bc82bc20b4bf46094035ed0"
           },
           {
             "kind": "provider_request",
@@ -1049,7 +1049,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-06_011.attempt_manifest",
-            "sha256": "5e4c207a0c4058fe9456e65116fcac52a22f545e9689e74635a8f746f6f2b168"
+            "sha256": "e9ada5f10965be0ae88028ef40bdb775ad061b202ef2a944c4574f7d08c5209f"
           },
           {
             "kind": "provider_request",
@@ -1079,7 +1079,7 @@
           {
             "kind": "attempt_manifest",
             "name": "F1-06_017.attempt_manifest",
-            "sha256": "3a6e5304852764ba8106578c350151e9535ce643841ce4f0e56423d603e631bc"
+            "sha256": "9389395d3eadccd87a575f2a15084449f73dceefcc55400058e21be922d08938"
           }
         ],
         "verified": true
@@ -1129,22 +1129,22 @@
           {
             "kind": "provider_request",
             "name": "F1-07_001.provider_request",
-            "sha256": "29a0e53c135492d074fe326e1ac54a3dad778c6469591832214506b84a20558a"
+            "sha256": "66f3ece852b537ad7d7565eb1a353beb72c44f6bf9a20b852c9977ee14a25e01"
           },
           {
             "kind": "ingress",
             "name": "F1-07_002.ingress",
-            "sha256": "29a0e53c135492d074fe326e1ac54a3dad778c6469591832214506b84a20558a"
+            "sha256": "66f3ece852b537ad7d7565eb1a353beb72c44f6bf9a20b852c9977ee14a25e01"
           },
           {
             "kind": "egress",
             "name": "F1-07_003.egress",
-            "sha256": "29a0e53c135492d074fe326e1ac54a3dad778c6469591832214506b84a20558a"
+            "sha256": "66f3ece852b537ad7d7565eb1a353beb72c44f6bf9a20b852c9977ee14a25e01"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-07_004.attempt_manifest",
-            "sha256": "667c90c3c8912e7c83184324e132c323bb55572f8be85dd63a6b11c98c241272"
+            "sha256": "2e129c3072b1636a8179bf9fb9a6eec850ac0771a0977f313754f7b5ffbf53b6"
           }
         ],
         "verified": true
@@ -1199,22 +1199,22 @@
           {
             "kind": "provider_request",
             "name": "F1-08_001.provider_request",
-            "sha256": "29a0e53c135492d074fe326e1ac54a3dad778c6469591832214506b84a20558a"
+            "sha256": "66f3ece852b537ad7d7565eb1a353beb72c44f6bf9a20b852c9977ee14a25e01"
           },
           {
             "kind": "ingress",
             "name": "F1-08_002.ingress",
-            "sha256": "29a0e53c135492d074fe326e1ac54a3dad778c6469591832214506b84a20558a"
+            "sha256": "66f3ece852b537ad7d7565eb1a353beb72c44f6bf9a20b852c9977ee14a25e01"
           },
           {
             "kind": "egress",
             "name": "F1-08_003.egress",
-            "sha256": "29a0e53c135492d074fe326e1ac54a3dad778c6469591832214506b84a20558a"
+            "sha256": "66f3ece852b537ad7d7565eb1a353beb72c44f6bf9a20b852c9977ee14a25e01"
           },
           {
             "kind": "attempt_manifest",
             "name": "F1-08_004.attempt_manifest",
-            "sha256": "353d4255a99b34ffc93c3972c0c62e4b0d3cde394e69d88eeaf2a8afb5ac996b"
+            "sha256": "156d35574355ee29f1645c299c744cc714e520a946069d09321e1449e4c8839f"
           }
         ],
         "verified": true

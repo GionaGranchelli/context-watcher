@@ -1,0 +1,487 @@
+{
+  "codex_version": "codex-cli 0.166.0",
+  "commit": "467e8c726ab4dffaa7c929ba55e678e045b0c295",
+  "duration_ms": 2922,
+  "evidence": {
+    "private_directory_mode": "0700",
+    "runner_output_sha256": "e84b845cb2aba9222fcd15627b3df46e3c1d7477a5ddb09bcd5b2193156db391"
+  },
+  "evidence_directory": "PRIVATE_EVIDENCE",
+  "partial_evidence_boundaries": [
+    {
+      "boundary_id": "before_first_provider_dispatch",
+      "evidence_source": "F1-02 admission record; not an interruption",
+      "injection_boundary": "request admission rejection is tested, but runner interruption evidence is not",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "boundary_id": "after_admission_before_dispatch",
+      "evidence_source": "NONE",
+      "injection_boundary": "no deterministic fault hook at this boundary",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "boundary_id": "after_ingress_before_completed_egress",
+      "evidence_source": "F1-04 error records; not an interruption",
+      "injection_boundary": "provider errors preserve wire records; exact interruption point is not injected",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "boundary_id": "after_response_before_usage_settlement",
+      "evidence_source": "F1-06 settlement records; not an interruption",
+      "injection_boundary": "settlement errors are tested; process interruption before settlement is not",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "boundary_id": "after_task_before_final_manifest",
+      "evidence_source": "NONE",
+      "injection_boundary": "NOT_EXERCISED",
+      "result": "NOT_VERIFIED"
+    }
+  ],
+  "preservation_note": "First committed matrix attempt retained; parallel test captures reused scenario-level filenames. No scenario is qualified from this run.",
+  "provider_calls": 0,
+  "provider_spend_usd": 0,
+  "run_disposition": "FAILED_HARNESS_EVIDENCE_FILENAME_COLLISION",
+  "runner_exit_code": 101,
+  "scenarios": [
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 3,
+          "rejected": 1,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.000888
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-01_000.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-01_001.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-01_002.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_003.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-01_004.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_005.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-01_006.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_007.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-01_008.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_009.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-01_010.attempt_manifest",
+            "sha256": "8b129046e14edddbbea292b229a865a2e130a80f5c9472f81bd1b96ebf67efbb"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Per-session fourth request rejected before dispatch",
+      "injection_boundary": [
+        "proxy admission before upstream dispatch"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "NOT_VERIFIED",
+      "observed_behavior": [
+        "3 admitted; fourth returned 429; upstream saw 3"
+      ],
+      "process_cleanup": [
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "FAIL",
+      "scenario_id": "F1-01",
+      "upstream_dispatch_count": 3
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 3,
+          "rejected": 1,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.000888
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-02_000.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-02_001.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-02_002.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_003.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-02_004.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_005.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-02_006.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_007.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-02_008.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_009.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-02_010.attempt_manifest",
+            "sha256": "3393450640e6291a8bef28b264148063ce6577dafe94af0b4dfe6cf1d5e98182"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Campaign-wide fourth request rejected across sessions",
+      "injection_boundary": [
+        "shared SpendGuard pre-dispatch admission"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "NOT_VERIFIED",
+      "observed_behavior": [
+        "3 admitted across 2 sessions; new session rejected before dispatch"
+      ],
+      "process_cleanup": [
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "FAIL",
+      "scenario_id": "F1-02",
+      "upstream_dispatch_count": 3
+    },
+    {
+      "admission_settlement_state": "NOT_AVAILABLE",
+      "evidence_preservation": "NOT_VERIFIED",
+      "expected_behavior": "Retryable provider response bounded by per-session and campaign admission",
+      "injection_boundary": "NOT_EXERCISED",
+      "observed_behavior": "No structured test result emitted",
+      "process_cleanup": "NOT_VERIFIED",
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-03",
+      "upstream_dispatch_count": null
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-04_000.provider_request",
+            "sha256": "3e7e6de88aec207b051c059117bb28f2c6792fa6221db828c5bfcacfba6a590f"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-04_001.provider_response",
+            "sha256": "d292012eb3769a2f60ab0b28588143cc1a936b37cf63a76637e646b7c34fa5d1"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_002.ingress",
+            "sha256": "3e7e6de88aec207b051c059117bb28f2c6792fa6221db828c5bfcacfba6a590f"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-04_003.egress",
+            "sha256": "3e7e6de88aec207b051c059117bb28f2c6792fa6221db828c5bfcacfba6a590f"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-04_004.attempt_manifest",
+            "sha256": "387e32de3ec87fba28f2380d3a285c4b57762b460fd8fecf97347e3161179a8f"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "HTTP 429, 500, 503, 401 and 403 classified and settled",
+      "injection_boundary": [
+        "mock provider HTTP response"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "NOT_VERIFIED",
+      "observed_behavior": [
+        "HTTP 429 recorded as upstream_error"
+      ],
+      "process_cleanup": [
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "FAIL",
+      "scenario_id": "F1-04",
+      "upstream_dispatch_count": 1
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-05_000.provider_request",
+            "sha256": "d57f6cf7cbf5cfcd700e07375c23e4037ab02fd97d8d8a9fea6e29f4b09c6ccb"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-05_001.provider_response",
+            "sha256": "1633df6c9f307b11a9ac2cf709e59e413bd5700297d66869541352ad352bb6d6"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-05_002.ingress",
+            "sha256": "d57f6cf7cbf5cfcd700e07375c23e4037ab02fd97d8d8a9fea6e29f4b09c6ccb"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-05_003.egress",
+            "sha256": "d57f6cf7cbf5cfcd700e07375c23e4037ab02fd97d8d8a9fea6e29f4b09c6ccb"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-05_004.attempt_manifest",
+            "sha256": "5fc24dd1f575e1cde3d44c7f72bbfae3df3fff866b3dd285ea81342c426f9ef9"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Invalid, truncated, incomplete and stalled SSE responses remain unsuccessful",
+      "injection_boundary": [
+        "mock streaming response before terminal completion"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "NOT_VERIFIED",
+      "observed_behavior": [
+        "INVALID_SSE classified stream_error; usage unavailable"
+      ],
+      "process_cleanup": [
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "FAIL",
+      "scenario_id": "F1-05",
+      "upstream_dispatch_count": 1
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-06_000.provider_request",
+            "sha256": "96bcd22ddde44b581d169d33fe7355e5ce02a755270b49c2c0b2489f96710e20"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-06_001.provider_response",
+            "sha256": "3055ce3933da677bf0fadc993c63850d0a42b03d441dae151f39531d2f8ca397"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-06_002.ingress",
+            "sha256": "96bcd22ddde44b581d169d33fe7355e5ce02a755270b49c2c0b2489f96710e20"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-06_003.egress",
+            "sha256": "96bcd22ddde44b581d169d33fe7355e5ce02a755270b49c2c0b2489f96710e20"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-06_004.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-06_005.attempt_manifest",
+            "sha256": "cb1e4d295963c851bde6b4287a1263901a1eac1fec98440cf5d0ae6aa66e3f2c"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Missing and invalid usage fail closed without measured-zero substitution",
+      "injection_boundary": [
+        "provider usage settlement"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "NOT_VERIFIED",
+      "observed_behavior": [
+        "MISSING_USAGE preserved as None; no measured cost"
+      ],
+      "process_cleanup": [
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "FAIL",
+      "scenario_id": "F1-06",
+      "upstream_dispatch_count": 1
+    },
+    {
+      "admission_settlement_state": "NOT_AVAILABLE",
+      "evidence_preservation": "NOT_VERIFIED",
+      "expected_behavior": "Per-run timeout kills and reaps Codex/tool process groups",
+      "injection_boundary": "NOT_EXERCISED",
+      "observed_behavior": "No structured test result emitted",
+      "process_cleanup": "NOT_VERIFIED",
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-07",
+      "upstream_dispatch_count": null
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 0,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.0
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "deadline_guard",
+            "name": "F1-08_000.deadline_guard",
+            "sha256": "289febae0b48393bc063c6ca1141816bf32dec67a38d61bea29a5cce0180f759"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Campaign deadline prevents next attempt and cancels active work",
+      "injection_boundary": [
+        "campaign budget calculation before starting the next attempt"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "NOT_VERIFIED",
+      "observed_behavior": [
+        "one second remained at 7199 seconds; timeout became unavailable at 7200 seconds"
+      ],
+      "process_cleanup": [
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "FAIL",
+      "scenario_id": "F1-08",
+      "upstream_dispatch_count": 0
+    },
+    {
+      "admission_settlement_state": "NOT_AVAILABLE",
+      "evidence_preservation": "NOT_VERIFIED",
+      "expected_behavior": "External interruption terminates dedicated runner and preserves evidence",
+      "injection_boundary": "NOT_EXERCISED",
+      "observed_behavior": "No structured test result emitted",
+      "process_cleanup": "NOT_VERIFIED",
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-09",
+      "upstream_dispatch_count": null
+    },
+    {
+      "admission_settlement_state": "NOT_AVAILABLE",
+      "evidence_preservation": "NOT_VERIFIED",
+      "expected_behavior": "Failed cancellation is reported and blocks subsequent execution",
+      "injection_boundary": "NOT_EXERCISED",
+      "observed_behavior": "No structured test result emitted",
+      "process_cleanup": "NOT_VERIFIED",
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-10",
+      "upstream_dispatch_count": null
+    }
+  ],
+  "schema": "cw122b1-f1-fault-matrix-v1"
+}

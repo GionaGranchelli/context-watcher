@@ -824,6 +824,8 @@ async fn f1_send_responses(
         .unwrap()
 }
 
+static F1_EVIDENCE_CAPTURE_ID: AtomicUsize = AtomicUsize::new(0);
+
 fn f1_capture_private_evidence(
     scenario_id: &str,
     session_ids: &[&str],
@@ -836,9 +838,12 @@ fn f1_capture_private_evidence(
     let Some(root) = std::env::var_os("CW122B1_F1_EVIDENCE_DIR").map(PathBuf::from) else {
         return json!({"status":"NOT_CONFIGURED_FOR_PRIVATE_CAPTURE"});
     };
-    let directory = root.join("faults").join(scenario_id);
+    let capture_id = F1_EVIDENCE_CAPTURE_ID.fetch_add(1, Ordering::SeqCst);
+    let directory = root
+        .join("faults")
+        .join(scenario_id)
+        .join(format!("attempt-{}-{capture_id:04}", std::process::id()));
     create_private_dir(&root.join("faults"));
-    create_private_dir(&root.join("faults").join(scenario_id));
     create_private_dir(&directory);
     let mut files = Vec::new();
     let requests = f.mock.captured.lock().unwrap().clone();

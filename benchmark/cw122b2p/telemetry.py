@@ -108,8 +108,6 @@ def analyze_attempt(run, pricing=PRICING):
     """Calculate complete-session economics only when every billing category is observed."""
     requests = run['requests']
     require(len(requests) == run['request_count_reported'], 'request count disagrees with aggregate')
-    totals = {key: 0 for key in ['input_tokens', 'cached_input_tokens', 'cache_write_tokens',
-                                  'cache_write_ttl_30m_tokens', 'cache_write_ttl_12h_tokens', 'output_tokens']}
     missing = []
     cost = Decimal(0)
     for req in requests:
@@ -128,8 +126,6 @@ def analyze_attempt(run, pricing=PRICING):
         for field, value in fields.items():
             if type(value) is not int or value < 0:
                 missing.append((req['index'], field))
-            else:
-                totals[field] += value
         if all(type(v) is int and v >= 0 for v in fields.values()):
             require(fields['cached_input_tokens'] + fields['cache_write_tokens'] <= fields['input_tokens'], 'cached/write tokens exceed input')
             require(fields['cache_write_ttl_30m_tokens'] + fields['cache_write_ttl_12h_tokens'] == fields['cache_write_tokens'], 'cache-write lifetime breakdown disagrees')

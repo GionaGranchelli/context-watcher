@@ -2,11 +2,20 @@
 import copy
 import json
 from pathlib import Path
+import tempfile
 import unittest
 
 from telemetry import NORMALIZATION_LIMITATIONS, analyze_attempt, cache_fairness, evaluate_pair, normalize_attempt
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_rehearsal_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('cw122b2p_rehearse', ROOT / 'benchmark/cw122b2p/rehearse.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class TelemetryTests(unittest.TestCase):
@@ -62,10 +71,7 @@ class TelemetryTests(unittest.TestCase):
         self.assertIn('LIVE_NOT_VERIFIED', profile['qualification']['codex_cli_model_compatibility'])
 
     def test_offline_rehearsal_replays_saved_campaign_and_refuses_economic_qualification(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location('cw122b2p_rehearse', ROOT / 'benchmark/cw122b2p/rehearse.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_rehearsal_module()
         result = module.replay()
         self.assertEqual(result['status'], 'OFFLINE_READINESS_REPLAY_PASS')
         self.assertEqual(result['normalized_runs'], 12)
@@ -73,6 +79,22 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(result['valid_pairs'], 0)
         self.assertEqual(result['product_value'], 'NOT_EVALUATED')
         self.assertTrue(all(not pair['eligible_for_economics'] for pair in result['cache_pairs']))
+
+    def test_offline_rehearsal_rejects_symlinked_evidence_paths(self):
+        module = load_rehearsal_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            target_dir = root / 'actual'
+            target_dir.mkdir()
+            target_file = target_dir / 'aggregate.json'
+            target_file.write_text('{}')
+            file_link = root / 'file-link.json'
+            file_link.symlink_to(target_file)
+            dir_link = root / 'dir-link'
+            dir_link.symlink_to(target_dir, target_is_directory=True)
+            for path in (file_link, dir_link / 'aggregate.json'):
+                with self.subTest(path=path), self.assertRaisesRegex(ValueError, 'symlinks'):
+                    module.replay(path)
 
     def test_cache_cases_a_through_e_fail_closed(self):
         matched = {'telemetry_complete': True, 'initial_state_hash': 'same', 'isolation_verified': True}

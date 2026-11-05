@@ -15,22 +15,29 @@ from telemetry import NORMALIZATION_LIMITATIONS, cache_fairness, evaluate_pair, 
 
 def replay(aggregate_path=None):
     aggregate_path = Path(aggregate_path) if aggregate_path else REPO / 'benchmark/cw122b1/mock-aggregate.json'
-    require(aggregate_path.is_absolute() and aggregate_path.is_file(), 'aggregate must be an existing absolute file')
-    require(aggregate_path == (REPO / 'benchmark/cw122b1/mock-aggregate.json') or
-            not aggregate_path.resolve().is_relative_to(REPO.resolve()), 'private aggregate path must be outside checkout')
+    require(aggregate_path.is_absolute(), 'aggregate path must be absolute')
+    try:
+        resolved_aggregate = aggregate_path.resolve(strict=True)
+    except OSError as error:
+        raise ValueError('aggregate must be an existing file') from error
+    require(resolved_aggregate == aggregate_path, 'aggregate path must not contain symlinks')
+    require(resolved_aggregate.is_file(), 'aggregate must be an existing file')
+    default_aggregate = REPO / 'benchmark/cw122b1/mock-aggregate.json'
+    require(aggregate_path == default_aggregate or not resolved_aggregate.is_relative_to(REPO.resolve()),
+            'private aggregate path must be outside checkout')
     campaign_path = REPO / 'benchmark/cw122a/campaign.json'
     schema_path = REPO / 'benchmark/cw122a/telemetry.schema.json'
     aggregate = json.loads(aggregate_path.read_text())
     campaign = json.loads(campaign_path.read_text())
     schema = json.loads(schema_path.read_text())
     from jsonschema import Draft202012Validator
-    Draft202012Validator(schema).validate(normalize_campaign(aggregate, campaign))
+    dataset = normalize_campaign(aggregate, campaign)
+    Draft202012Validator(schema).validate(dataset)
     require(aggregate['status'] == 'MOCK_CODEX_CAMPAIGN_PASS', 'saved Codex mock campaign did not pass')
     require(aggregate['provider_calls'] == 0 and aggregate['provider_spend_usd'] == 0, 'provider inference/spend present in mock campaign')
     require(len(aggregate['attempts']) == 12 and sum(a['request_count'] for a in aggregate['attempts']) == 48, 'mock campaign count mismatch')
     traces = {family: json.loads((REPO / 'benchmark/cw122a' / task['trace']).read_text())
               for family, task in campaign['tasks'].items()}
-    dataset = normalize_campaign(aggregate, campaign)
     analysis = analyze(dataset, campaign, traces)
     by_attempt = {(a['pair_id'], a['mode']): normalize_attempt(a) for a in aggregate['attempts']}
     cache_results = []

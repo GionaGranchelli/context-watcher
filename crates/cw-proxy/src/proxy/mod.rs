@@ -92,6 +92,10 @@ pub async fn handle_proxy_request(
     }
 
     let target = resolve_upstream_target(&state, &uri);
+    let upstream_provider = serde_json::from_slice::<Value>(&body)
+        .ok()
+        .map(|raw| detect_provider(uri.path(), &raw))
+        .unwrap_or_else(|| detect_provider(uri.path(), &Value::Null));
     let mut outbound_body = body.to_vec();
     let mut recorder = None;
 
@@ -520,7 +524,16 @@ pub async fn handle_proxy_request(
         }
     }
 
-    forward_to_upstream(&state, method, target, &headers, outbound_body, recorder).await
+    forward_to_upstream(
+        &state,
+        upstream_provider,
+        method,
+        target,
+        &headers,
+        outbound_body,
+        recorder,
+    )
+    .await
 }
 
 #[cfg(test)]

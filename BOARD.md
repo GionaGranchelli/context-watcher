@@ -19,6 +19,10 @@ The installed Codex CLI and authenticated Responses path passed a 12-attempt loo
 
 Provider profile, complete-session usage and cache-pricing adapter, cache-fairness controls, and the shared campaign request cap are under offline qualification. No live runner or provider inference is enabled. See [readiness protocol](docs/CW-122B2-P-READINESS.md).
 
+## CW-122B2-L0 — Local smoke runner preparation
+
+The single-request Codex smoke runner and strict Luna settlement are implemented locally and covered by offline tests, including a loopback-only runner exercise. The runner defaults to `NO_GO`; no provider request or spend has been made. Live execution requires independent review and a new single-use approval. The current branch is based on PR #44 commit `f629f22`; PR #44 is still open, so this work has not yet been rebased on approved `main` and is not ready to claim a main-based PR. See [L0 readiness](docs/CW-122B2-L0-READINESS.md). The six-pair campaign stays disabled.
+
 ## CW-121C2 — Merged
 
 Daemon-backed human TUI consent controls and read-only MCP policy inspection implemented for independent review. Deterministic and scripted terminal checks passed. No inference, new authorization model, or automatic merge. See [workflow, evidence and security inventory](docs/CW-121C2-TUI-MCP-CONTROLS.md).

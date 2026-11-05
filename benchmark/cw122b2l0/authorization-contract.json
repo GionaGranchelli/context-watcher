@@ -1,0 +1,37 @@
+{
+  "experiment_id": "CW-122B2-L0-SMOKE",
+  "enabled": false,
+  "authorization_issued": false,
+  "provider": "openai",
+  "model": "gpt-6-luna",
+  "endpoint": "https://api.openai.com/v1",
+  "processing_tier": "standard",
+  "attempt_count": 1,
+  "required_fields": [
+    "authorization_id", "approver_identity", "approval_reference", "issued_at", "expires_at",
+    "provider", "model", "endpoint", "processing_tier", "runner_sha256", "pricing_sha256",
+    "codex_executable_sha256", "cw_executable_sha256", "request_cap", "deadline_seconds",
+    "spend_ceiling_usd", "reservation_overrun_risk_accepted", "credential_file", "credential_sha256",
+    "private_evidence_directory", "isolation_profile", "codex_executable_path", "cw_executable_path",
+    "sandbox_executable_path", "sandbox_executable_sha256", "authorization_claim_directory"
+  ],
+  "limits": {
+    "attempt_count": 1,
+    "request_cap_max": 1,
+    "deadline_seconds_max": 900,
+    "authorization_lifetime_seconds_max": 86400
+  },
+  "policy": {
+    "single_use_claim_required": true,
+    "claim_directory_persistent_outside_evidence": true,
+    "redirects": false,
+    "fallback": false,
+    "campaign_execution": false,
+    "credential_in_codex_environment": false,
+    "credential_in_tool_environment": false,
+    "raw_evidence_outside_checkout": true,
+    "provider_key_hidden_from_codex_process_tree": true,
+    "codex_home_isolated": true,
+    "host_home_hidden": true
+  }
+}

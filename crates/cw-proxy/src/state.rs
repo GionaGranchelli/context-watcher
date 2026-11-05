@@ -6,6 +6,7 @@ use cw_core::{
 use cw_store::CwStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::os::unix::fs::PermissionsExt;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, broadcast, oneshot};
 use uuid::Uuid;
@@ -19,6 +20,24 @@ fn upstream_timeout(raw: Option<&str>) -> Duration {
         .filter(|seconds| (1..=MAX_UPSTREAM_TIMEOUT_SECS).contains(seconds))
         .unwrap_or(DEFAULT_UPSTREAM_TIMEOUT_SECS);
     Duration::from_secs(seconds)
+}
+
+fn read_private_openai_key(path: Option<String>) -> Option<String> {
+    let path = path?;
+    let metadata = std::fs::symlink_metadata(&path).ok()?;
+    if !metadata.file_type().is_file() || metadata.permissions().mode() & 0o777 != 0o600 {
+        tracing::error!("CW OpenAI credential file must be a regular 0600 file");
+        return None;
+    }
+    match std::fs::read_to_string(path) {
+        Ok(key) if !key.trim().is_empty() && !key.contains(['\n', '\r']) => {
+            Some(key.trim().to_string())
+        }
+        _ => {
+            tracing::error!("CW OpenAI credential file is empty or unreadable");
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +108,9 @@ pub struct DaemonState {
     pub http_client: reqwest::Client,
     pub anthropic_upstream: String,
     pub openai_upstream: String,
+    /// Optional OpenAI bearer credential read from a dedicated file for isolated live runs.
+    pub openai_api_key: Option<String>,
+    pub openai_api_key_configured: bool,
     pub deepseek_upstream: String,
     pub gemini_upstream: String,
     pub ollama_upstream: String,
@@ -96,6 +118,10 @@ pub struct DaemonState {
     pub llamacpp_api_key: Option<String>,
     pub vllm_upstream: String,
     pub capture_wire_egress: bool,
+    /// Opt-in exact response body capture for bounded, private qualification runs.
+    pub capture_wire_response: bool,
+    /// Optional provider/model allowlist for separately authorized smoke runs.
+    pub live_provider_model: Option<(cw_core::ir::ProviderKind, String)>,
     /// When set, every provider request must be admitted by the SpendGuard before
     /// dispatch and settled from provider-reported usage (live qualification runs).
     pub spend_guard: Option<cw_core::spend_guard::SpendGuard>,
@@ -218,6 +244,8 @@ impl DaemonState {
                 .unwrap_or_else(|_| "https://api.anthropic.com".to_string()),
             openai_upstream: std::env::var("CW_OPENAI_UPSTREAM")
                 .unwrap_or_else(|_| "https://api.openai.com".to_string()),
+            openai_api_key_configured: std::env::var_os("CW_OPENAI_API_KEY_FILE").is_some(),
+            openai_api_key: read_private_openai_key(std::env::var("CW_OPENAI_API_KEY_FILE").ok()),
             deepseek_upstream: std::env::var("CW_DEEPSEEK_UPSTREAM")
                 .unwrap_or_else(|_| "https://api.deepseek.com".to_string()),
             gemini_upstream: std::env::var("CW_GEMINI_UPSTREAM")
@@ -231,6 +259,12 @@ impl DaemonState {
                 .unwrap_or_else(|_| "http://127.0.0.1:8000".to_string()),
             capture_wire_egress: std::env::var("CW_CAPTURE_WIRE_EGRESS").ok().as_deref()
                 == Some("1"),
+            capture_wire_response: std::env::var("CW_CAPTURE_WIRE_RESPONSE").ok().as_deref()
+                == Some("1"),
+            live_provider_model: std::env::var("CW_L0_ALLOWED_MODEL")
+                .ok()
+                .filter(|model| !model.trim().is_empty())
+                .map(|model| (cw_core::ir::ProviderKind::OpenAI, model)),
             spend_guard: None,
             #[cfg(feature = "qualification-fault-hooks")]
             qualification_fault_hook: None,
@@ -245,8 +279,36 @@ impl DaemonState {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_UPSTREAM_TIMEOUT_SECS, MAX_UPSTREAM_TIMEOUT_SECS, upstream_timeout};
+    use super::{
+        DEFAULT_UPSTREAM_TIMEOUT_SECS, MAX_UPSTREAM_TIMEOUT_SECS, read_private_openai_key,
+        upstream_timeout,
+    };
+    use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
+
+    #[test]
+    fn openai_key_loader_requires_regular_private_single_line_file() {
+        let dir = std::env::temp_dir().join(format!("cw-key-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let key = dir.join("key");
+        std::fs::write(&key, "synthetic-key").unwrap();
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            read_private_openai_key(Some(key.to_string_lossy().into_owned())).as_deref(),
+            Some("synthetic-key")
+        );
+        std::fs::write(&key, "").unwrap();
+        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned())).is_none());
+        std::fs::write(&key, "first\nsecond").unwrap();
+        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned())).is_none());
+        std::fs::write(&key, "synthetic-key").unwrap();
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned())).is_none());
+        let link = dir.join("key-link");
+        std::os::unix::fs::symlink(&key, &link).unwrap();
+        assert!(read_private_openai_key(Some(link.to_string_lossy().into_owned())).is_none());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn upstream_timeout_keeps_default_and_accepts_bounded_override() {

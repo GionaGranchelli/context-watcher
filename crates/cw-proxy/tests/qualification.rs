@@ -434,6 +434,22 @@ async fn handle_mock_responses(
         json_body: json_val.clone(),
     });
 
+    if json_val
+        .as_ref()
+        .and_then(|value| value.get("model"))
+        .and_then(Value::as_str)
+        == Some("gpt-6-luna")
+    {
+        return Json(json!({
+            "id":"resp_luna_mock",
+            "output":[{"id":"msg_luna_mock","type":"message","role":"assistant","content":[{"type":"output_text","text":"loopback qualification complete"}]}],
+            "usage":{"input_tokens":1000,"output_tokens":1000,"total_tokens":2000,
+                "input_tokens_details":{"cached_tokens":100,"cache_write_tokens":500,
+                    "cache_write_tokens_details":{"ttl_30m_tokens":200,"ttl_12h_tokens":300}}}
+        }))
+        .into_response();
+    }
+
     let body_str = String::from_utf8_lossy(&body);
 
     if body_str.contains("CW122B1_F1-03_RETRY_LOOP") {
@@ -732,6 +748,7 @@ struct QualificationFixture {
     control_token: String,
     store: CwStore,
     proxy_task: tokio::task::JoinHandle<()>,
+    captured: Arc<Mutex<Vec<CapturedRequest>>>,
     #[cfg(feature = "qualification-fault-hooks")]
     qualification_fault_hook: Option<cw_proxy::state::QualificationFaultHook>,
 }
@@ -745,6 +762,42 @@ impl QualificationFixture {
         spend_guard: Option<SpendGuard>,
         private_control_token: Option<String>,
         capture_wire_egress: bool,
+    ) -> Self {
+        Self::setup_config_with_upstream_key(
+            spend_guard,
+            private_control_token,
+            capture_wire_egress,
+            None,
+        )
+        .await
+    }
+
+    async fn setup_config_with_upstream_key(
+        spend_guard: Option<SpendGuard>,
+        private_control_token: Option<String>,
+        capture_wire_egress: bool,
+        upstream_key: Option<&str>,
+    ) -> Self {
+        Self::setup_config_with_key_state(
+            spend_guard,
+            private_control_token,
+            capture_wire_egress,
+            upstream_key,
+            upstream_key.is_some(),
+            false,
+            None,
+        )
+        .await
+    }
+
+    async fn setup_config_with_key_state(
+        spend_guard: Option<SpendGuard>,
+        private_control_token: Option<String>,
+        capture_wire_egress: bool,
+        upstream_key: Option<&str>,
+        key_configured: bool,
+        capture_wire_response: bool,
+        expected_live_model: Option<&str>,
     ) -> Self {
         let mock = MockProvider::start().await;
         let store = CwStore::open_in_memory().unwrap();
@@ -762,10 +815,15 @@ impl QualificationFixture {
             state.control_token = tok;
         }
         state.openai_upstream = mock.url.clone();
+        state.openai_api_key = upstream_key.map(str::to_string);
+        state.openai_api_key_configured = key_configured;
         state.anthropic_upstream = mock.url.clone();
         state.deepseek_upstream = mock.url.clone();
         state.spend_guard = spend_guard;
         state.capture_wire_egress = capture_wire_egress;
+        state.capture_wire_response = capture_wire_response;
+        state.live_provider_model =
+            expected_live_model.map(|model| (ProviderKind::OpenAI, model.to_owned()));
         #[cfg(feature = "qualification-fault-hooks")]
         {
             state.qualification_fault_hook = cw_proxy::state::QualificationFaultHook::from_env();
@@ -781,8 +839,10 @@ impl QualificationFixture {
             axum::serve(listener, app).await.unwrap();
         });
 
+        let captured = mock.captured.clone();
         Self {
             mock,
+            captured,
             proxy_port,
             control_token,
             store,
@@ -1097,6 +1157,189 @@ async fn test_cw122b1_f1_02_campaign_request_exhaustion_crosses_sessions() {
         evidence,
         "A",
         "PASS",
+    );
+}
+
+#[tokio::test]
+async fn test_openai_file_credential_replaces_dummy_bearer_only_upstream() {
+    const SECRET: &str = "synthetic-upstream-secret-for-test";
+    let f =
+        QualificationFixture::setup_config_with_upstream_key(None, None, true, Some(SECRET)).await;
+    let response = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/openai/v1/chat/completions", f.proxy_port))
+        .header("authorization", "Bearer codex-dummy-token")
+        .header("x-cw-session-id", "credential-injection-test")
+        .header("x-cw-control-token", &f.control_token)
+        .json(&json!({"model":"gpt-4o-mini","messages":[{"role":"user","content":"credential probe"}]}))
+        .send().await.unwrap();
+    let response_body = response.bytes().await.unwrap();
+    assert!(!String::from_utf8_lossy(&response_body).contains(SECRET));
+    let captured = f.captured.lock().unwrap().clone();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(
+        captured[0].headers["authorization"],
+        format!("Bearer {SECRET}")
+    );
+    assert!(!String::from_utf8_lossy(&captured[0].body).contains(SECRET));
+    assert!(!String::from_utf8_lossy(&captured[0].body).contains("codex-dummy-token"));
+}
+
+#[tokio::test]
+async fn test_invalid_configured_openai_credential_fails_before_dispatch() {
+    let f = QualificationFixture::setup_config_with_key_state(
+        None, None, false, None, true, false, None,
+    )
+    .await;
+    let response = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/openai/v1/chat/completions", f.proxy_port))
+        .header("authorization", "Bearer codex-dummy-token")
+        .header("x-cw-session-id", "invalid-credential-test")
+        .header("x-cw-control-token", &f.control_token)
+        .json(&json!({"model":"gpt-4o-mini","messages":[{"role":"user","content":"must not dispatch"}]}))
+        .send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(f.captured.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_smoke_provider_model_mismatch_fails_before_dispatch() {
+    let f = QualificationFixture::setup_config_with_key_state(
+        None,
+        None,
+        false,
+        None,
+        false,
+        false,
+        Some("gpt-6-luna"),
+    )
+    .await;
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/responses",
+            f.proxy_port
+        ))
+        .header("x-cw-session-id", "smoke-model-mismatch")
+        .header("x-cw-control-token", &f.control_token)
+        .json(&json!({"model":"gpt-6-luna-preview","input":"no dispatch"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(f.captured.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_gpt6_luna_loopback_smoke_settles_and_captures_exact_wire_evidence() {
+    let guard = SpendGuard::new_with_campaign_request_limit(
+        SpendGuardConfig {
+            authorized_budget_usd: 0.30,
+            max_session_cost_usd: 0.30,
+            max_requests_per_session: 1,
+            request_reservation_usd: 0.01,
+            ..Default::default()
+        },
+        1,
+    );
+    let f = QualificationFixture::setup_config_with_key_state(
+        Some(guard.clone()),
+        None,
+        true,
+        None,
+        false,
+        true,
+        Some("gpt-6-luna"),
+    )
+    .await;
+    let payload = json!({
+        "model":"gpt-6-luna",
+        "stream":false,
+        "input":"CW122B2L0 loopback smoke; no external provider",
+    });
+    let ingress = serde_json::to_vec(&payload).unwrap();
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/responses",
+            f.proxy_port
+        ))
+        .header("x-cw-session-id", "gpt6-luna-loopback-smoke")
+        .header("x-cw-control-token", &f.control_token)
+        .header("content-type", "application/json")
+        .body(ingress.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_bytes = response.bytes().await.unwrap().to_vec();
+    let response_json: Value = serde_json::from_slice(&response_bytes).unwrap();
+    let usage = response_json.get("usage").unwrap();
+    assert_eq!(usage["input_tokens"], 1000);
+    assert_eq!(usage["input_tokens_details"]["cached_tokens"], 100);
+    assert_eq!(usage["input_tokens_details"]["cache_write_tokens"], 500);
+    assert_eq!(usage["output_tokens"], 1000);
+
+    let captured = f.mock.captured.lock().unwrap().clone();
+    assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].path, "/v1/responses");
+    assert_eq!(captured[0].body, ingress);
+    assert_eq!(f.mock.responses.lock().unwrap()[0].body, response_bytes);
+    assert_eq!(guard.total_request_count(), 1);
+    assert_eq!(guard.total_spent_usd(), 0.000641);
+    assert_eq!(guard.total_reserved_usd(), 0.0);
+
+    let turns = f.store.list_turns("gpt6-luna-loopback-smoke").unwrap();
+    assert_eq!(turns.len(), 1);
+    assert_eq!(turns[0].model.as_deref(), Some("gpt-6-luna"));
+    assert_eq!(turns[0].observed_usage.as_ref(), Some(usage));
+    let turn_id = &turns[0].id;
+    assert_eq!(
+        f.store.get_wire_request(turn_id).unwrap(),
+        Some(ingress.clone())
+    );
+    assert_eq!(f.store.get_wire_egress(turn_id).unwrap(), Some(ingress));
+    assert_eq!(
+        f.store.get_wire_response(turn_id).unwrap(),
+        Some((response_bytes, true, false))
+    );
+}
+
+#[tokio::test]
+async fn test_opt_in_wire_capture_preserves_full_provider_response() {
+    let f = QualificationFixture::setup_config_with_key_state(
+        None,
+        None,
+        true,
+        None,
+        false,
+        true,
+        Some("gpt-4o-mini"),
+    )
+    .await;
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/responses",
+            f.proxy_port
+        ))
+        .header("x-cw-session-id", "response-evidence-test")
+        .header("x-cw-control-token", &f.control_token)
+        .json(&json!({"model":"gpt-4o-mini","stream":true,"input":"capture exact response"}))
+        .send()
+        .await
+        .unwrap();
+    let response_bytes = response.bytes().await.unwrap().to_vec();
+    let turns = f.store.list_turns("response-evidence-test").unwrap();
+    assert_eq!(turns.len(), 1);
+    let turn_id = &turns[0].id;
+    assert!(
+        !f.store
+            .get_wire_request(turn_id)
+            .unwrap()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(f.store.get_wire_egress(turn_id).unwrap().is_some());
+    assert_eq!(
+        f.store.get_wire_response(turn_id).unwrap(),
+        Some((response_bytes, true, false))
     );
 }
 
@@ -2975,7 +3218,8 @@ async fn test_harness_binary_codex_cli_multiturn_overlay_reapplication() {
                 proxy_port,
             ));
             cmd.args(["-m", "mock-model", "Turn 1 prompt"]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home_clone);
             cmd.env("CW_SESSION_ID", &sid);
             cmd.env("CW_CONTROL_TOKEN", &token);
@@ -3029,7 +3273,8 @@ async fn test_harness_binary_codex_cli_multiturn_overlay_reapplication() {
                 proxy_port,
             ));
             cmd.args(["-m", "mock-model", "Turn 2 prompt"]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home_clone);
             cmd.env("CW_SESSION_ID", &sid);
             cmd.env("CW_CONTROL_TOKEN", &token);
@@ -3280,7 +3525,7 @@ impl CodexStep<'_> {
             .env("TMPDIR", self.temp_dir)
             .env("LANG", "C.UTF-8")
             .env("LC_ALL", "C.UTF-8")
-            .env("OPENAI_API_KEY", "cw122b1-mock-only-key")
+            .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy")
             .env("CW_SESSION_ID", self.session_id)
             .env("CW_CONTROL_TOKEN", self.control_token)
             .stdout(std::process::Stdio::piped())
@@ -4511,7 +4756,8 @@ async fn test_harness_binary_codex_cli_native_resume_three_turn_qualification() 
                 "mock-model",
                 "CW112_TASK_TURN_1: create calculator.py with add function",
             ]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home);
             cmd.env("CW_SESSION_ID", &sid);
             cmd.env("CW_CONTROL_TOKEN", &token);
@@ -4601,7 +4847,8 @@ async fn test_harness_binary_codex_cli_native_resume_three_turn_qualification() 
                 &thread_id,
                 "CW112_TASK_TURN_2: add multiply function to calculator.py",
             ]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home);
             cmd.env("CW_SESSION_ID", &sid);
             cmd.env("CW_CONTROL_TOKEN", &token);
@@ -4660,7 +4907,8 @@ async fn test_harness_binary_codex_cli_native_resume_three_turn_qualification() 
                 &thread_id,
                 "CW112_TASK_TURN_3: create test_calculator.py and run unit tests",
             ]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home);
             cmd.env("CW_SESSION_ID", &sid);
             cmd.env("CW_CONTROL_TOKEN", &token);
@@ -4857,7 +5105,8 @@ async fn test_harness_binary_codex_cli_unknown_native_session_id_resume() {
                 "00000000-0000-0000-0000-000000000000",
                 "resume non-existent session",
             ]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home);
             cmd.env("CW_SESSION_ID", "cw_unknown_session_test");
             cmd.env("CW_CONTROL_TOKEN", &token);
@@ -4908,7 +5157,8 @@ async fn test_harness_binary_codex_cli_unauthorized_token_rejection() {
                 proxy_port,
             ));
             cmd.args(["-m", "mock-model", "Test invalid token"]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home);
             cmd.env("CW_SESSION_ID", "cw_unauthorized_test");
             cmd.env("CW_CONTROL_TOKEN", bad_token);
@@ -4968,7 +5218,8 @@ async fn test_harness_binary_codex_cli_upstream_failure_handling() {
                 proxy_port,
             ));
             cmd.args(["-m", "mock-model", "CW_FORCE_UPSTREAM_502"]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home);
             cmd.env("CW_SESSION_ID", "cw_upstream_fail_test");
             cmd.env("CW_CONTROL_TOKEN", &token);
@@ -5030,7 +5281,8 @@ async fn test_harness_binary_codex_cli_session_isolation() {
                 proxy_port,
             ));
             cmd.args(["-m", "mock-model", "Session A turn 1"]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home_a);
             cmd.env("CW_SESSION_ID", &sid_a);
             cmd.env("CW_CONTROL_TOKEN", &token);
@@ -5086,7 +5338,8 @@ async fn test_harness_binary_codex_cli_session_isolation() {
                 proxy_port,
             ));
             cmd.args(["-m", "mock-model", "Session B turn 1"]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home_b);
             cmd.env("CW_SESSION_ID", &sid_b);
             cmd.env("CW_CONTROL_TOKEN", &token);
@@ -5121,7 +5374,8 @@ async fn test_harness_binary_codex_cli_session_isolation() {
                 proxy_port,
             ));
             cmd.args(["-m", "mock-model", "Session A turn 2"]);
-            cmd.env("OPENAI_API_KEY", "mock-openai-key");
+            cmd.env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
             cmd.env("CODEX_HOME", &temp_home_a);
             cmd.env("CW_SESSION_ID", &sid_a);
             cmd.env("CW_CONTROL_TOKEN", &token);

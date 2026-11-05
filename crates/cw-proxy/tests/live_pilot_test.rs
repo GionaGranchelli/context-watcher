@@ -482,7 +482,6 @@ fn codex_cmd(
     bin: &Path,
     ws: &Path,
     home: &Path,
-    api_key: &str,
     route: &[String],
     tail: &[&str],
     resume: bool,
@@ -503,7 +502,9 @@ fn codex_cmd(
         "sandbox_mode=\"workspace-write\"",
     ]);
     c.args(route).args(tail);
-    c.env("OPENAI_API_KEY", api_key).env("CODEX_HOME", home);
+    c.env_remove("OPENAI_API_KEY")
+        .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy")
+        .env("CODEX_HOME", home);
     c
 }
 
@@ -1250,6 +1251,8 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
             store.set_autopilot_config(&cfg).unwrap();
             let mut st = DaemonState::new(store.clone());
             st.openai_upstream = "https://api.openai.com".into();
+            st.openai_api_key = Some(api_key.clone());
+            st.openai_api_key_configured = true;
             st.capture_wire_egress = true;
             st.spend_guard = Some(guard.clone());
             let token = st.control_token.clone();
@@ -1273,7 +1276,6 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
             &codex_bin,
             &fixture.workspace_dir,
             &home,
-            &api_key,
             &route,
             &["-m", model, fixture.turn1_prompt()],
             false,
@@ -1319,7 +1321,6 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
             &codex_bin,
             &fixture.workspace_dir,
             &home,
-            &api_key,
             &route,
             &["-m", model, &tid, fixture.turn2_prompt()],
             true,

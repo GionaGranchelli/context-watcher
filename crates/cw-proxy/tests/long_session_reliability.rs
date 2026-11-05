@@ -1506,7 +1506,8 @@ async fn execute_codex_session(
 
                 cmd.current_dir(&ws);
                 cmd.env("CODEX_HOME", &th);
-                cmd.env("OPENAI_API_KEY", "mock-openai-key");
+                cmd.env_remove("OPENAI_API_KEY")
+                    .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
                 cmd.env("CW_SESSION_ID", &sid);
                 cmd.env("CW_CONTROL_TOKEN", &tok);
                 cmd.output()
@@ -1751,7 +1752,8 @@ async fn execute_codex_session(
 
                 cmd.current_dir(&ws);
                 cmd.env("CODEX_HOME", &th);
-                cmd.env("OPENAI_API_KEY", "mock-openai-key");
+                cmd.env_remove("OPENAI_API_KEY")
+                    .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
                 cmd.env("CW_SESSION_ID", &sid);
                 cmd.env("CW_CONTROL_TOKEN", &tok);
                 cmd.output()

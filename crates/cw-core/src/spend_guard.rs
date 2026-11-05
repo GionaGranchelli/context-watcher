@@ -140,6 +140,181 @@ impl ObservedUsage {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LunaUsage {
+    input_tokens: u64,
+    cached_tokens: u64,
+    write_30m_tokens: u64,
+    write_12h_tokens: u64,
+    output_tokens: u64,
+}
+
+fn luna_usage_field(value: &Value, path: &str) -> Result<u64, SpendGuardError> {
+    value.pointer(path).and_then(Value::as_u64).ok_or_else(|| {
+        SpendGuardError::UsageTelemetryUnavailable {
+            reason: format!("missing or invalid {path}"),
+        }
+    })
+}
+
+fn parse_luna_usage(usage: &Value) -> Result<LunaUsage, SpendGuardError> {
+    let details = usage.pointer("/input_tokens_details").ok_or_else(|| {
+        SpendGuardError::UsageTelemetryUnavailable {
+            reason: "missing input_tokens_details".into(),
+        }
+    })?;
+    let parsed = LunaUsage {
+        input_tokens: luna_usage_field(usage, "/input_tokens")?,
+        cached_tokens: luna_usage_field(details, "/cached_tokens")?,
+        write_30m_tokens: luna_usage_field(details, "/cache_write_tokens_details/ttl_30m_tokens")?,
+        write_12h_tokens: luna_usage_field(details, "/cache_write_tokens_details/ttl_12h_tokens")?,
+        output_tokens: luna_usage_field(usage, "/output_tokens")?,
+    };
+    let writes = parsed
+        .write_30m_tokens
+        .checked_add(parsed.write_12h_tokens)
+        .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+            reason: "cache-write token count overflow".into(),
+        })?;
+    if luna_usage_field(details, "/cache_write_tokens")? != writes
+        || parsed
+            .cached_tokens
+            .checked_add(writes)
+            .is_none_or(|accounted| accounted > parsed.input_tokens)
+    {
+        return Err(SpendGuardError::UsageTelemetryUnavailable {
+            reason: "contradictory input token categories".into(),
+        });
+    }
+    if let Some(total) = usage.get("total_tokens") {
+        let expected = parsed
+            .input_tokens
+            .checked_add(parsed.output_tokens)
+            .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+                reason: "total token count overflow".into(),
+            })?;
+        if total.as_u64() != Some(expected) {
+            return Err(SpendGuardError::UsageTelemetryUnavailable {
+                reason: "total_tokens contradicts input plus output".into(),
+            });
+        }
+    }
+    Ok(parsed)
+}
+
+fn luna_rate_milli_usd_per_mtok(value: &Value) -> Result<u64, SpendGuardError> {
+    let raw = value
+        .as_str()
+        .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+            reason: "invalid GPT-6 Luna pricing snapshot rate".into(),
+        })?;
+    let (whole, fraction) = raw.split_once('.').unwrap_or((raw, ""));
+    if whole.is_empty()
+        || !whole.bytes().all(|b| b.is_ascii_digit())
+        || fraction.len() > 3
+        || !fraction.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Err(SpendGuardError::UsageTelemetryUnavailable {
+            reason: "invalid GPT-6 Luna pricing snapshot decimal".into(),
+        });
+    }
+    let whole = whole
+        .parse::<u64>()
+        .map_err(|_| SpendGuardError::UsageTelemetryUnavailable {
+            reason: "GPT-6 Luna pricing snapshot rate overflow".into(),
+        })?;
+    let fraction = format!("{fraction:0<3}").parse::<u64>().unwrap_or(0);
+    whole
+        .checked_mul(1000)
+        .and_then(|n| n.checked_add(fraction))
+        .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+            reason: "GPT-6 Luna pricing snapshot rate overflow".into(),
+        })
+}
+
+fn luna_rate(tier: &Value, name: &str) -> Result<u64, SpendGuardError> {
+    luna_rate_milli_usd_per_mtok(tier.get(name).ok_or_else(|| {
+        SpendGuardError::UsageTelemetryUnavailable {
+            reason: format!("missing GPT-6 Luna pricing rate {name}"),
+        }
+    })?)
+}
+
+fn price_luna_usage(
+    usage: &Value,
+    provider: ProviderKind,
+    model: &str,
+) -> Result<f64, SpendGuardError> {
+    if provider != ProviderKind::OpenAI || model != "gpt-6-luna" {
+        return Err(SpendGuardError::UnverifiedPricingModel {
+            model: model.to_string(),
+            provider,
+        });
+    }
+    let usage = parse_luna_usage(usage)?;
+    let snapshot: Value = serde_json::from_str(include_str!(
+        "../../../benchmark/cw122b2p/pricing-2026-11-05.json"
+    ))
+    .map_err(|_| SpendGuardError::UsageTelemetryUnavailable {
+        reason: "invalid GPT-6 Luna pricing snapshot JSON".into(),
+    })?;
+    if snapshot.get("model").and_then(Value::as_str) != Some("gpt-6-luna")
+        || snapshot.get("provider").and_then(Value::as_str) != Some("OpenAI API")
+        || snapshot.get("currency").and_then(Value::as_str) != Some("USD")
+        || snapshot.get("processing_tier").and_then(Value::as_str) != Some("standard")
+        || snapshot
+            .get("billing_categories_are_disjoint")
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        return Err(SpendGuardError::UsageTelemetryUnavailable {
+            reason: "GPT-6 Luna pricing snapshot identity or billing semantics mismatch".into(),
+        });
+    }
+    let threshold = snapshot
+        .get("long_context_threshold_tokens")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+            reason: "missing GPT-6 Luna long-context threshold".into(),
+        })?;
+    let tier_name = if usage.input_tokens > threshold {
+        "long_context_over_272000_input_tokens"
+    } else {
+        "short_context_up_to_272000_input_tokens"
+    };
+    let tier = snapshot
+        .pointer(&format!("/context_pricing_tiers/{tier_name}"))
+        .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+            reason: format!("missing GPT-6 Luna pricing tier {tier_name}"),
+        })?;
+    let uncached =
+        usage.input_tokens - usage.cached_tokens - usage.write_30m_tokens - usage.write_12h_tokens;
+    let categories = [
+        (uncached, luna_rate(tier, "uncached_input")?),
+        (usage.cached_tokens, luna_rate(tier, "cached_input")?),
+        (
+            usage.write_30m_tokens,
+            luna_rate(tier, "cache_write_ttl_30m")?,
+        ),
+        (
+            usage.write_12h_tokens,
+            luna_rate(tier, "cache_write_ttl_12h")?,
+        ),
+        (usage.output_tokens, luna_rate(tier, "output")?),
+    ];
+    let numerator = categories
+        .into_iter()
+        .try_fold(0_u128, |sum, (tokens, rate)| {
+            sum.checked_add(u128::from(tokens) * u128::from(rate))
+        })
+        .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+            reason: "GPT-6 Luna cost calculation overflow".into(),
+        })?;
+    // Rates use 0.001 USD/M units; one resulting unit is 0.001 micro-USD.
+    let micro_usd = numerator.div_ceil(1000);
+    Ok(micro_usd as f64 / MICRO_USD_PER_USD)
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 struct SessionLedger {
     requests: usize,
@@ -365,6 +540,12 @@ impl SpendGuard {
         provider: ProviderKind,
         model: &str,
     ) -> Result<f64, SpendGuardError> {
+        if provider == ProviderKind::OpenAI && model == "gpt-6-luna" {
+            return Err(SpendGuardError::UnverifiedPricingModel {
+                model: model.to_string(),
+                provider,
+            });
+        }
         if self.inner.killswitch_tripped.load(Ordering::SeqCst) {
             return Err(SpendGuardError::KillswitchActive {
                 reason: "SpendGuard emergency killswitch is active".to_string(),
@@ -564,18 +745,26 @@ impl RequestPermit {
                 reason: "provider returned no usage object".into(),
             }),
         };
-        let priced = observed.and_then(|u| {
-            let p = find_pricing_profile(provider, model).ok_or_else(|| {
-                SpendGuardError::UnverifiedPricingModel {
-                    model: model.to_string(),
-                    provider,
-                }
-            })?;
-            let uncached = u.input_tokens - u.cached_input_tokens;
-            Ok((uncached as f64 / 1e6) * p.uncached_input_per_mtok
-                + (u.cached_input_tokens as f64 / 1e6) * p.cached_input_read_per_mtok
-                + (u.output_tokens as f64 / 1e6) * p.output_per_mtok)
-        });
+        let priced = if provider == ProviderKind::OpenAI && model == "gpt-6-luna" {
+            usage
+                .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+                    reason: "provider returned no usage object".into(),
+                })
+                .and_then(|raw| price_luna_usage(raw, provider, model))
+        } else {
+            observed.and_then(|u| {
+                let p = find_pricing_profile(provider, model).ok_or_else(|| {
+                    SpendGuardError::UnverifiedPricingModel {
+                        model: model.to_string(),
+                        provider,
+                    }
+                })?;
+                let uncached = u.input_tokens - u.cached_input_tokens;
+                Ok((uncached as f64 / 1e6) * p.uncached_input_per_mtok
+                    + (u.cached_input_tokens as f64 / 1e6) * p.cached_input_read_per_mtok
+                    + (u.output_tokens as f64 / 1e6) * p.output_per_mtok)
+            })
+        };
         match priced {
             Ok(cost) => {
                 let committed = reservation.commit(cost);
@@ -785,6 +974,78 @@ mod tests {
         let bad = serde_json::json!({"input_tokens":1,"output_tokens":1,
             "input_tokens_details":{"cached_tokens":2}});
         assert!(ObservedUsage::from_provider_usage(&bad).is_err());
+    }
+
+    fn luna_usage(input: u64, cached: u64, write30: u64, write12: u64, output: u64) -> Value {
+        json!({"input_tokens":input,"output_tokens":output,"total_tokens":input+output,
+            "input_tokens_details":{"cached_tokens":cached,"cache_write_tokens":write30+write12,
+                "cache_write_tokens_details":{"ttl_30m_tokens":write30,"ttl_12h_tokens":write12}}})
+    }
+
+    #[test]
+    fn gpt6_luna_prices_disjoint_cache_categories_from_snapshot() {
+        let cost = price_luna_usage(
+            &luna_usage(1_000, 100, 200, 300, 1_000),
+            ProviderKind::OpenAI,
+            "gpt-6-luna",
+        )
+        .unwrap();
+        assert_eq!(cost, 0.000641);
+        assert_eq!(
+            price_luna_usage(
+                &luna_usage(272_000, 0, 0, 0, 0),
+                ProviderKind::OpenAI,
+                "gpt-6-luna"
+            )
+            .unwrap(),
+            0.0272
+        );
+        assert_eq!(
+            price_luna_usage(
+                &luna_usage(272_001, 0, 0, 0, 0),
+                ProviderKind::OpenAI,
+                "gpt-6-luna"
+            )
+            .unwrap(),
+            0.054401
+        );
+    }
+
+    #[test]
+    fn gpt6_luna_settlement_charges_known_short_context_amount() {
+        let guard = live_guard();
+        let usage = luna_usage(1_000, 100, 200, 300, 1_000);
+        let permit = guard.admit_request("luna-settlement").unwrap();
+        assert_eq!(
+            permit
+                .settle(Some(&usage), ProviderKind::OpenAI, "gpt-6-luna")
+                .unwrap(),
+            0.000641
+        );
+        assert_eq!(guard.total_spent_usd(), 0.000641);
+        assert_eq!(guard.total_reserved_usd(), 0.0);
+    }
+
+    #[test]
+    fn gpt6_luna_rejects_missing_or_contradictory_usage_and_legacy_accounting() {
+        let mut missing = luna_usage(1, 0, 0, 0, 0);
+        missing["input_tokens_details"]
+            .as_object_mut()
+            .unwrap()
+            .remove("cache_write_tokens");
+        assert!(parse_luna_usage(&missing).is_err());
+        assert!(parse_luna_usage(&luna_usage(1, 1, 1, 0, 0)).is_err());
+        assert!(parse_luna_usage(&json!({"input_tokens":1,"output_tokens":0})).is_err());
+        let guard = SpendGuard::new(SpendGuardConfig {
+            authorized_budget_usd: 1.0,
+            require_verified_pricing: false,
+            ..Default::default()
+        });
+        assert!(
+            guard
+                .record_usage(1, 0, 0, ProviderKind::OpenAI, "gpt-6-luna")
+                .is_err()
+        );
     }
 
     #[test]

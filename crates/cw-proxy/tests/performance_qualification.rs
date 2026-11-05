@@ -799,6 +799,8 @@ pub async fn run_proxied_benchmark_session(
 
     let mut state = DaemonState::new(store.clone());
     state.openai_upstream = "https://api.openai.com".to_string();
+    state.openai_api_key = Some(api_key.to_owned());
+    state.openai_api_key_configured = true;
     state.capture_wire_egress = true;
     let control_token = state.control_token.clone();
 
@@ -824,7 +826,6 @@ pub async fn run_proxied_benchmark_session(
     let codex_bin_c = codex_bin.to_path_buf();
     let ws_c = fixture.workspace_dir.clone();
     let home_c = temp_home.clone();
-    let key_c = api_key.to_string();
     let sid_c = session_id.to_string();
     let tok_c = control_token.clone();
     let model_str = model.to_string();
@@ -848,7 +849,8 @@ pub async fn run_proxied_benchmark_session(
         ));
         cmd.args(["-m", &model_str, t1_prompt]);
         cmd.stdin(std::process::Stdio::null());
-        cmd.env("OPENAI_API_KEY", key_c);
+        cmd.env_remove("OPENAI_API_KEY")
+            .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
         cmd.env("CODEX_HOME", &home_c);
         cmd.env("CW_SESSION_ID", &sid_c);
         cmd.env("CW_CONTROL_TOKEN", &tok_c);
@@ -923,7 +925,6 @@ pub async fn run_proxied_benchmark_session(
     let codex_bin_c2 = codex_bin.to_path_buf();
     let ws_c2 = fixture.workspace_dir.clone();
     let home_c2 = temp_home.clone();
-    let key_c2 = api_key.to_string();
     let sid_c2 = session_id.to_string();
     let tok_c2 = control_token.clone();
     let tid_c2 = tid1.clone();
@@ -949,7 +950,8 @@ pub async fn run_proxied_benchmark_session(
         ));
         cmd.args(["-m", &model_str2, &tid_c2, t2_prompt]);
         cmd.stdin(std::process::Stdio::null());
-        cmd.env("OPENAI_API_KEY", key_c2);
+        cmd.env_remove("OPENAI_API_KEY")
+            .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
         cmd.env("CODEX_HOME", &home_c2);
         cmd.env("CW_SESSION_ID", &sid_c2);
         cmd.env("CW_CONTROL_TOKEN", &tok_c2);

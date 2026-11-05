@@ -40,6 +40,16 @@ pub struct MutationCreationReport {
     pub skipped: Vec<cw_core::ir::SkippedMutation>,
 }
 
+pub struct SpendGuardAdmission<'a> {
+    pub turn_id: &'a str,
+    pub session_id: &'a str,
+    pub provider: &'a str,
+    pub model: &'a str,
+    pub admitted: bool,
+    pub reservation_usd: Option<f64>,
+    pub error: Option<&'a str>,
+}
+
 #[derive(Clone)]
 pub struct CwStore {
     conn: Arc<Mutex<Connection>>,
@@ -239,6 +249,8 @@ impl CwStore {
 
         conn.execute_batch("CREATE TABLE IF NOT EXISTS wire_requests(turn_id TEXT PRIMARY KEY,body BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS wire_egress(turn_id TEXT PRIMARY KEY,body BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS wire_responses(turn_id TEXT PRIMARY KEY,body BLOB NOT NULL,complete INTEGER NOT NULL,truncated INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS spend_guard_ledger(turn_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,provider TEXT NOT NULL,model TEXT NOT NULL,admission_status TEXT NOT NULL,reservation_usd REAL,settlement_status TEXT NOT NULL,settled_usd REAL,usage_json TEXT,error TEXT,updated_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS request_sequences(session_id TEXT PRIMARY KEY,seq INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS exports(session_id TEXT NOT NULL,path TEXT PRIMARY KEY,content_hash TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS mutation_effectiveness_v2 (
@@ -552,6 +564,11 @@ impl CwStore {
         for id in &ids {
             tx.execute("DELETE FROM wire_requests WHERE turn_id=?1", params![id])?;
             tx.execute("DELETE FROM wire_egress WHERE turn_id=?1", params![id])?;
+            tx.execute("DELETE FROM wire_responses WHERE turn_id=?1", params![id])?;
+            tx.execute(
+                "DELETE FROM spend_guard_ledger WHERE turn_id=?1",
+                params![id],
+            )?;
             tx.execute(
                 "DELETE FROM mutation_effectiveness_v2 WHERE turn_id=?1",
                 params![id],
@@ -658,6 +675,79 @@ impl CwStore {
             )
             .optional()?;
         Ok(raw)
+    }
+
+    pub fn save_wire_response(
+        &self,
+        turn_id: &str,
+        body: &[u8],
+        complete: bool,
+        truncated: bool,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS wire_responses (turn_id TEXT PRIMARY KEY, body BLOB NOT NULL, complete INTEGER NOT NULL, truncated INTEGER NOT NULL)")?;
+        conn.execute(
+            "INSERT OR REPLACE INTO wire_responses(turn_id,body,complete,truncated) VALUES (?1,?2,?3,?4)",
+            params![turn_id, body, complete, truncated],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_wire_response(
+        &self,
+        turn_id: &str,
+    ) -> Result<Option<(Vec<u8>, bool, bool)>, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS wire_responses (turn_id TEXT PRIMARY KEY, body BLOB NOT NULL, complete INTEGER NOT NULL, truncated INTEGER NOT NULL)")?;
+        Ok(conn
+            .query_row(
+                "SELECT body,complete,truncated FROM wire_responses WHERE turn_id = ?1",
+                params![turn_id],
+                |row| Ok((row.get(0)?, row.get::<_, bool>(1)?, row.get::<_, bool>(2)?)),
+            )
+            .optional()?)
+    }
+
+    pub fn record_spend_admission(
+        &self,
+        admission: SpendGuardAdmission<'_>,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute(
+            "INSERT OR REPLACE INTO spend_guard_ledger(turn_id,session_id,provider,model,admission_status,reservation_usd,settlement_status,settled_usd,usage_json,error,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,NULL,NULL,?8,?9)",
+            params![
+                admission.turn_id,
+                admission.session_id,
+                admission.provider,
+                admission.model,
+                if admission.admitted { "ADMITTED" } else { "REJECTED" },
+                admission.reservation_usd,
+                if admission.admitted { "PENDING" } else { "NOT_DISPATCHED" },
+                admission.error,
+                Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn record_spend_settlement(
+        &self,
+        turn_id: &str,
+        status: &str,
+        settled_usd: Option<f64>,
+        usage: Option<&Value>,
+        error: Option<&str>,
+    ) -> Result<(), StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let usage_json = usage.map(serde_json::to_string).transpose()?;
+        let changed = conn.execute(
+            "UPDATE spend_guard_ledger SET settlement_status=?2,settled_usd=?3,usage_json=?4,error=?5,updated_at=?6 WHERE turn_id=?1 AND admission_status='ADMITTED'",
+            params![turn_id, status, settled_usd, usage_json, error, Utc::now().to_rfc3339()],
+        )?;
+        if changed != 1 {
+            return Err(rusqlite::Error::QueryReturnedNoRows.into());
+        }
+        Ok(())
     }
 
     pub fn reserve_turn_sequence(&self, session_id: &str) -> Result<u32, StoreError> {
@@ -1773,6 +1863,39 @@ mod tests {
     use super::*;
     use cw_core::analyze_turn_from_payload;
     use serde_json::json;
+
+    #[test]
+    fn spend_guard_ledger_keeps_admission_and_settlement_evidence() {
+        let store = CwStore::open_in_memory().unwrap();
+        store
+            .record_spend_admission(SpendGuardAdmission {
+                turn_id: "turn-1",
+                session_id: "session-1",
+                provider: "OpenAI",
+                model: "gpt-6-luna",
+                admitted: true,
+                reservation_usd: Some(0.3),
+                error: None,
+            })
+            .unwrap();
+        let usage = json!({"input_tokens":10,"output_tokens":2});
+        store
+            .record_spend_settlement("turn-1", "SETTLED", Some(0.000002), Some(&usage), None)
+            .unwrap();
+        let conn = store.conn.lock().unwrap();
+        let record: (String, String, f64, f64, String) = conn
+            .query_row(
+                "SELECT admission_status,settlement_status,reservation_usd,settled_usd,usage_json FROM spend_guard_ledger WHERE turn_id='turn-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(record.0, "ADMITTED");
+        assert_eq!(record.1, "SETTLED");
+        assert_eq!(record.2, 0.3);
+        assert_eq!(record.3, 0.000002);
+        assert_eq!(serde_json::from_str::<Value>(&record.4).unwrap(), usage);
+    }
 
     #[test]
     fn save_turn_reclaims_only_unreferenced_superseded_blobs() {

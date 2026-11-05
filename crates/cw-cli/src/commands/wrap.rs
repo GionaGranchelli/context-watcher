@@ -165,6 +165,11 @@ pub fn run_wrap(proxy_port: u16, session_id: Option<String>, cmd: Vec<String>) -
     if is_gemini {
         process.env("GEMINI_CLI_CUSTOM_HEADERS", gemini_headers);
     }
+    if is_codex {
+        process
+            .env_remove("OPENAI_API_KEY")
+            .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
+    }
 
     process
         .env_remove("CW_CONTROL_TOKEN")
@@ -257,7 +262,8 @@ mod tests {
         assert!(settings.contains("127.0.0.1:5432/openai/v1"));
         assert!(settings.contains("x-cw-session-id\"=\"CW_SESSION_ID"));
         assert!(settings.contains("x-cw-control-token\"=\"CW_CONTROL_TOKEN"));
-        assert!(settings.contains("env_key=\"OPENAI_API_KEY\""));
+        assert!(settings.contains("env_key=\"CW_PROXY_DUMMY_API_KEY\""));
+        assert!(settings.contains("shell_environment_policy.filters.OPENAI_API_KEY"));
         assert!(settings.contains("shell_environment_policy.filters.CW_CONTROL_TOKEN"));
         assert!(!settings.contains("private-token"));
     }

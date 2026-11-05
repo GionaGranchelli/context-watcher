@@ -122,6 +122,29 @@
       "sentinel_observed": true,
       "upstream_authorization_matches_synthetic_key": true,
       "wrapper_source_sha256": "beb9c61ae81d2772d31907b4626ea0e5fe793a2835dba1635a4bd4a5d79a8c45"
+    },
+    {
+      "attempt_id": "CW-122B2-L0-CODEX-SPENDGUARD-MOCK-1",
+      "external_network_available": false,
+      "host_home_hidden": true,
+      "limitations": [
+        "No actual Codex request reached CW proxy in this attempt",
+        "SpendGuard settlement remains verified by the direct loopback proxy integration test",
+        "Full guarded Codex-to-provider execution remains unverified until the separately authorized real endpoint smoke"
+      ],
+      "loopback_requests": 0,
+      "network_namespace_isolated": true,
+      "outcome": "blocked_startup_before_proxy_ready",
+      "owned_processes_remaining": 0,
+      "private_evidence_artifact_sha256": {
+        "cw-server.log": "81429d87b815a3a80cb2c0e5762b3f1729e429ff813064c6641c4deec7faa3a1",
+        "cw.db": "8a797de82b85974adf771196d9b78e1b4230cd029aa1efcd7b431f50140e2ce8",
+        "e2e.py": "825c2b127a78fce37bf52faf1ded95d2c687b068f5c8cc9efcd91d5e1b77aa86"
+      },
+      "private_evidence_directory": "operator-local temporary evidence",
+      "process_cleanup_verified": true,
+      "provider_calls": 0,
+      "reason": "The production L0 startup guard requires the exact OpenAI upstream endpoint, so it rejected the loopback upstream override before proxy readiness."
     }
   ],
   "host_home_hidden": true,

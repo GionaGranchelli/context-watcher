@@ -74,13 +74,15 @@ impl Recorder {
     }
 
     pub fn tap(&mut self, bytes: &[u8]) {
+        let mut capture_truncated = false;
         if let Some(raw) = self.raw_response.as_mut() {
-            if raw.len().saturating_add(bytes.len()) <= MAX_CAPTURED_PROVIDER_RESPONSE_BYTES {
-                raw.extend_from_slice(bytes);
-            } else {
-                self.raw_response = None;
-                self.response_capture_truncated = true;
-            }
+            let remaining = MAX_CAPTURED_PROVIDER_RESPONSE_BYTES.saturating_sub(raw.len());
+            let captured = bytes.len().min(remaining);
+            raw.extend_from_slice(&bytes[..captured]);
+            capture_truncated = captured < bytes.len();
+        }
+        if capture_truncated {
+            self.response_capture_truncated = true;
         }
         if let Some(turn) = self.turn.as_mut()
             && turn.first_body_byte_ms.is_none()
@@ -540,16 +542,21 @@ mod tests {
         recorder.state.capture_wire_response = true;
         recorder.raw_response = Some(Vec::new());
         recorder.tap(&vec![b'x'; MAX_CAPTURED_PROVIDER_RESPONSE_BYTES + 1]);
+        recorder.tap(b"tail");
         recorder.response_body_complete = true;
         let task = recorder
             .finish("completed")
             .expect("turn finalization task");
         task.await.expect("turn finalization");
 
-        assert_eq!(
-            store.get_wire_response(&turn_id).unwrap(),
-            Some((Vec::new(), true, true))
-        );
+        let (body, complete, truncated) = store
+            .get_wire_response(&turn_id)
+            .unwrap()
+            .expect("wire response evidence");
+        assert_eq!(body.len(), MAX_CAPTURED_PROVIDER_RESPONSE_BYTES);
+        assert!(body.iter().all(|byte| *byte == b'x'));
+        assert!(complete);
+        assert!(truncated);
     }
 
     #[tokio::test]

@@ -526,6 +526,15 @@ async fn main() -> Result<()> {
                 bail!("CW L0 smoke budget and model authorization must be configured together");
             }
             if state.spend_guard.is_some()
+                && (state
+                    .live_allowed_session_id
+                    .as_deref()
+                    .is_none_or(|id| !cw_core::control::is_valid_session_id(id))
+                    || state.live_authorization_expires_at.is_none())
+            {
+                bail!("CW L0 smoke session binding and authorization expiry are required");
+            }
+            if state.spend_guard.is_some()
                 && (!matches!(
                     state.live_provider_model.as_ref(),
                     Some((cw_core::ir::ProviderKind::OpenAI, model)) if model == "gpt-6-luna"

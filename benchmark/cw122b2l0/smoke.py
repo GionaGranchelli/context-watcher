@@ -63,6 +63,17 @@ def sha256(path):
     return h.hexdigest()
 
 
+def validate_credential_not_exposed(record, host_home):
+    credential = Path(record['credential_file']).resolve()
+    for key in ('cw_executable_path', 'codex_executable_path'):
+        executable = Path(record[key])
+        path = executable.resolve(strict=True)
+        if path.is_relative_to(host_home):
+            root = Path(os.path.commonpath((str(executable.parent.resolve()), str(path))))
+            require(not credential.is_relative_to(root),
+                    'provider credential cannot be under an exposed executable installation root')
+
+
 def runner_sha256():
     components = (
         Path(__file__),
@@ -123,6 +134,9 @@ def validate(record, selection, now=None):
     require(no_symlink_components(claims) and claims.is_dir()
             and stat.S_IMODE(claims.stat().st_mode) == 0o700,
             'authorization claim directory must exist with mode 0700 and no symlink components')
+    require(not claims.resolve().is_relative_to(evidence.resolve())
+            and not evidence.resolve().is_relative_to(claims.resolve()),
+            'authorization claim and evidence directories must be disjoint')
     volatile_roots = (Path('/tmp'), Path('/var/tmp'), Path('/dev/shm'), Path('/run'))
     require(not any(claims.resolve().is_relative_to(root) for root in volatile_roots),
             'authorization claim directory must be on persistent storage')
@@ -137,6 +151,7 @@ def validate(record, selection, now=None):
                          'sandbox_executable_path':'sandbox_executable_sha256'}[key]
         require(sha256(executable) == record[expected_hash], 'selected executable hash mismatch: '+key)
         require(selection.get(key) == str(executable), 'selected executable path mismatch: '+key)
+    validate_credential_not_exposed(record, Path.home().resolve())
     require(runner_sha256() == record['runner_sha256'], 'smoke runner bundle hash mismatch')
     return True
 
@@ -159,6 +174,13 @@ def claim_once(record, claim_root):
         os.fsync(dfd)
     finally:
         os.close(dfd)
+
+
+def authorization_remaining_seconds(record):
+    expires = datetime.fromisoformat(record['expires_at'].replace('Z', '+00:00'))
+    remaining = (expires - datetime.now(timezone.utc)).total_seconds()
+    require(remaining > 0, 'authorization expired before provider execution')
+    return remaining
 
 
 def create_private_evidence(path):
@@ -246,11 +268,15 @@ def hidden_paths(home, credential):
 
 def verify_bubblewrap(sandbox, home, credential):
     paths = hidden_paths(home, credential)
+    home = Path(home).resolve()
+    credential = Path(credential).resolve()
+    home_probe = next(iter(home.iterdir()), None)
+    require(home_probe is not None, 'host home must contain an entry to verify isolation')
     argv = [str(sandbox), '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--unshare-pid']
     for path in paths:
         argv.extend(['--tmpfs', str(path)])
     check = 'import os,sys; raise SystemExit(any(os.path.exists(p) for p in sys.argv[1:]))'
-    result = subprocess.run(argv + [sys.executable, '-c', check, str(home), str(credential)],
+    result = subprocess.run(argv + [sys.executable, '-c', check, str(home_probe), str(credential)],
                             env={'PATH':'/usr/bin:/bin','HOME':str(home),
                                  'LANG':'C.UTF-8','LC_ALL':'C.UTF-8'},
                             stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
@@ -307,6 +333,7 @@ def bind_executable(argv, executable, sandbox_name, host_home):
 
 def codex_sandbox_command(record, runtime, workspace, session_id, proxy_port):
     host_home = Path.home().resolve()
+    validate_credential_not_exposed(record, host_home)
     argv = [record['sandbox_executable_path'], '--ro-bind', '/', '/', '--dev', '/dev',
             '--proc', '/proc', '--unshare-pid']
     cw_command = bind_executable(argv, record['cw_executable_path'], 'cw-dist', host_home)
@@ -325,6 +352,9 @@ def codex_sandbox_command(record, runtime, workspace, session_id, proxy_port):
                  '--setenv', 'HOME', str(home), '--setenv', 'CODEX_HOME', str(codex_home),
                  '--setenv', 'TMPDIR', str(temp), '--setenv', 'PATH', '/opt/cw-dist:/opt/cw-dist/bin:/opt/codex-dist/bin:/usr/local/bin:/usr/bin:/bin',
                  '--setenv', 'LANG', 'C.UTF-8', '--setenv', 'LC_ALL', 'C.UTF-8',
+                 '--setenv', 'CW_L0_SMOKE_DUMMY_AUTH', '1',
+                 '--setenv', 'CW_L0_ALLOWED_SESSION_ID', session_id,
+                 '--setenv', 'CW_L0_AUTH_EXPIRES_AT', record['expires_at'],
                  '--setenv', 'CW_PROXY_DUMMY_API_KEY', 'cw-local-proxy-dummy',
                  '--', cw_command, 'wrap', '--proxy-port', str(proxy_port), '--session-id', session_id,
                  '--', codex_command, 'exec', '--ignore-user-config', '--ignore-rules',
@@ -351,7 +381,45 @@ def copy_private_file(source, evidence, name):
     return write_raw_artifact(evidence, name, Path(source).read_bytes())
 
 
-def collect_live_evidence(database, evidence, codex_home):
+def provider_response_models(response_bytes):
+    models = set()
+    candidates = [response_bytes]
+    if b'data:' in response_bytes:
+        candidates = [line[5:].strip() for line in response_bytes.splitlines()
+                      if line.startswith(b'data:') and line[5:].strip() != b'[DONE]']
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        response = value.get('response') if isinstance(value, dict) else None
+        model = response.get('model') if isinstance(response, dict) else None
+        if model is None and isinstance(value, dict):
+            model = value.get('model')
+        if isinstance(model, str) and model:
+            models.add(model)
+    return sorted(models)
+
+
+def provider_response_service_tiers(response_bytes):
+    tiers = set()
+    candidates = [response_bytes]
+    if b'data:' in response_bytes:
+        candidates = [line[5:].strip() for line in response_bytes.splitlines()
+                      if line.startswith(b'data:') and line[5:].strip() != b'[DONE]']
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        response = value.get('response') if isinstance(value, dict) else None
+        tier = response.get('service_tier') if isinstance(response, dict) else None
+        if isinstance(tier, str) and tier:
+            tiers.add(tier)
+    return sorted(tiers)
+
+
+def collect_live_evidence(database, evidence, codex_home, expected_model=None):
     database = Path(database)
     require(database.is_file(), 'CW smoke database was not created')
     transcript_copy = Path(evidence) / 'codex-home'
@@ -374,6 +442,8 @@ def collect_live_evidence(database, evidence, codex_home):
             turn = json.loads(turn_raw)
             wire = {}
             bodies = {}
+            response_models = []
+            response_tiers = []
             directory = Path(evidence) / f'request-{index:02d}'
             directory.mkdir(mode=0o700)
             for kind, query in (
@@ -389,6 +459,13 @@ def collect_live_evidence(database, evidence, codex_home):
                     continue
                 body = bytes(found[0])
                 bodies[kind] = body
+                if kind == 'response':
+                    response_models = provider_response_models(body)
+                    response_tiers = provider_response_service_tiers(body)
+                    if expected_model is not None and response_models != [expected_model]:
+                        issues.append(f'request {index}: provider response model missing or mismatched')
+                    if expected_model is not None and response_tiers != ['default']:
+                        issues.append(f'request {index}: effective provider service tier missing or not standard-priced')
                 complete, truncated = (bool(found[1]), bool(found[2])) if kind == 'response' else (None, None)
                 wire[kind] = {'sha256':hashlib.sha256(body).hexdigest(),'bytes':len(body),
                               'complete':complete,'truncated':truncated}
@@ -424,9 +501,17 @@ def collect_live_evidence(database, evidence, codex_home):
             unchanged = ingress_json is not None and egress_json is not None and ingress_json == egress_json
             if not unchanged:
                 issues.append(f'request {index}: ingress/egress equality unavailable or false')
+            if expected_model is not None and isinstance(egress_json, dict):
+                requested_tier = egress_json.get('service_tier')
+                if requested_tier not in (None, 'default'):
+                    issues.append(f'request {index}: request service tier conflicts with standard pricing authorization')
             results.append({'turn_id':turn_id,'turn':turn,'wire':wire,
                             'ingress_json':ingress_json,'egress_json':egress_json,
-                            'request_body_unchanged':unchanged})
+                            'request_body_unchanged':unchanged,
+                            'provider_response_models':response_models,
+                            'provider_response_model_matches':expected_model is not None and response_models == [expected_model],
+                            'provider_response_service_tiers':response_tiers,
+                            'provider_response_service_tier_matches':expected_model is not None and response_tiers == ['default']})
         ledger = conn.execute(
             'SELECT turn_id,session_id,provider,model,admission_status,reservation_usd,settlement_status,settled_usd,usage_json,error '
             'FROM spend_guard_ledger ORDER BY updated_at,turn_id'
@@ -456,10 +541,11 @@ def run_authorized_smoke(record, *, evidence, cw_executable, codex_executable):
     host_home = Path.home().resolve()
     verify_bubblewrap(record['sandbox_executable_path'], host_home, credential)
     install_handlers, kill_tree, restore_handlers, run_bounded = load_fault_controls()
+    authorization_deadline = time.monotonic() + authorization_remaining_seconds(record)
     claim_once(record, record['authorization_claim_directory'])
     write_private_json(evidence, 'authorization-record.json', record)
     started = time.monotonic()
-    deadline = started + record['deadline_seconds']
+    deadline = min(started + record['deadline_seconds'], authorization_deadline)
     runtime = None
     database = None
     cw_log = None
@@ -491,6 +577,8 @@ def run_authorized_smoke(record, *, evidence, cw_executable, codex_executable):
             'LANG':'C.UTF-8','LC_ALL':'C.UTF-8','RUST_LOG':'warn',
             'CW_OPENAI_API_KEY_FILE':str(credential), 'CW_CAPTURE_WIRE_EGRESS':'1',
             'CW_CAPTURE_WIRE_RESPONSE':'1','CW_L0_ALLOWED_MODEL':record['model'],
+            'CW_L0_ALLOWED_SESSION_ID':SMOKE_SESSION_PREFIX + record['authorization_id'],
+            'CW_L0_AUTH_EXPIRES_AT':record['expires_at'],
             'CW_L0_SMOKE_SPEND_CEILING_USD':str(record['spend_ceiling_usd']),
             'CW_L0_SMOKE_REQUEST_CAP':str(record['request_cap']),
             'CW_UPSTREAM_TIMEOUT_SECS':str(min(record['deadline_seconds'],300)),
@@ -548,9 +636,18 @@ def run_authorized_smoke(record, *, evidence, cw_executable, codex_executable):
         copy_private_file(cw_log, evidence, 'cw-server.log')
     if database is not None and database.is_file():
         try:
-            records, ledger, evidence_issues = collect_live_evidence(database, evidence, codex_home)
+            records, ledger, evidence_issues = collect_live_evidence(
+                database, evidence, codex_home, expected_model=record['model'])
             if evidence_issues:
                 result_status = 'INCONCLUSIVE'
+            if any(
+                (item['provider_response_models']
+                 and item['provider_response_models'] != [record['model']])
+                or (item['provider_response_service_tiers']
+                    and item['provider_response_service_tiers'] != ['default'])
+                for item in records
+            ) or any('request service tier conflicts' in issue for issue in evidence_issues):
+                result_status = 'FAIL'
         except Exception as exc:
             write_private_json(evidence, 'evidence-error.json', {'error':type(exc).__name__,'detail':str(exc)})
             result_status = 'INCONCLUSIVE'
@@ -692,4 +789,4 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

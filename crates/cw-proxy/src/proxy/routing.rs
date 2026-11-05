@@ -1,5 +1,23 @@
 use crate::state::DaemonState;
 use axum::http::Uri;
+use cw_core::ir::ProviderKind;
+
+pub fn provider_for_route(path: &str, fallback: ProviderKind) -> ProviderKind {
+    if path.starts_with("/openai/") || path == "/openai" {
+        ProviderKind::OpenAI
+    } else if path.starts_with("/anthropic/") || path == "/anthropic" {
+        ProviderKind::Anthropic
+    } else if path.starts_with("/gemini/") || path == "/gemini" {
+        ProviderKind::Gemini
+    } else if ["/deepseek", "/ollama", "/llamacpp", "/vllm"]
+        .iter()
+        .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
+    {
+        ProviderKind::OpenAICompatible
+    } else {
+        fallback
+    }
+}
 
 /// Resolves the upstream target URL from the incoming request URI and daemon state.
 pub fn resolve_upstream_target(state: &DaemonState, uri: &Uri) -> String {
@@ -29,4 +47,22 @@ pub fn resolve_upstream_target(state: &DaemonState, uri: &Uri) -> String {
         })
         .unwrap_or((fallback, path));
     format!("{}{suffix}", base.trim_end_matches('/'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::provider_for_route;
+    use cw_core::ir::ProviderKind;
+
+    #[test]
+    fn upstream_provider_comes_from_the_selected_route() {
+        assert_eq!(
+            provider_for_route("/deepseek/v1/chat/completions", ProviderKind::OpenAI),
+            ProviderKind::OpenAICompatible
+        );
+        assert_eq!(
+            provider_for_route("/openai/v1/responses", ProviderKind::OpenAICompatible),
+            ProviderKind::OpenAI
+        );
+    }
 }

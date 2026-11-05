@@ -5,6 +5,15 @@ use std::process::Command;
 
 /// Returns Codex CLI configuration flags to route requests through contextWatcher's authenticated Responses proxy.
 pub fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
+    codex_proxy_config_args_with_auth(proxy_port, true)
+}
+
+pub fn codex_proxy_config_args_with_auth(proxy_port: u16, dummy_auth: bool) -> Vec<String> {
+    let env_key = if dummy_auth {
+        "CW_PROXY_DUMMY_API_KEY"
+    } else {
+        "OPENAI_API_KEY"
+    };
     [
         "model_provider=\"context_watcher\"".to_owned(),
         "model_providers.context_watcher.name=\"contextWatcher\"".to_owned(),
@@ -15,7 +24,7 @@ pub fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
         "model_providers.context_watcher.requires_openai_auth=true".to_owned(),
         // Codex only needs a non-secret bearer for the local proxy. The proxy replaces it
         // with its separately configured file-backed upstream credential.
-        "model_providers.context_watcher.env_key=\"CW_PROXY_DUMMY_API_KEY\"".to_owned(),
+        format!("model_providers.context_watcher.env_key=\"{env_key}\""),
         "model_providers.context_watcher.env_http_headers={\"x-cw-session-id\"=\"CW_SESSION_ID\",\"x-cw-control-token\"=\"CW_CONTROL_TOKEN\"}".to_owned(),
         "shell_environment_policy.filters.CW_CONTROL_TOKEN=\"exclude\"".to_owned(),
         "shell_environment_policy.filters.CW_PROXY_DUMMY_API_KEY=\"exclude\"".to_owned(),

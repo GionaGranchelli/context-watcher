@@ -5,7 +5,9 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
+import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import threading
@@ -156,6 +158,33 @@ class SmokeAuthorizationTests(unittest.TestCase):
         self.assertTrue(all(not p.is_alive() and p.exitcode == 0 for p in workers))
         self.assertCountEqual([q.get(timeout=1), q.get(timeout=1)], ['claimed','FileExistsError'])
 
+    def test_authorization_claim_directory_cannot_be_removed_with_evidence(self):
+        bad = copy.deepcopy(self.record)
+        bad['authorization_claim_directory'] = str(self.evidence)
+        with self.assertRaisesRegex(ValueError, 'must be disjoint'):
+            smoke.validate(bad, self.selection | {'authorization_claim_directory':str(self.evidence)})
+
+    @unittest.skipUnless(shutil.which('bwrap'), 'bubblewrap unavailable')
+    def test_real_bubblewrap_hides_home_contents_and_provider_credential(self):
+        result = smoke.verify_bubblewrap(shutil.which('bwrap'), Path.home(), self.cred)
+        self.assertIn(Path.home().resolve(), result)
+        self.assertIn(self.cred.parent.resolve(), result)
+
+    def test_credential_cannot_be_hidden_then_exposed_through_codex_install_alias(self):
+        with tempfile.TemporaryDirectory(prefix='cw-l0-install-', dir=Path.home()) as temp:
+            root = Path(temp)
+            codex = root / 'bin' / 'codex'; codex.parent.mkdir(); codex.write_bytes(b'codex')
+            cw = root / 'bin' / 'cw'; cw.write_bytes(b'cw')
+            keydir = root / 'bin' / 'private'; keydir.mkdir()
+            key = keydir / 'key'; key.write_text('synthetic'); key.chmod(0o600)
+            record = copy.deepcopy(self.record)
+            record.update({'codex_executable_path':str(codex), 'cw_executable_path':str(cw),
+                           'credential_file':str(key)})
+            runtime = Path(self.tmp.name) / 'runtime'; runtime.mkdir()
+            workspace = runtime / 'workspace'; workspace.mkdir()
+            with self.assertRaisesRegex(ValueError, 'exposed executable installation root'):
+                smoke.codex_sandbox_command(record, runtime, workspace, 'cw122b2l0-test', 43121)
+
     def test_symlink_credential_and_nonempty_evidence_rejected(self):
         link = self.cred.parent / 'key-link'
         link.symlink_to(self.cred)
@@ -227,6 +256,14 @@ class SmokeAuthorizationTests(unittest.TestCase):
         finally:
             server.shutdown(); thread.join(2); server.server_close()
 
+    def test_provider_response_model_is_read_from_actual_response_events(self):
+        raw = b'{"type":"response.completed","response":{"model":"gpt-6-luna"}}'
+        self.assertEqual(smoke.provider_response_models(raw), ['gpt-6-luna'])
+        self.assertNotEqual(smoke.provider_response_models(raw), ['gpt-6-luna-preview'])
+        self.assertEqual(smoke.provider_response_service_tiers(raw), [])
+        self.assertEqual(smoke.provider_response_service_tiers(
+            b'{"response":{"service_tier":"default"}}'), ['default'])
+
     def test_cli_defaults_and_run_flag_are_no_go_before_any_launch(self):
         with self.assertRaises(SystemExit) as absent:
             smoke.main([])
@@ -236,6 +273,16 @@ class SmokeAuthorizationTests(unittest.TestCase):
         self.assertIn('NO_GO', str(live.exception))
         with self.assertRaises(ValueError):
             smoke.main(['--mock-only'])
+
+    def test_cli_propagates_failed_mock_exit_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); bindir = root / 'bin'; bindir.mkdir()
+            codex = bindir / 'codex'; codex.write_text('#!/bin/sh\necho codex-mock\n'); codex.chmod(0o700)
+            cargo = bindir / 'cargo'; cargo.write_text('#!/bin/sh\nexit 7\n'); cargo.chmod(0o700)
+            evidence = root / 'evidence'
+            result = subprocess.run([sys.executable, str(Path(smoke.__file__)),'--mock-only','--evidence-dir',str(evidence)],
+                                    env={'PATH':f'{bindir}:/usr/bin:/bin','HOME':str(root)}, capture_output=True)
+            self.assertEqual(result.returncode, 7, (result.stdout, result.stderr))
 
     def test_check_validates_private_auth_but_never_claims_or_launches(self):
         auth = self.cred.parent / 'authorization.json'
@@ -360,8 +407,9 @@ class SmokeAuthorizationTests(unittest.TestCase):
                     usage = {'input_tokens':10,'output_tokens':2,'total_tokens':12,
                         'input_tokens_details':{'cached_tokens':2,'cache_write_tokens':2,
                         'cache_write_tokens_details':{'ttl_30m_tokens':1,'ttl_12h_tokens':1}}}
-                    response = (b'data: {"type":"response.completed","response":{"usage":'
-                        + json.dumps(usage,separators=(',',':')).encode() + b'}}\\n\\n')
+                    response = json.dumps({'type':'response.completed',
+                        'response':{'model':'gpt-6-luna','service_tier':'default','usage':usage}},
+                        separators=(',',':')).encode()
                     turn = {'model':request['model'],'outcome':'completed','observed_usage':usage,
                             'applied_mutation_ids':[],'skipped_mutations':[]}
                     session = self.headers['x-cw-session-id']
@@ -434,6 +482,7 @@ class SmokeAuthorizationTests(unittest.TestCase):
                 self.record,evidence=self.evidence,cw_executable=self.cw,codex_executable=self.codex)
         self.assertEqual(result['status'],'PASS', (
             result,
+            (self.evidence/'runner-error.json').read_text() if (self.evidence/'runner-error.json').exists() else None,
             (self.evidence/'evidence-error.json').read_text() if (self.evidence/'evidence-error.json').exists() else None,
             (self.evidence/'codex-events.jsonl').read_text(errors='replace') if (self.evidence/'codex-events.jsonl').exists() else None,
         ))
@@ -469,9 +518,16 @@ class SmokeAuthorizationTests(unittest.TestCase):
         ''')
         conn.execute('INSERT INTO turns VALUES(?,?,?)',('turn-1',json.dumps({'outcome':'blocked'}),'now'))
         conn.execute('INSERT INTO wire_requests VALUES(?,?)',('turn-1',b'{"model":"gpt-6-luna"}'))
+        conn.execute('INSERT INTO wire_responses VALUES(?,?,?,?)',('turn-1',
+            b'{"response":{"model":"gpt-6-luna-preview","service_tier":"priority"}}',1,0))
         conn.commit(); conn.close()
-        records, ledger, issues = smoke.collect_live_evidence(db,self.evidence,None)
+        records, ledger, issues = smoke.collect_live_evidence(
+            db,self.evidence,None,expected_model='gpt-6-luna')
         self.assertEqual(len(records),1)
+        self.assertEqual(records[0]['provider_response_models'], ['gpt-6-luna-preview'])
+        self.assertEqual(records[0]['provider_response_service_tiers'], ['priority'])
+        self.assertFalse(records[0]['provider_response_model_matches'])
+        self.assertFalse(records[0]['provider_response_service_tier_matches'])
         self.assertEqual(ledger,[])
         self.assertGreaterEqual(len(issues),4)
         self.assertTrue((self.evidence/'cw.db').is_file())

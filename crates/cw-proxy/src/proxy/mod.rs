@@ -92,10 +92,46 @@ pub async fn handle_proxy_request(
     }
 
     let target = resolve_upstream_target(&state, &uri);
-    let upstream_provider = serde_json::from_slice::<Value>(&body)
+    let detected_provider = serde_json::from_slice::<Value>(&body)
         .ok()
         .map(|raw| detect_provider(uri.path(), &raw))
         .unwrap_or_else(|| detect_provider(uri.path(), &Value::Null));
+    let upstream_provider = routing::provider_for_route(uri.path(), detected_provider);
+    if state.live_allowed_session_id.is_some() {
+        let expected_origin = format!("{}/", state.openai_upstream.trim_end_matches('/'));
+        let authorized = headers
+            .get("x-cw-control-token")
+            .and_then(|value| value.to_str().ok())
+            == Some(state.control_token.as_str());
+        let bound_session = headers
+            .get("x-cw-session-id")
+            .and_then(|value| value.to_str().ok())
+            == state.live_allowed_session_id.as_deref();
+        let live_route = uri.path().starts_with("/openai/")
+            && target.starts_with(&expected_origin)
+            && upstream_provider == ProviderKind::OpenAI;
+        let authorization_active = state
+            .live_authorization_expires_at
+            .is_some_and(|expires| Utc::now() < expires);
+        let authorized_tier = serde_json::from_slice::<Value>(&body)
+            .ok()
+            .and_then(|payload| {
+                payload
+                    .get("service_tier")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .as_deref()
+            == Some("default");
+        if !live_route || !authorized || !bound_session || !authorization_active || !authorized_tier
+        {
+            return (
+                StatusCode::FORBIDDEN,
+                "Smoke authorization route, session, expiry, or pricing tier mismatch",
+            )
+                .into_response();
+        }
+    }
     let mut outbound_body = body.to_vec();
     let mut recorder = None;
 
@@ -570,5 +606,89 @@ mod mutation_fallback_tests {
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].rule_id, "pin-1");
         assert_eq!(skipped[0].reason, "PostMutationValidationFailed");
+    }
+}
+
+#[cfg(test)]
+mod l0_route_boundary_tests {
+    use super::handle_proxy_request;
+    use crate::state::DaemonState;
+    use axum::{
+        body::Bytes,
+        extract::State,
+        http::{HeaderMap, Method, StatusCode, Uri},
+    };
+    use chrono::{Duration, Utc};
+    use cw_store::CwStore;
+
+    #[tokio::test]
+    async fn l0_rejects_alternate_routes_and_unbound_openai_requests() {
+        let mut state = DaemonState::new(CwStore::open_in_memory().unwrap());
+        state.live_allowed_session_id = Some("cw122b2l0-test-auth".into());
+        state.live_authorization_expires_at = Some(Utc::now() + Duration::minutes(1));
+        state.live_provider_model = Some((cw_core::ir::ProviderKind::OpenAI, "gpt-6-luna".into()));
+        state.spend_guard = Some(
+            cw_core::spend_guard::SpendGuard::new_with_campaign_request_limit(
+                cw_core::spend_guard::SpendGuardConfig::default(),
+                1,
+            ),
+        );
+
+        for (path, bound, expires_at, tier) in [
+            (
+                "/deepseek/v1/chat/completions",
+                false,
+                Utc::now() + Duration::minutes(1),
+                None,
+            ),
+            (
+                "/openai/v1/responses",
+                false,
+                Utc::now() + Duration::minutes(1),
+                None,
+            ),
+            (
+                "/openai/v1/responses",
+                true,
+                Utc::now() - Duration::seconds(1),
+                Some("default"),
+            ),
+            (
+                "/openai/v1/responses",
+                true,
+                Utc::now() + Duration::minutes(1),
+                None,
+            ),
+            (
+                "/openai/v1/responses",
+                true,
+                Utc::now() + Duration::minutes(1),
+                Some("priority"),
+            ),
+        ] {
+            let mut request_state = state.clone();
+            request_state.live_authorization_expires_at = Some(expires_at);
+            let mut headers = HeaderMap::new();
+            if bound {
+                headers.insert(
+                    "x-cw-control-token",
+                    request_state.control_token.parse().unwrap(),
+                );
+                headers.insert("x-cw-session-id", "cw122b2l0-test-auth".parse().unwrap());
+            }
+            let mut payload = serde_json::json!({"model":"gpt-6-luna"});
+            if let Some(tier) = tier {
+                payload["service_tier"] = serde_json::Value::String(tier.into());
+            }
+            let response = handle_proxy_request(
+                State(request_state),
+                Method::POST,
+                Uri::try_from(path).unwrap(),
+                headers,
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "route {path}");
+        }
     }
 }

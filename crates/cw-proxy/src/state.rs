@@ -116,6 +116,7 @@ pub struct DaemonState {
     pub control_token: String,
     pub ws_tx: broadcast::Sender<WsEvent>,
     pub http_client: reqwest::Client,
+    pub http_client_no_redirect: reqwest::Client,
     pub anthropic_upstream: String,
     pub openai_upstream: String,
     /// Optional OpenAI bearer credential read from a dedicated file for isolated live runs.
@@ -132,6 +133,8 @@ pub struct DaemonState {
     pub capture_wire_response: bool,
     /// Optional provider/model allowlist for separately authorized smoke runs.
     pub live_provider_model: Option<(cw_core::ir::ProviderKind, String)>,
+    pub live_allowed_session_id: Option<String>,
+    pub live_authorization_expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// When set, every provider request must be admitted by the SpendGuard before
     /// dispatch and settled from provider-reported usage (live qualification runs).
     pub spend_guard: Option<cw_core::spend_guard::SpendGuard>,
@@ -237,11 +240,14 @@ impl DaemonState {
     pub fn new(store: CwStore) -> Self {
         let (ws_tx, _) = broadcast::channel(256);
         // Large local-model prompts can need longer than the default five-minute bound.
+        let timeout = upstream_timeout(std::env::var("CW_UPSTREAM_TIMEOUT_SECS").ok().as_deref());
         let http_client = reqwest::Client::builder()
+            .timeout(timeout)
+            .build()
+            .unwrap_or_default();
+        let http_client_no_redirect = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(upstream_timeout(
-                std::env::var("CW_UPSTREAM_TIMEOUT_SECS").ok().as_deref(),
-            ))
+            .timeout(timeout)
             .build()
             .unwrap_or_default();
 
@@ -250,6 +256,7 @@ impl DaemonState {
             control_token: Uuid::new_v4().simple().to_string(),
             ws_tx,
             http_client,
+            http_client_no_redirect,
             anthropic_upstream: std::env::var("CW_ANTHROPIC_UPSTREAM")
                 .unwrap_or_else(|_| "https://api.anthropic.com".to_string()),
             openai_upstream: std::env::var("CW_OPENAI_UPSTREAM")
@@ -275,6 +282,13 @@ impl DaemonState {
                 .ok()
                 .filter(|model| !model.trim().is_empty())
                 .map(|model| (cw_core::ir::ProviderKind::OpenAI, model)),
+            live_allowed_session_id: std::env::var("CW_L0_ALLOWED_SESSION_ID")
+                .ok()
+                .filter(|id| !id.trim().is_empty()),
+            live_authorization_expires_at: std::env::var("CW_L0_AUTH_EXPIRES_AT")
+                .ok()
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc)),
             spend_guard: None,
             #[cfg(feature = "qualification-fault-hooks")]
             qualification_fault_hook: None,

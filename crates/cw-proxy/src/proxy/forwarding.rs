@@ -177,7 +177,29 @@ pub async fn forward_to_upstream(
             .into_response();
     }
 
-    let mut request = state.http_client.request(method, target);
+    if state.live_allowed_session_id.is_some()
+        && state
+            .live_authorization_expires_at
+            .is_none_or(|expires| chrono::Utc::now() >= expires)
+    {
+        if let Some(mut rec) = recorder
+            && let Some(task) = rec.finish("authorization_expired")
+        {
+            let _ = task.await;
+        }
+        return (
+            StatusCode::FORBIDDEN,
+            "Smoke authorization expired before dispatch",
+        )
+            .into_response();
+    }
+
+    let client = if state.live_allowed_session_id.is_some() {
+        &state.http_client_no_redirect
+    } else {
+        &state.http_client
+    };
+    let mut request = client.request(method, target);
     let replace_openai_auth =
         upstream_provider == ProviderKind::OpenAI && state.openai_api_key.is_some();
     for (key, value) in headers {
@@ -309,4 +331,64 @@ pub async fn forward_to_upstream(
     *response.status_mut() = status;
     *response.headers_mut() = response_headers;
     response
+}
+
+#[cfg(test)]
+mod redirect_tests {
+    use super::forward_to_upstream;
+    use crate::state::DaemonState;
+    use axum::{
+        Router,
+        http::{HeaderMap, Method, StatusCode},
+        response::Redirect,
+        routing::post,
+    };
+    use chrono::{Duration, Utc};
+    use cw_core::ir::ProviderKind;
+    use cw_store::CwStore;
+
+    async fn redirect() -> Redirect {
+        Redirect::temporary("/ok")
+    }
+
+    async fn ok() -> &'static str {
+        "ok"
+    }
+
+    #[tokio::test]
+    async fn redirect_blocking_is_l0_only() {
+        let app = Router::new()
+            .route("/redirect", post(redirect))
+            .route("/ok", post(ok));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut state = DaemonState::new(CwStore::open_in_memory().unwrap());
+        state.openai_upstream = url.clone();
+        let followed = forward_to_upstream(
+            &state,
+            ProviderKind::OpenAI,
+            Method::POST,
+            format!("{url}/redirect"),
+            &HeaderMap::new(),
+            b"{}".to_vec(),
+            None,
+        )
+        .await;
+        assert_eq!(followed.status(), StatusCode::OK);
+        state.live_allowed_session_id = Some("cw122b2l0-test".into());
+        state.live_authorization_expires_at = Some(Utc::now() + Duration::minutes(1));
+        let refused = forward_to_upstream(
+            &state,
+            ProviderKind::OpenAI,
+            Method::POST,
+            format!("{url}/redirect"),
+            &HeaderMap::new(),
+            b"{}".to_vec(),
+            None,
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::TEMPORARY_REDIRECT);
+        server.abort();
+    }
 }

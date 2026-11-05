@@ -442,6 +442,8 @@ async fn handle_mock_responses(
     {
         return Json(json!({
             "id":"resp_luna_mock",
+            "model":"gpt-6-luna",
+            "service_tier":"default",
             "output":[{"id":"msg_luna_mock","type":"message","role":"assistant","content":[{"type":"output_text","text":"loopback qualification complete"}]}],
             "usage":{"input_tokens":1000,"output_tokens":1000,"total_tokens":2000,
                 "input_tokens_details":{"cached_tokens":100,"cache_write_tokens":500,
@@ -799,6 +801,27 @@ impl QualificationFixture {
         capture_wire_response: bool,
         expected_live_model: Option<&str>,
     ) -> Self {
+        Self::setup_config_with_live_identity(
+            spend_guard,
+            private_control_token,
+            capture_wire_egress,
+            upstream_key,
+            key_configured,
+            capture_wire_response,
+            expected_live_model.map(|model| (model, None)),
+        )
+        .await
+    }
+
+    async fn setup_config_with_live_identity(
+        spend_guard: Option<SpendGuard>,
+        private_control_token: Option<String>,
+        capture_wire_egress: bool,
+        upstream_key: Option<&str>,
+        key_configured: bool,
+        capture_wire_response: bool,
+        expected_live_identity: Option<(&str, Option<&str>)>,
+    ) -> Self {
         let mock = MockProvider::start().await;
         let store = CwStore::open_in_memory().unwrap();
         store
@@ -823,7 +846,11 @@ impl QualificationFixture {
         state.capture_wire_egress = capture_wire_egress;
         state.capture_wire_response = capture_wire_response;
         state.live_provider_model =
-            expected_live_model.map(|model| (ProviderKind::OpenAI, model.to_owned()));
+            expected_live_identity.map(|(model, _)| (ProviderKind::OpenAI, model.to_owned()));
+        let l0_session_id = expected_live_identity.and_then(|(_, session)| session);
+        state.live_allowed_session_id = l0_session_id.map(str::to_owned);
+        state.live_authorization_expires_at =
+            l0_session_id.map(|_| Utc::now() + chrono::Duration::minutes(1));
         #[cfg(feature = "qualification-fault-hooks")]
         {
             state.qualification_fault_hook = cw_proxy::state::QualificationFaultHook::from_env();
@@ -1277,18 +1304,19 @@ async fn test_gpt6_luna_loopback_smoke_settles_and_captures_exact_wire_evidence(
         },
         1,
     );
-    let f = QualificationFixture::setup_config_with_key_state(
+    let f = QualificationFixture::setup_config_with_live_identity(
         Some(guard.clone()),
         None,
         true,
         None,
         false,
         true,
-        Some("gpt-6-luna"),
+        Some(("gpt-6-luna", Some("gpt6-luna-loopback-smoke"))),
     )
     .await;
     let payload = json!({
         "model":"gpt-6-luna",
+        "service_tier":"default",
         "stream":false,
         "input":"CW122B2L0 loopback smoke; no external provider",
     });
@@ -2904,13 +2932,13 @@ async fn test_core_contract_ac6_control_token_stripped_and_tool_sandboxing() {
 }
 
 #[tokio::test]
-async fn test_cw122b1_proxy_does_not_follow_upstream_redirect() {
+async fn test_cw122b1_proxy_preserves_default_redirect_behavior() {
     let f = QualificationFixture::setup().await;
     let redirect_hits = Arc::new(AtomicUsize::new(0));
     let hits = redirect_hits.clone();
     let trap = Router::new().route(
         "/tripwire",
-        get(move || {
+        post(move || {
             let hits = hits.clone();
             async move {
                 hits.fetch_add(1, Ordering::SeqCst);
@@ -2941,12 +2969,8 @@ async fn test_cw122b1_proxy_does_not_follow_upstream_redirect() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-    assert_eq!(
-        response.headers().get("location").unwrap(),
-        trap_url.as_str()
-    );
-    assert_eq!(redirect_hits.load(Ordering::SeqCst), 0);
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(redirect_hits.load(Ordering::SeqCst), 1);
     assert_eq!(f.mock.captured.lock().unwrap().len(), 1);
     trap_task.abort();
 }

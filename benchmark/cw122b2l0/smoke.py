@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 ROOT = Path(__file__).resolve().parents[2]
 PRICING = ROOT / 'benchmark/cw122b2p/pricing-2026-11-05.json'
 HASH = re.compile(r'^[0-9a-f]{64}$')
+SMOKE_SESSION_PREFIX = 'cw122b2l0-'
+SESSION_ID_CHARS = re.compile(r'^[A-Za-z0-9_-]+$')
 FIELDS = {
     'authorization_id', 'approver_identity', 'approval_reference', 'issued_at', 'expires_at',
     'provider', 'model', 'endpoint', 'processing_tier', 'runner_sha256', 'pricing_sha256',
@@ -83,6 +85,10 @@ def validate(record, selection, now=None):
     require(isinstance(record, dict) and set(record) == FIELDS, 'authorization fields missing or unknown')
     require(all(isinstance(record[k], str) and record[k].strip() for k in
                 ('authorization_id', 'approver_identity', 'approval_reference')), 'approval identity/reference required')
+    auth_id = record['authorization_id']
+    require(SESSION_ID_CHARS.fullmatch(auth_id) is not None
+            and len(SMOKE_SESSION_PREFIX) + len(auth_id) <= 128,
+            'authorization ID does not fit the authenticated CW session ID contract')
     try:
         issued = datetime.fromisoformat(record['issued_at'].replace('Z', '+00:00'))
         expires = datetime.fromisoformat(record['expires_at'].replace('Z', '+00:00'))
@@ -504,7 +510,7 @@ def run_authorized_smoke(record, *, evidence, cw_executable, codex_executable):
                 stderr=subprocess.STDOUT, start_new_session=True,
             )
             wait_for_loopback(port, server, deadline)
-            session = 'cw122b2l0-' + record['authorization_id']
+            session = SMOKE_SESSION_PREFIX + record['authorization_id']
             argv, codex_home = codex_sandbox_command(
                 record, runtime, workspace, session, port)
             try:

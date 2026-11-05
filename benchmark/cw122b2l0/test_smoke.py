@@ -86,6 +86,17 @@ class SmokeAuthorizationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             smoke.validate(changed, self.selection)
 
+    def test_authorization_id_must_fit_authenticated_session_contract(self):
+        maximum = copy.deepcopy(self.record)
+        maximum['authorization_id'] = 'a' * (128 - len(smoke.SMOKE_SESSION_PREFIX))
+        self.assertTrue(smoke.validate(maximum, self.selection))
+        for invalid in ('contains/slash', 'has space', 'a' * (129 - len(smoke.SMOKE_SESSION_PREFIX)), 'é'):
+            with self.subTest(authorization_id=invalid):
+                changed = copy.deepcopy(self.record)
+                changed['authorization_id'] = invalid
+                with self.assertRaisesRegex(ValueError, 'session ID contract'):
+                    smoke.validate(changed, self.selection)
+
     def test_runner_bundle_digest_binds_imported_fault_controls(self):
         original = smoke.sha256
         baseline = smoke.runner_sha256()
@@ -106,6 +117,8 @@ class SmokeAuthorizationTests(unittest.TestCase):
         self.assertFalse(contract['authorization_issued'])
         self.assertEqual(set(contract['required_fields']), smoke.FIELDS)
         self.assertEqual(set(example), smoke.FIELDS)
+        self.assertEqual(contract['session_binding']['prefix'], smoke.SMOKE_SESSION_PREFIX)
+        self.assertEqual(contract['session_binding']['maximum_total_characters'], 128)
 
     def test_authorization_rejects_replaced_provider_credential(self):
         self.assertTrue(smoke.validate(self.record, self.selection))

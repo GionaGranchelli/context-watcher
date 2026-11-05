@@ -1,6 +1,6 @@
 # CW-122B2-L0 — Real-provider smoke readiness
 
-**Status: MOCK_QUALIFIED; LIVE_EXECUTION_NO_GO.** No provider request, paid inference, or production server change was made. PR #44 is still open at `f629f22`; this working branch is stacked on that commit and is not yet based on approved `main`.
+**Status: MOCK_QUALIFIED; LIVE_EXECUTION_NO_GO.** No provider request, paid inference, or production server change was made. PR #45 is open, stacked on PR #44 at `f629f22`; it is not yet based on approved `main`.
 
 ## Implemented
 
@@ -23,8 +23,8 @@
 
 ## Remaining gates
 
-1. Finish PR #44 and obtain its independent approval/merge. Rebase this work onto the resulting approved `main`; this branch is not ready to be described as main-based while #44 is open. GitHub still reports PR #44 open at `f629f22`.
-2. Run CI and obtain independent review of this focused change. Build the reviewed CW binary from the reviewed checkout and bind its exact path and SHA-256 in the separate smoke authorization.
+1. Finish PR #44 and obtain its independent approval/merge. Retarget PR #45 to the resulting `main`.
+2. Run CI and obtain independent review of PR #45. GitHub currently reports only GitGuardian green; `.github/workflows/ci.yml` restricts pull-request CI to base `main`, so no CI run is attached while this PR is stacked. Build the reviewed CW binary from the reviewed checkout and bind its exact path and SHA-256 in the separate smoke authorization.
 3. Before any `--run`, obtain fresh human authorization for the exact single request, spend ceiling, endpoint/model, deadline, executables, credential, persistent claim directory, and private evidence directory. The existing authorization example remains disabled and has risk acceptance set false.
 4. Only after the smoke result is independently reviewed may the separate six-pair campaign be considered for its own approval.
 

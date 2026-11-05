@@ -13,8 +13,8 @@
 ## Offline verification
 
 - Python runner suite: 17 passed. It covers disabled-contract consistency, invalid/expired/reused authorization, credential replacement, persistent claim behavior, private paths and symlinks, redirects, a local-only end-to-end mock request, partial evidence, missing usage, timeout handling, and resource failure.
-- `test_gpt6_luna_loopback_smoke_settles_and_captures_exact_wire_evidence` exercises the real CW proxy/router and SpendGuard against the loopback provider. It verifies model binding, all usage categories, exact ingress/egress/response capture, and `$0.000641` settlement. This test sends the request directly; it does not exercise a Codex process.
-- `cargo test --workspace`: 311 passed, 23 ignored. Ignored tests were not run or counted as passing.
+- The L0 proxy regressions verify a non-OpenAI provider fallback is rejected before dispatch, and `test_gpt6_luna_loopback_smoke_settles_and_captures_exact_wire_evidence` exercises the real CW proxy/router and SpendGuard against the loopback provider. It verifies model binding, all usage categories, exact ingress/egress/response capture, and `$0.000641` settlement. This test sends the request directly; it does not exercise a Codex process.
+- `cargo test --workspace`: 312 passed, 23 ignored. Ignored tests were not run or counted as passing.
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.
 - Formatting and diff checks: passed.
 - A real bubblewrap process ran the current checkout's `target/debug/cw wrap` with a fake Codex executable under the host home and a deliberately supplied `OPENAI_API_KEY`. The child confirmed that variable was absent and only the dummy bearer was present. No model request was made.

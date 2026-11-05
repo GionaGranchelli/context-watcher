@@ -1229,6 +1229,43 @@ async fn test_smoke_provider_model_mismatch_fails_before_dispatch() {
 }
 
 #[tokio::test]
+async fn test_l0_smoke_rejects_non_openai_provider_fallback_before_dispatch() {
+    let guard = SpendGuard::new_with_campaign_request_limit(
+        SpendGuardConfig {
+            authorized_budget_usd: 0.30,
+            max_session_cost_usd: 0.30,
+            max_requests_per_session: 1,
+            request_reservation_usd: 0.30,
+            ..Default::default()
+        },
+        1,
+    );
+    let f = QualificationFixture::setup_config_with_key_state(
+        Some(guard.clone()),
+        None,
+        false,
+        None,
+        false,
+        false,
+        Some("gpt-6-luna"),
+    )
+    .await;
+    let response = reqwest::Client::new()
+        .post(format!("http://127.0.0.1:{}/anthropic/v1/messages", f.proxy_port))
+        .header("x-cw-session-id", "l0-provider-fallback")
+        .header("x-cw-control-token", &f.control_token)
+        .json(&json!({"model":"claude-sonnet","max_tokens":8,"messages":[{"role":"user","content":"must not fall back"}]}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert!(f.mock.captured.lock().unwrap().is_empty());
+    assert_eq!(guard.total_request_count(), 0);
+    assert_eq!(guard.total_reserved_usd(), 0.0);
+}
+
+#[tokio::test]
 async fn test_gpt6_luna_loopback_smoke_settles_and_captures_exact_wire_evidence() {
     let guard = SpendGuard::new_with_campaign_request_limit(
         SpendGuardConfig {

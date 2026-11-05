@@ -10,6 +10,17 @@ Run from a Git checkout: the runner records `git rev-parse HEAD`, and does not a
 
 The ignored Rust test is intentionally launched through this runner. Default CI runs the deterministic redirect regression and normal tests, but does not require a local Codex installation or run the mock campaign.
 
+Run the CW-122B1-F1 fault matrix without contacting a model provider:
+
+```sh
+python3 -B benchmark/cw122b1/run_mock_campaign.py --evidence-dir /absolute/private/path/cw122b1-success
+python3 -B benchmark/cw122b1/run_fault_matrix.py \
+  --evidence-dir /absolute/private/path/cw122b1-f1 \
+  --success-path-evidence-dir /absolute/private/path/cw122b1-success
+```
+
+It runs deterministic proxy and runner tests, then the Codex loopback fault cases when `codex` is available on the minimal allowlisted `PATH`. It also runs five supervised boundary interruptions. Proxy lifecycle hooks are compiled only by the explicit `qualification-fault-hooks` feature; the supervisor kills each dedicated Cargo process group after the private marker and evidence are durable, then verifies cleanup and hashes. The after-task boundary uses the Codex mock campaign and its independent task oracle, stopping before the per-attempt manifest is written. Raw evidence stays outside the checkout with mode `0700` directories and `0600` files, and the runner updates sanitized `fault-matrix.json`. `BLOCKED_WITH_UNVERIFIED_SCENARIOS` means at least one required execution layer or interruption boundary remains unverified. It never enables live provider traffic.
+
 See [the qualification report](../../docs/CW-122B1-CODEX-MOCK-QUALIFICATION.md) for scope, results, limitations and the live gate.
 
 The accepted host run's [sanitized aggregate](mock-aggregate.json) is safe to commit. Artifact fields named `*_sha256` are computed with SHA-256; the aggregate identifies the algorithm. It contains hashes and synthetic mock telemetry, not raw conversations.

@@ -30,6 +30,50 @@ use cw_store::CwStore;
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 
+const LIVE_PILOT_CAMPAIGN_REQUEST_LIMIT: usize = 50;
+
+fn live_pilot_spend_guard(auth_usd: f64) -> SpendGuard {
+    SpendGuard::new_with_campaign_request_limit(
+        SpendGuardConfig {
+            authorized_budget_usd: auth_usd,
+            session_reservation_usd: 0.15,
+            max_session_cost_usd: 0.15,
+            max_requests_per_session: 25,
+            require_verified_pricing: true,
+            request_reservation_usd: 0.01,
+        },
+        LIVE_PILOT_CAMPAIGN_REQUEST_LIMIT,
+    )
+}
+
+#[test]
+fn test_cw119c_live_pilot_guard_enforces_shared_campaign_request_limit() {
+    let guard = live_pilot_spend_guard(1.0);
+    let usage = json!({"input_tokens": 0, "output_tokens": 0});
+    for session in ["m1"; 25].into_iter().chain(["m2"; 25]) {
+        guard
+            .admit_request(session)
+            .unwrap()
+            .settle(
+                Some(&usage),
+                cw_core::ir::ProviderKind::OpenAI,
+                "gpt-4o-mini",
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        guard.total_request_count(),
+        LIVE_PILOT_CAMPAIGN_REQUEST_LIMIT
+    );
+    assert!(matches!(
+        guard.admit_request("another-session"),
+        Err(SpendGuardError::RequestLimitExceeded {
+            count: 51,
+            limit: 50
+        })
+    ));
+}
+
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -1164,14 +1208,7 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
     );
     let codex_bin = readiness.binary_path.clone().unwrap();
     let model = "gpt-4o-mini";
-    let guard = SpendGuard::new(SpendGuardConfig {
-        authorized_budget_usd: auth_usd,
-        session_reservation_usd: 0.15,
-        max_session_cost_usd: 0.15,
-        max_requests_per_session: 25,
-        require_verified_pricing: true,
-        request_reservation_usd: 0.01,
-    });
+    let guard = live_pilot_spend_guard(auth_usd);
 
     let evidence_dir = workspace_root()
         .join("target")
@@ -1334,6 +1371,8 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
             serde_json::to_vec_pretty(&json!({
                 "sessions": sessions, "total_campaign_spend_usd": guard.total_spent_usd(),
                 "killswitch_tripped": guard.is_killswitch_tripped(), "spend_envelope_usd": auth_usd,
+                "campaign_request_limit": LIVE_PILOT_CAMPAIGN_REQUEST_LIMIT,
+                "campaign_requests_admitted": guard.total_request_count(),
             }))
             .unwrap(),
         )
@@ -1354,6 +1393,10 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
         assert!(
             requests > 0,
             "no provider requests were admitted through the proxy"
+        );
+        assert!(
+            guard.total_request_count() <= LIVE_PILOT_CAMPAIGN_REQUEST_LIMIT,
+            "campaign request limit exceeded"
         );
         if mode == Mode::M2 {
             let treatment = treatment.as_ref().expect("M2 treatment report");
@@ -1378,6 +1421,8 @@ async fn test_cw119c_controlled_live_treatment_codex_m1_m2() {
         "model": model,
         "harness_readiness": readiness,
         "total_campaign_spend_usd": guard.total_spent_usd(),
+        "campaign_request_limit": LIVE_PILOT_CAMPAIGN_REQUEST_LIMIT,
+        "campaign_requests_admitted": guard.total_request_count(),
         "spend_envelope_usd": auth_usd,
         "killswitch_tripped": guard.is_killswitch_tripped(),
         "note": "Wall time includes provider latency and agent stochasticity; it is not proxy overhead.",

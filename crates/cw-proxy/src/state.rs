@@ -99,7 +99,102 @@ pub struct DaemonState {
     /// When set, every provider request must be admitted by the SpendGuard before
     /// dispatch and settled from provider-reported usage (live qualification runs).
     pub spend_guard: Option<cw_core::spend_guard::SpendGuard>,
+    #[cfg(feature = "qualification-fault-hooks")]
+    #[doc(hidden)]
+    pub qualification_fault_hook: Option<QualificationFaultHook>,
     pub(crate) intercepts: Arc<Mutex<HashMap<String, ActiveIntercept>>>,
+}
+
+/// File-backed pause point used only by the explicit qualification-fault-hooks build.
+#[cfg(feature = "qualification-fault-hooks")]
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct QualificationFaultHook {
+    boundary_id: String,
+    root: std::path::PathBuf,
+}
+
+#[cfg(feature = "qualification-fault-hooks")]
+impl QualificationFaultHook {
+    pub fn from_env() -> Option<Self> {
+        let boundary_id = std::env::var("CW122B1_F1_BOUNDARY_ID").ok()?;
+        let root = std::env::var_os("CW122B1_F1_BOUNDARY_DIR")?.into();
+        Some(Self { boundary_id, root })
+    }
+
+    pub async fn pause(
+        &self,
+        boundary_id: &str,
+        mut details: serde_json::Value,
+        artifacts: &[(&str, &[u8])],
+    ) {
+        if self.boundary_id != boundary_id {
+            return;
+        }
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+        let mut files = Vec::new();
+        for (name, bytes) in artifacts {
+            let path = self.root.join(name);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).expect("create boundary evidence directory");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+                        .expect("restrict boundary evidence directory");
+                }
+            }
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options
+                .open(&path)
+                .expect("create boundary evidence artifact");
+            file.write_all(bytes)
+                .expect("write boundary evidence artifact");
+            let digest = Sha256::digest(bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            files.push(serde_json::json!({
+                "path": name,
+                "sha256": digest,
+                "kind": name.rsplit('.').next().unwrap_or("artifact"),
+            }));
+        }
+        if let Some(object) = details.as_object_mut() {
+            object.insert("boundary_id".into(), serde_json::json!(boundary_id));
+            object.insert("result".into(), serde_json::json!("BOUNDARY_REACHED"));
+            object.insert(
+                "evidence_preservation".into(),
+                serde_json::json!({"status":"PRESERVED","directory":self.root,"files":files}),
+            );
+        }
+        let marker = self.root.join("ready.json");
+        let temporary = self.root.join("ready.json.tmp");
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let bytes = serde_json::to_vec_pretty(&details).expect("serialize boundary marker");
+        options
+            .open(&temporary)
+            .expect("create ready boundary marker")
+            .write_all(&bytes)
+            .expect("write ready boundary marker");
+        std::fs::rename(temporary, marker).expect("publish ready boundary marker");
+        loop {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
 }
 
 impl DaemonState {
@@ -137,6 +232,8 @@ impl DaemonState {
             capture_wire_egress: std::env::var("CW_CAPTURE_WIRE_EGRESS").ok().as_deref()
                 == Some("1"),
             spend_guard: None,
+            #[cfg(feature = "qualification-fault-hooks")]
+            qualification_fault_hook: None,
             intercepts: Arc::new(Mutex::new(HashMap::new())),
         }
     }

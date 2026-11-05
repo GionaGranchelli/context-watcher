@@ -1,0 +1,1319 @@
+{
+  "codex_version": "codex-cli 0.166.0",
+  "commit": "d33ac821e90ec51409271c1debe27c381e95e4cd",
+  "duration_ms": 3700,
+  "evidence": {
+    "private_directory_mode": "0700",
+    "runner_output_sha256": "d466ff869b75c8fc112a1297c73c4f281b1f2e18a6c75deaab7f50acbd66a526"
+  },
+  "evidence_directory": "PRIVATE_EVIDENCE",
+  "partial_evidence_boundaries": [
+    {
+      "boundary_id": "before_first_provider_dispatch",
+      "evidence_source": "F1-02 admission record; not an interruption",
+      "injection_boundary": "request admission rejection is tested, but runner interruption evidence is not",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "boundary_id": "after_admission_before_dispatch",
+      "evidence_source": "NONE",
+      "injection_boundary": "no deterministic fault hook at this boundary",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "boundary_id": "after_ingress_before_completed_egress",
+      "evidence_source": "F1-04 error records; not an interruption",
+      "injection_boundary": "provider errors preserve wire records; exact interruption point is not injected",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "boundary_id": "after_response_before_usage_settlement",
+      "evidence_source": "F1-06 settlement records; not an interruption",
+      "injection_boundary": "settlement errors are tested; process interruption before settlement is not",
+      "result": "NOT_VERIFIED"
+    },
+    {
+      "boundary_id": "after_task_before_final_manifest",
+      "evidence_source": "partial-evidence-boundary",
+      "injection_boundary": "failed attempt guard dropped before completion",
+      "result": "PASS"
+    }
+  ],
+  "preservation_note": "Scenario directories were created with mode 0775 despite 0600 evidence files; these rows are not accepted as PASS under the 0700/0600 contract.",
+  "provider_calls": 0,
+  "provider_spend_usd": 0,
+  "run_disposition": "INVALID_EVIDENCE_PERMISSIONS",
+  "runner_exit_code": 0,
+  "scenarios": [
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 3,
+          "rejected": 1,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.000888
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 1,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 3e-05
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-01_000.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-01_001.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-01_002.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_003.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-01_004.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_005.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-01_006.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_007.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-01_008.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_009.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-01_010.attempt_manifest",
+            "sha256": "6051daabd5d385fa7fa61d53b507a965b21991d4b159986b4a23dd1a937d5ec2"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-01_011.provider_request",
+            "sha256": "3ff22497608e0234ef2a48331dde066c0502b12adc3d8f5be6598996fb27d6e9"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-01_012.provider_response",
+            "sha256": "c0dde27c2decacbef6a3b0caa67e33f7ccc25229a4b8f70c80e13dd3096a29c8"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_013.ingress",
+            "sha256": "3ff22497608e0234ef2a48331dde066c0502b12adc3d8f5be6598996fb27d6e9"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-01_014.egress",
+            "sha256": "3ff22497608e0234ef2a48331dde066c0502b12adc3d8f5be6598996fb27d6e9"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-01_015.ingress",
+            "sha256": "27df55af32939ffa5c702091be2594640468247f52852c8452fb64c26458a5c9"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-01_016.attempt_manifest",
+            "sha256": "9b13778d3059087e340e3067e246bf95ce30af52de9919551ddc170571641d94"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Per-session fourth request rejected before dispatch",
+      "injection_boundary": [
+        "Codex tool round trip reaches second request after one-request session cap",
+        "proxy admission before upstream dispatch"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "PASS",
+      "observed_behavior": [
+        "3 admitted; fourth returned 429; upstream saw 3",
+        "one request reached mock; Codex result: Err(\"codex_exit_1\")"
+      ],
+      "process_cleanup": [
+        "Codex termination status: Err(\"codex_exit_1\"); no live process cleanup required",
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-01",
+      "upstream_dispatch_count": 4
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 3,
+          "rejected": 1,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.000888
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 1,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 4e-06
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-02_000.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-02_001.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-02_002.provider_request",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_003.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-02_004.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_005.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-02_006.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_007.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-02_008.egress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_009.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-02_010.attempt_manifest",
+            "sha256": "59d4a23b387f74afbf26afcafa9743770e1504e67c4dabf893a1638242e7cfde"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-02_011.provider_request",
+            "sha256": "63d5fa8edc1a1fe157b4029fc4f34ae0a0331f1705d46bc1662722baa1355f85"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-02_012.provider_response",
+            "sha256": "dd2c69e53ab40d0c570410c3e26ebbc85ae2a1f894a3ff0d114d2bd0536ffd9d"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_013.ingress",
+            "sha256": "63d5fa8edc1a1fe157b4029fc4f34ae0a0331f1705d46bc1662722baa1355f85"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-02_014.egress",
+            "sha256": "63d5fa8edc1a1fe157b4029fc4f34ae0a0331f1705d46bc1662722baa1355f85"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-02_015.ingress",
+            "sha256": "e503d87dc2962927676b2ee56ee72320b7abc754cf6e6d2062001596c7723705"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-02_016.attempt_manifest",
+            "sha256": "cfa989f71688eb1243d4c00d867613f00bcd19a7fac33c4c95a9ef46f265d9d1"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Campaign-wide fourth request rejected across sessions",
+      "injection_boundary": [
+        "second Codex session hits shared campaign cap before upstream dispatch",
+        "shared SpendGuard pre-dispatch admission"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "PASS",
+      "observed_behavior": [
+        "3 admitted across 2 sessions; new session rejected before dispatch",
+        "one total mock dispatch; second Codex run: Err(\"codex_exit_1\")"
+      ],
+      "process_cleanup": [
+        "NOT_APPLICABLE_LAYER_A",
+        "Second Codex termination status: Err(\"codex_exit_1\"); no live process cleanup required"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-02",
+      "upstream_dispatch_count": 4
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 3,
+          "rejected": 1,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.0
+          }
+        },
+        {
+          "accepted": 3,
+          "rejected": 1,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.0
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-03_000.provider_request",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-03_001.provider_request",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-03_002.provider_request",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-03_003.provider_response",
+            "sha256": "339ab1159a3952b22d33955b1e2cd587f3c1ccbc625fa58da66cbef6b1814a31"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-03_004.provider_response",
+            "sha256": "339ab1159a3952b22d33955b1e2cd587f3c1ccbc625fa58da66cbef6b1814a31"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-03_005.provider_response",
+            "sha256": "339ab1159a3952b22d33955b1e2cd587f3c1ccbc625fa58da66cbef6b1814a31"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-03_006.ingress",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-03_007.egress",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-03_008.ingress",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-03_009.egress",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-03_010.ingress",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-03_011.egress",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-03_012.ingress",
+            "sha256": "014c60af1fa8a3188a8b38dd7fb9060da3127993709d8726fe94e51593bf5327"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-03_013.attempt_manifest",
+            "sha256": "06bf98b56f53501ec2635acb4cf86b40f95195e27a7483f87ef0ecf30642583c"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-03_014.provider_request",
+            "sha256": "d2f0ada11deb645238bc0d19ba70e4348c504cc39a4d99ae132e9ef525bbc7d8"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-03_015.provider_request",
+            "sha256": "e627358892a98d25b3ff5d89d511842f9150acc285eb6770aa717856db1be7f2"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-03_016.provider_request",
+            "sha256": "9ab4c753b1b2a4f05faed5c476e51acb6e0d3a906514041819e9dc3eee1e82ad"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-03_017.provider_response",
+            "sha256": "339ab1159a3952b22d33955b1e2cd587f3c1ccbc625fa58da66cbef6b1814a31"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-03_018.provider_response",
+            "sha256": "339ab1159a3952b22d33955b1e2cd587f3c1ccbc625fa58da66cbef6b1814a31"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-03_019.provider_response",
+            "sha256": "339ab1159a3952b22d33955b1e2cd587f3c1ccbc625fa58da66cbef6b1814a31"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-03_020.ingress",
+            "sha256": "d2f0ada11deb645238bc0d19ba70e4348c504cc39a4d99ae132e9ef525bbc7d8"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-03_021.egress",
+            "sha256": "d2f0ada11deb645238bc0d19ba70e4348c504cc39a4d99ae132e9ef525bbc7d8"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-03_022.ingress",
+            "sha256": "e627358892a98d25b3ff5d89d511842f9150acc285eb6770aa717856db1be7f2"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-03_023.egress",
+            "sha256": "e627358892a98d25b3ff5d89d511842f9150acc285eb6770aa717856db1be7f2"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-03_024.ingress",
+            "sha256": "9ab4c753b1b2a4f05faed5c476e51acb6e0d3a906514041819e9dc3eee1e82ad"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-03_025.egress",
+            "sha256": "9ab4c753b1b2a4f05faed5c476e51acb6e0d3a906514041819e9dc3eee1e82ad"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-03_026.ingress",
+            "sha256": "6961eeb82a4355863278ab7a133c219677f870f757a8f1c63714c00e67040b0d"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-03_027.attempt_manifest",
+            "sha256": "1affef2836a071613084686b93dd6d071535abad011fa414b075d6cb3af502d0"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Retryable provider response bounded by per-session and campaign admission",
+      "injection_boundary": [
+        "Codex request routed through authenticated loopback proxy to retryable mock 429",
+        "each mock HTTP 429 response settles before another proxy admission"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "PASS",
+      "observed_behavior": [
+        "three 429 dispatches admitted; fourth request blocked at session cap",
+        "Codex made 3 observed mock requests; run result: Err(\"codex_exit_1\")"
+      ],
+      "process_cleanup": [
+        "Codex termination status: Err(\"codex_exit_1\"); no live process cleanup required",
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-03",
+      "upstream_dispatch_count": 6
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 3,
+          "rejected": 1,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.0
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-04_000.provider_request",
+            "sha256": "3e7e6de88aec207b051c059117bb28f2c6792fa6221db828c5bfcacfba6a590f"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-04_001.provider_response",
+            "sha256": "d292012eb3769a2f60ab0b28588143cc1a936b37cf63a76637e646b7c34fa5d1"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_002.ingress",
+            "sha256": "3e7e6de88aec207b051c059117bb28f2c6792fa6221db828c5bfcacfba6a590f"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-04_003.egress",
+            "sha256": "3e7e6de88aec207b051c059117bb28f2c6792fa6221db828c5bfcacfba6a590f"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-04_004.attempt_manifest",
+            "sha256": "5f5b3bcb2f617b12a19b9086b2c70c8f8d0fdff1e0cc04e51a3c88de778643b8"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-04_005.provider_request",
+            "sha256": "73f8a5b6877b7b693b0a2d61b18afec73203586123cf0ca702f814bfe11d7308"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-04_006.provider_response",
+            "sha256": "8c7f644a14467e06ee798a89532dbff95329ac8e639e2b3b250f7d3fbaf8911e"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_007.ingress",
+            "sha256": "73f8a5b6877b7b693b0a2d61b18afec73203586123cf0ca702f814bfe11d7308"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-04_008.egress",
+            "sha256": "73f8a5b6877b7b693b0a2d61b18afec73203586123cf0ca702f814bfe11d7308"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-04_009.attempt_manifest",
+            "sha256": "cbee0642e2277c664358a4d49a04c56fc99ce38199f18c71fb903d037e0d07b1"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-04_010.provider_request",
+            "sha256": "08fcbf79db0435368fdefb3b0f9dada1c4334796bff8ef4314635f15cc8f7926"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-04_011.provider_response",
+            "sha256": "a44fe80197852e952b1615aee5d4778035daeaef7ff043810812e81b25b61628"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_012.ingress",
+            "sha256": "08fcbf79db0435368fdefb3b0f9dada1c4334796bff8ef4314635f15cc8f7926"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-04_013.egress",
+            "sha256": "08fcbf79db0435368fdefb3b0f9dada1c4334796bff8ef4314635f15cc8f7926"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-04_014.attempt_manifest",
+            "sha256": "17338387944db1e72afe53f4f4650d795a63551717d3f08d8c8b7c690531de63"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-04_015.provider_request",
+            "sha256": "7b389c33c9f1b030907b44773466e52cf55d013ed25cb4ff2db9510021c8e189"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-04_016.provider_response",
+            "sha256": "e9d83f01c9aff03af6380e341aad90a5547d378ef54582383c6c9a35c53181af"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_017.ingress",
+            "sha256": "7b389c33c9f1b030907b44773466e52cf55d013ed25cb4ff2db9510021c8e189"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-04_018.egress",
+            "sha256": "7b389c33c9f1b030907b44773466e52cf55d013ed25cb4ff2db9510021c8e189"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-04_019.attempt_manifest",
+            "sha256": "ab1bc5efce978a11a4e8cf9654214541c80dfd63ee0ed761a6574a2c3efb782f"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-04_020.provider_request",
+            "sha256": "63bac0e9b154a6724ad73501cc774f98bf1ff92198e5357e765b361926456fca"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-04_021.provider_response",
+            "sha256": "43ed5c457b799abe72e15e5ce574960937404f72402c5c15837044c1fc1a3a4a"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_022.ingress",
+            "sha256": "63bac0e9b154a6724ad73501cc774f98bf1ff92198e5357e765b361926456fca"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-04_023.egress",
+            "sha256": "63bac0e9b154a6724ad73501cc774f98bf1ff92198e5357e765b361926456fca"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-04_024.attempt_manifest",
+            "sha256": "a7543dc5ecd40aee831a6ea5be52540b81d481307f5f25c01b88d09a71c177f0"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-04_025.provider_request",
+            "sha256": "d2f0ada11deb645238bc0d19ba70e4348c504cc39a4d99ae132e9ef525bbc7d8"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-04_026.provider_request",
+            "sha256": "e627358892a98d25b3ff5d89d511842f9150acc285eb6770aa717856db1be7f2"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-04_027.provider_request",
+            "sha256": "9ab4c753b1b2a4f05faed5c476e51acb6e0d3a906514041819e9dc3eee1e82ad"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-04_028.provider_response",
+            "sha256": "339ab1159a3952b22d33955b1e2cd587f3c1ccbc625fa58da66cbef6b1814a31"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-04_029.provider_response",
+            "sha256": "339ab1159a3952b22d33955b1e2cd587f3c1ccbc625fa58da66cbef6b1814a31"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-04_030.provider_response",
+            "sha256": "339ab1159a3952b22d33955b1e2cd587f3c1ccbc625fa58da66cbef6b1814a31"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_031.ingress",
+            "sha256": "d2f0ada11deb645238bc0d19ba70e4348c504cc39a4d99ae132e9ef525bbc7d8"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-04_032.egress",
+            "sha256": "d2f0ada11deb645238bc0d19ba70e4348c504cc39a4d99ae132e9ef525bbc7d8"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_033.ingress",
+            "sha256": "e627358892a98d25b3ff5d89d511842f9150acc285eb6770aa717856db1be7f2"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-04_034.egress",
+            "sha256": "e627358892a98d25b3ff5d89d511842f9150acc285eb6770aa717856db1be7f2"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_035.ingress",
+            "sha256": "9ab4c753b1b2a4f05faed5c476e51acb6e0d3a906514041819e9dc3eee1e82ad"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-04_036.egress",
+            "sha256": "9ab4c753b1b2a4f05faed5c476e51acb6e0d3a906514041819e9dc3eee1e82ad"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-04_037.ingress",
+            "sha256": "6961eeb82a4355863278ab7a133c219677f870f757a8f1c63714c00e67040b0d"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-04_038.attempt_manifest",
+            "sha256": "1affef2836a071613084686b93dd6d071535abad011fa414b075d6cb3af502d0"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "HTTP 429, 500, 503, 401 and 403 classified and settled",
+      "injection_boundary": [
+        "Codex receives HTTP 429 through the loopback proxy",
+        "mock provider HTTP response"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "PASS",
+      "observed_behavior": [
+        "HTTP 429 recorded as upstream_error",
+        "HTTP 500 recorded as upstream_error",
+        "HTTP 503 recorded as upstream_error",
+        "HTTP 401 recorded as upstream_error",
+        "HTTP 403 recorded as upstream_error",
+        "3 observed 429 response(s); Codex result: Err(\"codex_exit_1\")"
+      ],
+      "process_cleanup": [
+        "Codex termination status: Err(\"codex_exit_1\"); no live process cleanup required",
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-04",
+      "upstream_dispatch_count": 8
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-05_000.provider_request",
+            "sha256": "d57f6cf7cbf5cfcd700e07375c23e4037ab02fd97d8d8a9fea6e29f4b09c6ccb"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-05_001.provider_response",
+            "sha256": "1633df6c9f307b11a9ac2cf709e59e413bd5700297d66869541352ad352bb6d6"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-05_002.ingress",
+            "sha256": "d57f6cf7cbf5cfcd700e07375c23e4037ab02fd97d8d8a9fea6e29f4b09c6ccb"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-05_003.egress",
+            "sha256": "d57f6cf7cbf5cfcd700e07375c23e4037ab02fd97d8d8a9fea6e29f4b09c6ccb"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-05_004.attempt_manifest",
+            "sha256": "76dab364a62d9dd8b1f8baf4a0fe37c841995129394d28057dfbe85c8c134261"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-05_005.provider_request",
+            "sha256": "e3a64a9ca78b643b73e07caafa2ecdec549010c1ab068b92837f247e9a3160d6"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-05_006.provider_response",
+            "sha256": "5c9feafce28a5fc0e36707ec9736f98331928e448f40f1a3ac69583ed0ab573a"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-05_007.ingress",
+            "sha256": "e3a64a9ca78b643b73e07caafa2ecdec549010c1ab068b92837f247e9a3160d6"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-05_008.egress",
+            "sha256": "e3a64a9ca78b643b73e07caafa2ecdec549010c1ab068b92837f247e9a3160d6"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-05_009.attempt_manifest",
+            "sha256": "82a02127fae36b5a2249783d75dfa3ee1d486b422766f6dcbe09dbfd5c9d817a"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-05_010.provider_request",
+            "sha256": "b935ed353958bd69b974577808b1ab3fb53c902c780a67c0f2625b6b268b9b3b"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-05_011.provider_response",
+            "sha256": "3f58c166446eb4223ca9315e445d7399d999ba5bd60227e9d12652a30690b410"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-05_012.ingress",
+            "sha256": "b935ed353958bd69b974577808b1ab3fb53c902c780a67c0f2625b6b268b9b3b"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-05_013.egress",
+            "sha256": "b935ed353958bd69b974577808b1ab3fb53c902c780a67c0f2625b6b268b9b3b"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-05_014.attempt_manifest",
+            "sha256": "6a77902b258b267b3ec934080e0dcbb9ff20b267c19d03cd143de3266d23696c"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-05_015.provider_request",
+            "sha256": "98c3dbeedb09e8513aff2622d83fe4bfa28cb2629891ceabc2840e7cd1708d8e"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-05_016.ingress",
+            "sha256": "98c3dbeedb09e8513aff2622d83fe4bfa28cb2629891ceabc2840e7cd1708d8e"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-05_017.egress",
+            "sha256": "98c3dbeedb09e8513aff2622d83fe4bfa28cb2629891ceabc2840e7cd1708d8e"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-05_018.attempt_manifest",
+            "sha256": "0484b5c232f1d4dcb92784a5fa59ea8ced43d95551261af1e058ed9eeb2e583e"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-05_019.provider_request",
+            "sha256": "c98385dd923bbc61f8d89d3d7569bed3fffcb99c4edbb99488d6ab2d0f14758d"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-05_020.ingress",
+            "sha256": "c98385dd923bbc61f8d89d3d7569bed3fffcb99c4edbb99488d6ab2d0f14758d"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-05_021.egress",
+            "sha256": "c98385dd923bbc61f8d89d3d7569bed3fffcb99c4edbb99488d6ab2d0f14758d"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-05_022.attempt_manifest",
+            "sha256": "f0ce004fc2e989fcae666c2995fd7153283c8fd4074c31b6e2f6374bedf76d67"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Invalid, truncated, incomplete and stalled SSE responses remain unsuccessful",
+      "injection_boundary": [
+        "Codex receives a stalled streaming response until the per-run deadline",
+        "mock stalls before response headers",
+        "mock streaming response before terminal completion"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "PASS",
+      "observed_behavior": [
+        "INVALID_SSE classified stream_error; usage unavailable",
+        "TRUNCATED_SSE classified stream_error; usage unavailable",
+        "CLOSE_BEFORE_COMPLETE classified stream_error; usage unavailable",
+        "cancelled outcome recorded and reservation settled conservatively",
+        "one local dispatch; timed out and reaped: Err(\"codex_run_deadline_exceeded_exit_signal_9_and_process_group_reaped\")"
+      ],
+      "process_cleanup": [
+        "Codex termination status: Err(\"codex_run_deadline_exceeded_exit_signal_9_and_process_group_reaped\"); process-group reap verified",
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-05",
+      "upstream_dispatch_count": 5
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "provider_request",
+            "name": "F1-06_000.provider_request",
+            "sha256": "96bcd22ddde44b581d169d33fe7355e5ce02a755270b49c2c0b2489f96710e20"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-06_001.provider_response",
+            "sha256": "3055ce3933da677bf0fadc993c63850d0a42b03d441dae151f39531d2f8ca397"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-06_002.ingress",
+            "sha256": "96bcd22ddde44b581d169d33fe7355e5ce02a755270b49c2c0b2489f96710e20"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-06_003.egress",
+            "sha256": "96bcd22ddde44b581d169d33fe7355e5ce02a755270b49c2c0b2489f96710e20"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-06_004.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-06_005.attempt_manifest",
+            "sha256": "53589a57071c9a63909b70047c213e23683cadc2a9288176ad61a638a822b5de"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-06_006.provider_request",
+            "sha256": "7ce97eb3262604461409d466a652537754b2e298a44d7c756ffeef0b47ce26cd"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-06_007.provider_response",
+            "sha256": "9e45acfdb5d9d4a93e48fa7666eb25a9f04037d0790d0413a8623ea050d7a84d"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-06_008.ingress",
+            "sha256": "7ce97eb3262604461409d466a652537754b2e298a44d7c756ffeef0b47ce26cd"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-06_009.egress",
+            "sha256": "7ce97eb3262604461409d466a652537754b2e298a44d7c756ffeef0b47ce26cd"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-06_010.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-06_011.attempt_manifest",
+            "sha256": "81c038f9d2f5abe1c9b1a24b42c4843b9b2d97062b9e4f8d2be3dd0cce91a909"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-06_012.provider_request",
+            "sha256": "fdf6f62c0af3886a5866ef2e74c1c13f3ba119973826f04c8cde33cbee7e616b"
+          },
+          {
+            "kind": "provider_response",
+            "name": "F1-06_013.provider_response",
+            "sha256": "8c966515896142011090c231462db3fd4b6e1d4db36b83796de3ebe3b7aa2767"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-06_014.ingress",
+            "sha256": "fdf6f62c0af3886a5866ef2e74c1c13f3ba119973826f04c8cde33cbee7e616b"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-06_015.egress",
+            "sha256": "fdf6f62c0af3886a5866ef2e74c1c13f3ba119973826f04c8cde33cbee7e616b"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-06_016.ingress",
+            "sha256": "ea5f60152543568d63307dd3020ba94ac2b0683095b7c31f32504da013fd2c25"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-06_017.attempt_manifest",
+            "sha256": "7f1592c5e13ddb9d40ad63c1e0098a9be148b7721acf2f23d1acd25cc18183f3"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Missing and invalid usage fail closed without measured-zero substitution",
+      "injection_boundary": [
+        "provider usage settlement"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "NOT_VERIFIED",
+      "observed_behavior": [
+        "MISSING_USAGE preserved as None; no measured cost",
+        "INVALID_USAGE preserved as Some(Object {\"input_tokens\": String(\"unknown\"), \"output_tokens\": Number(4)}); no measured cost",
+        "CONTRADICTORY_USAGE preserved as Some(Object {\"input_tokens\": Number(1), \"input_tokens_details\": Object {\"cached_tokens\": Number(2)}, \"output_tokens\": Number(4)}); no measured cost"
+      ],
+      "process_cleanup": [
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-06",
+      "upstream_dispatch_count": 3
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 0,
+          "rejected": 0,
+          "settlement": "NOT_APPLICABLE"
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "process_tree_cleanup",
+            "name": "F1-07_000.process_tree_cleanup",
+            "sha256": "c7a6aef7444f96c5de2456622f2702b6e383f10ec0345b1c354c2346609b2d3e"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-07_001.provider_request",
+            "sha256": "c98385dd923bbc61f8d89d3d7569bed3fffcb99c4edbb99488d6ab2d0f14758d"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-07_002.ingress",
+            "sha256": "c98385dd923bbc61f8d89d3d7569bed3fffcb99c4edbb99488d6ab2d0f14758d"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-07_003.egress",
+            "sha256": "c98385dd923bbc61f8d89d3d7569bed3fffcb99c4edbb99488d6ab2d0f14758d"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-07_004.attempt_manifest",
+            "sha256": "85966da2bb4076051e6e2e592a13ea8fef3bf7ca56f9ef0ae9513a3e2de5ae5c"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Per-run timeout kills and reaps Codex/tool process groups",
+      "injection_boundary": [
+        "Codex run deadline expires while the mock provider stalls before response",
+        "per-run timeout with detached nested descendant"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "PASS",
+      "observed_behavior": [
+        "timed-out command returned non-success and detached child was reaped",
+        "one local request; Codex timeout: Err(\"codex_run_deadline_exceeded_exit_signal_9_and_process_group_reaped\")"
+      ],
+      "process_cleanup": [
+        "Codex termination status: Err(\"codex_run_deadline_exceeded_exit_signal_9_and_process_group_reaped\"); process-group reap verified",
+        "VERIFIED"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-07",
+      "upstream_dispatch_count": 1
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 0,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": false,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.0
+          }
+        },
+        {
+          "accepted": 1,
+          "rejected": 0,
+          "settlement": {
+            "killswitch": true,
+            "reserved_usd": 0.0,
+            "spent_usd": 0.01
+          }
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "deadline_guard",
+            "name": "F1-08_000.deadline_guard",
+            "sha256": "289febae0b48393bc063c6ca1141816bf32dec67a38d61bea29a5cce0180f759"
+          },
+          {
+            "kind": "provider_request",
+            "name": "F1-08_001.provider_request",
+            "sha256": "c98385dd923bbc61f8d89d3d7569bed3fffcb99c4edbb99488d6ab2d0f14758d"
+          },
+          {
+            "kind": "ingress",
+            "name": "F1-08_002.ingress",
+            "sha256": "c98385dd923bbc61f8d89d3d7569bed3fffcb99c4edbb99488d6ab2d0f14758d"
+          },
+          {
+            "kind": "egress",
+            "name": "F1-08_003.egress",
+            "sha256": "c98385dd923bbc61f8d89d3d7569bed3fffcb99c4edbb99488d6ab2d0f14758d"
+          },
+          {
+            "kind": "attempt_manifest",
+            "name": "F1-08_004.attempt_manifest",
+            "sha256": "6e06a8ea6ffc710749352a924cf23abd7a19cec0545186017eb22e8af6649806"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Campaign deadline prevents next attempt and cancels active work",
+      "injection_boundary": [
+        "Codex request is active with one second left in the simulated campaign budget",
+        "campaign budget calculation before starting the next attempt"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "PASS",
+      "observed_behavior": [
+        "one second remained at 7199 seconds; timeout became unavailable at 7200 seconds",
+        "one local dispatch was cancelled at the campaign budget; expired budget returned no next-run timeout"
+      ],
+      "process_cleanup": [
+        "Codex termination status: Err(\"codex_run_deadline_exceeded_exit_signal_9_and_process_group_reaped\"); process-group reap verified",
+        "NOT_APPLICABLE_LAYER_A"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-08",
+      "upstream_dispatch_count": 1
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 0,
+          "rejected": 0,
+          "settlement": "NOT_APPLICABLE"
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "interrupted_attempt_record",
+            "name": "F1-09_000.interrupted_attempt_record",
+            "sha256": "f242b871d226d405922079250dc3025f4e8191f3b4ca7895b363c4c3d1b52583"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "External interruption terminates dedicated runner and preserves evidence",
+      "injection_boundary": [
+        "dedicated runner SIGTERM while child active"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "NOT_VERIFIED",
+      "observed_behavior": [
+        "detached child reaped and partial evidence preserved"
+      ],
+      "process_cleanup": [
+        "VERIFIED"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-09",
+      "upstream_dispatch_count": 0
+    },
+    {
+      "admission_settlement_state": [
+        {
+          "accepted": 0,
+          "rejected": 0,
+          "settlement": "NOT_APPLICABLE"
+        }
+      ],
+      "evidence_preservation": {
+        "artifacts": [
+          {
+            "kind": "cancellation_failure_record",
+            "name": "F1-10_000.cancellation_failure_record",
+            "sha256": "937df277f6cd5ddec91d0ad707e1f1c01cd4c52ce416fa9ff1b04ce677c79439"
+          }
+        ],
+        "verified": true
+      },
+      "expected_behavior": "Failed cancellation is reported and blocks subsequent execution",
+      "injection_boundary": [
+        "cancellation function returns unverified"
+      ],
+      "layer_a_result": "PASS",
+      "layer_b_result": "NOT_VERIFIED",
+      "observed_behavior": [
+        "runner raised non-success cleanup error; next command not started"
+      ],
+      "process_cleanup": [
+        "FAILED_INJECTED_AND_REAPED_FOR_TEST_SAFETY"
+      ],
+      "result": "NOT_VERIFIED",
+      "scenario_id": "F1-10",
+      "upstream_dispatch_count": 0
+    }
+  ],
+  "schema": "cw122b1-f1-fault-matrix-v1",
+  "status": "BLOCKED_WITH_UNVERIFIED_SCENARIOS",
+  "successful_path_regression": {
+    "provider_calls": 0,
+    "reason": "The original 12-attempt runner stopped at its CW-122A source-freeze check after the F1 SpendGuard change; the historical freeze was preserved.",
+    "status": "NOT_VERIFIED"
+  }
+}

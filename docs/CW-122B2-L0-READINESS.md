@@ -21,6 +21,7 @@
 - On the current head, `cargo test --workspace` passed (313 passed, 23 ignored), workspace Clippy passed, the L0 Python suite passed (20 tests), and formatting plus `git diff --check` passed. The focused proxy suite also passed (147 passed, 23 ignored). The current head was not run in GitHub CI because PR #45 remains stacked on PR #44.
 - The L0 Python suite also passed under `python3 -O` (20 tests); the live runner uses explicit `require()` validation, so its guards remain active with Python assertions disabled.
 - The review claim that forwarding redacts the upstream bearer is not reproduced: `test_openai_file_credential_replaces_dummy_bearer_only_upstream` verifies the loopback mock receives the exact configured `Bearer` value while the dummy is replaced.
+- Copilot's review of code commit `806dd14` raised the same redacted-Authorization claim. The current request builder forwards `Bearer {configured_key}`, and the exact loopback-header test passed again on `b25c407`; the review thread was replied to with this evidence and resolved as a false positive. Copilot's report also stated it could not complete the full review at its selected tier; this does not replace independent human approval.
 - `cargo test -p cw-cli --bin cw`: 19 passed, including the Codex argument-order regression. Ignored tests were not run or counted as passing.
 - `benchmark/cw122b2l0` authorization/runner suite: 20 passed, including bundle-hash dependency and generated sandbox-command isolation coverage.
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.

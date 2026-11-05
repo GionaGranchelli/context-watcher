@@ -48,12 +48,14 @@
       "cw_executable_sha256": "dccae9168e7a1271deafe27ef62ea8d38b42144558a9a1b4b37577891ae29bbb",
       "external_network_available": false,
       "harness_source_sha256": "93225015f69644d44081b6fb89a74627fcd6db649392eb80ff3cd3d3aa159265",
+      "host_home_hidden": false,
       "ingress_matches_egress": true,
       "limitations": [
-        "loopback mock response, not provider inference",
         "SpendGuard authorization-gated runner was not used; direct proxy settlement remains separately tested",
-        "synthetic key only; no real credential or provider call",
-        "does not establish provider account access, billing, or product value"
+        "does not establish provider account access, billing, or product value",
+        "host home was not hidden in this intermediate mock run; it is excluded from the fully isolated qualification count",
+        "loopback mock response, not provider inference",
+        "synthetic key only; no real credential or provider call"
       ],
       "model_label": "gpt-6-luna",
       "network_namespace_isolated": true,
@@ -62,15 +64,61 @@
         "cw-server.log": "ef091ae3281c43918ed350cfe67f4282e94c6458939c882cf50020b8c7eab887",
         "cw.db": "6c36ed65b0c3d626cccca7e2684547b7358850363d77c6281d95de9f24c76f8f",
         "mock-upstream-request.bin": "f9f54c64e3e5de289e87dcfe08db854ac9444419354823ff584aab5ea883a268",
+        "run-summary.json": "9222997cb1c626365c769d6ecf87113d561f26daf53a40ef31e35707e04ec24c",
         "turn-00-egress.bin": "f9f54c64e3e5de289e87dcfe08db854ac9444419354823ff584aab5ea883a268",
         "turn-00-ingress.bin": "f9f54c64e3e5de289e87dcfe08db854ac9444419354823ff584aab5ea883a268",
         "turn-00-response.bin": "aa571fdcf10ad93e5c6ed42f1ccce6c0ed5a547b9e18101aef44f46d09a94ae2",
         "turn-00.json": "5bccb7169b6be3fd86a818ac7cb269030a7303bceca51f15b1aa1acc13eeeb1e"
       },
+      "private_evidence_artifacts_scanned_for_synthetic_key": {
+        "occurrence_files": [
+          "cw-key",
+          "e2e.py"
+        ],
+        "other_raw_artifacts_clear": true
+      },
       "provider_calls": 0,
       "qualification_id": "CW-122B2-L0-CODEX-LOOPBACK-MOCK-2",
       "request_count": 1,
       "result": "PASS",
+      "sentinel_observed": true,
+      "upstream_authorization_matches_synthetic_key": true,
+      "wrapper_source_sha256": "beb9c61ae81d2772d31907b4626ea0e5fe793a2835dba1635a4bd4a5d79a8c45"
+    },
+    {
+      "codex_cli_version": "codex-cli 0.166.0",
+      "codex_executable_sha256": "e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af",
+      "codex_exit_code": 0,
+      "completed_cw_turns": 1,
+      "cw_executable_sha256": "dccae9168e7a1271deafe27ef62ea8d38b42144558a9a1b4b37577891ae29bbb",
+      "external_network_available": false,
+      "harness_source_sha256": "93225015f69644d44081b6fb89a74627fcd6db649392eb80ff3cd3d3aa159265",
+      "host_home_hidden": true,
+      "ingress_matches_egress": true,
+      "limitations": [
+        "loopback mock response, not provider inference",
+        "authorization-gated SpendGuard runner was not used; direct proxy settlement remains separately tested",
+        "synthetic key only; no real credential or provider call",
+        "does not establish provider account access, billing, or product value"
+      ],
+      "model_label": "gpt-6-luna",
+      "network_namespace_isolated": true,
+      "private_evidence_artifact_sha256": {
+        "codex-events.jsonl": "7cc9271e5e8ba488456a916248a7d479abc71d8898d9a8f6d0d63cd707a23f35",
+        "cw-server.log": "ca0738db43cb463dcb95f9aac4705dc3596df0081dbdc01f80a51991819d6868",
+        "cw.db": "54d4cda180084edbff1a99efc3be8a249922b4c3a6a05a2dd0cf770c2b1783a4",
+        "mock-upstream-request.bin": "88ac9844e8da86bb42453411683b2bea3471eeefd38af04816c3ef0abf5a53a6",
+        "run-summary.json": "e3326ad9545af03a630a98726c884b85d483c001e9083a944d9ef31f515bca4c",
+        "turn-00-egress.bin": "88ac9844e8da86bb42453411683b2bea3471eeefd38af04816c3ef0abf5a53a6",
+        "turn-00-ingress.bin": "88ac9844e8da86bb42453411683b2bea3471eeefd38af04816c3ef0abf5a53a6",
+        "turn-00-response.bin": "aa571fdcf10ad93e5c6ed42f1ccce6c0ed5a547b9e18101aef44f46d09a94ae2",
+        "turn-00.json": "6619c90bbaa0b55209d5fd263650fb5368349d960870850eefbfeff619aa7380"
+      },
+      "provider_calls": 0,
+      "qualification_id": "CW-122B2-L0-CODEX-LOOPBACK-MOCK-3",
+      "request_count": 1,
+      "result": "PASS",
+      "sandbox_executable_sha256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
       "sentinel_observed": true,
       "upstream_authorization_matches_synthetic_key": true,
       "wrapper_source_sha256": "beb9c61ae81d2772d31907b4626ea0e5fe793a2835dba1635a4bd4a5d79a8c45"

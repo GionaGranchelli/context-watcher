@@ -261,6 +261,30 @@ class SmokeAuthorizationTests(unittest.TestCase):
         self.assertNotIn('CW_OPENAI_API_KEY_FILE', env)
         self.assertNotIn('PASSWORD', env)
 
+    def test_live_command_hides_host_home_and_credential_and_isolates_codex_home(self):
+        runtime = Path(self.tmp.name) / 'runtime'
+        workspace = runtime / 'workspace'
+        workspace.mkdir(parents=True)
+        argv, codex_home = smoke.codex_sandbox_command(
+            self.record, runtime, workspace, 'cw122b2l0-auth-1', 43121)
+        for directory in ('cw-home', 'codex-state', 'codex-tmp'):
+            self.assertTrue((runtime / directory).is_dir())
+        self.assertEqual(codex_home, runtime / 'codex-state')
+        self.assertIn('--tmpfs', argv)
+        self.assertIn(str(Path.home().resolve()), argv)
+        self.assertIn(str(self.cred.parent), argv)
+        self.assertIn('--ro-bind', argv)
+        separator = argv.index('--')
+        self.assertIn(str(workspace), argv[:separator])
+        self.assertIn(str(codex_home), argv[:separator])
+        child_command = argv[separator + 1:]
+        self.assertNotIn(str(self.cred), child_command)
+        self.assertNotIn('CW_OPENAI_API_KEY_FILE', child_command)
+        self.assertNotIn('OPENAI_API_KEY', child_command)
+        self.assertIn(['CW_PROXY_DUMMY_API_KEY', 'cw-local-proxy-dummy'], [
+            argv[index + 1:index + 3] for index, value in enumerate(argv) if value == '--setenv'
+        ])
+
     def test_mock_runner_refuses_evidence_write_failure_before_codex_lookup(self):
         with patch.object(smoke, 'write_raw_artifact', side_effect=OSError('disk full')) as write, \
              patch.object(smoke.shutil, 'which') as which:

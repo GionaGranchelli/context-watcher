@@ -1,6 +1,6 @@
 # CW-122B2-L0 — Real-provider smoke readiness
 
-**Status: L0_OFFLINE_RUNNER_GATES_PASS; CODEX_TO_PROXY_MOCK_PATH_NOT_VERIFIED; LIVE_EXECUTION_NO_GO.** No provider request, paid inference, or production server change was made. PR #45 is open, stacked on PR #44 at `f629f22`; it is not yet based on approved `main`.
+**Status: L0_OFFLINE_RUNNER_GATES_PASS; CODEX_TO_PROXY_LOOPBACK_MOCK_PASS; LIVE_EXECUTION_NO_GO.** No provider request, paid inference, or production server change was made. PR #45 is open, stacked on PR #44 at `f629f22`; it is not yet based on approved `main`.
 
 ## Implemented
 
@@ -14,14 +14,16 @@
 
 - Python runner suite: 17 passed. It covers disabled-contract consistency, invalid/expired/reused authorization, credential replacement, persistent claim behavior, private paths and symlinks, redirects, a local-only end-to-end mock request, partial evidence, missing usage, timeout handling, and resource failure.
 - The L0 proxy regressions verify a non-OpenAI provider fallback is rejected before dispatch, and `test_gpt6_luna_loopback_smoke_settles_and_captures_exact_wire_evidence` exercises the real CW proxy/router and SpendGuard against the loopback provider. It verifies model binding, all usage categories, exact ingress/egress/response capture, and `$0.000641` settlement. This test sends the request directly; it does not exercise a Codex process.
-- `cargo test --workspace`: 312 passed, 23 ignored. Ignored tests were not run or counted as passing.
+- A separate one-request integration ran Codex CLI 0.166.0 through the actual `cw wrap` and CW proxy to a loopback-only Responses mock, inside a bubblewrap network namespace with the host home hidden. Codex completed with the expected sentinel; the mock saw exactly one `gpt-6-luna` request, and the captured ingress and egress bytes matched. This mock run did not enable SpendGuard; its exact pricing/admission path is covered by the direct Rust proxy test above. No provider network was available. Sanitized hashes are in [the qualification manifest](../.audit/cw122b2l0/codex-loopback-qualification.json); full raw request, response, database, Codex state, and failure evidence remain private outside the checkout.
+- This integration exposed and fixed a real wrapper defect: `cw wrap` placed Codex `--config` arguments before `exec`, where Codex 0.166.0 selected the default OpenAI provider and failed for a missing `OPENAI_API_KEY`. The wrapper now inserts the proxy configuration after `exec`; a CLI regression test covers the ordering. Two failed zero-request attempts are retained with the private evidence.
+- `cargo test --workspace`: 313 passed, 23 ignored. `cargo test -p cw-cli --bin cw`: 19 passed, including the new Codex argument-order regression. Ignored tests were not run or counted as passing.
 - `cargo clippy --workspace --all-targets -- -D warnings`: passed.
 - Formatting and diff checks: passed.
 - Supplemental CI equivalents passed: Hermes plugin (12 tests); CW-104B offline suite (15 tests) and fixture rehearsal (`OFFLINE_FIXTURE_PASS`); CW-122A campaign tests (20 tests) and synthetic rehearsal (`OFFLINE_GATES_PASS`, six synthetic pairs, `product_value=NOT_EVALUATED`, `live=NOT_AUTHORIZED`); Web check/tests (15)/build; Rust dependency audit (339 dependencies); and Web audit at the CI high-severity threshold. Web audit reported three low-severity advisories.
 - To keep the frozen CW-122A campaign inputs intact while checking compatibility with changed production code, the prior freeze bytes are preserved at `.audit/cw122b2l0/cw122a-freeze-before.json` (SHA-256 `fd2eb463818124da46033b2e92942522d106d7633f3302a6dcaf8d2630515d94`). The current freeze is a new offline compatibility version that names this predecessor; campaign instructions, fixtures, and historical results were not changed. The CW-104B current runner freeze is also versioned and its predecessor is preserved under `.audit/cw122b2l0/`.
 - This host lacks `python3-venv`; CW-122A Python tests and rehearsal ran using system Python with the exact pinned `jsonschema==4.19.2`, rather than CI's isolated virtual environment.
 - A real bubblewrap process ran the current checkout's `target/debug/cw wrap` with a fake Codex executable under the host home and a deliberately supplied `OPENAI_API_KEY`. The child confirmed that variable was absent and only the dummy bearer was present. No model request was made.
-- `codex-cli 0.166.0` is installed on this execution host, and `codex exec --help` confirms the flags used by the runner. The Python runner's successful-path test still uses fake CW and Codex executables, so actual Codex-to-CW-to-Luna mock qualification remains unverified; no Codex request was run.
+- The Python runner's successful-path unit test still uses fake CW and Codex executables. The separate actual-Codex loopback mock integration above covers the adapter/proxy path, but not the authorization-gated live runner with a provider credential.
 - Official pricing and cache-write semantics were checked against [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and [prompt-caching documentation](https://developers.openai.com/api/docs/guides/prompt-caching) on 2026-11-05. Account access and billing remain unverified.
 
 ## Remaining gates

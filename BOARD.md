@@ -21,7 +21,7 @@ Provider profile, complete-session usage and cache-pricing adapter, cache-fairne
 
 ## CW-122B2-L0 — Local smoke runner preparation
 
-PR #45 contains the single-request Codex smoke runner and strict Luna settlement, with offline proxy, authorization, evidence, fallback, and compatibility gates passing. The runner defaults to `NO_GO`; no provider request or spend has been made. PR #45 is stacked on PR #44 commit `f629f22`; it has GitGuardian green, but CI is not attached because the workflow only runs for PRs based on `main`. After PR #44 is approved and merged, retarget PR #45 to `main` and obtain CI plus independent approval. Actual Codex execution against the loopback mock and live provider execution remain unverified. See [L0 readiness](docs/CW-122B2-L0-READINESS.md). The six-pair campaign stays disabled.
+PR #45 contains the single-request Codex smoke runner and strict Luna settlement. Offline gates pass, including one actual Codex-through-CW request to a loopback-only mock in an isolated network namespace. This proves local adapter/proxy compatibility, not live provider access or product value; the mock run did not enable SpendGuard, which is covered by the separate direct proxy test. The runner defaults to `NO_GO`; no provider request or spend has been made. PR #45 is stacked on PR #44 commit `f629f22`; it has GitGuardian green, but CI is not attached because the workflow only runs for PRs based on `main`. After PR #44 is approved and merged, retarget PR #45 to `main` and obtain CI plus independent approval. See [L0 readiness](docs/CW-122B2-L0-READINESS.md). The six-pair campaign stays disabled.
 
 ## CW-121C2 — Merged
 

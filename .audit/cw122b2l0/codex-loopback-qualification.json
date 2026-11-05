@@ -1,0 +1,50 @@
+{
+  "codex_cli_version": "codex-cli 0.166.0",
+  "codex_executable_sha256": "e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af",
+  "codex_exit_code": 0,
+  "codex_sentinel_observed": true,
+  "completed_cw_turns": 1,
+  "context_watcher": "current branch debug binary",
+  "cw_executable_sha256": "e344cc568a82012d77f0d358ed0c5a5694bd96cdd815ddc4c4b55b45a053b5f0",
+  "failed_zero_request_attempts": [
+    {
+      "codex_output_sha256": "121db64788d9c8d29af50964b03ed3db1be4105f3d8ad29a6c5f343c59368f64",
+      "private_evidence_tree_sha256": "6f08ee19644f2a0f52e86efb3d86141053bb19c7e745a7b44adf20fdd662a644",
+      "reason": "Codex refused a non-Git workspace before launch"
+    },
+    {
+      "codex_output_sha256": "a8cdf9222952ef3ae2b405fa0d828a231268a0cd87148eefa6eb574a024ee557",
+      "private_evidence_tree_sha256": "211ae777416c5ad32cf3d839fc32de67219caa71adc7b4ae328167a48aaa31a2",
+      "reason": "cw wrap configuration ordering left Codex on its default provider; Codex failed closed because OPENAI_API_KEY was absent"
+    }
+  ],
+  "host_home_hidden": true,
+  "ingress_matches_egress": true,
+  "limitations": [
+    "mock response, not provider inference",
+    "SpendGuard settlement was not active in this Codex-path run; separately verified by the loopback proxy settlement test",
+    "does not establish account access, billing, or product value"
+  ],
+  "model_label": "gpt-6-luna",
+  "network_namespace_isolated": true,
+  "private_evidence_artifact_sha256": {
+    "codex-events.jsonl": "47ccce6d935720e3306591d360995517e90f311b151cbdcfe7dfa45ab09824e6",
+    "cw-server.log": "d817a7ee6d156b6fe3511aa4721f11f44cec4a513342f4c90b07699abf07cf8a",
+    "cw.db": "2a2d75949f3dc1e54ebf518cf725b085058bfcf8ea7c31f29d09c8a438b7344b",
+    "e2e.py": "4b471761bb21dc4e53a957d1ff06431214302b2e957f81f38110a1a080f7873f",
+    "mock-upstream-request.bin": "41d604a0398e22eb7d56b81793b1ab733386e6cd31c3b722a1749e01b952f16b",
+    "turn-00-egress.bin": "41d604a0398e22eb7d56b81793b1ab733386e6cd31c3b722a1749e01b952f16b",
+    "turn-00-ingress.bin": "41d604a0398e22eb7d56b81793b1ab733386e6cd31c3b722a1749e01b952f16b",
+    "turn-00-response.bin": "aa571fdcf10ad93e5c6ed42f1ccce6c0ed5a547b9e18101aef44f46d09a94ae2",
+    "turn-00.json": "289b8eae2bb1c6e7752340565178daf97feaf3f68facf2a016e4102934f8ba7e"
+  },
+  "private_evidence_tree_sha256": "7b34b5c8ce3233c96aea6851ff92159128904bdae1d58c65256c162483188d4d",
+  "provider_calls": 0,
+  "qualification_id": "CW-122B2-L0-CODEX-LOOPBACK-MOCK-1",
+  "request_count": 1,
+  "request_outcome": "completed",
+  "result": "PASS",
+  "spend_guard_enabled": false,
+  "upstream": "loopback-only OpenAI Responses mock",
+  "wrapper_source_sha256": "bd2ac39d389af5725b6cebc94e97954d63da34643ee9e3a58d3e8b44ceca4949"
+}

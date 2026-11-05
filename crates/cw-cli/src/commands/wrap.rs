@@ -82,6 +82,12 @@ pub(crate) fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
     cw_harnesses::qualification::codex_proxy_config_args(proxy_port)
 }
 
+fn codex_args_with_proxy_config(mut args: Vec<String>, proxy_port: u16) -> Vec<String> {
+    let insertion = usize::from(args.first().is_some_and(|arg| arg == "exec"));
+    args.splice(insertion..insertion, codex_proxy_config_args(proxy_port));
+    args
+}
+
 /// Launches a harness child process with loopback proxy routing and sanitized environment.
 pub fn run_wrap(proxy_port: u16, session_id: Option<String>, cmd: Vec<String>) -> Result<()> {
     if cmd.is_empty() {
@@ -100,10 +106,6 @@ pub fn run_wrap(proxy_port: u16, session_id: Option<String>, cmd: Vec<String>) -
         .is_some_and(|name| name.eq_ignore_ascii_case("gemini"));
 
     let mut args = Vec::new();
-    if is_codex {
-        args.extend(codex_proxy_config_args(proxy_port));
-    }
-
     let mut extracted_session_id = session_id;
     let mut tail_iter = cmd[1..].iter().cloned();
     while let Some(arg) = tail_iter.next() {
@@ -119,6 +121,9 @@ pub fn run_wrap(proxy_port: u16, session_id: Option<String>, cmd: Vec<String>) -
             continue;
         }
         args.push(arg);
+    }
+    if is_codex {
+        args = codex_args_with_proxy_config(args, proxy_port);
     }
 
     let session_id = extracted_session_id.or_else(|| std::env::var("CW_SESSION_ID").ok());
@@ -266,6 +271,18 @@ mod tests {
         assert!(settings.contains("shell_environment_policy.filters.OPENAI_API_KEY"));
         assert!(settings.contains("shell_environment_policy.filters.CW_CONTROL_TOKEN"));
         assert!(!settings.contains("private-token"));
+    }
+
+    #[test]
+    fn codex_exec_proxy_configuration_follows_the_subcommand() {
+        let args = codex_args_with_proxy_config(
+            vec!["exec".into(), "--json".into(), "prompt".into()],
+            5432,
+        );
+        assert_eq!(args[0], "exec");
+        assert_eq!(args[1], "--config");
+        assert_eq!(args.last().map(String::as_str), Some("prompt"));
+        assert!(args.contains(&"model_provider=\"context_watcher\"".into()));
     }
 
     #[test]

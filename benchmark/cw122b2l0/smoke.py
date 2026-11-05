@@ -575,7 +575,9 @@ def run_authorized_smoke(record, *, evidence, cw_executable, codex_executable):
         cw_env = {
             'PATH':'/usr/bin:/bin', 'HOME':str(runtime / 'cw-home'), 'TMPDIR':str(runtime / 'cw-tmp'),
             'LANG':'C.UTF-8','LC_ALL':'C.UTF-8','RUST_LOG':'warn',
-            'CW_OPENAI_API_KEY_FILE':str(credential), 'CW_CAPTURE_WIRE_EGRESS':'1',
+            'CW_OPENAI_API_KEY_FILE':str(credential),
+            'CW_OPENAI_API_KEY_SHA256':record['credential_sha256'],
+            'CW_CAPTURE_WIRE_EGRESS':'1',
             'CW_CAPTURE_WIRE_RESPONSE':'1','CW_L0_ALLOWED_MODEL':record['model'],
             'CW_L0_ALLOWED_SESSION_ID':SMOKE_SESSION_PREFIX + record['authorization_id'],
             'CW_L0_AUTH_EXPIRES_AT':record['expires_at'],

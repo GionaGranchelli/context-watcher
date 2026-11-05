@@ -5,7 +5,7 @@ edition.workspace = true
 
 [features]
 r11a-qualification = ["cw-store/r11a-qualification"]
-qualification-fault-hooks = ["dep:sha2"]
+qualification-fault-hooks = []
 
 [dependencies]
 cw-core.workspace = true
@@ -26,13 +26,12 @@ bytes.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 tracing.workspace = true
-sha2 = { version = "0.11", optional = true }
+sha2 = "0.11"
 
 [dev-dependencies]
 blake3.workspace = true
 rusqlite.workspace = true
 libc = "0.2"
-sha2 = "0.11"
 
 [[test]]
 name = "r11a_qualification"

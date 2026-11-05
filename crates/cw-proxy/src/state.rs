@@ -24,18 +24,45 @@ fn upstream_timeout(raw: Option<&str>) -> Duration {
 }
 
 #[cfg(unix)]
-fn read_private_openai_key(path: Option<String>) -> Option<String> {
+fn read_private_openai_key(
+    path: Option<String>,
+    expected_sha256: Option<String>,
+) -> Option<String> {
     let path = path?;
+    let expected_sha256 = expected_sha256?;
+    if expected_sha256.len() != 64 || !expected_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        tracing::error!("CW OpenAI credential SHA-256 authorization is invalid");
+        return None;
+    }
     let metadata = std::fs::symlink_metadata(&path).ok()?;
     if !metadata.file_type().is_file() || metadata.permissions().mode() & 0o777 != 0o600 {
         tracing::error!("CW OpenAI credential file must be a regular 0600 file");
         return None;
     }
-    match std::fs::read_to_string(path) {
-        Ok(key) if !key.trim().is_empty() && !key.contains(['\n', '\r']) => {
-            Some(key.trim().to_string())
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            use sha2::{Digest, Sha256};
+            let digest = Sha256::digest(&bytes)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            if expected_sha256 != digest {
+                tracing::error!("CW OpenAI credential file does not match the authorized SHA-256");
+                return None;
+            }
+            let Ok(key) = std::str::from_utf8(&bytes) else {
+                tracing::error!("CW OpenAI credential file is not valid UTF-8");
+                return None;
+            };
+            if !key.trim().is_empty() && !key.contains(['\n', '\r']) {
+                Some(key.trim().to_string())
+            } else {
+                tracing::error!("CW OpenAI credential file is empty or unreadable");
+                None
+            }
         }
-        _ => {
+        Err(_) => {
             tracing::error!("CW OpenAI credential file is empty or unreadable");
             None
         }
@@ -43,7 +70,10 @@ fn read_private_openai_key(path: Option<String>) -> Option<String> {
 }
 
 #[cfg(not(unix))]
-fn read_private_openai_key(path: Option<String>) -> Option<String> {
+fn read_private_openai_key(
+    path: Option<String>,
+    _expected_sha256: Option<String>,
+) -> Option<String> {
     if path.is_some() {
         tracing::error!("File-backed OpenAI credentials require Unix file permissions");
     }
@@ -262,7 +292,10 @@ impl DaemonState {
             openai_upstream: std::env::var("CW_OPENAI_UPSTREAM")
                 .unwrap_or_else(|_| "https://api.openai.com".to_string()),
             openai_api_key_configured: std::env::var_os("CW_OPENAI_API_KEY_FILE").is_some(),
-            openai_api_key: read_private_openai_key(std::env::var("CW_OPENAI_API_KEY_FILE").ok()),
+            openai_api_key: read_private_openai_key(
+                std::env::var("CW_OPENAI_API_KEY_FILE").ok(),
+                std::env::var("CW_OPENAI_API_KEY_SHA256").ok(),
+            ),
             deepseek_upstream: std::env::var("CW_DEEPSEEK_UPSTREAM")
                 .unwrap_or_else(|_| "https://api.deepseek.com".to_string()),
             gemini_upstream: std::env::var("CW_GEMINI_UPSTREAM")
@@ -320,19 +353,31 @@ mod tests {
         std::fs::write(&key, "synthetic-key").unwrap();
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(
-            read_private_openai_key(Some(key.to_string_lossy().into_owned())).as_deref(),
+            read_private_openai_key(
+                Some(key.to_string_lossy().into_owned()),
+                Some("2ee8f42267a3635138b7b04501b6a854349d168cdc4e2db23bf05b64e65371f7".into()),
+            )
+            .as_deref(),
             Some("synthetic-key")
         );
+        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned()), None).is_none());
+        assert!(
+            read_private_openai_key(
+                Some(key.to_string_lossy().into_owned()),
+                Some("0000000000000000000000000000000000000000000000000000000000000000".into()),
+            )
+            .is_none()
+        );
         std::fs::write(&key, "").unwrap();
-        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned())).is_none());
+        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned()), None).is_none());
         std::fs::write(&key, "first\nsecond").unwrap();
-        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned())).is_none());
+        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned()), None).is_none());
         std::fs::write(&key, "synthetic-key").unwrap();
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned())).is_none());
+        assert!(read_private_openai_key(Some(key.to_string_lossy().into_owned()), None).is_none());
         let link = dir.join("key-link");
         std::os::unix::fs::symlink(&key, &link).unwrap();
-        assert!(read_private_openai_key(Some(link.to_string_lossy().into_owned())).is_none());
+        assert!(read_private_openai_key(Some(link.to_string_lossy().into_owned()), None).is_none());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

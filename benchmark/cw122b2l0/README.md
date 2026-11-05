@@ -12,6 +12,8 @@ python3 -B -m unittest discover -s benchmark/cw122b2l0 -p 'test_*.py'
 
 For a future operator, first complete independent review, confirm account access and the current pricing snapshot, create an external key file with mode `0600`, a new empty evidence directory with mode `0700`, and a persistent claim directory outside the checkout with mode `0700`. Keep the claim directory after the run, even if evidence is archived or removed. Issue a separate approval that names the exact model, endpoint, executable and runner hashes, one-request cap, deadline, spend ceiling, evidence/credential/claim paths, and the SHA-256 of the exact credential-file bytes; explicitly accept reservation-overrun risk. Fill `authorization.example.json` from that approval; never commit the completed record or credential.
 
+The authorized `runner_sha256` is a bundle digest: it covers `smoke.py` and the local fault-control helper sources imported from CW-122B1/CW-122A. A change to those dependencies invalidates the approval.
+
 Validate without execution:
 
 ```sh

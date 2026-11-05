@@ -20,6 +20,7 @@ pub fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
         "shell_environment_policy.filters.CW_CONTROL_TOKEN=\"exclude\"".to_owned(),
         "shell_environment_policy.filters.CW_PROXY_DUMMY_API_KEY=\"exclude\"".to_owned(),
         "shell_environment_policy.filters.OPENAI_API_KEY=\"exclude\"".to_owned(),
+        "shell_environment_policy.filters.CW_OPENAI_API_KEY_FILE=\"exclude\"".to_owned(),
     ]
     .into_iter()
     .flat_map(|setting| ["--config".to_owned(), setting])
@@ -239,6 +240,9 @@ mod tests {
         );
         assert!(args.iter().any(|a| {
             a.contains("shell_environment_policy.filters.CW_PROXY_DUMMY_API_KEY=\"exclude\"")
+        }));
+        assert!(args.iter().any(|a| {
+            a.contains("shell_environment_policy.filters.CW_OPENAI_API_KEY_FILE=\"exclude\"")
         }));
         assert!(
             args.iter()

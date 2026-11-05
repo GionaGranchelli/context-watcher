@@ -48,7 +48,7 @@ class SmokeAuthorizationTests(unittest.TestCase):
             'authorization_id':'mock-auth-1','approver_identity':'test operator','approval_reference':'offline fixture',
             'issued_at':now.isoformat(),'expires_at':(now+timedelta(minutes=5)).isoformat(),
             'provider':'openai','model':'gpt-6-luna','endpoint':'https://api.openai.com/v1','processing_tier':'standard',
-            'runner_sha256':smoke.sha256(smoke.Path(smoke.__file__)), 'pricing_sha256':smoke.sha256(smoke.PRICING),
+            'runner_sha256':smoke.runner_sha256(), 'pricing_sha256':smoke.sha256(smoke.PRICING),
             'codex_executable_sha256':smoke.sha256(self.codex),'cw_executable_sha256':smoke.sha256(self.cw),'request_cap':1,'deadline_seconds':60,
             'spend_ceiling_usd':0.3,'reservation_overrun_risk_accepted':True,'credential_file':str(self.cred),
             'credential_sha256':smoke.sha256(self.cred),
@@ -78,9 +78,25 @@ class SmokeAuthorizationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             smoke.validate(changed, self.selection)
         changed = copy.deepcopy(self.record)
+        changed['runner_sha256'] = '0' * 64
+        with self.assertRaises(ValueError):
+            smoke.validate(changed, self.selection)
+        changed = copy.deepcopy(self.record)
         changed['isolation_profile'] = 'unsandboxed'
         with self.assertRaises(ValueError):
             smoke.validate(changed, self.selection)
+
+    def test_runner_bundle_digest_binds_imported_fault_controls(self):
+        original = smoke.sha256
+        baseline = smoke.runner_sha256()
+        with patch.object(
+            smoke,
+            'sha256',
+            side_effect=lambda path: 'f' * 64
+            if smoke.Path(path).name == 'run_mock_campaign.py'
+            else original(path),
+        ):
+            self.assertNotEqual(smoke.runner_sha256(), baseline)
 
     def test_disabled_contract_and_example_match_validator_fields(self):
         root = smoke.Path(smoke.__file__).parent

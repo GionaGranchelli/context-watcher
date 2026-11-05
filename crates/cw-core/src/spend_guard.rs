@@ -305,7 +305,9 @@ fn price_luna_usage(
     let numerator = categories
         .into_iter()
         .try_fold(0_u128, |sum, (tokens, rate)| {
-            sum.checked_add(u128::from(tokens) * u128::from(rate))
+            u128::from(tokens)
+                .checked_mul(u128::from(rate))
+                .and_then(|cost| sum.checked_add(cost))
         })
         .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
             reason: "GPT-6 Luna cost calculation overflow".into(),

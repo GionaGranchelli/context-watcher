@@ -61,6 +61,24 @@ def sha256(path):
     return h.hexdigest()
 
 
+def runner_sha256():
+    components = (
+        Path(__file__),
+        ROOT / 'benchmark/cw122b1/run_mock_campaign.py',
+        ROOT / 'benchmark/cw122a/offline_env.py',
+        ROOT / 'benchmark/cw122a/rehearse.py',
+        ROOT / 'benchmark/cw122a/analyze.py',
+        ROOT / 'benchmark/cw122a/oracle.py',
+    )
+    digest = hashlib.sha256()
+    for path in components:
+        relative = path.resolve().relative_to(ROOT).as_posix().encode()
+        digest.update(len(relative).to_bytes(4, 'big'))
+        digest.update(relative)
+        digest.update(bytes.fromhex(sha256(path)))
+    return digest.hexdigest()
+
+
 def validate(record, selection, now=None):
     require(isinstance(record, dict) and set(record) == FIELDS, 'authorization fields missing or unknown')
     require(all(isinstance(record[k], str) and record[k].strip() for k in
@@ -113,7 +131,7 @@ def validate(record, selection, now=None):
                          'sandbox_executable_path':'sandbox_executable_sha256'}[key]
         require(sha256(executable) == record[expected_hash], 'selected executable hash mismatch: '+key)
         require(selection.get(key) == str(executable), 'selected executable path mismatch: '+key)
-    require(sha256(Path(__file__)) == record['runner_sha256'], 'smoke runner hash mismatch')
+    require(runner_sha256() == record['runner_sha256'], 'smoke runner bundle hash mismatch')
     return True
 
 
@@ -619,7 +637,7 @@ def selection_from_args(args, record):
             and args.sandbox_executable is not None,
             'Codex, CW and sandbox executable paths must be supplied')
     return {
-        'runner_sha256':sha256(Path(__file__)),
+        'runner_sha256':runner_sha256(),
         'codex_executable_sha256':record.get('codex_executable_sha256'),
         'cw_executable_sha256':record.get('cw_executable_sha256'),
         'codex_executable_path':str(args.codex_executable),

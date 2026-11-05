@@ -173,6 +173,7 @@ pub fn run_wrap(proxy_port: u16, session_id: Option<String>, cmd: Vec<String>) -
     if is_codex {
         process
             .env_remove("OPENAI_API_KEY")
+            .env_remove("CW_OPENAI_API_KEY_FILE")
             .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
     }
 
@@ -269,6 +270,7 @@ mod tests {
         assert!(settings.contains("x-cw-control-token\"=\"CW_CONTROL_TOKEN"));
         assert!(settings.contains("env_key=\"CW_PROXY_DUMMY_API_KEY\""));
         assert!(settings.contains("shell_environment_policy.filters.OPENAI_API_KEY"));
+        assert!(settings.contains("shell_environment_policy.filters.CW_OPENAI_API_KEY_FILE"));
         assert!(settings.contains("shell_environment_policy.filters.CW_CONTROL_TOKEN"));
         assert!(!settings.contains("private-token"));
     }

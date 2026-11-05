@@ -6,6 +6,7 @@ use cw_core::{
 use cw_store::CwStore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, broadcast, oneshot};
@@ -22,6 +23,7 @@ fn upstream_timeout(raw: Option<&str>) -> Duration {
     Duration::from_secs(seconds)
 }
 
+#[cfg(unix)]
 fn read_private_openai_key(path: Option<String>) -> Option<String> {
     let path = path?;
     let metadata = std::fs::symlink_metadata(&path).ok()?;
@@ -38,6 +40,14 @@ fn read_private_openai_key(path: Option<String>) -> Option<String> {
             None
         }
     }
+}
+
+#[cfg(not(unix))]
+fn read_private_openai_key(path: Option<String>) -> Option<String> {
+    if path.is_some() {
+        tracing::error!("File-backed OpenAI credentials require Unix file permissions");
+    }
+    None
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -283,10 +293,12 @@ mod tests {
         DEFAULT_UPSTREAM_TIMEOUT_SECS, MAX_UPSTREAM_TIMEOUT_SECS, read_private_openai_key,
         upstream_timeout,
     };
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
 
     #[test]
+    #[cfg(unix)]
     fn openai_key_loader_requires_regular_private_single_line_file() {
         let dir = std::env::temp_dir().join(format!("cw-key-test-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir(&dir).unwrap();

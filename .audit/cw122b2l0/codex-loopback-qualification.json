@@ -18,6 +18,64 @@
       "reason": "cw wrap configuration ordering left Codex on its default provider; Codex failed closed because OPENAI_API_KEY was absent"
     }
   ],
+  "follow_up_attempts": [
+    {
+      "outcome": "setup_failed_before_CW_start",
+      "private_evidence_directory": "operator-local temporary evidence",
+      "private_evidence_tree_sha256": "NOT_AVAILABLE",
+      "provider_calls": 0,
+      "reason": "Copied harness did not precreate required isolated directories"
+    },
+    {
+      "codex_retries": 5,
+      "cw_cancelled_turns": 30,
+      "loopback_requests": 0,
+      "outcome": "proxy_rejected_invalid_synthetic_key_before_upstream",
+      "private_evidence_artifact_sha256": {
+        "codex-events.jsonl": "631d81f11efe0b394aff2684876b3d378d308d48b049a3dbc01eab4c9b5cb0a6",
+        "cw-server.log": "db4beb056beb3d88d274b3fa75432e9394a8fea124705443863290528fc98812",
+        "cw.db": "aef50f6e54b44d9048ca017fde06ef7f3744c7402b88d5d73826d72bb56a151a"
+      },
+      "private_evidence_directory": "operator-local temporary evidence",
+      "provider_calls": 0,
+      "reason": "Synthetic key fixture included a trailing newline; proxy correctly rejected it"
+    },
+    {
+      "codex_cli_version": "codex-cli 0.166.0",
+      "codex_executable_sha256": "e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af",
+      "codex_exit_code": 0,
+      "completed_cw_turns": 1,
+      "cw_executable_sha256": "dccae9168e7a1271deafe27ef62ea8d38b42144558a9a1b4b37577891ae29bbb",
+      "external_network_available": false,
+      "harness_source_sha256": "93225015f69644d44081b6fb89a74627fcd6db649392eb80ff3cd3d3aa159265",
+      "ingress_matches_egress": true,
+      "limitations": [
+        "loopback mock response, not provider inference",
+        "SpendGuard authorization-gated runner was not used; direct proxy settlement remains separately tested",
+        "synthetic key only; no real credential or provider call",
+        "does not establish provider account access, billing, or product value"
+      ],
+      "model_label": "gpt-6-luna",
+      "network_namespace_isolated": true,
+      "private_evidence_artifact_sha256": {
+        "codex-events.jsonl": "80d0ac67e52932a26bdf25a6fca5b3bc865d6b6600d2fee5c0a336aa418383f6",
+        "cw-server.log": "ef091ae3281c43918ed350cfe67f4282e94c6458939c882cf50020b8c7eab887",
+        "cw.db": "6c36ed65b0c3d626cccca7e2684547b7358850363d77c6281d95de9f24c76f8f",
+        "mock-upstream-request.bin": "f9f54c64e3e5de289e87dcfe08db854ac9444419354823ff584aab5ea883a268",
+        "turn-00-egress.bin": "f9f54c64e3e5de289e87dcfe08db854ac9444419354823ff584aab5ea883a268",
+        "turn-00-ingress.bin": "f9f54c64e3e5de289e87dcfe08db854ac9444419354823ff584aab5ea883a268",
+        "turn-00-response.bin": "aa571fdcf10ad93e5c6ed42f1ccce6c0ed5a547b9e18101aef44f46d09a94ae2",
+        "turn-00.json": "5bccb7169b6be3fd86a818ac7cb269030a7303bceca51f15b1aa1acc13eeeb1e"
+      },
+      "provider_calls": 0,
+      "qualification_id": "CW-122B2-L0-CODEX-LOOPBACK-MOCK-2",
+      "request_count": 1,
+      "result": "PASS",
+      "sentinel_observed": true,
+      "upstream_authorization_matches_synthetic_key": true,
+      "wrapper_source_sha256": "beb9c61ae81d2772d31907b4626ea0e5fe793a2835dba1635a4bd4a5d79a8c45"
+    }
+  ],
   "host_home_hidden": true,
   "ingress_matches_egress": true,
   "limitations": [

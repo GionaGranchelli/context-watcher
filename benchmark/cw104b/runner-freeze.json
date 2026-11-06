@@ -1,6 +1,6 @@
 {
-  "version": "CW-122B2-L0-OFFLINE-READINESS-2",
-  "supersedes_runner_freeze_sha256": "ea926a1b60a3da835c868290d48be57ac8553ee94bdc208bb6e8bdeaa76d01a2",
+  "version": "CW-122B2-L0-OFFLINE-READINESS-3",
+  "supersedes_runner_freeze_sha256": "0468c6f6030b4312d9640966c840bd39281f3a38fbca24bdbd43dcee40cc388b",
   "default": "sanitized offline fixture",
   "historical_freeze": "benchmark/cw104b/freeze.json is retained unchanged for CW-104B-1 observations",
   "live_scope": "one-local-m1-m2-smoke-pair; explicit live switch plus current single-use operator authorization required",
@@ -33,7 +33,7 @@
     "crates/cw-proxy/src/api/mutations.rs": "460114501ec41b7d8566c55e90a6c60dc7f2aa31f2c0e20618396eb0fe752f69",
     "crates/cw-proxy/src/api/pin_policy.rs": "8e57e86a92c884b1065bc6a257d0a772a53045c8653525512045a6966803ca3e",
     "crates/cw-proxy/src/api/transform.rs": "249d9e257908c94376d5cb0b9ab3eefcb20a935ab8b32cdae12a15d1d9fd13c1",
-    "crates/cw-proxy/src/proxy/mod.rs": "00a6279577d4ad73368a9aec6890ced0e35ade2f2ae176a4205bb1b76f567869",
+    "crates/cw-proxy/src/proxy/mod.rs": "0238d0c67f16a743592a5df9d1e0738cd594f0ad77589943a5cd3e722b1ac232",
     "crates/cw-proxy/tests/pin_lifecycle.rs": "34bd4d5f49dca9853c0789b3becd5541574228c952005f6ac46471a693b81511",
     "crates/cw-store/src/lib.rs": "c21b8654e3dabd499c455a3ed7c498e899c9605eab9d17e212635a6ed24bdc11",
     "crates/cw-tui/src/lib.rs": "733220bafd80c1d749ea178166026bcf5e642b00e1e4c76200c86ab8fdfe4634",

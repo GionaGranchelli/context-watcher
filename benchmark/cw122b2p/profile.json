@@ -1,0 +1,37 @@
+{
+  "profile_id": "openai-gpt-6-luna-responses-2026-11-05",
+  "provider": "OpenAI API",
+  "model": "gpt-6-luna",
+  "endpoint": "https://api.openai.com/v1/responses",
+  "protocol": "Responses API",
+  "protocol_requirement": "Streaming Responses, tools/function calling, multi-request conversation state, complete usage details",
+  "model_context_tokens": 1050000,
+  "model_max_output_tokens": 128000,
+  "reasoning_effort": "medium",
+  "sampling": "temperature/top_p unsupported or not selected for the planned reasoning profile; preserve explicit observed wire values",
+  "qualification": {
+    "model_available_api": "DOC_VERIFIED",
+    "model_listed_for_codex_cli": "DOC_VERIFIED; codex -m gpt-6-luna is documented",
+    "responses_streaming_tools": "DOC_VERIFIED",
+    "codex_cli_model_compatibility": "DOC_VERIFIED_MODEL_AND_RESPONSES_PROTOCOL; GPT6_LOCAL_MOCK_ATTEMPT_FAILED_DURING_SPEND_SETTLEMENT; LIVE_NOT_VERIFIED_ACCOUNT_ACCESS_AND_MODEL_EXECUTION",
+    "model_retirement": "NO_CURRENT_API_OR_CODEX_RETIREMENT_NOTICE_FOUND_AS_OF_2026-11-05; recheck before authorization",
+    "provider_usage_telemetry": "DOC_VERIFIED_SCHEMA; LIVE_NOT_VERIFIED_VALUES",
+    "provider_cache_behavior": "DOC_VERIFIED_MECHANISM; LIVE_NOT_VERIFIED_REUSE",
+    "cost": "LIVE_NOT_VERIFIED; GPT6_LUNA_NOT_YET_SUPPORTED_BY_SPEND_GUARD_PRICING"
+  },
+  "sources": [
+    "https://developers.openai.com/api/docs/models/gpt-6-luna",
+    "https://developers.openai.com/api/docs/pricing",
+    "https://developers.openai.com/api/docs/guides/prompt-caching",
+    "https://developers.openai.com/api/docs/deprecations",
+    "https://developers.openai.com/api/reference/resources/responses/methods/create",
+    "https://developers.openai.com/codex/models",
+    "https://developers.openai.com/codex/config-reference",
+    "https://developers.openai.com/codex/config-advanced"
+  ],
+  "constraints": {
+    "live_inference_authorized": false,
+    "live_runner_enabled": false,
+    "codex_config_compatibility": "not proven by provider model documentation; requires future authorized live gate"
+  }
+}

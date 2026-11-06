@@ -1101,6 +1101,40 @@ async fn test_cw122b1_f1_02_campaign_request_exhaustion_crosses_sessions() {
 }
 
 #[tokio::test]
+async fn test_cw122b2p_campaign_cap_360_rejects_request_361_before_dispatch() {
+    let guard = SpendGuard::new_with_campaign_request_limit(
+        SpendGuardConfig {
+            authorized_budget_usd: 100.0,
+            max_requests_per_session: 30,
+            require_verified_pricing: false,
+            request_reservation_usd: 0.001,
+            ..Default::default()
+        },
+        360,
+    );
+    let fixture = QualificationFixture::setup_config(Some(guard.clone()), None, false).await;
+    for request in 0..360 {
+        let session = format!("cw122b2p-session-{}", request / 30);
+        let response = f1_send_chat(&fixture, &session).await;
+        let status = response.status();
+        let body = response.text().await.expect("consume success response");
+        assert_eq!(status, StatusCode::OK, "admission {request}: {body}");
+    }
+    let rejected = f1_send_chat(&fixture, "cw122b2p-new-session-361").await;
+    assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        rejected
+            .text()
+            .await
+            .expect("consume rejection response")
+            .contains("Provider request count limit exceeded")
+    );
+    assert_eq!(fixture.mock.captured.lock().unwrap().len(), 360);
+    assert_eq!(guard.total_request_count(), 360);
+    assert_eq!(guard.session_request_count("cw122b2p-new-session-361"), 0);
+}
+
+#[tokio::test]
 async fn test_cw122b1_f1_03_retryable_responses_consume_each_admission() {
     let guard = SpendGuard::new(SpendGuardConfig {
         authorized_budget_usd: 1.0,

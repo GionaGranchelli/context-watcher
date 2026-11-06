@@ -11,9 +11,13 @@
 
 Frozen six-pair pruning-only campaign, real proxy-to-mock isolation tests, independent oracles, matched analyzer and closed live admission merged in PR #41. [Readiness report](docs/CW-122A-READINESS.md). Product value remains NOT_EVALUATED.
 
-## CW-122B1 — Mock path and F1 passed; review pending
+## CW-122B1 — Merged
 
-The installed Codex CLI and authenticated Responses path passed a 12-attempt loopback-mock campaign. This qualifies CLI routing, resume, pruning exposure, and evidence accounting only; fixture repairs and usage are scripted. [PR #43](https://github.com/GionaGranchelli/context-watcher/pull/43) adds the separate [F1 fault qualification](docs/CW-122B1-F1-FAULT-QUALIFICATION.md): all 10 scenarios and all five partial-evidence boundaries passed on `bdd3ba79714d5f1e34d94cdea5ed0df8840645cb`. The 12-attempt successful-path regression also passed on that code revision. The opt-in CW-119C live pilot now shares one 50-request SpendGuard across M1/M2; `SpendGuard::new()` remains campaign-unbounded for compatibility, so future live runners must select and share a bounded guard explicitly. PR #43 remains open for independent review. Live inference remains NO-GO pending independent approval, provider qualification and fresh spend authorization; product value remains NOT_EVALUATED.
+The installed Codex CLI and authenticated Responses path passed a 12-attempt loopback-mock campaign. This qualifies CLI routing, resume, pruning exposure, and evidence accounting only; fixture repairs and usage are scripted. [PR #43](https://github.com/GionaGranchelli/context-watcher/pull/43) merged the separate [F1 fault qualification](docs/CW-122B1-F1-FAULT-QUALIFICATION.md): all 10 scenarios and all five partial-evidence boundaries passed on `bdd3ba79714d5f1e34d94cdea5ed0df8840645cb`. The 12-attempt successful-path regression also passed on that code revision. `SpendGuard::new()` retains an effectively unlimited campaign count for compatibility; future live runners must explicitly create and share a bounded guard across all sessions, attempts, retries, and routes. Live inference remains NO-GO pending provider and cache qualification, financial-risk acceptance and fresh spend authorization; product value remains NOT_EVALUATED.
+
+## CW-122B2-P — In progress
+
+Provider profile, complete-session usage and cache-pricing adapter, cache-fairness controls, and the shared campaign request cap are under offline qualification. No live runner or provider inference is enabled. See [readiness protocol](docs/CW-122B2-P-READINESS.md).
 
 ## CW-121C2 — Merged
 

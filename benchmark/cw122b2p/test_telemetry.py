@@ -102,6 +102,8 @@ class TelemetryTests(unittest.TestCase):
         self.assertEqual(cache_fairness(None, matched), 'CACHE_CONFUNDED_UNKNOWN_STATE')
         missing = {**matched, 'initial_state_hash': None}
         self.assertEqual(cache_fairness(missing, missing), 'CACHE_CONFUNDED_UNKNOWN_STATE')
+        blank = {**matched, 'initial_state_hash': ''}
+        self.assertEqual(cache_fairness(blank, blank), 'CACHE_CONFUNDED_UNKNOWN_STATE')
         invalid = {**matched, 'initial_state_hash': 'not-a-sha256'}
         self.assertEqual(cache_fairness(invalid, invalid), 'CACHE_CONFUNDED_UNKNOWN_STATE')
         self.assertEqual(cache_fairness({**matched, 'telemetry_complete': False}, matched), 'CACHE_CONFUNDED_INCOMPLETE_TELEMETRY')

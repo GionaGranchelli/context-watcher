@@ -1,0 +1,21 @@
+{
+  "experiment": "CW-122B2-L1-SMOKE",
+  "default_status": "NO_GO",
+  "live_runner_callable": true,
+  "authorization_issued": false,
+  "provider": "OpenAI API",
+  "model": "gpt-6-luna",
+  "endpoint": "https://api.openai.com/v1",
+  "processing_tier": "standard",
+  "pair_id": "f1-r1",
+  "attempt_order": ["M1", "M2"],
+  "exact_attempt_count": 2,
+  "max_requests": 60,
+  "max_requests_per_attempt": 30,
+  "max_seconds": 1200,
+  "max_seconds_per_attempt": 600,
+  "maximum_spend_ceiling_usd": 5.0,
+  "request_guard": "one shared SpendGuard::new_with_campaign_request_limit, limit 60",
+  "reservation_overrun_risk": "Must be explicitly accepted in a separate smoke authorization",
+  "full_six_pair_campaign_enabled": false
+}

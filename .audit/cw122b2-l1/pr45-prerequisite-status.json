@@ -1,0 +1,29 @@
+{
+  "base": "main",
+  "checks": {
+    "Test Workspace": "success"
+  },
+  "head": "feat/cw122b2-l0-real-smoke",
+  "head_sha": "d80d87354f758168d77251e485ff26f9e00879c5",
+  "interpretation": "L0 PR is CI-green and review threads are resolved, but independent human approval is absent. L1 worktree changes are not included in this PR.",
+  "mergeable": true,
+  "merged": false,
+  "pull_request": 45,
+  "review_submissions": {
+    "Copilot": "COMMENTED",
+    "author": "COMMENTED",
+    "independent_human_approval": "absent"
+  },
+  "review_threads": {
+    "total": 6,
+    "unresolved": 0
+  },
+  "source": "GitHub PR and review APIs plus Actions run 42261372762, checked 2026-11-06 17:37 UTC",
+  "state": "open",
+  "workflow_run": {
+    "conclusion": "success",
+    "head_sha": "d80d87354f758168d77251e485ff26f9e00879c5",
+    "id": 42261372762,
+    "name": "CI"
+  }
+}

@@ -6,7 +6,7 @@ This directory selects an API-level provider profile and adapts saved CW-122B1 m
 - `pricing-2026-11-05.json`: dated official standard short- and long-context prices and disjoint cache billing categories.
 - `telemetry.py`: maps every request from a B1 attempt, applies the saved short/long-context tier per request, and refuses complete-session cost when any usage category is absent.
 - `rehearse.py`: maps the sanitized 12-attempt aggregate into CW-122A's unchanged schema and analyzer; it keeps rows invalid where raw wire evidence is absent.
-- `authorization-contract.json`: exact future limits and explicit overrun-risk acceptance; no authorization exists and no live runner is callable.
+- `authorization-contract.json` and `authorization.py`: exact future limits, credential path and SHA-256 binding, durable single-use claim, and explicit overrun-risk acceptance; no authorization exists and no live runner is callable.
 
 Run the deterministic gates with:
 

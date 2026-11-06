@@ -1,6 +1,6 @@
 # CW-122B2-L0 — Real-provider smoke readiness
 
-**Status: L0_OFFLINE_GATES_PASS_AFTER_REVIEW_FIXES; CODEX_TO_PROXY_LOOPBACK_MOCK_PASS; LIVE_EXECUTION_NO_GO.** No provider request, paid inference, or production server change was made. PR #45 is open, stacked on PR #44 at `65d1fff`; it is not yet based on approved `main`.
+**Status: L0_OFFLINE_GATES_PASS_AFTER_REVIEW_FIXES; CODEX_TO_PROXY_LOOPBACK_MOCK_PASS; LIVE_EXECUTION_NO_GO.** No provider request, paid inference, or production server change was made. PR #44 merged into `main` at `a327c10`; PR #45 now targets `main`.
 
 ## Implemented
 
@@ -36,9 +36,8 @@
 
 ## Remaining gates
 
-1. Finish PR #44 and obtain its independent approval/merge. Retarget PR #45 to the resulting `main`.
-2. Run GitHub CI and obtain independent review of PR #45. GitHub currently reports only GitGuardian green; `.github/workflows/ci.yml` restricts pull-request CI to base `main`, so no CI run is attached while this PR is stacked. Build the reviewed CW binary from the reviewed checkout and bind its exact path and SHA-256 in the separate smoke authorization.
-3. Before any `--run`, obtain fresh human authorization for the exact single request, spend ceiling, endpoint/model, deadline, executables, credential, persistent claim directory, and private evidence directory. The existing authorization example remains disabled and has risk acceptance set false.
-4. Only after the smoke result is independently reviewed may the separate six-pair campaign be considered for its own approval.
+1. Obtain independent human approval and merge PR #45 after its full CI passes.
+2. Before any `--run`, obtain fresh human authorization for the exact single request, spend ceiling, endpoint/model, deadline, executables, credential, persistent claim directory, and private evidence directory. Build the reviewed CW binary from the reviewed checkout and bind its exact path and SHA-256 in that authorization.
+3. Only after the smoke result is independently reviewed may the separate six-pair campaign be considered for its own approval. Any economic pair must also have real evidence backing both cache-state comparability and `isolation_verified`; matching syntactically valid hashes or a Boolean flag alone do not prove provider cache isolation. Until then, report cache economics as confounded.
 
 The spend ceiling is enforced by pre-request reservation and post-response settlement. It is not a provider-side hard charge limit; a single admitted response can exceed its reservation before the guard detects the overrun. A smoke `PASS` proves path and telemetry compatibility only, not pruning value, cache savings, or task-quality improvement.

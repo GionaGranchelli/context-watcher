@@ -326,12 +326,29 @@ class SmokeAuthorizationTests(unittest.TestCase):
         self.assertIn(str(codex_home), argv[:separator])
         child_command = argv[separator + 1:]
         self.assertIn('--skip-git-repo-check', child_command)
+        self.assertIn(['--config', 'service_tier="default"'], [
+            child_command[index:index + 2]
+            for index, value in enumerate(child_command[:-1]) if value == '--config'
+        ])
         self.assertNotIn(str(self.cred), child_command)
         self.assertNotIn('CW_OPENAI_API_KEY_FILE', child_command)
         self.assertNotIn('OPENAI_API_KEY', child_command)
         self.assertIn(['CW_PROXY_DUMMY_API_KEY', 'cw-local-proxy-dummy'], [
             argv[index + 1:index + 3] for index, value in enumerate(argv) if value == '--setenv'
         ])
+
+    def test_session_evidence_skips_unrelated_broken_codex_plugin_symlinks(self):
+        runtime = Path(self.tmp.name) / 'runtime'
+        codex_home = runtime / 'codex-home'
+        sessions = codex_home / 'sessions' / '2026' / '11'
+        sessions.mkdir(parents=True)
+        (sessions / 'session.jsonl').write_text('{"type":"thread.started"}\n')
+        (codex_home / '.tmp').mkdir()
+        (codex_home / '.tmp' / 'broken-plugin-link').symlink_to(runtime / 'missing-plugin-target')
+        smoke.copy_codex_sessions(codex_home, self.evidence)
+        copied = self.evidence / 'codex-home' / 'sessions' / '2026' / '11' / 'session.jsonl'
+        self.assertEqual(copied.read_text(), '{"type":"thread.started"}\n')
+        self.assertFalse((self.evidence / 'codex-home' / '.tmp').exists())
 
     def test_mock_runner_refuses_evidence_write_failure_before_codex_lookup(self):
         with patch.object(smoke, 'write_raw_artifact', side_effect=OSError('disk full')) as write, \

@@ -358,6 +358,7 @@ def codex_sandbox_command(record, runtime, workspace, session_id, proxy_port):
                  '--setenv', 'CW_PROXY_DUMMY_API_KEY', 'cw-local-proxy-dummy',
                  '--', cw_command, 'wrap', '--proxy-port', str(proxy_port), '--session-id', session_id,
                  '--', codex_command, 'exec', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
+                 '--config', 'service_tier="default"',
                  '--sandbox', 'read-only', '--cd', str(workspace), '--model', record['model'], '--json',
                  'Reply exactly with CW-L0-SMOKE-OK. Do not use tools.'])
     return argv, codex_home
@@ -419,18 +420,28 @@ def provider_response_service_tiers(response_bytes):
     return sorted(tiers)
 
 
+def copy_codex_sessions(codex_home, evidence):
+    destination = Path(evidence) / 'codex-home'
+    destination.mkdir(mode=0o700)
+    source = Path(codex_home) / 'sessions' if codex_home is not None else None
+    if source is not None and source.is_dir():
+        shutil.copytree(source, destination / 'sessions', symlinks=False)
+        for root, dirs, files in os.walk(destination):
+            os.chmod(root, 0o700)
+            for name in dirs:
+                path = Path(root) / name
+                require(not path.is_symlink(), 'unexpected symlink in Codex session evidence')
+                os.chmod(path, 0o700)
+            for name in files:
+                path = Path(root) / name
+                require(path.is_file() and not path.is_symlink(), 'unexpected non-regular Codex session evidence')
+                os.chmod(path, 0o600)
+
+
 def collect_live_evidence(database, evidence, codex_home, expected_model=None):
     database = Path(database)
     require(database.is_file(), 'CW smoke database was not created')
-    transcript_copy = Path(evidence) / 'codex-home'
-    if codex_home is not None and Path(codex_home).exists():
-        shutil.copytree(codex_home, transcript_copy, symlinks=False)
-        for root, dirs, files in os.walk(transcript_copy):
-            os.chmod(root, 0o700)
-            for name in files:
-                path = Path(root) / name
-                require(path.is_file() and not path.is_symlink(), 'unexpected non-regular Codex evidence file')
-                os.chmod(path, 0o600)
+    copy_codex_sessions(codex_home, evidence)
     conn = sqlite3.connect(database)
     try:
         checkpoint = conn.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone()
@@ -677,7 +688,7 @@ def run_authorized_smoke(record, *, evidence, cw_executable, codex_executable):
         'evidence_issues':evidence_issues,
         'model':record['model'],'endpoint':record['endpoint'],'request_cap':record['request_cap'],
         'codex_exit_code':codex_exit,'elapsed_seconds':round(time.monotonic()-started,3),
-        'cleanup':cleanup,'transcript_directory':'codex-home','artifact_sha256':hashes,
+        'cleanup':cleanup,'transcript_directory':'codex-home/sessions','artifact_sha256':hashes,
     }
     write_private_json(evidence, 'run-manifest.json', manifest)
     if runtime is not None:

@@ -359,6 +359,8 @@ def codex_sandbox_command(record, runtime, workspace, session_id, proxy_port):
                  '--', cw_command, 'wrap', '--proxy-port', str(proxy_port), '--session-id', session_id,
                  '--', codex_command, 'exec', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
                  '--config', 'service_tier="default"',
+                 '--config', 'model_providers.context_watcher.request_max_retries=0',
+                 '--config', 'model_providers.context_watcher.stream_max_retries=0',
                  '--sandbox', 'read-only', '--cd', str(workspace), '--model', record['model'], '--json',
                  'Reply exactly with CW-L0-SMOKE-OK. Do not use tools.'])
     return argv, codex_home
@@ -420,6 +422,93 @@ def provider_response_service_tiers(response_bytes):
     return sorted(tiers)
 
 
+def provider_response_completed(response_bytes):
+    candidates = [line[5:].strip() for line in response_bytes.splitlines()
+                  if line.startswith(b'data:') and line[5:].strip() != b'[DONE]']
+    for candidate in candidates:
+        try:
+            value = json.loads(candidate)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict) and value.get('type') in ('response.completed','response.done'):
+            return True
+    return False
+
+
+def expected_smoke_egress(ingress):
+    if not isinstance(ingress, dict):
+        return None
+    expected = dict(ingress)
+    if 'service_tier' not in expected:
+        expected['service_tier'] = 'default'
+    return expected if expected.get('service_tier') == 'default' else None
+
+
+def classify_provider_usage(usage, request):
+    if not isinstance(usage, dict):
+        return None
+    details = usage.get('input_tokens_details')
+    if not isinstance(details, dict):
+        return None
+    counts = (usage.get('input_tokens'), usage.get('output_tokens'),
+              details.get('cached_tokens'), details.get('cache_write_tokens'))
+    if any(type(value) is not int or value < 0 for value in counts):
+        return None
+    input_tokens, output_tokens, cached, writes = counts
+    if 'cache_write_tokens_details' in details:
+        split = details['cache_write_tokens_details']
+        if not isinstance(split, dict):
+            return None
+        write_30m, write_12h = split.get('ttl_30m_tokens'), split.get('ttl_12h_tokens')
+        source = 'provider_reported_ttl_split'
+        if any(type(value) is not int or value < 0 for value in (write_30m, write_12h)):
+            return None
+    else:
+        ttl = effective_cache_write_ttl(request)
+        if ttl is None:
+            return None
+        write_30m, write_12h = (writes, 0) if ttl == '30m' else (0, writes)
+        source = 'request_ttl_' + ttl
+    if write_30m + write_12h != writes or cached + writes > input_tokens:
+        return None
+    total = usage.get('total_tokens')
+    if total is not None and (type(total) is not int or total != input_tokens + output_tokens):
+        return None
+    normalized = dict(usage)
+    normalized_details = dict(details)
+    normalized_details['cache_write_tokens_details'] = {
+        'ttl_30m_tokens':write_30m,'ttl_12h_tokens':write_12h}
+    normalized['input_tokens_details'] = normalized_details
+    return {'usage':normalized,'cache_write_ttl_source':source}
+
+
+def effective_cache_write_ttl(request):
+    if not isinstance(request, dict):
+        return None
+    if 'prompt_cache_options' not in request:
+        ttl = '30m'
+    else:
+        options = request['prompt_cache_options']
+        if not isinstance(options, dict):
+            return None
+        ttl = options.get('ttl', '30m')
+        if ttl not in ('30m','12h'):
+            return None
+
+    def conflicts(value):
+        if isinstance(value, dict):
+            breakpoint = value.get('prompt_cache_breakpoint')
+            if (isinstance(breakpoint, dict) and 'ttl' in breakpoint
+                    and breakpoint['ttl'] != ttl):
+                return True
+            return any(conflicts(child) for child in value.values())
+        if isinstance(value, list):
+            return any(conflicts(child) for child in value)
+        return False
+
+    return None if conflicts(request) else ttl
+
+
 def copy_codex_sessions(codex_home, evidence):
     destination = Path(evidence) / 'codex-home'
     destination.mkdir(mode=0o700)
@@ -471,6 +560,7 @@ def collect_live_evidence(database, evidence, codex_home, expected_model=None):
                 body = bytes(found[0])
                 bodies[kind] = body
                 if kind == 'response':
+                    protocol_completed = provider_response_completed(body)
                     response_models = provider_response_models(body)
                     response_tiers = provider_response_service_tiers(body)
                     if expected_model is not None and response_models != [expected_model]:
@@ -479,28 +569,13 @@ def collect_live_evidence(database, evidence, codex_home, expected_model=None):
                         issues.append(f'request {index}: effective provider service tier missing or not standard-priced')
                 complete, truncated = (bool(found[1]), bool(found[2])) if kind == 'response' else (None, None)
                 wire[kind] = {'sha256':hashlib.sha256(body).hexdigest(),'bytes':len(body),
-                              'complete':complete,'truncated':truncated}
+                              'complete':complete,'protocol_completed':protocol_completed if kind == 'response' else None,
+                              'truncated':truncated}
                 write_raw_artifact(directory, f'{kind}.bin', body)
                 if kind == 'response':
-                    if not complete or truncated:
+                    if not (complete or protocol_completed) or truncated:
                         issues.append(f'request {index}: provider response incomplete or truncated')
             write_private_json(Path(evidence) / f'request-{index:02d}', 'turn.json', turn)
-            usage = turn.get('observed_usage')
-            if not isinstance(usage, dict):
-                issues.append(f'request {index}: provider usage telemetry missing')
-                usage_record = {'status':'NOT_AVAILABLE'}
-            else:
-                details = usage.get('input_tokens_details')
-                complete_usage = (isinstance(details, dict)
-                    and all(type(details.get(key)) is int for key in (
-                        'cached_tokens','cache_write_tokens'))
-                    and isinstance(details.get('cache_write_tokens_details'), dict)
-                    and all(type(details['cache_write_tokens_details'].get(key)) is int for key in (
-                        'ttl_30m_tokens','ttl_12h_tokens')))
-                usage_record = usage
-                if not complete_usage:
-                    issues.append(f'request {index}: provider cache usage telemetry incomplete')
-            write_private_json(Path(evidence) / f'request-{index:02d}', 'usage.json', usage_record)
             ingress_json = egress_json = None
             try:
                 if 'ingress' in bodies:
@@ -509,16 +584,37 @@ def collect_live_evidence(database, evidence, codex_home, expected_model=None):
                     egress_json = json.loads(bodies['egress'])
             except (UnicodeDecodeError, json.JSONDecodeError):
                 issues.append(f'request {index}: wire body is not valid JSON')
-            unchanged = ingress_json is not None and egress_json is not None and ingress_json == egress_json
-            if not unchanged:
-                issues.append(f'request {index}: ingress/egress equality unavailable or false')
+            usage = turn.get('observed_usage')
+            if not isinstance(usage, dict):
+                issues.append(f'request {index}: provider usage telemetry missing')
+                usage_record = {'status':'NOT_AVAILABLE'}
+                usage_classification = None
+            else:
+                usage_record = usage
+                usage_classification = classify_provider_usage(usage, egress_json)
+                if usage_classification is None:
+                    issues.append(f'request {index}: provider cache usage telemetry incomplete')
+            write_private_json(Path(evidence) / f'request-{index:02d}', 'usage.json', usage_record)
+            write_private_json(Path(evidence) / f'request-{index:02d}', 'usage-classification.json',
+                {'status':'COMPLETE','cache_write_ttl_source':usage_classification['cache_write_ttl_source'],
+                 'settlement_usage':usage_classification['usage']} if usage_classification else
+                {'status':'NOT_AVAILABLE'})
+            expected_egress = expected_smoke_egress(ingress_json)
+            matches_authorized_egress = expected_egress is not None and egress_json == expected_egress
+            if expected_egress is None:
+                issues.append(f'request {index}: request service tier conflicts with standard pricing authorization')
+            elif not matches_authorized_egress:
+                issues.append(f'request {index}: egress differs from the authorized standard-tier transformation')
             if expected_model is not None and isinstance(egress_json, dict):
                 requested_tier = egress_json.get('service_tier')
                 if requested_tier not in (None, 'default'):
                     issues.append(f'request {index}: request service tier conflicts with standard pricing authorization')
             results.append({'turn_id':turn_id,'turn':turn,'wire':wire,
                             'ingress_json':ingress_json,'egress_json':egress_json,
-                            'request_body_unchanged':unchanged,
+                            'request_matches_authorized_egress':matches_authorized_egress,
+                            'usage_telemetry_complete':usage_classification is not None,
+                            'cache_write_ttl_source':usage_classification['cache_write_ttl_source'] if usage_classification else None,
+                            'standard_tier_defaulted':ingress_json is not None and 'service_tier' not in ingress_json,
                             'provider_response_models':response_models,
                             'provider_response_model_matches':expected_model is not None and response_models == [expected_model],
                             'provider_response_service_tiers':response_tiers,
@@ -673,7 +769,7 @@ def run_authorized_smoke(record, *, evidence, cw_executable, codex_executable):
             and ledger[0]['settled_usd'] is not None
             and ledger[0]['settled_usd'] <= record['spend_ceiling_usd']
             and records[0]['turn'].get('model') == record['model']
-            and records[0]['request_body_unchanged']
+            and records[0]['request_matches_authorized_egress']
             and records[0]['turn'].get('outcome') == 'completed'
             and b'CW-L0-SMOKE-OK' in codex_output
             and cleanup['verified'] and runner_error is None and not evidence_issues):

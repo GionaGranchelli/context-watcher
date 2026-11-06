@@ -357,7 +357,7 @@ def codex_sandbox_command(record, runtime, workspace, session_id, proxy_port):
                  '--setenv', 'CW_L0_AUTH_EXPIRES_AT', record['expires_at'],
                  '--setenv', 'CW_PROXY_DUMMY_API_KEY', 'cw-local-proxy-dummy',
                  '--', cw_command, 'wrap', '--proxy-port', str(proxy_port), '--session-id', session_id,
-                 '--', codex_command, 'exec', '--ignore-user-config', '--ignore-rules',
+                 '--', codex_command, 'exec', '--skip-git-repo-check', '--ignore-user-config', '--ignore-rules',
                  '--sandbox', 'read-only', '--cd', str(workspace), '--model', record['model'], '--json',
                  'Reply exactly with CW-L0-SMOKE-OK. Do not use tools.'])
     return argv, codex_home

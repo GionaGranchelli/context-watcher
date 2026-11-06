@@ -325,6 +325,7 @@ class SmokeAuthorizationTests(unittest.TestCase):
         self.assertIn(str(workspace), argv[:separator])
         self.assertIn(str(codex_home), argv[:separator])
         child_command = argv[separator + 1:]
+        self.assertIn('--skip-git-repo-check', child_command)
         self.assertNotIn(str(self.cred), child_command)
         self.assertNotIn('CW_OPENAI_API_KEY_FILE', child_command)
         self.assertNotIn('OPENAI_API_KEY', child_command)

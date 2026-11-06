@@ -1,6 +1,6 @@
 # CW-122B2-L0 — Real-provider smoke readiness
 
-**Status: L0_OFFLINE_GATES_PASS_AFTER_REVIEW_FIXES; CODEX_TO_PROXY_LOOPBACK_MOCK_PASS; LIVE_EXECUTION_NO_GO.** No provider request, paid inference, or production server change was made. PR #45 is open, stacked on PR #44 at `f629f22`; it is not yet based on approved `main`.
+**Status: L0_OFFLINE_GATES_PASS_AFTER_REVIEW_FIXES; CODEX_TO_PROXY_LOOPBACK_MOCK_PASS; LIVE_EXECUTION_NO_GO.** No provider request, paid inference, or production server change was made. PR #45 is open, stacked on PR #44 at `65d1fff`; it is not yet based on approved `main`.
 
 ## Implemented
 

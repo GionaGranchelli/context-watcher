@@ -6,8 +6,7 @@
     "provider", "model", "endpoint", "campaign_sha256", "runner_sha256", "codex_executable_sha256",
     "profile_sha256", "pricing_sha256", "exact_run_count", "max_requests", "max_requests_per_attempt",
     "max_seconds", "max_seconds_per_attempt", "campaign_request_guard", "spend_ceiling_usd",
-    "reservation_overrun_risk_accepted", "credential_file", "credential_sha256",
-    "private_evidence_directory", "authorization_claim_directory"
+    "reservation_overrun_risk_accepted", "credential_file", "private_evidence_directory"
   ],
   "immutable_limits": {"exact_run_count": 12, "max_requests": 360, "max_seconds": 7200,
                         "max_requests_per_attempt": 30, "max_seconds_per_attempt": 600},

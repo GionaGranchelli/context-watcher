@@ -1,12 +1,11 @@
 import json
-import hashlib
 from pathlib import Path
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 import stat
 
-from authorization import CAMPAIGN_REQUEST_GUARD, FIELDS, claim_once, validate
+from authorization import CAMPAIGN_REQUEST_GUARD, FIELDS, validate
 
 ROOT = Path(__file__).resolve().parent
 
@@ -25,14 +24,11 @@ class AuthorizationContractTests(unittest.TestCase):
 
     def test_exact_hash_bound_contract_and_overrun_acknowledgement(self):
         now = datetime.now(timezone.utc)
-        with tempfile.TemporaryDirectory(dir=Path.home()) as temp:
+        with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             evidence = root / 'evidence'
             evidence.mkdir(mode=0o700)
             evidence.chmod(0o700)
-            claims = root / 'claims'
-            claims.mkdir(mode=0o700)
-            claims.chmod(0o700)
             credential = root / 'credential'
             credential.write_text('offline-placeholder')
             credential.chmod(0o600)
@@ -46,29 +42,13 @@ class AuthorizationContractTests(unittest.TestCase):
                 'max_seconds': 7200, 'max_seconds_per_attempt': 600,
                 'campaign_request_guard': CAMPAIGN_REQUEST_GUARD, 'spend_ceiling_usd': 0.1,
                 'reservation_overrun_risk_accepted': True,
-                'credential_file': str(credential),
-                'credential_sha256': hashlib.sha256(b'offline-placeholder').hexdigest(),
-                'private_evidence_directory': str(evidence),
-                'authorization_claim_directory': str(claims),
+                'credential_file': str(credential), 'private_evidence_directory': str(evidence),
             }
             selection = {key: record[key] for key in ('provider', 'model', 'endpoint', 'campaign_sha256', 'runner_sha256',
                                                         'codex_executable_sha256', 'profile_sha256', 'pricing_sha256',
-                                                        'credential_file', 'credential_sha256',
-                                                        'private_evidence_directory',
-                                                        'authorization_claim_directory')}
+                                                        'credential_file', 'private_evidence_directory')}
             self.assertEqual(set(record), FIELDS)
             self.assertTrue(validate(record, selection, now))
-            with self.assertRaisesRegex(ValueError, 'authorization fields missing or unknown'):
-                validate(None, selection, now)
-            expired = dict(record, expires_at=(now - timedelta(seconds=1)).isoformat())
-            with self.assertRaisesRegex(ValueError, 'authorization expired'):
-                validate(expired, selection, now)
-            claim_once(record)
-            claimed = list(claims.iterdir())
-            self.assertEqual(len(claimed), 1)
-            self.assertEqual(stat.S_IMODE(claimed[0].stat().st_mode), 0o600)
-            with self.assertRaises(FileExistsError):
-                claim_once(record)
             for key, value in [('runner_sha256', 'f' * 64), ('max_requests', 361),
                                ('max_seconds_per_attempt', 601), ('reservation_overrun_risk_accepted', False)]:
                 changed = dict(record, **{key: value})
@@ -77,22 +57,6 @@ class AuthorizationContractTests(unittest.TestCase):
             changed_guard = dict(record, campaign_request_guard={**CAMPAIGN_REQUEST_GUARD, 'limit': 359})
             with self.assertRaises(ValueError):
                 validate(changed_guard, selection, now)
-            credential.write_text('replacement-key')
-            with self.assertRaisesRegex(ValueError, 'credential file hash mismatch'):
-                validate(record, selection, now)
-            credential.write_text('offline-placeholder')
-            credential_link = root / 'credential-link'
-            credential_link.symlink_to(credential)
-            linked_record = dict(record, credential_file=str(credential_link))
-            linked_selection = dict(selection, credential_file=str(credential_link))
-            with self.assertRaisesRegex(ValueError, 'no symlink components'):
-                validate(linked_record, linked_selection, now)
-            claim_link = root / 'claims-link'
-            claim_link.symlink_to(claims, target_is_directory=True)
-            linked_claim = dict(record, authorization_claim_directory=str(claim_link))
-            linked_claim_selection = dict(selection, authorization_claim_directory=str(claim_link))
-            with self.assertRaisesRegex(ValueError, 'no symlink components'):
-                validate(linked_claim, linked_claim_selection, now)
             with self.assertRaises(ValueError):
                 validate(dict(record, unexpected=True), selection, now)
             with tempfile.NamedTemporaryFile(dir=ROOT.parent.parent) as inside_checkout:

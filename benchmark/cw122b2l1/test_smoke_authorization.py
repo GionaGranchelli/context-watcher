@@ -10,8 +10,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'cw122b2p'))
-from authorization import SMOKE_REQUEST_GUARD, claim_once, validate_smoke
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from smoke_authorization import SMOKE_REQUEST_GUARD, claim_once, validate_smoke
 import run_smoke
 
 
@@ -80,6 +80,8 @@ class SmokeAuthorizationTests(unittest.TestCase):
             'crates/cw-harnesses/src',
         }
         self.assertTrue(required <= set(run_smoke.BUNDLE))
+        self.assertIn('benchmark/cw122b2l1/smoke_authorization.py', run_smoke.BUNDLE)
+        self.assertNotIn('benchmark/cw122b2p/authorization.py', run_smoke.BUNDLE)
 
     def test_runner_hash_changes_when_nested_dependency_changes(self):
         source = self.root / 'source'

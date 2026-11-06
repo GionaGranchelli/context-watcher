@@ -11,9 +11,8 @@ import stat
 import sys
 
 REPO = Path(__file__).resolve().parents[2]
-AUTH_MODULE = REPO / 'benchmark/cw122b2p/authorization.py'
-sys.path.insert(0, str(AUTH_MODULE.parent))
-from authorization import claim_once, no_symlink_components, validate_smoke  # noqa: E402
+sys.path.insert(0, str(REPO / 'benchmark/cw122b2l1'))
+from smoke_authorization import claim_once, no_symlink_components, validate_smoke  # noqa: E402
 
 sys.path.insert(0, str(REPO / 'benchmark/cw122b1'))
 from run_mock_campaign import (  # noqa: E402
@@ -23,12 +22,12 @@ from run_mock_campaign import (  # noqa: E402
 
 BUNDLE = (
     'benchmark/cw122b2l1/run_smoke.py',
+    'benchmark/cw122b2l1/smoke_authorization.py',
     'benchmark/cw122b2l1/test_smoke_authorization.py',
     'benchmark/cw122b1/run_mock_campaign.py',
     'benchmark/cw122a/offline_env.py',
     'benchmark/cw122a/rehearse.py',
     'benchmark/cw122a/analyze.py',
-    'benchmark/cw122b2p/authorization.py',
     'benchmark/cw122b2p/profile.json',
     'benchmark/cw122b2p/pricing-2026-11-05.json',
     'benchmark/cw122a/campaign.json',

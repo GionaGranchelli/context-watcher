@@ -1,0 +1,64 @@
+{
+  "status": "PRIVATE_EVIDENCE_RECHECK_PASS",
+  "observation_type": "exploratory_same_ingress_not_preregistered_campaign_pair",
+  "source_manifest_sha256": "39b3041f27e49681a805fdad70df42e0f1a8a290fe12b6c6d4b8d2fb7da913d9",
+  "pricing_snapshot_sha256": "d60688d5ed1639a59add9c6e13e4e3f0917834cb5cdb389a79cfce6665239915",
+  "test_driver_equivalence": "NOT_VERIFIED",
+  "cache_state_comparability": "NOT_VERIFIED",
+  "arms": {
+    "M1": {
+      "private_artifact_prefix": "attempts/m1-passthrough-cold-512",
+      "provider_status": "completed",
+      "request_max_output_tokens": 512,
+      "input_tokens": 1049,
+      "cached_read_tokens": 0,
+      "cache_write_tokens": 1046,
+      "output_tokens": 91,
+      "applied_rule_ids": [],
+      "settled_usd": 0.000177,
+      "file_sha256": {
+        "ingress.json": "763e77bba56e6e52901e67da7a72b277083dd23ed33268c4295da0e6cf8af792",
+        "egress.json": "763e77bba56e6e52901e67da7a72b277083dd23ed33268c4295da0e6cf8af792",
+        "response.json": "38796ba4c1a06bdc63788512c2a9084885f0c748660eadacfd2a522d4acb6060",
+        "settlement.json": "07f4f2f1e63c2766f4c9fd8d5642c459873ae2304aae90f11a06da4156033787"
+      }
+    },
+    "M2": {
+      "private_artifact_prefix": "attempts/m2-incomplete-same-driver-512",
+      "provider_status": "incomplete",
+      "incomplete_reason": "max_output_tokens",
+      "request_max_output_tokens": 512,
+      "input_tokens": 270,
+      "cached_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "output_tokens": 512,
+      "applied_rule_ids": ["cw122-live-prune"],
+      "settled_usd": 0.000283,
+      "file_sha256": {
+        "ingress.json": "763e77bba56e6e52901e67da7a72b277083dd23ed33268c4295da0e6cf8af792",
+        "egress.json": "123d4bec0427e1640aed34d17f729fe175b05bcf7f048b9d5ca78f453f2de6c9",
+        "response.json": "d1c08ff6eec6271f6250039017fc8319efc9233136ec44fe8518a3a621697a9a",
+        "settlement.json": "aa98243371327ce38e751aee0f2c9325137b3ad4d374547016961aa4aa4bb476"
+      }
+    }
+  },
+  "wire_verification": {
+    "ingress_equal": true,
+    "m1_egress_changed_pointers": [],
+    "m2_egress_changed_pointers": ["/input/2/output"]
+  },
+  "deltas_m2_minus_m1": {
+    "input_tokens": -779,
+    "input_percent": -74.2612,
+    "output_tokens": 421,
+    "output_percent": 462.6374,
+    "recorded_settled_usd": 0.000106,
+    "recorded_settled_cost_percent": 59.887
+  },
+  "acceptance": {
+    "m1": "marker assertion passed; independent coding-task oracle not run",
+    "m2": "provider response incomplete; task not accepted; independent coding-task oracle not run"
+  },
+  "cost_basis": "Recorded SpendGuard settlements use the committed standard short-context snapshot and default 30-minute write rate; not an invoice reconciliation.",
+  "interpretation": "This observation shows that lower input alone did not ensure lower total request cost or accepted completion. It is not a causal or campaign-level product-value result."
+}

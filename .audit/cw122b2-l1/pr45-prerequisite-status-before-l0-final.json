@@ -1,0 +1,29 @@
+{
+  "base": "main",
+  "checks": {
+    "GitGuardian Security Checks": "success",
+    "Test Workspace": "success"
+  },
+  "workflow_run": {
+    "id": 42221432750,
+    "name": "CI",
+    "conclusion": "success",
+    "head_sha": "64c51159a4d8da264a4dc2f50373c329f8360137"
+  },
+  "head": "feat/cw122b2-l0-real-smoke",
+  "head_sha": "64c51159a4d8da264a4dc2f50373c329f8360137",
+  "interpretation": "L0 PR is CI-green and threads are resolved, but no independent human approval is recorded. This does not review the uncommitted L1 changes in the local worktree.",
+  "mergeable": true,
+  "pull_request": 45,
+  "review_submissions": {
+    "Copilot": "COMMENTED",
+    "author": "COMMENTED",
+    "independent_human_approval": "absent"
+  },
+  "review_threads": {
+    "total": 6,
+    "unresolved": 0
+  },
+  "source": "GitHub read-only API snapshot at 2026-11-06 17:03 UTC",
+  "state": "open"
+}

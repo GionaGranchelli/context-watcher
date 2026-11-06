@@ -1,0 +1,16 @@
+{
+  "claim_markers_created": 0,
+  "credential_content_or_hash_in_this_artifact": false,
+  "evidence_entries_created": 0,
+  "max_requests": 60,
+  "max_seconds": 1200,
+  "model": "gpt-6-luna",
+  "pair": "f1-r1 M1 then M2",
+  "private_authorization_path": "/home/gionag/.local/state/context-watcher/cw122b2l1-smoke-review/smoke-authorization-review.json",
+  "provider": "OpenAI API",
+  "provider_inference": false,
+  "reservation_overrun_risk_accepted": false,
+  "runner_result": "ValueError: reservation overrun risk must be explicitly accepted",
+  "spend_ceiling_usd": 5.0,
+  "status": "NO_GO_DRAFT_REJECTED_BEFORE_CLAIM"
+}

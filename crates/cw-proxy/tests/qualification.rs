@@ -755,6 +755,16 @@ struct QualificationFixture {
     qualification_fault_hook: Option<cw_proxy::state::QualificationFaultHook>,
 }
 
+struct OpenAiUpstream<'a> {
+    url: Option<&'a str>,
+    api_key: Option<&'a str>,
+    key_configured: bool,
+    capture_response: bool,
+    expected_live_identity: Option<(&'a str, Option<&'a str>)>,
+    live_authorization_expires_at: Option<chrono::DateTime<Utc>>,
+    store: Option<CwStore>,
+}
+
 impl QualificationFixture {
     async fn setup() -> Self {
         Self::setup_config(None, None, false).await
@@ -822,8 +832,33 @@ impl QualificationFixture {
         capture_wire_response: bool,
         expected_live_identity: Option<(&str, Option<&str>)>,
     ) -> Self {
+        Self::setup_config_with_openai_upstream(
+            spend_guard,
+            private_control_token,
+            capture_wire_egress,
+            OpenAiUpstream {
+                url: None,
+                api_key: upstream_key,
+                key_configured,
+                capture_response: capture_wire_response,
+                expected_live_identity,
+                live_authorization_expires_at: None,
+                store: None,
+            },
+        )
+        .await
+    }
+
+    async fn setup_config_with_openai_upstream(
+        spend_guard: Option<SpendGuard>,
+        private_control_token: Option<String>,
+        capture_wire_egress: bool,
+        openai: OpenAiUpstream<'_>,
+    ) -> Self {
         let mock = MockProvider::start().await;
-        let store = CwStore::open_in_memory().unwrap();
+        let store = openai
+            .store
+            .unwrap_or_else(|| CwStore::open_in_memory().unwrap());
         store
             .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
                 enabled: true,
@@ -837,20 +872,24 @@ impl QualificationFixture {
         } else if let Ok(tok) = cw_core::control::control_token(false) {
             state.control_token = tok;
         }
-        state.openai_upstream = mock.url.clone();
-        state.openai_api_key = upstream_key.map(str::to_string);
-        state.openai_api_key_configured = key_configured;
+        state.openai_upstream = openai.url.unwrap_or(&mock.url).to_owned();
+        state.openai_api_key = openai.api_key.map(str::to_string);
+        state.openai_api_key_configured = openai.key_configured;
         state.anthropic_upstream = mock.url.clone();
         state.deepseek_upstream = mock.url.clone();
         state.spend_guard = spend_guard;
         state.capture_wire_egress = capture_wire_egress;
-        state.capture_wire_response = capture_wire_response;
-        state.live_provider_model =
-            expected_live_identity.map(|(model, _)| (ProviderKind::OpenAI, model.to_owned()));
-        let l0_session_id = expected_live_identity.and_then(|(_, session)| session);
+        state.capture_wire_response = openai.capture_response;
+        state.live_provider_model = openai
+            .expected_live_identity
+            .map(|(model, _)| (ProviderKind::OpenAI, model.to_owned()));
+        let l0_session_id = openai
+            .expected_live_identity
+            .and_then(|(_, session)| session);
         state.live_allowed_session_id = l0_session_id.map(str::to_owned);
-        state.live_authorization_expires_at =
-            l0_session_id.map(|_| Utc::now() + chrono::Duration::minutes(1));
+        state.live_authorization_expires_at = openai
+            .live_authorization_expires_at
+            .or_else(|| l0_session_id.map(|_| Utc::now() + chrono::Duration::minutes(1)));
         #[cfg(feature = "qualification-fault-hooks")]
         {
             state.qualification_fault_hook = cw_proxy::state::QualificationFaultHook::from_env();
@@ -884,6 +923,825 @@ impl Drop for QualificationFixture {
     fn drop(&mut self) {
         self.proxy_task.abort();
     }
+}
+
+#[tokio::test]
+async fn qualification_fixture_uses_explicit_openai_upstream() {
+    let upstream = MockProvider::start().await;
+    let store_root =
+        std::env::temp_dir().join(format!("cw122b2-l1-file-store-{}", uuid::Uuid::new_v4()));
+    create_private_dir(&store_root);
+    let store_path = store_root.join("cw.sqlite");
+    let fixture = QualificationFixture::setup_config_with_openai_upstream(
+        None,
+        Some("qualification-control-token-000000000000".into()),
+        true,
+        OpenAiUpstream {
+            url: Some(&upstream.url),
+            api_key: None,
+            key_configured: false,
+            capture_response: true,
+            expected_live_identity: None,
+            live_authorization_expires_at: None,
+            store: Some(CwStore::open(&store_path).unwrap()),
+        },
+    )
+    .await;
+    let response = reqwest::Client::new()
+        .post(format!(
+            "http://127.0.0.1:{}/openai/v1/responses",
+            fixture.proxy_port
+        ))
+        .header("x-cw-session-id", "explicit-upstream-fixture-session")
+        .header("x-cw-control-token", &fixture.control_token)
+        .json(&json!({
+            "model":"gpt-4o-mini",
+            "input":[{"type":"message","role":"user","content":"route probe"}]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(store_path.is_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&store_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    assert_eq!(upstream.captured.lock().unwrap().len(), 1);
+    assert!(fixture.mock.captured.lock().unwrap().is_empty());
+    let turn = fixture
+        .store
+        .get_latest_turn("explicit-upstream-fixture-session")
+        .unwrap()
+        .unwrap();
+    let (body, complete, truncated) =
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            loop {
+                if let Some(response) = fixture.store.get_wire_response(&turn.id).unwrap() {
+                    break response;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("provider response evidence persisted");
+    assert!(!body.is_empty());
+    assert!(complete);
+    assert!(!truncated);
+    let evidence_root = std::env::temp_dir().join(format!(
+        "cw122b2-l1-partial-evidence-{}",
+        uuid::Uuid::new_v4()
+    ));
+    create_private_dir(&evidence_root);
+    drop(PartialCodexEvidence {
+        root: evidence_root.clone(),
+        label: "explicit-upstream".into(),
+        session_id: "explicit-upstream-fixture-session".into(),
+        store: fixture.store.clone(),
+        captured: fixture.mock.captured.clone(),
+        responses: fixture.mock.responses.clone(),
+        codex_home: None,
+        complete: false,
+    });
+    let failed = evidence_root.join("failed/explicit-upstream");
+    assert_eq!(std::fs::read(failed.join("response_00.sse")).unwrap(), body);
+    let metadata: Value =
+        serde_json::from_slice(&std::fs::read(failed.join("response_meta_00.json")).unwrap())
+            .unwrap();
+    assert_eq!(metadata, json!({"complete":true,"truncated":false}));
+    std::fs::remove_dir_all(evidence_root).unwrap();
+    drop(fixture);
+    drop(upstream);
+    std::fs::remove_dir_all(store_root).unwrap();
+}
+
+fn completed_responses_body(bytes: &[u8]) -> Option<Value> {
+    if let Ok(value) = serde_json::from_slice::<Value>(bytes)
+        && value.get("status").and_then(Value::as_str) == Some("completed")
+    {
+        return Some(value);
+    }
+    for line in bytes.split(|byte| *byte == b'\n') {
+        let Some(data) = line.strip_prefix(b"data: ") else {
+            continue;
+        };
+        let Ok(event) = serde_json::from_slice::<Value>(data) else {
+            continue;
+        };
+        if event.get("type").and_then(Value::as_str) == Some("response.completed")
+            && event.pointer("/response/status").and_then(Value::as_str) == Some("completed")
+        {
+            return event.get("response").cloned();
+        }
+    }
+    None
+}
+
+fn snapshot_workspace(workspace: &std::path::Path) -> std::collections::BTreeMap<String, String> {
+    std::fs::read_dir(workspace)
+        .expect("read isolated workspace")
+        .map(|entry| {
+            let entry = entry.expect("workspace entry");
+            let bytes = std::fs::read(entry.path()).expect("read workspace fixture file");
+            (
+                entry.file_name().to_string_lossy().into_owned(),
+                sha256_hex(&bytes),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "real OpenAI M1/M2 task smoke; run only through the separately authorized CW-122B2-L1 runner"]
+async fn test_cw122b2l1_live_matched_smoke_pair() {
+    use std::{collections::BTreeMap, time::Duration};
+
+    let authorization_path = PathBuf::from(
+        std::env::var_os("CW122B2L1_SMOKE_AUTHORIZATION")
+            .expect("launch through benchmark/cw122b2l1/run_smoke.py"),
+    );
+    let authorization: Value = serde_json::from_slice(
+        &std::fs::read(&authorization_path).expect("read smoke authorization"),
+    )
+    .expect("valid smoke authorization JSON");
+    assert_eq!(authorization["experiment"], "CW-122B2-L1-SMOKE");
+    assert_eq!(authorization["provider"], "OpenAI API");
+    assert_eq!(authorization["model"], "gpt-6-luna");
+    assert_eq!(authorization["endpoint"], "https://api.openai.com/v1");
+    assert_eq!(authorization["processing_tier"], "standard");
+    assert_eq!(authorization["pair_id"], "f1-r1");
+    assert_eq!(authorization["attempt_order"], json!(["M1", "M2"]));
+    assert_eq!(authorization["exact_attempt_count"], 2);
+    assert_eq!(authorization["max_requests"], 60);
+    assert_eq!(authorization["max_requests_per_attempt"], 30);
+    assert_eq!(authorization["max_seconds"], 1200);
+    assert_eq!(authorization["max_seconds_per_attempt"], 600);
+    assert_eq!(authorization["reservation_overrun_risk_accepted"], true);
+    let budget = authorization["spend_ceiling_usd"]
+        .as_f64()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .expect("finite positive smoke spend ceiling");
+    let request_reservation = authorization["request_reservation_usd"]
+        .as_f64()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .expect("positive per-request reservation");
+
+    let issued = chrono::DateTime::parse_from_rfc3339(
+        authorization["issued_at"]
+            .as_str()
+            .expect("authorization issue time"),
+    )
+    .expect("valid issue time")
+    .with_timezone(&Utc);
+    let expires = chrono::DateTime::parse_from_rfc3339(
+        authorization["expires_at"]
+            .as_str()
+            .expect("authorization expiry"),
+    )
+    .expect("valid expiry")
+    .with_timezone(&Utc);
+    assert!(issued <= Utc::now() && Utc::now() < expires);
+    assert!(expires - issued <= chrono::Duration::hours(24));
+
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let campaign_root = cw122a_root();
+    let campaign_bytes = std::fs::read(campaign_root.join("campaign.json")).unwrap();
+    assert_eq!(
+        authorization["campaign_sha256"],
+        sha256_hex(&campaign_bytes),
+        "smoke must bind the frozen CW-122A campaign"
+    );
+    let campaign: Value = serde_json::from_slice(&campaign_bytes).unwrap();
+    let pair = campaign["pairs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|pair| pair["pair_id"] == "f1-r1")
+        .expect("frozen F1 smoke pair");
+    assert_eq!(pair["order"], json!(["M1", "M2"]));
+    let instructions = campaign["tasks"]["f1"]["instructions"]
+        .as_str()
+        .expect("frozen F1 instructions");
+    let initial_prompt = format!(
+        "{instructions}\n\nFirst inspect the implementation and run relevant diagnostics. Report what needs fixing without editing files yet."
+    );
+    let implementation_prompt = "Implement the requested change now.";
+    let model = authorization["model"].as_str().unwrap();
+    let endpoint = authorization["endpoint"].as_str().unwrap();
+    let evidence_root = PathBuf::from(
+        authorization["private_evidence_directory"]
+            .as_str()
+            .expect("private evidence path"),
+    );
+    assert!(evidence_root.is_absolute() && evidence_root.is_dir());
+    assert!(
+        !evidence_root
+            .canonicalize()
+            .unwrap()
+            .starts_with(repository.canonicalize().unwrap())
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&evidence_root)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+    }
+    let credential_path = PathBuf::from(
+        authorization["credential_file"]
+            .as_str()
+            .expect("credential file path"),
+    );
+    assert!(credential_path.is_absolute() && credential_path.is_file());
+    assert!(
+        !credential_path
+            .canonicalize()
+            .unwrap()
+            .starts_with(repository.canonicalize().unwrap())
+    );
+    assert!(
+        !credential_path
+            .canonicalize()
+            .unwrap()
+            .starts_with(evidence_root.canonicalize().unwrap())
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&credential_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    let credential_bytes = std::fs::read(&credential_path).expect("read authorized key file");
+    assert_eq!(
+        authorization["credential_sha256"],
+        sha256_hex(&credential_bytes),
+        "credential changed after authorization"
+    );
+    let api_key = String::from_utf8(credential_bytes)
+        .expect("UTF-8 OpenAI credential")
+        .trim()
+        .to_owned();
+    assert!(!api_key.is_empty());
+
+    let guard = SpendGuard::new_with_campaign_request_limit(
+        SpendGuardConfig {
+            authorized_budget_usd: budget,
+            max_session_cost_usd: budget,
+            max_requests_per_session: 30,
+            require_verified_pricing: true,
+            request_reservation_usd: request_reservation,
+            ..Default::default()
+        },
+        60,
+    );
+    let campaign_started = tokio::time::Instant::now();
+    let campaign_deadline = Duration::from_secs(1200);
+    let mut pair_hashes: Option<BTreeMap<String, String>> = None;
+    let mut attempts = Vec::new();
+    for mode in ["M1", "M2"] {
+        let session_id = format!(
+            "cw122b2l1-{}-{}",
+            authorization["authorization_id"].as_str().unwrap(),
+            uuid::Uuid::new_v4().simple()
+        );
+        assert!(cw_core::control::is_valid_session_id(&session_id));
+        let attempt_root = evidence_root.join("attempts").join(&session_id);
+        create_private_dir(&attempt_root);
+        let home = attempt_root.join("home");
+        let codex_home = attempt_root.join("codex");
+        let temp_dir = attempt_root.join("tmp");
+        let workspace = attempt_root.join("workspace");
+        for path in [&home, &codex_home, &temp_dir, &workspace] {
+            create_private_dir(path);
+        }
+        for entry in std::fs::read_dir(campaign_root.join("fixtures/f1")).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_file() {
+                std::fs::copy(entry.path(), workspace.join(entry.file_name())).unwrap();
+            }
+        }
+        let initial_files = snapshot_workspace(&workspace);
+        assert!(
+            pair_hashes
+                .replace(initial_files.clone())
+                .is_none_or(|previous| previous == initial_files),
+            "matched smoke arms began from different fixtures"
+        );
+        assert_eq!(
+            cw122_oracle_check("f1", &workspace)["passed"].as_bool(),
+            Some(false),
+            "frozen fixture should fail before coding"
+        );
+
+        let control_token = uuid::Uuid::new_v4().simple().to_string();
+        let database = attempt_root.join("cw.sqlite");
+        let store = CwStore::open(&database).expect("open persistent evidence database");
+        let live_expiry = expires;
+        let fixture = QualificationFixture::setup_config_with_openai_upstream(
+            Some(guard.clone()),
+            Some(control_token.clone()),
+            true,
+            OpenAiUpstream {
+                url: Some(endpoint),
+                api_key: Some(&api_key),
+                key_configured: true,
+                capture_response: true,
+                expected_live_identity: Some((model, Some(&session_id))),
+                live_authorization_expires_at: Some(live_expiry),
+                store: Some(store),
+            },
+        )
+        .await;
+        fixture
+            .store
+            .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
+                enabled: mode == "M2",
+                auto_diet_at_breakpoint: false,
+                local_model_window_guard: false,
+                auto_heal_low_health: false,
+                auto_cache_safe_pin: false,
+                zero_break_tail_hygiene: false,
+                auto_sync_to_disk: false,
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(
+            !fixture
+                .store
+                .get_pin_context_policy(&session_id)
+                .unwrap()
+                .is_enabled_for(&session_id),
+            "PinContext must remain inactive"
+        );
+        let codex_binary = std::fs::canonicalize(require_installed_binary("codex"))
+            .expect("canonical Codex executable");
+        let codex = CodexStep {
+            binary: &codex_binary,
+            model,
+            service_tier: Some("default"),
+            workspace: &workspace,
+            home: &home,
+            codex_home: &codex_home,
+            temp_dir: &temp_dir,
+            proxy_port: fixture.proxy_port,
+            session_id: &session_id,
+            control_token: &control_token,
+        };
+        let mut partial = PartialCodexEvidence {
+            root: attempt_root.clone(),
+            label: "provider-attempt".into(),
+            session_id: session_id.clone(),
+            store: fixture.store.clone(),
+            captured: fixture.mock.captured.clone(),
+            responses: fixture.mock.responses.clone(),
+            codex_home: Some(codex_home.clone()),
+            complete: false,
+        };
+        let spent_before_attempt = guard.total_spent_usd();
+        let attempt_started = tokio::time::Instant::now();
+        let remaining = |started: tokio::time::Instant| {
+            let attempt_left = Duration::from_secs(600).saturating_sub(started.elapsed());
+            let campaign_left = campaign_deadline.saturating_sub(campaign_started.elapsed());
+            attempt_left.min(campaign_left)
+        };
+        assert!(
+            remaining(attempt_started) > Duration::ZERO,
+            "smoke deadline expired before bootstrap"
+        );
+        let (bootstrap_diagnostics, bootstrap_ms) = codex
+            .run(None, &initial_prompt, remaining(attempt_started))
+            .await
+            .unwrap_or_else(|error| panic!("{mode} bootstrap Codex failed: {error}"));
+        let thread_id =
+            codex_thread_id_from_rollout(&codex_home).expect("Codex saved a native thread ID");
+        let mut bootstrap_turns = fixture.store.list_turns(&session_id).unwrap();
+        bootstrap_turns.sort_by_key(|turn| turn.sequence_number);
+        assert!(
+            bootstrap_turns.len() >= 2,
+            "bootstrap did not complete a tool round trip"
+        );
+        let mut generated_calls = std::collections::BTreeSet::new();
+        let mut selected: Option<(String, String, String, String)> = None;
+        for turn in &bootstrap_turns {
+            let ingress = fixture
+                .store
+                .get_wire_request(&turn.id)
+                .unwrap()
+                .expect("bootstrap ingress persisted");
+            let payload: Value = serde_json::from_slice(&ingress).expect("Responses ingress JSON");
+            let (response_bytes, complete, truncated) = fixture
+                .store
+                .get_wire_response(&turn.id)
+                .unwrap()
+                .expect("provider response persisted");
+            assert!(
+                complete && !truncated,
+                "bootstrap response capture incomplete"
+            );
+            let response =
+                completed_responses_body(&response_bytes).expect("bootstrap response completed");
+            assert_eq!(response["model"], model, "provider model mismatch");
+            assert_eq!(
+                response["service_tier"], "default",
+                "provider tier mismatch"
+            );
+            if selected.is_none()
+                && let Some(input) = payload.get("input").and_then(Value::as_array)
+            {
+                for (index, item) in input.iter().enumerate() {
+                    let Some(call_id) = item.get("call_id").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    if item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                        && generated_calls.contains(call_id)
+                        && item
+                            .get("output")
+                            .and_then(Value::as_str)
+                            .is_some_and(|output| !output.is_empty())
+                    {
+                        let nodes = parse_request_to_nodes(&payload, ProviderKind::OpenAI, 2)
+                            .expect("normalize actual tool-result request");
+                        let node = nodes
+                            .into_iter()
+                            .find(|node| {
+                                matches!(
+                                    &node.kind,
+                                    NodeKind::ToolResult { call_id: id, .. } if id == call_id
+                                )
+                            })
+                            .expect("actual tool result has a canonical node");
+                        assert_eq!(node.raw_json_pointer, format!("/input/{index}"));
+                        selected = Some((
+                            call_id.to_owned(),
+                            item["output"].as_str().unwrap().to_owned(),
+                            node.raw_json_pointer,
+                            node.fingerprint.0,
+                        ));
+                        break;
+                    }
+                }
+            }
+            for item in response["output"].as_array().into_iter().flatten() {
+                if item.get("type").and_then(Value::as_str) == Some("function_call")
+                    && let Some(call_id) = item.get("call_id").and_then(Value::as_str)
+                {
+                    generated_calls.insert(call_id.to_owned());
+                }
+            }
+        }
+        let (target_call_id, original_tool_output, target_pointer, target_fingerprint) =
+            selected.expect("bootstrap generated and consumed a real command output");
+        assert_eq!(
+            snapshot_workspace(&workspace),
+            initial_files,
+            "diagnostic phase changed the fixture before the coding request"
+        );
+        let bootstrap_max_sequence = bootstrap_turns
+            .last()
+            .expect("bootstrap turns")
+            .sequence_number;
+        let rule_id = "cw122b2l1-smoke-historical-prune";
+        let stub =
+            "[cw:pruned completed diagnostic output; consumed by assistant; original retained]";
+        if mode == "M2" {
+            fixture
+                .store
+                .save_mutation(&MutationRule {
+                    id: rule_id.into(),
+                    session_id: session_id.clone(),
+                    op: MutationOp::PruneOrStub {
+                        target_fingerprint: Some(target_fingerprint.clone()),
+                        target_call_id: Some(target_call_id.clone()),
+                        target_json_pointer: Some(target_pointer.clone()),
+                        stub_text: stub.into(),
+                    },
+                    status: MutationStatus::Committed,
+                    estimated_saved_tokens: 0,
+                    estimated_kv_break_tokens: 0,
+                    created_at: Utc::now(),
+                })
+                .unwrap();
+        }
+        assert!(
+            remaining(attempt_started) > Duration::ZERO,
+            "smoke deadline expired before coding"
+        );
+        let (coding_diagnostics, coding_ms) = codex
+            .run(
+                Some(&thread_id),
+                implementation_prompt,
+                remaining(attempt_started),
+            )
+            .await
+            .unwrap_or_else(|error| panic!("{mode} coding Codex failed: {error}"));
+        let acceptance = cw122_oracle_check("f1", &workspace);
+        assert!(
+            acceptance["passed"].as_bool() == Some(true),
+            "independent F1 oracle failed"
+        );
+
+        let mut turns = fixture.store.list_turns(&session_id).unwrap();
+        turns.sort_by_key(|turn| turn.sequence_number);
+        assert!(turns.len() <= 30, "per-attempt request cap exceeded");
+        assert!(
+            guard.total_request_count() <= 60,
+            "pair request cap exceeded"
+        );
+        let mut verified_prunes = 0usize;
+        let mut requests = Vec::new();
+        let ledger = rusqlite::Connection::open(&database).expect("open private spend ledger");
+        let mut ledger_settled_cost_total_usd = 0.0f64;
+        let mut total_input_tokens = 0u64;
+        let mut total_output_tokens = 0u64;
+        let mut total_cached_input_tokens = 0u64;
+        let mut total_cache_write_tokens = 0u64;
+        for turn in &turns {
+            let ingress = fixture
+                .store
+                .get_wire_request(&turn.id)
+                .unwrap()
+                .expect("request ingress persisted");
+            let egress = fixture
+                .store
+                .get_wire_egress(&turn.id)
+                .unwrap()
+                .expect("provider egress persisted");
+            let original: Value = serde_json::from_slice(&ingress).expect("ingress JSON");
+            let actual: Value = serde_json::from_slice(&egress).expect("egress JSON");
+            let mut expected = original.clone();
+            let mut changed = false;
+            if mode == "M2" && turn.sequence_number > bootstrap_max_sequence {
+                let input = expected
+                    .get_mut("input")
+                    .and_then(Value::as_array_mut)
+                    .expect("Responses input array");
+                let targets: Vec<_> = input
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| is_function_output(item, &target_call_id))
+                    .map(|(index, _)| index)
+                    .collect();
+                assert!(
+                    targets.len() <= 1,
+                    "selected call ID duplicated in one request"
+                );
+                if let Some(index) = targets.first() {
+                    assert_eq!(input[*index]["output"], original_tool_output);
+                    input[*index]["output"] = Value::String(stub.into());
+                    changed = true;
+                    verified_prunes += 1;
+                }
+            }
+            assert_eq!(actual, expected, "unexpected full-wire change");
+            if changed {
+                assert_eq!(turn.applied_mutation_ids, [rule_id]);
+            } else {
+                assert!(turn.applied_mutation_ids.is_empty());
+                assert_eq!(ingress, egress, "passthrough bytes changed");
+            }
+            let (response_bytes, complete, truncated) = fixture
+                .store
+                .get_wire_response(&turn.id)
+                .unwrap()
+                .expect("complete raw provider response");
+            assert!(
+                complete && !truncated,
+                "provider response capture incomplete"
+            );
+            let response = completed_responses_body(&response_bytes)
+                .expect("provider response did not complete");
+            assert_eq!(response["model"], model, "provider model mismatch");
+            assert_eq!(
+                response["service_tier"], "default",
+                "provider tier mismatch"
+            );
+            let usage = response
+                .get("usage")
+                .cloned()
+                .expect("provider usage telemetry");
+            assert!(usage["input_tokens"].as_u64().is_some());
+            assert!(usage["output_tokens"].as_u64().is_some());
+            assert!(
+                usage["input_tokens_details"]["cached_tokens"]
+                    .as_u64()
+                    .is_some()
+            );
+            assert!(
+                usage["input_tokens_details"]["cache_write_tokens"]
+                    .as_u64()
+                    .is_some()
+            );
+            let (admission_status, settlement_status, reservation_usd, settled_usd, ledger_usage_json):
+                (String, String, Option<f64>, Option<f64>, Option<String>) = ledger
+                .query_row(
+                    "SELECT admission_status,settlement_status,reservation_usd,settled_usd,usage_json FROM spend_guard_ledger WHERE turn_id=?1",
+                    [&turn.id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                )
+                .expect("provider turn has persisted SpendGuard ledger row");
+            assert_eq!(admission_status, "ADMITTED");
+            assert_eq!(settlement_status, "SETTLED");
+            assert_eq!(reservation_usd, Some(request_reservation));
+            let settled_usd = settled_usd
+                .filter(|cost| cost.is_finite() && *cost >= 0.0)
+                .expect("persisted request settlement amount");
+            let ledger_usage: Value = serde_json::from_str(
+                ledger_usage_json
+                    .as_deref()
+                    .expect("settled ledger usage JSON"),
+            )
+            .expect("valid settled ledger usage JSON");
+            assert_eq!(
+                ledger_usage, usage,
+                "ledger usage matches provider response"
+            );
+            ledger_settled_cost_total_usd += settled_usd;
+            total_input_tokens = total_input_tokens
+                .checked_add(usage["input_tokens"].as_u64().unwrap())
+                .expect("input token total overflow");
+            total_output_tokens = total_output_tokens
+                .checked_add(usage["output_tokens"].as_u64().unwrap())
+                .expect("output token total overflow");
+            total_cached_input_tokens = total_cached_input_tokens
+                .checked_add(
+                    usage["input_tokens_details"]["cached_tokens"]
+                        .as_u64()
+                        .unwrap(),
+                )
+                .expect("cached input total overflow");
+            total_cache_write_tokens = total_cache_write_tokens
+                .checked_add(
+                    usage["input_tokens_details"]["cache_write_tokens"]
+                        .as_u64()
+                        .unwrap(),
+                )
+                .expect("cache-write total overflow");
+            requests.push(json!({
+                "turn_id":turn.id,
+                "sequence_number":turn.sequence_number,
+                "ingress_sha256":sha256_hex(&ingress),
+                "egress_sha256":sha256_hex(&egress),
+                "response_sha256":sha256_hex(&response_bytes),
+                "model":response["model"],
+                "service_tier":response["service_tier"],
+                "usage":usage,
+                "spend_ledger":{
+                    "admission_status":admission_status,
+                    "settlement_status":settlement_status,
+                    "reservation_usd":reservation_usd,
+                    "settled_usd":settled_usd,
+                    "usage":ledger_usage
+                },
+                "applied_rule_ids":turn.applied_mutation_ids,
+                "skipped_mutations":turn.skipped_mutations,
+                "response_complete":complete,
+                "response_truncated":truncated
+            }));
+        }
+        assert!(
+            (ledger_settled_cost_total_usd - (guard.total_spent_usd() - spent_before_attempt))
+                .abs()
+                <= 1e-9,
+            "persisted request settlements reconcile with shared SpendGuard total"
+        );
+        if mode == "M2" {
+            assert!(
+                verified_prunes > 0,
+                "M2 had no verified provider-bound transformation"
+            );
+        } else {
+            assert_eq!(verified_prunes, 0);
+        }
+        let rollouts = find_rollout_files(&codex_home.join("sessions"));
+        assert!(!rollouts.is_empty(), "Codex transcript missing");
+        let mut rollout_hashes = Vec::new();
+        for (index, path) in rollouts.iter().enumerate() {
+            let bytes = std::fs::read(path).expect("read Codex transcript");
+            assert!(!String::from_utf8_lossy(&bytes).contains(stub));
+            write_private_file(
+                &attempt_root.join(format!("rollout_{index:02}.jsonl")),
+                &bytes,
+            );
+            rollout_hashes.push(sha256_hex(&bytes));
+        }
+        let report = json!({
+            "pair_id":"f1-r1",
+            "family":"f1",
+            "mode":mode,
+            "session_id":session_id,
+            "thread_id":thread_id,
+            "model":model,
+            "endpoint":endpoint,
+            "sampling":"Codex defaults; explicit seed unavailable",
+            "task_instructions_sha256":sha256_hex(instructions.as_bytes()),
+            "initial_prompt_sha256":sha256_hex(initial_prompt.as_bytes()),
+            "implementation_prompt_sha256":sha256_hex(implementation_prompt.as_bytes()),
+            "initial_fixture_hashes":initial_files,
+            "task_acceptance":acceptance,
+            "request_count":turns.len(),
+            "requests":requests,
+            "bootstrap_wall_ms":bootstrap_ms,
+            "coding_wall_ms":coding_ms,
+            "complete_attempt_wall_ms":attempt_started.elapsed().as_millis(),
+            "provider_input_tokens":total_input_tokens,
+            "provider_output_tokens":total_output_tokens,
+            "provider_cached_input_tokens":total_cached_input_tokens,
+            "provider_cache_write_tokens":total_cache_write_tokens,
+            "persisted_ledger_settled_cost_usd":ledger_settled_cost_total_usd,
+            "bootstrap_diagnostics":bootstrap_diagnostics,
+            "coding_diagnostics":coding_diagnostics,
+            "treatment":{
+                "rule_id":if mode=="M2" {json!(rule_id)} else {Value::Null},
+                "target_call_id_sha256":sha256_hex(target_call_id.as_bytes()),
+                "target_output_sha256":sha256_hex(original_tool_output.as_bytes()),
+                "verified_prunes":verified_prunes,
+                "status":if mode=="M2" {"verified_real_provider_egress"} else {"passthrough"}
+            },
+            "transcript_sha256":rollout_hashes,
+            "settled_cost_total_usd":guard.total_spent_usd() - spent_before_attempt,
+            "status":"SMOKE_ATTEMPT_ACCEPTED"
+        });
+        write_private_file(
+            &attempt_root.join("attempt.json"),
+            &serde_json::to_vec_pretty(&report).unwrap(),
+        );
+        save_cw122b1_raw_evidence(
+            Some(&attempt_root),
+            &session_id,
+            &turns,
+            &fixture.store,
+            &[],
+        );
+        partial.complete();
+        attempts.push(report);
+        drop(fixture);
+        assert!(
+            !guard.is_killswitch_tripped(),
+            "SpendGuard stopped the smoke pair"
+        );
+    }
+    assert_eq!(attempts.len(), 2);
+    assert!(campaign_started.elapsed() < campaign_deadline);
+    assert_eq!(
+        guard.total_request_count(),
+        attempts
+            .iter()
+            .map(|a| a["request_count"].as_u64().unwrap() as usize)
+            .sum::<usize>()
+    );
+    assert!(!guard.is_killswitch_tripped());
+    let m1_input = attempts[0]["provider_input_tokens"].as_u64().unwrap();
+    let m2_input = attempts[1]["provider_input_tokens"].as_u64().unwrap();
+    let m1_cost = attempts[0]["settled_cost_total_usd"].as_f64().unwrap();
+    let m2_cost = attempts[1]["settled_cost_total_usd"].as_f64().unwrap();
+    let paired_metrics = json!({
+        "m1_input_tokens":m1_input,
+        "m2_input_tokens":m2_input,
+        "input_tokens_delta_m2_minus_m1":m2_input as i128 - m1_input as i128,
+        "input_tokens_relative_delta":if m1_input == 0 {Value::Null} else {json!((m2_input as f64 - m1_input as f64) / m1_input as f64)},
+        "m1_output_tokens":attempts[0]["provider_output_tokens"],
+        "m2_output_tokens":attempts[1]["provider_output_tokens"],
+        "m1_settled_cost_usd":m1_cost,
+        "m2_settled_cost_usd":m2_cost,
+        "settled_cost_delta_m2_minus_m1_usd":m2_cost - m1_cost,
+        "acceptance_m1":attempts[0]["task_acceptance"]["passed"],
+        "acceptance_m2":attempts[1]["task_acceptance"]["passed"]
+    });
+    let manifest = json!({
+        "experiment":"CW-122B2-L1-SMOKE",
+        "status":"MATCHED_SMOKE_PAIR_PASS",
+        "pair_id":"f1-r1",
+        "provider":"OpenAI API",
+        "model":model,
+        "endpoint":endpoint,
+        "attempts":attempts,
+        "paired_metrics":paired_metrics,
+        "request_count":guard.total_request_count(),
+        "settled_cost_total_usd":guard.total_spent_usd(),
+        "reservation_overrun_risk_accepted":true,
+        "product_value":"NOT_EVALUATED; one matched smoke pair is not the preregistered six-pair campaign",
+        "cache_economics":"NOT_QUALIFIED; initial provider cache state and isolation remain unverified"
+    });
+    write_private_file(
+        &evidence_root.join("smoke-manifest.json"),
+        &serde_json::to_vec_pretty(&manifest).unwrap(),
+    );
 }
 
 async fn f1_send_chat(f: &QualificationFixture, session: &str) -> reqwest::Response {
@@ -1791,6 +2649,8 @@ async fn test_cw122b1_interruption_active_mock_request() {
         QualificationFixture::setup_config(Some(guard.clone()), Some(token.clone()), true).await;
     let codex = CodexStep {
         binary: &binary,
+        model: "gpt-4o-mini",
+        service_tier: None,
         workspace: &workspace,
         home: &home,
         codex_home: &codex_home,
@@ -1892,6 +2752,8 @@ async fn test_cw122b1_f1_codex_request_caps_block_agent_continuation() {
     }
     let codex = CodexStep {
         binary: &binary,
+        model: "gpt-4o-mini",
+        service_tier: None,
         workspace: &paths[3],
         home: &paths[0],
         codex_home: &paths[1],
@@ -1907,6 +2769,7 @@ async fn test_cw122b1_f1_codex_request_caps_block_agent_continuation() {
         store: fixture.store.clone(),
         captured: fixture.mock.captured.clone(),
         responses: fixture.mock.responses.clone(),
+        codex_home: Some(paths[1].clone()),
         complete: false,
     };
     let result = codex
@@ -1987,6 +2850,8 @@ async fn test_cw122b1_f1_codex_request_caps_block_agent_continuation() {
     }
     let first = CodexStep {
         binary: &binary,
+        model: "gpt-4o-mini",
+        service_tier: None,
         workspace: &first_paths[3],
         home: &first_paths[0],
         codex_home: &first_paths[1],
@@ -2003,6 +2868,8 @@ async fn test_cw122b1_f1_codex_request_caps_block_agent_continuation() {
     );
     let second = CodexStep {
         binary: &binary,
+        model: "gpt-4o-mini",
+        service_tier: None,
         workspace: &second_paths[3],
         home: &second_paths[0],
         codex_home: &second_paths[1],
@@ -2082,6 +2949,8 @@ async fn test_cw122b1_f1_codex_retry_loop_is_counted_and_bounded() {
         QualificationFixture::setup_config(Some(guard.clone()), Some(token.clone()), true).await;
     let codex = CodexStep {
         binary: &binary,
+        model: "gpt-4o-mini",
+        service_tier: None,
         workspace: &workspace,
         home: &home,
         codex_home: &codex_home,
@@ -2101,6 +2970,7 @@ async fn test_cw122b1_f1_codex_retry_loop_is_counted_and_bounded() {
         store: f.store.clone(),
         captured: f.mock.captured.clone(),
         responses: f.mock.responses.clone(),
+        codex_home: Some(codex_home.clone()),
         complete: false,
     };
     let run = codex
@@ -2200,6 +3070,8 @@ async fn test_cw122b1_f1_codex_retry_loop_is_counted_and_bounded() {
     }
     let stall_codex = CodexStep {
         binary: &binary,
+        model: "gpt-4o-mini",
+        service_tier: None,
         workspace: &stall_workspace,
         home: &stall_home,
         codex_home: &stall_codex_home,
@@ -2215,6 +3087,7 @@ async fn test_cw122b1_f1_codex_retry_loop_is_counted_and_bounded() {
         store: stall_fixture.store.clone(),
         captured: stall_fixture.mock.captured.clone(),
         responses: stall_fixture.mock.responses.clone(),
+        codex_home: Some(stall_codex_home.clone()),
         complete: false,
     };
     let remaining_campaign = bounded_codex_timeout(Duration::ZERO, Duration::from_secs(7199))
@@ -3492,6 +4365,8 @@ fn write_private_file(path: &std::path::Path, bytes: &[u8]) {
 
 struct CodexStep<'a> {
     binary: &'a std::path::Path,
+    model: &'a str,
+    service_tier: Option<&'a str>,
     workspace: &'a std::path::Path,
     home: &'a std::path::Path,
     codex_home: &'a std::path::Path,
@@ -3573,7 +4448,7 @@ impl CodexStep<'_> {
                 &format!("shell_environment_policy.filters.{key}=\"exclude\""),
             ]);
         }
-        cmd.args(["-m", "gpt-4o-mini"]);
+        cmd.args(codex_model_args(self.model, self.service_tier));
         if let Some(thread) = resume_thread {
             cmd.arg(thread);
         }
@@ -3670,6 +4545,23 @@ impl CodexStep<'_> {
             Err(format!("codex_exit_{}", output.status.code().unwrap_or(-1)))
         }
     }
+}
+
+fn codex_model_args(model: &str, service_tier: Option<&str>) -> Vec<String> {
+    let mut args = vec!["-m".into(), model.into()];
+    if let Some(tier) = service_tier {
+        args.extend(["--config".into(), format!("service_tier=\"{tier}\"")]);
+    }
+    args
+}
+
+#[test]
+fn codex_qualification_model_args_bind_model_and_optional_tier() {
+    assert_eq!(codex_model_args("gpt-4o-mini", None), ["-m", "gpt-4o-mini"]);
+    assert_eq!(
+        codex_model_args("gpt-6-luna", Some("default")),
+        ["-m", "gpt-6-luna", "--config", "service_tier=\"default\""]
+    );
 }
 
 fn codex_exit_status(status: std::process::ExitStatus) -> String {
@@ -3953,7 +4845,19 @@ fn save_cw122b1_raw_evidence(
             &root.join(format!("raw/{session_id}/egress_{index:02}.json")),
             &egress,
         );
-        if let Some(response) = responses.get(index) {
+        if let Some((response, complete, truncated)) = store
+            .get_wire_response(&turn.id)
+            .expect("read captured provider response")
+        {
+            write_private_file(
+                &root.join(format!("raw/{session_id}/response_{index:02}.sse")),
+                &response,
+            );
+            write_private_file(
+                &root.join(format!("raw/{session_id}/response_meta_{index:02}.json")),
+                &serde_json::to_vec(&json!({"complete":complete,"truncated":truncated})).unwrap(),
+            );
+        } else if let Some(response) = responses.get(index) {
             write_private_file(
                 &root.join(format!("raw/{session_id}/response_{index:02}.sse")),
                 &response.body,
@@ -3969,6 +4873,7 @@ struct PartialCodexEvidence {
     store: CwStore,
     captured: Arc<Mutex<Vec<CapturedRequest>>>,
     responses: Arc<Mutex<Vec<CapturedResponse>>>,
+    codex_home: Option<PathBuf>,
     complete: bool,
 }
 
@@ -4000,6 +4905,21 @@ impl Drop for PartialCodexEvidence {
                     &bytes,
                 );
             }
+            if let Ok(Some((bytes, complete, truncated))) = self.store.get_wire_response(&turn.id) {
+                let _ = write_private_file_result(
+                    &directory.join(format!("response_{index:02}.sse")),
+                    &bytes,
+                );
+                if let Ok(metadata) = serde_json::to_vec(&json!({
+                    "complete":complete,
+                    "truncated":truncated,
+                })) {
+                    let _ = write_private_file_result(
+                        &directory.join(format!("response_meta_{index:02}.json")),
+                        &metadata,
+                    );
+                }
+            }
         }
         if let Ok(captured) = self.captured.lock() {
             for (index, request) in captured.iter().enumerate() {
@@ -4017,12 +4937,33 @@ impl Drop for PartialCodexEvidence {
                 );
             }
         }
+        let mut transcript_files = self
+            .codex_home
+            .as_ref()
+            .map(|home| find_rollout_files(&home.join("sessions")))
+            .unwrap_or_default();
+        transcript_files.sort();
+        let mut transcripts_copied = 0usize;
+        for (index, path) in transcript_files.iter().enumerate() {
+            if let Ok(bytes) = std::fs::read(path)
+                && write_private_file_result(
+                    &directory.join(format!("codex_rollout_{index:02}.jsonl")),
+                    &bytes,
+                )
+                .is_ok()
+            {
+                transcripts_copied += 1;
+            }
+        }
         let status = json!({
             "status":"INCOMPLETE_OR_FAILED",
             "session_id":self.session_id,
             "persisted_turns":turns.len(),
             "captured_provider_requests":self.captured.lock().map(|items| items.len()).unwrap_or(0),
             "captured_provider_responses":self.responses.lock().map(|items| items.len()).unwrap_or(0),
+            "codex_transcripts_found":transcript_files.len(),
+            "codex_transcripts_copied":transcripts_copied,
+            "codex_transcript_evidence":if transcript_files.is_empty() {"NOT_CREATED"} else if transcripts_copied == transcript_files.len() {"PRESERVED"} else {"INCOMPLETE"},
         });
         if let Ok(bytes) = serde_json::to_vec_pretty(&status) {
             let _ = write_private_file_result(&directory.join("status.json"), &bytes);
@@ -4057,6 +4998,11 @@ fn test_cw122b1_failed_attempt_preserves_partial_wire_evidence() {
         });
     create_private_dir(&root);
     let session_id = uuid::Uuid::new_v4().to_string();
+    let codex_home = root.join("codex-home");
+    let transcript_path = codex_home.join("sessions/2026/11/06/rollout-failure.jsonl");
+    create_private_dir(transcript_path.parent().unwrap());
+    let transcript = b"{\"type\":\"session_meta\",\"payload\":{\"id\":\"failed-thread\"}}\n";
+    std::fs::write(&transcript_path, transcript).unwrap();
     let store = CwStore::open_in_memory().unwrap();
     let captured = Arc::new(Mutex::new(vec![CapturedRequest {
         path: "/v1/responses".into(),
@@ -4075,6 +5021,7 @@ fn test_cw122b1_failed_attempt_preserves_partial_wire_evidence() {
         store,
         captured,
         responses,
+        codex_home: Some(codex_home.clone()),
         complete: false,
     };
     drop(evidence);
@@ -4087,9 +5034,16 @@ fn test_cw122b1_failed_attempt_preserves_partial_wire_evidence() {
         std::fs::read(failed.join("provider_response_00.bin")).unwrap(),
         b"data: partial"
     );
+    assert_eq!(
+        std::fs::read(failed.join("codex_rollout_00.jsonl")).unwrap(),
+        transcript
+    );
     let status: Value =
         serde_json::from_slice(&std::fs::read(failed.join("status.json")).unwrap()).unwrap();
     assert_eq!(status["status"], "INCOMPLETE_OR_FAILED");
+    assert_eq!(status["codex_transcripts_found"], 1);
+    assert_eq!(status["codex_transcripts_copied"], 1);
+    assert_eq!(status["codex_transcript_evidence"], "PRESERVED");
     if persistent_root.is_some() {
         let artifact_names = [
             "provider_request_00.json",
@@ -4290,6 +5244,7 @@ async fn test_cw122b1_codex_mock_campaign() {
                 store: f.store.clone(),
                 captured: f.mock.captured.clone(),
                 responses: f.mock.responses.clone(),
+                codex_home: Some(codex_home.clone()),
                 complete: false,
             };
             f.store
@@ -4312,6 +5267,8 @@ async fn test_cw122b1_codex_mock_campaign() {
             );
             let codex = CodexStep {
                 binary: &codex_bin,
+                model: "gpt-4o-mini",
+                service_tier: None,
                 workspace: &workspace,
                 home: &home,
                 codex_home: &codex_home,

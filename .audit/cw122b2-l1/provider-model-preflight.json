@@ -1,0 +1,9 @@
+{
+  "checked_at_utc": "2026-11-06T16:36:50.246590+00:00",
+  "model_id": "gpt-6-luna",
+  "object": "model",
+  "redirect_followed": false,
+  "request_id": "59e8d52d-9626-43ee-851e-7d6b3c530d8e",
+  "status": "MODEL_ACCESS_CONFIRMED",
+  "status_code": 200
+}

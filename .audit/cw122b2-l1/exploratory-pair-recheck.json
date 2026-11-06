@@ -1,0 +1,49 @@
+{
+  "arms": {
+    "M1": {
+      "aggregate_cache_write_tokens": 1046,
+      "applied_rule_ids": [],
+      "cached_input_tokens": 0,
+      "egress_sha256": "763e77bba56e6e52901e67da7a72b277083dd23ed33268c4295da0e6cf8af792",
+      "ingress_equals_egress": true,
+      "ingress_sha256": "763e77bba56e6e52901e67da7a72b277083dd23ed33268c4295da0e6cf8af792",
+      "input_tokens": 1049,
+      "output_tokens": 91,
+      "provider_completed": true,
+      "recomputed_cost_usd": "0.000177",
+      "recorded_cost_usd": 0.000177,
+      "request_prompt_cache_retention": "omitted; default 30m rate used",
+      "uncached_input_tokens": 3
+    },
+    "M2": {
+      "aggregate_cache_write_tokens": 0,
+      "applied_rule_ids": [
+        "cw122-live-prune"
+      ],
+      "cached_input_tokens": 0,
+      "egress_sha256": "123d4bec0427e1640aed34d17f729fe175b05bcf7f048b9d5ca78f453f2de6c9",
+      "ingress_equals_egress": false,
+      "ingress_sha256": "763e77bba56e6e52901e67da7a72b277083dd23ed33268c4295da0e6cf8af792",
+      "input_tokens": 270,
+      "output_tokens": 252,
+      "provider_completed": true,
+      "recomputed_cost_usd": "0.000153",
+      "recorded_cost_usd": 0.000153,
+      "request_prompt_cache_retention": "omitted; default 30m rate used",
+      "uncached_input_tokens": 270
+    }
+  },
+  "artifact_hash_failures": 0,
+  "artifact_hashes_verified": 20,
+  "cache_comparability": "NOT_VERIFIED",
+  "full_payload_diff": [
+    "/input/2/output"
+  ],
+  "inference": "one request-level observation: input -74.26%; output +176.92%; SpendGuard cost -13.56%; no product-value claim",
+  "pricing_method": "request-reported aggregate writes repriced at default 30m rate because request did not set prompt_cache_retention; provider invoice not available",
+  "pricing_snapshot_sha256": "d60688d5ed1639a59add9c6e13e4e3f0917834cb5cdb389a79cfce6665239915",
+  "source_manifest_prior_hash_preserved": "b8f19f57e162050f17287664c9b30e691b421c9cf20b28b7ba789605ccacc733",
+  "source_manifest_sha256": "39b3041f27e49681a805fdad70df42e0f1a8a290fe12b6c6d4b8d2fb7da913d9",
+  "status": "PRIVATE_EVIDENCE_RECHECK_PASS",
+  "task_acceptance": "exact marker only; no independent coding-task oracle"
+}

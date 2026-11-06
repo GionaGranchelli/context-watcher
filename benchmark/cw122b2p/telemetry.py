@@ -153,7 +153,11 @@ def cache_fairness(arm_a, arm_b):
         return 'CACHE_CONFUNDED_UNKNOWN_STATE'
     if arm_a.get('telemetry_complete') is not True or arm_b.get('telemetry_complete') is not True:
         return 'CACHE_CONFUNDED_INCOMPLETE_TELEMETRY'
-    if arm_a.get('initial_state_hash') != arm_b.get('initial_state_hash'):
+    state_hashes = (arm_a.get('initial_state_hash'), arm_b.get('initial_state_hash'))
+    if any(not isinstance(value, str) or len(value) != 64 or
+           any(char not in '0123456789abcdef' for char in value) for value in state_hashes):
+        return 'CACHE_CONFUNDED_UNKNOWN_STATE'
+    if state_hashes[0] != state_hashes[1]:
         return 'CACHE_CONFUNDED_UNMATCHED_INITIAL_STATE'
     if arm_a.get('isolation_verified') is not True or arm_b.get('isolation_verified') is not True:
         return 'CACHE_CONFUNDED_ISOLATION_UNVERIFIED'

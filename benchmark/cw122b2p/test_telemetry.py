@@ -97,11 +97,15 @@ class TelemetryTests(unittest.TestCase):
                     module.replay(path)
 
     def test_cache_cases_a_through_e_fail_closed(self):
-        matched = {'telemetry_complete': True, 'initial_state_hash': 'same', 'isolation_verified': True}
+        matched = {'telemetry_complete': True, 'initial_state_hash': 'a' * 64, 'isolation_verified': True}
         self.assertEqual(cache_fairness(matched, matched), 'CACHE_MATCHED_TELEMETRY_COMPLETE')
         self.assertEqual(cache_fairness(None, matched), 'CACHE_CONFUNDED_UNKNOWN_STATE')
+        missing = {**matched, 'initial_state_hash': None}
+        self.assertEqual(cache_fairness(missing, missing), 'CACHE_CONFUNDED_UNKNOWN_STATE')
+        invalid = {**matched, 'initial_state_hash': 'not-a-sha256'}
+        self.assertEqual(cache_fairness(invalid, invalid), 'CACHE_CONFUNDED_UNKNOWN_STATE')
         self.assertEqual(cache_fairness({**matched, 'telemetry_complete': False}, matched), 'CACHE_CONFUNDED_INCOMPLETE_TELEMETRY')
-        self.assertEqual(cache_fairness(matched, {**matched, 'initial_state_hash': 'different'}), 'CACHE_CONFUNDED_UNMATCHED_INITIAL_STATE')
+        self.assertEqual(cache_fairness(matched, {**matched, 'initial_state_hash': 'b' * 64}), 'CACHE_CONFUNDED_UNMATCHED_INITIAL_STATE')
         self.assertEqual(cache_fairness(matched, {**matched, 'isolation_verified': False}), 'CACHE_CONFUNDED_ISOLATION_UNVERIFIED')
 
     def test_missing_cached_usage_invalidates_economics(self):

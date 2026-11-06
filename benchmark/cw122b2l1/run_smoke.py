@@ -32,6 +32,7 @@ BUNDLE = (
     'benchmark/cw122b2p/pricing-2026-11-05.json',
     'benchmark/cw122a/campaign.json',
     'benchmark/cw122a/oracle.py',
+    'benchmark/cw122a/retry.py',
     'benchmark/cw122a/oracles/f1.py',
     'benchmark/cw122a/fixtures/f1',
     'Cargo.toml',

@@ -72,6 +72,7 @@ class SmokeAuthorizationTests(unittest.TestCase):
             'benchmark/cw122a/rehearse.py',
             'benchmark/cw122a/analyze.py',
             'benchmark/cw122a/oracle.py',
+            'benchmark/cw122a/retry.py',
             'benchmark/cw122a/oracles/f1.py',
             'benchmark/cw122a/fixtures/f1',
             'crates/cw-core/src',

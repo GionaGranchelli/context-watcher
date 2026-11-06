@@ -12,7 +12,9 @@ import sys
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / 'benchmark/cw122b2l1'))
-from smoke_authorization import claim_once, no_symlink_components, validate_smoke  # noqa: E402
+from smoke_authorization import (  # noqa: E402
+    approval_statement, no_symlink_components, validate_and_claim, validate_smoke,
+)
 
 sys.path.insert(0, str(REPO / 'benchmark/cw122b1'))
 from run_mock_campaign import (  # noqa: E402
@@ -100,14 +102,29 @@ def selection(record):
         'credential_file': record.get('credential_file'),
         'credential_sha256': record.get('credential_sha256'),
         'private_evidence_directory': record.get('private_evidence_directory'),
-        'authorization_claim_directory': record.get('authorization_claim_directory'),
     }
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--run', metavar='AUTHORIZATION_JSON', help='run only with a fresh exact smoke authorization')
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument('--run', metavar='AUTHORIZATION_JSON', help='run only with a fresh exact smoke authorization')
+    action.add_argument('--approval-statement', metavar='AUTHORIZATION_JSON',
+                        help='print the exact GitHub comment body for the authorization JSON')
     args = parser.parse_args()
+    if args.approval_statement:
+        auth_path = Path(args.approval_statement)
+        if (not auth_path.is_absolute() or not no_symlink_components(auth_path)
+                or not auth_path.is_file() or auth_path.resolve().is_relative_to(REPO.resolve())):
+            raise ValueError('authorization must be a private absolute file outside checkout, with no symlink components')
+        if stat.S_IMODE(auth_path.stat().st_mode) != 0o600:
+            raise ValueError('authorization file must have mode 0600')
+        record = json.loads(auth_path.read_text())
+        if not isinstance(record, dict):
+            raise ValueError('smoke authorization must be a JSON object')
+        validate_smoke(record, selection(record))
+        print(approval_statement(record))
+        return 0
     if not args.run:
         print('NO_GO: offline/default mode; no authorization loaded and no provider call made')
         return 2
@@ -121,8 +138,7 @@ def main():
     record = json.loads(auth_path.read_text())
     if not isinstance(record, dict):
         raise ValueError('smoke authorization must be a JSON object')
-    validate_smoke(record, selection(record))
-    claim_once(record)
+    validate_and_claim(record, selection(record))
     evidence = Path(record['private_evidence_directory'])
     command = TEST + []
     env = build_environment()

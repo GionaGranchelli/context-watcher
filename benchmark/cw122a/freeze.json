@@ -1,6 +1,6 @@
 {
-  "version": "CW-122A-1-F1-BOUNDARY-HOOKS-L0-COMPAT-2",
-  "supersedes_freeze_sha256": "f67f71aeb5edbbddcc34c3cce110c1bc1213eae8b1793c42effe3e4eda292dc9",
+  "version": "CW-122A-1-F1-BOUNDARY-HOOKS-L0-COMPAT-3",
+  "supersedes_freeze_sha256": "01943af36e1ec2a5ccff306b2a36aa4d265a995d2972e65e8beece74daea3888",
   "scope": "Offline source compatibility requalification only; original campaign, fixtures, historical results, and live status unchanged",
   "files": {
     "benchmark/cw104b/smoke.py": "cda5758edc458433907c3bafca4bc4de77ab5dcecc7c41f518aa91e2b1f98da8",
@@ -25,10 +25,10 @@
     "benchmark/cw122a/trace-f2.json": "2d20559fc3ca7c34752c75d230ca6fb495a0342bbbcb24162c12034e18448d6b",
     "crates/cw-core/src/mutation.rs": "d83261abacafabf952d8a358b9fbe028049d229f3da89bf6a1b79e19067c0372",
     "crates/cw-core/src/normalizer.rs": "74d4738f29846838b3722b16e0035c81e1696592919b67223c9a6a962b429312",
-    "crates/cw-core/src/spend_guard.rs": "5540300e3fd52e0f5638d0e52aafb762b816ba2740df9f49a054074e592f1eed",
+    "crates/cw-core/src/spend_guard.rs": "1ac3c942761d5e7cef270d4d0af4b99545d9d2bff51f515e0e8a859e7d21f00a",
     "crates/cw-core/src/validator.rs": "ca29feab5d18b00d9466386e6f80b181d5e6a3922b866564fa2d2b43447d00dc",
-    "crates/cw-proxy/src/proxy/mod.rs": "00a6279577d4ad73368a9aec6890ced0e35ade2f2ae176a4205bb1b76f567869",
-    "crates/cw-proxy/tests/cw122_pruning.rs": "0fb3e99ac319f0f27a1a74cfa2628d54634c137c5f77a979acc41c1a287a43f2",
+    "crates/cw-proxy/src/proxy/mod.rs": "0238d0c67f16a743592a5df9d1e0738cd594f0ad77589943a5cd3e722b1ac232",
+    "crates/cw-proxy/tests/cw122_pruning.rs": "572859aec495bd2c392a771b0698ee430fc43be8a9ed35d01723102fb52d26da",
     "docs/CW-122A-PREREGISTRATION.md": "3ec48b71baaa89c9429fa9c115cae65bb3361f3f2a0fe1a3eca857d88d7ea3d3",
     "benchmark/cw122a/offline_env.py": "2ea652cc029bc2218eb3f14ee9ec7b812221694f580ee9477481ca0885eb260b",
     "benchmark/cw122a/requirements-test.txt": "49026b67905a6c42bd426e6f8b3d2d08dc24ec6fe51cb2f706aea0a3fb5f8e08"

@@ -14,6 +14,8 @@ It does not prove coding-task value. The prior pair was not a full matched Codex
 
 Current GitHub state for [PR #45](https://github.com/GionaGranchelli/context-watcher/pull/45): open, base `main`, mergeable, and full CI run [42261372762](https://github.com/GionaGranchelli/context-watcher/actions/runs/42261372762) passed on head `d80d87354f758168d77251e485ff26f9e00879c5`. All six review threads are resolved, but reviews are only COMMENTED by the author and Copilot; no independent human approval is recorded. This PR covers the L0 preparation, not the L1 changes in this worktree. The superseded snapshot is retained as `pr45-prerequisite-status-before-l0-final.json`; the current sanitized status is [pr45-prerequisite-status.json](../.audit/cw122b2-l1/pr45-prerequisite-status.json).
 
+The L1 work is in draft [PR #46](https://github.com/GionaGranchelli/context-watcher/pull/46), based on PR #45. It is reviewable, but has no GitHub Actions run because the current workflow only triggers for PRs targeting `main`; the full local Rust/Python gates passed on the PR source. Do not merge or execute the smoke before independent review and separate live-envelope approval.
+
 ## Live account preflight
 
 An authenticated, direct TLS `GET /v1/models/gpt-6-luna` succeeded at 2026-11-06 16:36:50 UTC (HTTP 200, model ID matched). Redirects were not followed; no inference endpoint was called and no generation tokens were requested. This confirms current key/model metadata access and direct network reachability, but not inference completion, billing telemetry, or task quality. Sanitized evidence: [provider-model-preflight.json](../.audit/cw122b2-l1/provider-model-preflight.json).

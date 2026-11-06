@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use cw_harnesses::spawn_transcript_watcher;
 use cw_mcp::run_mcp_stdio_server;
@@ -339,6 +339,71 @@ enum Commands {
     InstallIntegrations,
 }
 
+fn l0_smoke_spend_guard_from_environment() -> Result<Option<cw_core::spend_guard::SpendGuard>> {
+    let budget = std::env::var("CW_L0_SMOKE_SPEND_CEILING_USD").ok();
+    let request_cap = std::env::var("CW_L0_SMOKE_REQUEST_CAP").ok();
+    l0_smoke_spend_guard(budget.as_deref(), request_cap.as_deref())
+}
+
+fn l0_smoke_spend_guard(
+    budget: Option<&str>,
+    request_cap: Option<&str>,
+) -> Result<Option<cw_core::spend_guard::SpendGuard>> {
+    use cw_core::spend_guard::{SpendGuard, SpendGuardConfig, parse_authorization};
+
+    let (Some(budget), Some(request_cap)) = (budget, request_cap) else {
+        if budget.is_some() || request_cap.is_some() {
+            bail!("CW L0 smoke budget and request cap must be configured together");
+        }
+        return Ok(None);
+    };
+    let budget = parse_authorization(Some(budget))?;
+    let request_cap = request_cap.parse::<usize>()?;
+    if !(1..=8).contains(&request_cap) {
+        bail!("CW L0 smoke request cap must be within 1..=8");
+    }
+    let config = SpendGuardConfig {
+        authorized_budget_usd: budget,
+        session_reservation_usd: budget,
+        max_session_cost_usd: budget,
+        max_requests_per_session: request_cap,
+        request_reservation_usd: budget,
+        ..Default::default()
+    };
+    Ok(Some(SpendGuard::new_with_campaign_request_limit(
+        config,
+        request_cap,
+    )))
+}
+
+#[cfg(test)]
+mod l0_smoke_guard_tests {
+    use super::*;
+    use cw_core::spend_guard::SpendGuardError;
+
+    #[test]
+    fn smoke_guard_is_absent_or_requires_both_bounded_values() {
+        assert!(l0_smoke_spend_guard(None, None).unwrap().is_none());
+        assert!(l0_smoke_spend_guard(Some("0.30"), None).is_err());
+        assert!(l0_smoke_spend_guard(None, Some("1")).is_err());
+        assert!(l0_smoke_spend_guard(Some("0"), Some("1")).is_err());
+        assert!(l0_smoke_spend_guard(Some("0.30"), Some("9")).is_err());
+    }
+
+    #[test]
+    fn smoke_guard_reserves_full_ceiling_and_shares_global_request_cap() {
+        let guard = l0_smoke_spend_guard(Some("0.30"), Some("1"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(guard.config().request_reservation_usd, 0.30);
+        let _first = guard.admit_request("session-a").unwrap();
+        assert!(matches!(
+            guard.admit_request("session-b"),
+            Err(SpendGuardError::RequestLimitExceeded { count: 2, limit: 1 })
+        ));
+    }
+}
+
 #[derive(Subcommand)]
 enum PinPolicyAction {
     /// Show consent, stored pin contents/status, request eligibility and future-generation scope
@@ -456,6 +521,32 @@ async fn main() -> Result<()> {
 
             let mut state = DaemonState::new(store);
             state.control_token = cw_core::control::control_token(true)?;
+            state.spend_guard = l0_smoke_spend_guard_from_environment()?;
+            if state.spend_guard.is_some() != state.live_provider_model.is_some() {
+                bail!("CW L0 smoke budget and model authorization must be configured together");
+            }
+            if state.spend_guard.is_some()
+                && (state
+                    .live_allowed_session_id
+                    .as_deref()
+                    .is_none_or(|id| !cw_core::control::is_valid_session_id(id))
+                    || state.live_authorization_expires_at.is_none())
+            {
+                bail!("CW L0 smoke session binding and authorization expiry are required");
+            }
+            if state.spend_guard.is_some()
+                && (!matches!(
+                    state.live_provider_model.as_ref(),
+                    Some((cw_core::ir::ProviderKind::OpenAI, model)) if model == "gpt-6-luna"
+                ) || state.openai_upstream != "https://api.openai.com"
+                    || state.openai_api_key.is_none()
+                    || !state.capture_wire_egress
+                    || !state.capture_wire_response)
+            {
+                bail!(
+                    "CW L0 smoke requires the authorized OpenAI model, endpoint, private key, and complete wire capture"
+                );
+            }
             let proxy_app = build_proxy_router(state.clone());
             let ui_and_api_app =
                 build_api_router(state).fallback(commands::web::serve_embedded_web_ui);

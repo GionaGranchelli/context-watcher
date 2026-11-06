@@ -296,3 +296,204 @@ async fn cw122_unapproved_spend_guard_blocks_before_upstream_dispatch() {
     );
     assert!(guard.is_killswitch_tripped());
 }
+
+#[tokio::test]
+#[ignore = "one-request live OpenAI pruning test; requires explicit CW122_REAL_PRUNE_TEST=1 and CW122_REAL_PRUNE_AUTH_USD=0.30"]
+async fn cw122_live_pruning_reaches_openai_and_settles() {
+    use chrono::Duration;
+    use cw_core::spend_guard::{SpendGuard, SpendGuardConfig};
+
+    assert_eq!(std::env::var("CW122_REAL_PRUNE_TEST").as_deref(), Ok("1"));
+    assert_eq!(
+        std::env::var("CW122_REAL_PRUNE_AUTH_USD").as_deref(),
+        Ok("0.30")
+    );
+    let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
+    let session_id = format!("cw122-live-prune-{}", uuid::Uuid::new_v4().simple());
+    let stub = "[cw:pruned historical tool output]";
+    let mut raw = load("trace-f1.json");
+    raw["model"] = json!("gpt-6-luna");
+    raw["service_tier"] = json!("default");
+    raw["max_output_tokens"] = json!(512);
+    raw.as_object_mut().unwrap().remove("temperature");
+    raw.as_object_mut().unwrap().remove("top_p");
+    raw["input"].as_array_mut().unwrap().push(json!({
+        "type":"message", "role":"user", "content":"Reply exactly CW_PRUNE_LIVE_OK."
+    }));
+
+    let store = CwStore::open_in_memory().unwrap();
+    store
+        .upsert_session(&Session {
+            id: session_id.clone(),
+            parent_session_id: None,
+            harness: HarnessKind::GenericProxy,
+            workspace_root: None,
+            model: "gpt-6-luna".into(),
+            provider: ProviderKind::OpenAI,
+            title: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        })
+        .unwrap();
+    store
+        .set_autopilot_config(&cw_core::autopilot::AutoPilotConfig {
+            enabled: true,
+            auto_diet_at_breakpoint: false,
+            local_model_window_guard: false,
+            auto_heal_low_health: false,
+            auto_cache_safe_pin: false,
+            zero_break_tail_hygiene: false,
+            auto_sync_to_disk: false,
+            ..Default::default()
+        })
+        .unwrap();
+    let nodes = parse_request_to_nodes(&raw, ProviderKind::OpenAI, 1).unwrap();
+    let target = nodes
+        .iter()
+        .find(|node| matches!(&node.kind, NodeKind::ToolResult { call_id, .. } if call_id == "old_tests"))
+        .unwrap();
+    store
+        .save_mutation(&MutationRule {
+            id: "cw122-live-prune".into(),
+            session_id: session_id.clone(),
+            op: MutationOp::PruneOrStub {
+                target_fingerprint: Some(target.fingerprint.0.clone()),
+                target_call_id: Some("old_tests".into()),
+                target_json_pointer: Some(target.raw_json_pointer.clone()),
+                stub_text: stub.into(),
+            },
+            status: MutationStatus::Committed,
+            estimated_saved_tokens: 0,
+            estimated_kv_break_tokens: 0,
+            created_at: Utc::now(),
+        })
+        .unwrap();
+
+    let guard = SpendGuard::new_with_campaign_request_limit(
+        SpendGuardConfig {
+            authorized_budget_usd: 0.30,
+            session_reservation_usd: 0.30,
+            max_session_cost_usd: 0.30,
+            max_requests_per_session: 1,
+            require_verified_pricing: true,
+            request_reservation_usd: 0.30,
+        },
+        1,
+    );
+    let mut state = DaemonState::new(store.clone());
+    state.openai_upstream = "https://api.openai.com".into();
+    state.openai_api_key = Some(api_key);
+    state.openai_api_key_configured = true;
+    state.live_provider_model = Some((ProviderKind::OpenAI, "gpt-6-luna".into()));
+    state.live_allowed_session_id = Some(session_id.clone());
+    state.live_authorization_expires_at = Some(Utc::now() + Duration::minutes(5));
+    state.spend_guard = Some(guard.clone());
+    state.capture_wire_egress = true;
+    let control_token = state.control_token.clone();
+    let app = build_proxy_router(state);
+    let original = serde_json::to_vec(&raw).unwrap();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/openai/v1/responses")
+                .header("content-type", "application/json")
+                .header("x-cw-session-id", &session_id)
+                .header("x-cw-control-token", control_token)
+                .body(Body::from(original.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let response_bytes = to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    let provider_response: Value = serde_json::from_slice(&response_bytes).unwrap();
+    let turn = store.get_latest_turn(&session_id).unwrap().unwrap();
+    let egress_bytes = store.get_wire_egress(&turn.id).unwrap().unwrap();
+    let evidence_dir = std::env::temp_dir()
+        .join("cw122-live-prune-evidence")
+        .join(&session_id);
+    std::fs::create_dir_all(&evidence_dir).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&evidence_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    std::fs::write(evidence_dir.join("ingress.json"), original).unwrap();
+    std::fs::write(evidence_dir.join("egress.json"), &egress_bytes).unwrap();
+    std::fs::write(evidence_dir.join("response.json"), &response_bytes).unwrap();
+    std::fs::write(
+        evidence_dir.join("settlement.json"),
+        serde_json::to_vec_pretty(&json!({
+            "session_id": session_id,
+            "turn_id": turn.id,
+            "applied_mutation_ids": turn.applied_mutation_ids,
+            "saved_tokens_estimate": turn.token_usage.saved_by_mutations,
+            "http_status": status.as_u16(),
+            "provider_status": provider_response["status"],
+            "request_count": guard.total_request_count(),
+            "settled_usd": guard.total_spent_usd(),
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for name in [
+            "ingress.json",
+            "egress.json",
+            "response.json",
+            "settlement.json",
+        ] {
+            std::fs::set_permissions(
+                evidence_dir.join(name),
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .unwrap();
+        }
+    }
+    eprintln!("Private live evidence: {}", evidence_dir.display());
+    assert!(
+        status.is_success(),
+        "provider returned {status}: {}",
+        String::from_utf8_lossy(&response_bytes)
+    );
+    assert_eq!(provider_response["model"], "gpt-6-luna");
+    assert!(matches!(
+        provider_response["status"].as_str(),
+        Some("completed" | "incomplete")
+    ));
+    if provider_response["status"] == "incomplete" {
+        assert_eq!(
+            provider_response.pointer("/incomplete_details/reason"),
+            Some(&json!("max_output_tokens"))
+        );
+    } else {
+        assert!(provider_response.to_string().contains("CW_PRUNE_LIVE_OK"));
+    }
+
+    let egress: Value = serde_json::from_slice(&egress_bytes).unwrap();
+    assert_eq!(egress["input"][2]["output"], stub);
+    assert_eq!(turn.applied_mutation_ids, vec!["cw122-live-prune"]);
+    assert_eq!(store.get_turn_raw_payload(&turn.id).unwrap().unwrap(), raw);
+    assert_eq!(guard.total_request_count(), 1);
+    assert!(guard.total_spent_usd() > 0.0 && guard.total_spent_usd() <= 0.30);
+    eprintln!(
+        "CW122 live prune PASS: model=gpt-6-luna response_status={} incomplete_reason={:?} requests={} settled_usd={:.6} input_tokens={} output_tokens={}",
+        provider_response["status"],
+        provider_response.pointer("/incomplete_details/reason"),
+        guard.total_request_count(),
+        guard.total_spent_usd(),
+        provider_response
+            .pointer("/usage/input_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        provider_response
+            .pointer("/usage/output_tokens")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+    );
+}

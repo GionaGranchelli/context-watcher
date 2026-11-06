@@ -1,0 +1,179 @@
+{
+  "codex_cli_version": "codex-cli 0.166.0",
+  "codex_executable_sha256": "e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af",
+  "codex_exit_code": 0,
+  "codex_sentinel_observed": true,
+  "completed_cw_turns": 1,
+  "context_watcher": "current branch debug binary",
+  "cw_executable_sha256": "e344cc568a82012d77f0d358ed0c5a5694bd96cdd815ddc4c4b55b45a053b5f0",
+  "failed_zero_request_attempts": [
+    {
+      "codex_output_sha256": "121db64788d9c8d29af50964b03ed3db1be4105f3d8ad29a6c5f343c59368f64",
+      "private_evidence_tree_sha256": "6f08ee19644f2a0f52e86efb3d86141053bb19c7e745a7b44adf20fdd662a644",
+      "reason": "Codex refused a non-Git workspace before launch"
+    },
+    {
+      "codex_output_sha256": "a8cdf9222952ef3ae2b405fa0d828a231268a0cd87148eefa6eb574a024ee557",
+      "private_evidence_tree_sha256": "211ae777416c5ad32cf3d839fc32de67219caa71adc7b4ae328167a48aaa31a2",
+      "reason": "cw wrap configuration ordering left Codex on its default provider; Codex failed closed because OPENAI_API_KEY was absent"
+    }
+  ],
+  "follow_up_attempts": [
+    {
+      "outcome": "setup_failed_before_CW_start",
+      "private_evidence_directory": "operator-local temporary evidence",
+      "private_evidence_tree_sha256": "NOT_AVAILABLE",
+      "provider_calls": 0,
+      "reason": "Copied harness did not precreate required isolated directories"
+    },
+    {
+      "codex_retries": 5,
+      "cw_cancelled_turns": 30,
+      "loopback_requests": 0,
+      "outcome": "proxy_rejected_invalid_synthetic_key_before_upstream",
+      "private_evidence_artifact_sha256": {
+        "codex-events.jsonl": "631d81f11efe0b394aff2684876b3d378d308d48b049a3dbc01eab4c9b5cb0a6",
+        "cw-server.log": "db4beb056beb3d88d274b3fa75432e9394a8fea124705443863290528fc98812",
+        "cw.db": "aef50f6e54b44d9048ca017fde06ef7f3744c7402b88d5d73826d72bb56a151a"
+      },
+      "private_evidence_directory": "operator-local temporary evidence",
+      "provider_calls": 0,
+      "reason": "Synthetic key fixture included a trailing newline; proxy correctly rejected it"
+    },
+    {
+      "codex_cli_version": "codex-cli 0.166.0",
+      "codex_executable_sha256": "e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af",
+      "codex_exit_code": 0,
+      "completed_cw_turns": 1,
+      "cw_executable_sha256": "dccae9168e7a1271deafe27ef62ea8d38b42144558a9a1b4b37577891ae29bbb",
+      "external_network_available": false,
+      "harness_source_sha256": "93225015f69644d44081b6fb89a74627fcd6db649392eb80ff3cd3d3aa159265",
+      "host_home_hidden": false,
+      "ingress_matches_egress": true,
+      "limitations": [
+        "SpendGuard authorization-gated runner was not used; direct proxy settlement remains separately tested",
+        "does not establish provider account access, billing, or product value",
+        "host home was not hidden in this intermediate mock run; it is excluded from the fully isolated qualification count",
+        "loopback mock response, not provider inference",
+        "synthetic key only; no real credential or provider call"
+      ],
+      "model_label": "gpt-6-luna",
+      "network_namespace_isolated": true,
+      "private_evidence_artifact_sha256": {
+        "codex-events.jsonl": "80d0ac67e52932a26bdf25a6fca5b3bc865d6b6600d2fee5c0a336aa418383f6",
+        "cw-server.log": "ef091ae3281c43918ed350cfe67f4282e94c6458939c882cf50020b8c7eab887",
+        "cw.db": "6c36ed65b0c3d626cccca7e2684547b7358850363d77c6281d95de9f24c76f8f",
+        "mock-upstream-request.bin": "f9f54c64e3e5de289e87dcfe08db854ac9444419354823ff584aab5ea883a268",
+        "run-summary.json": "9222997cb1c626365c769d6ecf87113d561f26daf53a40ef31e35707e04ec24c",
+        "turn-00-egress.bin": "f9f54c64e3e5de289e87dcfe08db854ac9444419354823ff584aab5ea883a268",
+        "turn-00-ingress.bin": "f9f54c64e3e5de289e87dcfe08db854ac9444419354823ff584aab5ea883a268",
+        "turn-00-response.bin": "aa571fdcf10ad93e5c6ed42f1ccce6c0ed5a547b9e18101aef44f46d09a94ae2",
+        "turn-00.json": "5bccb7169b6be3fd86a818ac7cb269030a7303bceca51f15b1aa1acc13eeeb1e"
+      },
+      "private_evidence_artifacts_scanned_for_synthetic_key": {
+        "occurrence_files": [
+          "cw-key",
+          "e2e.py"
+        ],
+        "other_raw_artifacts_clear": true
+      },
+      "provider_calls": 0,
+      "qualification_id": "CW-122B2-L0-CODEX-LOOPBACK-MOCK-2",
+      "request_count": 1,
+      "result": "PASS",
+      "sentinel_observed": true,
+      "upstream_authorization_matches_synthetic_key": true,
+      "wrapper_source_sha256": "beb9c61ae81d2772d31907b4626ea0e5fe793a2835dba1635a4bd4a5d79a8c45"
+    },
+    {
+      "codex_cli_version": "codex-cli 0.166.0",
+      "codex_executable_sha256": "e14fc83739c13c1074b12bd1acce4010c893c7f6fbfc1593b4a31d74cabb57af",
+      "codex_exit_code": 0,
+      "completed_cw_turns": 1,
+      "cw_executable_sha256": "dccae9168e7a1271deafe27ef62ea8d38b42144558a9a1b4b37577891ae29bbb",
+      "external_network_available": false,
+      "harness_source_sha256": "93225015f69644d44081b6fb89a74627fcd6db649392eb80ff3cd3d3aa159265",
+      "host_home_hidden": true,
+      "ingress_matches_egress": true,
+      "limitations": [
+        "loopback mock response, not provider inference",
+        "authorization-gated SpendGuard runner was not used; direct proxy settlement remains separately tested",
+        "synthetic key only; no real credential or provider call",
+        "does not establish provider account access, billing, or product value"
+      ],
+      "model_label": "gpt-6-luna",
+      "network_namespace_isolated": true,
+      "private_evidence_artifact_sha256": {
+        "codex-events.jsonl": "7cc9271e5e8ba488456a916248a7d479abc71d8898d9a8f6d0d63cd707a23f35",
+        "cw-server.log": "ca0738db43cb463dcb95f9aac4705dc3596df0081dbdc01f80a51991819d6868",
+        "cw.db": "54d4cda180084edbff1a99efc3be8a249922b4c3a6a05a2dd0cf770c2b1783a4",
+        "mock-upstream-request.bin": "88ac9844e8da86bb42453411683b2bea3471eeefd38af04816c3ef0abf5a53a6",
+        "run-summary.json": "e3326ad9545af03a630a98726c884b85d483c001e9083a944d9ef31f515bca4c",
+        "turn-00-egress.bin": "88ac9844e8da86bb42453411683b2bea3471eeefd38af04816c3ef0abf5a53a6",
+        "turn-00-ingress.bin": "88ac9844e8da86bb42453411683b2bea3471eeefd38af04816c3ef0abf5a53a6",
+        "turn-00-response.bin": "aa571fdcf10ad93e5c6ed42f1ccce6c0ed5a547b9e18101aef44f46d09a94ae2",
+        "turn-00.json": "6619c90bbaa0b55209d5fd263650fb5368349d960870850eefbfeff619aa7380"
+      },
+      "provider_calls": 0,
+      "qualification_id": "CW-122B2-L0-CODEX-LOOPBACK-MOCK-3",
+      "request_count": 1,
+      "result": "PASS",
+      "sandbox_executable_sha256": "523da3e7399044be5163aee6f57a77a6bef7454376e28f0a0627920bae1b76b6",
+      "sentinel_observed": true,
+      "upstream_authorization_matches_synthetic_key": true,
+      "wrapper_source_sha256": "beb9c61ae81d2772d31907b4626ea0e5fe793a2835dba1635a4bd4a5d79a8c45"
+    },
+    {
+      "attempt_id": "CW-122B2-L0-CODEX-SPENDGUARD-MOCK-1",
+      "external_network_available": false,
+      "host_home_hidden": true,
+      "limitations": [
+        "No actual Codex request reached CW proxy in this attempt",
+        "SpendGuard settlement remains verified by the direct loopback proxy integration test",
+        "Full guarded Codex-to-provider execution remains unverified until the separately authorized real endpoint smoke"
+      ],
+      "loopback_requests": 0,
+      "network_namespace_isolated": true,
+      "outcome": "blocked_startup_before_proxy_ready",
+      "owned_processes_remaining": 0,
+      "private_evidence_artifact_sha256": {
+        "cw-server.log": "81429d87b815a3a80cb2c0e5762b3f1729e429ff813064c6641c4deec7faa3a1",
+        "cw.db": "8a797de82b85974adf771196d9b78e1b4230cd029aa1efcd7b431f50140e2ce8",
+        "e2e.py": "825c2b127a78fce37bf52faf1ded95d2c687b068f5c8cc9efcd91d5e1b77aa86"
+      },
+      "private_evidence_directory": "operator-local temporary evidence",
+      "process_cleanup_verified": true,
+      "provider_calls": 0,
+      "reason": "The production L0 startup guard requires the exact OpenAI upstream endpoint, so it rejected the loopback upstream override before proxy readiness."
+    }
+  ],
+  "host_home_hidden": true,
+  "ingress_matches_egress": true,
+  "limitations": [
+    "mock response, not provider inference",
+    "SpendGuard settlement was not active in this Codex-path run; separately verified by the loopback proxy settlement test",
+    "does not establish account access, billing, or product value"
+  ],
+  "model_label": "gpt-6-luna",
+  "network_namespace_isolated": true,
+  "private_evidence_artifact_sha256": {
+    "codex-events.jsonl": "47ccce6d935720e3306591d360995517e90f311b151cbdcfe7dfa45ab09824e6",
+    "cw-server.log": "d817a7ee6d156b6fe3511aa4721f11f44cec4a513342f4c90b07699abf07cf8a",
+    "cw.db": "2a2d75949f3dc1e54ebf518cf725b085058bfcf8ea7c31f29d09c8a438b7344b",
+    "e2e.py": "4b471761bb21dc4e53a957d1ff06431214302b2e957f81f38110a1a080f7873f",
+    "mock-upstream-request.bin": "41d604a0398e22eb7d56b81793b1ab733386e6cd31c3b722a1749e01b952f16b",
+    "turn-00-egress.bin": "41d604a0398e22eb7d56b81793b1ab733386e6cd31c3b722a1749e01b952f16b",
+    "turn-00-ingress.bin": "41d604a0398e22eb7d56b81793b1ab733386e6cd31c3b722a1749e01b952f16b",
+    "turn-00-response.bin": "aa571fdcf10ad93e5c6ed42f1ccce6c0ed5a547b9e18101aef44f46d09a94ae2",
+    "turn-00.json": "289b8eae2bb1c6e7752340565178daf97feaf3f68facf2a016e4102934f8ba7e"
+  },
+  "private_evidence_tree_sha256": "7b34b5c8ce3233c96aea6851ff92159128904bdae1d58c65256c162483188d4d",
+  "provider_calls": 0,
+  "qualification_id": "CW-122B2-L0-CODEX-LOOPBACK-MOCK-1",
+  "request_count": 1,
+  "request_outcome": "completed",
+  "result": "PASS",
+  "spend_guard_enabled": false,
+  "upstream": "loopback-only OpenAI Responses mock",
+  "wrapper_source_sha256": "bd2ac39d389af5725b6cebc94e97954d63da34643ee9e3a58d3e8b44ceca4949"
+}

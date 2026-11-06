@@ -19,6 +19,10 @@ The installed Codex CLI and authenticated Responses path passed a 12-attempt loo
 
 Provider profile, complete-session usage and cache-pricing adapter, cache-fairness controls, and the shared campaign request cap are under offline qualification. No live runner or provider inference is enabled. See [readiness protocol](docs/CW-122B2-P-READINESS.md).
 
+## CW-122B2-L0 — Local smoke runner preparation
+
+PR #45 contains the single-request Codex smoke runner and strict Luna settlement. Two separately authorized real requests reached OpenAI through Codex → CW; the retry settled at `$0.001266`, and corrected offline replay of its complete private evidence passes the L0 smoke gates. A separate one-request-per-attempt live probe also sent a committed historical prune through CW to GPT-6 Luna: the completed attempt applied the rule, preserved the stored ingress, captured the transformed egress, and settled 270 input plus 252 output tokens at `$0.000153`. Its 1,768-token prune figure is estimated; without an M1 baseline, savings and product value remain `NOT_EVALUATED`. Private evidence and failed attempts are preserved in the readiness report. Local workspace tests (321 passed, 23 ignored), 28 Python tests in normal and optimized modes, and workspace Clippy passed before this test addition; current targeted pruning tests pass (3 passed, 1 ignored). Latest changes have not run through full CI or independent review. Provider invoice data is unverified; the six-pair campaign stays disabled. Cache economics remain unqualified until real evidence supports cache-state comparability and `isolation_verified`; equal hashes alone are insufficient. See [L0 readiness](docs/CW-122B2-L0-READINESS.md).
+
 ## CW-121C2 — Merged
 
 Daemon-backed human TUI consent controls and read-only MCP policy inspection implemented for independent review. Deterministic and scripted terminal checks passed. No inference, new authorization model, or automatic merge. See [workflow, evidence and security inventory](docs/CW-121C2-TUI-MCP-CONTROLS.md).

@@ -9,6 +9,8 @@ use crate::{
     state::{DaemonState, WsEvent},
 };
 
+const MAX_CAPTURED_PROVIDER_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
+
 pub struct Recorder {
     pub state: DaemonState,
     pub turn: Option<ContextTurn>,
@@ -20,6 +22,9 @@ pub struct Recorder {
     pub buffer: Vec<u8>,
     pub terminal_outcome: Option<String>,
     pub current_event: Option<String>,
+    pub raw_response: Option<Vec<u8>>,
+    pub response_capture_truncated: bool,
+    pub response_body_complete: bool,
     pub session_terminated: bool,
     pub spend_permit: Option<cw_core::spend_guard::RequestPermit>,
 }
@@ -48,6 +53,7 @@ impl Recorder {
         previous: Option<Vec<ContextNode>>,
         started: Instant,
     ) -> Self {
+        let raw_response = state.capture_wire_response.then(Vec::new);
         Self {
             state,
             turn,
@@ -59,12 +65,25 @@ impl Recorder {
             buffer: Vec::new(),
             terminal_outcome: None,
             current_event: None,
+            raw_response,
+            response_capture_truncated: false,
+            response_body_complete: false,
             session_terminated: false,
             spend_permit: None,
         }
     }
 
     pub fn tap(&mut self, bytes: &[u8]) {
+        let mut capture_truncated = false;
+        if let Some(raw) = self.raw_response.as_mut() {
+            let remaining = MAX_CAPTURED_PROVIDER_RESPONSE_BYTES.saturating_sub(raw.len());
+            let captured = bytes.len().min(remaining);
+            raw.extend_from_slice(&bytes[..captured]);
+            capture_truncated = captured < bytes.len();
+        }
+        if capture_truncated {
+            self.response_capture_truncated = true;
+        }
         if let Some(turn) = self.turn.as_mut()
             && turn.first_body_byte_ms.is_none()
             && !bytes.is_empty()
@@ -222,8 +241,39 @@ impl Recorder {
                 .as_ref()
                 .and_then(|t| t.model.clone())
                 .unwrap_or_default();
-            if let Err(error) = permit.settle(self.usage.as_ref(), self.provider, &model) {
-                tracing::error!(%error, "SpendGuard settlement failed; killswitch engaged");
+            let turn_id = self
+                .turn
+                .as_ref()
+                .map(|turn| turn.id.as_str())
+                .unwrap_or_default();
+            let request = self
+                .state
+                .store
+                .get_wire_egress(turn_id)
+                .ok()
+                .flatten()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+            let settlement = permit.settle_with_request(
+                self.usage.as_ref(),
+                request.as_ref(),
+                self.provider,
+                &model,
+            );
+            let (status, settled_usd, error) = match settlement {
+                Ok(cost) => ("SETTLED", Some(cost), None),
+                Err(error) => {
+                    tracing::error!(%error, "SpendGuard settlement failed; killswitch engaged");
+                    ("FAILED_CLOSED", None, Some(error.to_string()))
+                }
+            };
+            if let Err(error) = self.state.store.record_spend_settlement(
+                turn_id,
+                status,
+                settled_usd,
+                self.usage.as_ref(),
+                error.as_deref(),
+            ) {
+                tracing::error!(%error, "Unable to persist SpendGuard settlement evidence");
             }
         }
         let mut turn = self.turn.take()?;
@@ -260,6 +310,9 @@ impl Recorder {
             .unwrap_or(0)
             .min(u32::MAX as u64) as u32;
         let state = self.state.clone();
+        let raw_response = self.raw_response.take();
+        let response_capture_truncated = self.response_capture_truncated;
+        let response_body_complete = self.response_body_complete;
         let provider = self.provider;
         let is_session_ended = self.session_terminated
             || state
@@ -270,6 +323,16 @@ impl Recorder {
             if let Err(error) = state.store.save_turn(&turn, None, None, None) {
                 tracing::error!(%error,"Unable to finalize provider attempt");
                 return;
+            }
+            if state.capture_wire_response
+                && let Err(error) = state.store.save_wire_response(
+                    &turn.id,
+                    raw_response.as_deref().unwrap_or_default(),
+                    response_body_complete,
+                    response_capture_truncated,
+                )
+            {
+                tracing::error!(%error, "Unable to persist raw provider response evidence");
             }
             for id in &turn.applied_mutation_ids {
                 let record = MutationEffectivenessRecord {
@@ -483,6 +546,29 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         panic!("Turn {} was not saved to store in time", turn_id);
+    }
+
+    #[tokio::test]
+    async fn oversized_raw_response_is_marked_incomplete_for_evidence() {
+        let (mut recorder, store, turn_id) = create_test_recorder(ProviderKind::OpenAI);
+        recorder.state.capture_wire_response = true;
+        recorder.raw_response = Some(Vec::new());
+        recorder.tap(&vec![b'x'; MAX_CAPTURED_PROVIDER_RESPONSE_BYTES + 1]);
+        recorder.tap(b"tail");
+        recorder.response_body_complete = true;
+        let task = recorder
+            .finish("completed")
+            .expect("turn finalization task");
+        task.await.expect("turn finalization");
+
+        let (body, complete, truncated) = store
+            .get_wire_response(&turn_id)
+            .unwrap()
+            .expect("wire response evidence");
+        assert_eq!(body.len(), MAX_CAPTURED_PROVIDER_RESPONSE_BYTES);
+        assert!(body.iter().all(|byte| *byte == b'x'));
+        assert!(complete);
+        assert!(truncated);
     }
 
     #[tokio::test]

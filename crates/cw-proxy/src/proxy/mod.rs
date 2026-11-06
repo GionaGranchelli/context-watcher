@@ -63,6 +63,20 @@ fn fallback_invalid_mutation(
     }
 }
 
+fn require_standard_service_tier(payload: &mut Value) -> Result<bool, ()> {
+    if !payload.is_object() {
+        return Err(());
+    }
+    match payload.get("service_tier") {
+        None => {
+            payload["service_tier"] = Value::String("default".into());
+            Ok(true)
+        }
+        Some(tier) if tier.as_str() == Some("default") => Ok(false),
+        Some(_) => Err(()),
+    }
+}
+
 /// Builds the Intercepting Proxy Router (`127.0.0.1:4401`).
 pub fn build_proxy_router(state: DaemonState) -> Router {
     Router::new()
@@ -92,6 +106,49 @@ pub async fn handle_proxy_request(
     }
 
     let target = resolve_upstream_target(&state, &uri);
+    let detected_provider = serde_json::from_slice::<Value>(&body)
+        .ok()
+        .map(|raw| detect_provider(uri.path(), &raw))
+        .unwrap_or_else(|| detect_provider(uri.path(), &Value::Null));
+    let upstream_provider = routing::provider_for_route(uri.path(), detected_provider);
+    if state.live_allowed_session_id.is_some() {
+        let expected_origin = format!("{}/", state.openai_upstream.trim_end_matches('/'));
+        let authorized = headers
+            .get("x-cw-control-token")
+            .and_then(|value| value.to_str().ok())
+            == Some(state.control_token.as_str());
+        let bound_session = headers
+            .get("x-cw-session-id")
+            .and_then(|value| value.to_str().ok())
+            == state.live_allowed_session_id.as_deref();
+        let live_route = uri.path().starts_with("/openai/")
+            && target.starts_with(&expected_origin)
+            && upstream_provider == ProviderKind::OpenAI;
+        let authorization_active = state
+            .live_authorization_expires_at
+            .is_some_and(|expires| Utc::now() < expires);
+        let mut authorized_payload = serde_json::from_slice::<Value>(&body).ok();
+        let tier_was_defaulted = authorized_payload
+            .as_mut()
+            .and_then(|payload| require_standard_service_tier(payload).ok());
+        let authorized_tier = tier_was_defaulted.is_some();
+        if !live_route || !authorized || !bound_session || !authorization_active || !authorized_tier
+        {
+            tracing::warn!(
+                live_route,
+                authorized_control_token = authorized,
+                bound_session,
+                authorization_active,
+                authorized_service_tier = authorized_tier,
+                "L0 smoke request rejected before SpendGuard admission"
+            );
+            return (
+                StatusCode::FORBIDDEN,
+                "Smoke authorization route, session, expiry, or pricing tier mismatch",
+            )
+                .into_response();
+        }
+    }
     let mut outbound_body = body.to_vec();
     let mut recorder = None;
 
@@ -520,7 +577,34 @@ pub async fn handle_proxy_request(
         }
     }
 
-    forward_to_upstream(&state, method, target, &headers, outbound_body, recorder).await
+    if state.live_allowed_session_id.is_some() {
+        let mut payload = match serde_json::from_slice::<Value>(&outbound_body) {
+            Ok(payload) => payload,
+            Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        };
+        if require_standard_service_tier(&mut payload).is_err() {
+            return (
+                StatusCode::FORBIDDEN,
+                "Smoke request no longer qualifies for standard pricing",
+            )
+                .into_response();
+        }
+        outbound_body = match serde_json::to_vec(&payload) {
+            Ok(normalized) => normalized,
+            Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        };
+    }
+
+    forward_to_upstream(
+        &state,
+        upstream_provider,
+        method,
+        target,
+        &headers,
+        outbound_body,
+        recorder,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -557,5 +641,154 @@ mod mutation_fallback_tests {
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].rule_id, "pin-1");
         assert_eq!(skipped[0].reason, "PostMutationValidationFailed");
+    }
+}
+
+#[cfg(test)]
+mod l0_route_boundary_tests {
+    use super::{handle_proxy_request, require_standard_service_tier};
+    use crate::state::DaemonState;
+    use axum::{
+        Json, Router,
+        body::Bytes,
+        extract::State,
+        http::{HeaderMap, Method, StatusCode, Uri},
+        routing::post,
+    };
+    use chrono::{Duration, Utc};
+    use cw_store::CwStore;
+
+    #[test]
+    fn l0_defaults_an_omitted_tier_and_rejects_other_explicit_tiers() {
+        let mut omitted = serde_json::json!({"model":"gpt-6-luna"});
+        assert_eq!(require_standard_service_tier(&mut omitted), Ok(true));
+        assert_eq!(omitted["service_tier"], "default");
+
+        let mut explicit = serde_json::json!({"model":"gpt-6-luna","service_tier":"default"});
+        assert_eq!(require_standard_service_tier(&mut explicit), Ok(false));
+        assert_eq!(explicit["service_tier"], "default");
+
+        for tier in ["auto", "priority", "flex"] {
+            let mut payload = serde_json::json!({"service_tier":tier});
+            assert_eq!(require_standard_service_tier(&mut payload), Err(()));
+        }
+        let mut null_tier = serde_json::json!({"service_tier":null});
+        assert_eq!(require_standard_service_tier(&mut null_tier), Err(()));
+    }
+
+    #[tokio::test]
+    async fn l0_forwards_an_explicit_standard_tier_when_codex_omits_it() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let app = Router::new().route(
+            "/v1/responses",
+            post(move |body: Bytes| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(body).unwrap();
+                    (
+                        StatusCode::OK,
+                        Json(serde_json::json!({"status":"completed"})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let mut state = DaemonState::new(CwStore::open_in_memory().unwrap());
+        state.openai_upstream = upstream;
+        state.live_allowed_session_id = Some("cw122b2l0-test-auth".into());
+        state.live_authorization_expires_at = Some(Utc::now() + Duration::minutes(1));
+        state.capture_wire_egress = true;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-cw-control-token", state.control_token.parse().unwrap());
+        headers.insert("x-cw-session-id", "cw122b2l0-test-auth".parse().unwrap());
+        let response = handle_proxy_request(
+            State(state),
+            Method::POST,
+            Uri::try_from("/openai/v1/responses").unwrap(),
+            headers,
+            Bytes::from_static(br#"{"model":"gpt-6-luna","input":"smoke"}"#),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let _ = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        let egress: serde_json::Value = serde_json::from_slice(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(egress["service_tier"], "default");
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn l0_rejects_alternate_routes_and_unbound_openai_requests() {
+        let mut state = DaemonState::new(CwStore::open_in_memory().unwrap());
+        state.live_allowed_session_id = Some("cw122b2l0-test-auth".into());
+        state.live_authorization_expires_at = Some(Utc::now() + Duration::minutes(1));
+        state.live_provider_model = Some((cw_core::ir::ProviderKind::OpenAI, "gpt-6-luna".into()));
+        state.spend_guard = Some(
+            cw_core::spend_guard::SpendGuard::new_with_campaign_request_limit(
+                cw_core::spend_guard::SpendGuardConfig::default(),
+                1,
+            ),
+        );
+
+        for (path, bound, expires_at, tier) in [
+            (
+                "/deepseek/v1/chat/completions",
+                false,
+                Utc::now() + Duration::minutes(1),
+                None,
+            ),
+            (
+                "/openai/v1/responses",
+                false,
+                Utc::now() + Duration::minutes(1),
+                None,
+            ),
+            (
+                "/openai/v1/responses",
+                true,
+                Utc::now() - Duration::seconds(1),
+                Some("default"),
+            ),
+            (
+                "/openai/v1/responses",
+                true,
+                Utc::now() + Duration::minutes(1),
+                None,
+            ),
+            (
+                "/openai/v1/responses",
+                true,
+                Utc::now() + Duration::minutes(1),
+                Some("priority"),
+            ),
+        ] {
+            let mut request_state = state.clone();
+            request_state.live_authorization_expires_at = Some(expires_at);
+            let mut headers = HeaderMap::new();
+            if bound {
+                headers.insert(
+                    "x-cw-control-token",
+                    request_state.control_token.parse().unwrap(),
+                );
+                headers.insert("x-cw-session-id", "cw122b2l0-test-auth".parse().unwrap());
+            }
+            let mut payload = serde_json::json!({"model":"gpt-6-luna"});
+            if let Some(tier) = tier {
+                payload["service_tier"] = serde_json::Value::String(tier.into());
+            }
+            let response = handle_proxy_request(
+                State(request_state),
+                Method::POST,
+                Uri::try_from(path).unwrap(),
+                headers,
+                Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN, "route {path}");
+        }
     }
 }

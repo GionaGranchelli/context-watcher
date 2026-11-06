@@ -78,8 +78,21 @@ fn is_cw_header(header: &str) -> bool {
         .is_some_and(|(name, _)| name.trim().to_ascii_lowercase().starts_with("x-cw-"))
 }
 
-pub(crate) fn codex_proxy_config_args(proxy_port: u16) -> Vec<String> {
-    cw_harnesses::qualification::codex_proxy_config_args(proxy_port)
+pub(crate) fn codex_proxy_config_args(proxy_port: u16, dummy_auth: bool) -> Vec<String> {
+    cw_harnesses::qualification::codex_proxy_config_args_with_auth(proxy_port, dummy_auth)
+}
+
+fn codex_args_with_proxy_config(
+    mut args: Vec<String>,
+    proxy_port: u16,
+    dummy_auth: bool,
+) -> Vec<String> {
+    let insertion = usize::from(args.first().is_some_and(|arg| arg == "exec"));
+    args.splice(
+        insertion..insertion,
+        codex_proxy_config_args(proxy_port, dummy_auth),
+    );
+    args
 }
 
 /// Launches a harness child process with loopback proxy routing and sanitized environment.
@@ -100,10 +113,6 @@ pub fn run_wrap(proxy_port: u16, session_id: Option<String>, cmd: Vec<String>) -
         .is_some_and(|name| name.eq_ignore_ascii_case("gemini"));
 
     let mut args = Vec::new();
-    if is_codex {
-        args.extend(codex_proxy_config_args(proxy_port));
-    }
-
     let mut extracted_session_id = session_id;
     let mut tail_iter = cmd[1..].iter().cloned();
     while let Some(arg) = tail_iter.next() {
@@ -119,6 +128,10 @@ pub fn run_wrap(proxy_port: u16, session_id: Option<String>, cmd: Vec<String>) -
             continue;
         }
         args.push(arg);
+    }
+    let dummy_codex_auth = is_codex && std::env::var_os("CW_L0_SMOKE_DUMMY_AUTH").is_some();
+    if is_codex {
+        args = codex_args_with_proxy_config(args, proxy_port, dummy_codex_auth);
     }
 
     let session_id = extracted_session_id.or_else(|| std::env::var("CW_SESSION_ID").ok());
@@ -164,6 +177,14 @@ pub fn run_wrap(proxy_port: u16, session_id: Option<String>, cmd: Vec<String>) -
 
     if is_gemini {
         process.env("GEMINI_CLI_CUSTOM_HEADERS", gemini_headers);
+    }
+    if is_codex {
+        process.env_remove("CW_OPENAI_API_KEY_FILE");
+        if dummy_codex_auth {
+            process
+                .env_remove("OPENAI_API_KEY")
+                .env("CW_PROXY_DUMMY_API_KEY", "cw-local-proxy-dummy");
+        }
     }
 
     process
@@ -251,15 +272,38 @@ mod tests {
 
     #[test]
     fn codex_wrapper_uses_proxy_provider_and_environment_backed_headers() {
-        let args = codex_proxy_config_args(5432);
+        let args = codex_proxy_config_args(5432, true);
         let settings = args.join(" ");
         assert!(settings.contains("model_provider=\"context_watcher\""));
         assert!(settings.contains("127.0.0.1:5432/openai/v1"));
         assert!(settings.contains("x-cw-session-id\"=\"CW_SESSION_ID"));
         assert!(settings.contains("x-cw-control-token\"=\"CW_CONTROL_TOKEN"));
-        assert!(settings.contains("env_key=\"OPENAI_API_KEY\""));
+        assert!(settings.contains("env_key=\"CW_PROXY_DUMMY_API_KEY\""));
+        assert!(settings.contains("shell_environment_policy.filters.OPENAI_API_KEY"));
+        assert!(settings.contains("shell_environment_policy.filters.CW_OPENAI_API_KEY_FILE"));
         assert!(settings.contains("shell_environment_policy.filters.CW_CONTROL_TOKEN"));
         assert!(!settings.contains("private-token"));
+    }
+
+    #[test]
+    fn ordinary_codex_wrapper_preserves_provider_key_authentication() {
+        let settings = codex_proxy_config_args(5432, false).join(" ");
+        assert!(settings.contains("env_key=\"OPENAI_API_KEY\""));
+        assert!(settings.contains("shell_environment_policy.filters.OPENAI_API_KEY"));
+        assert!(!settings.contains("env_key=\"CW_PROXY_DUMMY_API_KEY\""));
+    }
+
+    #[test]
+    fn codex_exec_proxy_configuration_follows_the_subcommand() {
+        let args = codex_args_with_proxy_config(
+            vec!["exec".into(), "--json".into(), "prompt".into()],
+            5432,
+            true,
+        );
+        assert_eq!(args[0], "exec");
+        assert_eq!(args[1], "--config");
+        assert_eq!(args.last().map(String::as_str), Some("prompt"));
+        assert!(args.contains(&"model_provider=\"context_watcher\"".into()));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 {
-  "version": "CW-121C2-OFFLINE-CONTROLS-1",
+  "version": "CW-122B2-L0-OFFLINE-READINESS-3",
+  "supersedes_runner_freeze_sha256": "0468c6f6030b4312d9640966c840bd39281f3a38fbca24bdbd43dcee40cc388b",
   "default": "sanitized offline fixture",
   "historical_freeze": "benchmark/cw104b/freeze.json is retained unchanged for CW-104B-1 observations",
   "live_scope": "one-local-m1-m2-smoke-pair; explicit live switch plus current single-use operator authorization required",
@@ -32,18 +33,18 @@
     "crates/cw-proxy/src/api/mutations.rs": "460114501ec41b7d8566c55e90a6c60dc7f2aa31f2c0e20618396eb0fe752f69",
     "crates/cw-proxy/src/api/pin_policy.rs": "8e57e86a92c884b1065bc6a257d0a772a53045c8653525512045a6966803ca3e",
     "crates/cw-proxy/src/api/transform.rs": "249d9e257908c94376d5cb0b9ab3eefcb20a935ab8b32cdae12a15d1d9fd13c1",
-    "crates/cw-proxy/src/proxy/mod.rs": "362d18fe1a71809bf37e6d37ca22f31d923e1984722ed542e2210863d72fdf42",
+    "crates/cw-proxy/src/proxy/mod.rs": "0238d0c67f16a743592a5df9d1e0738cd594f0ad77589943a5cd3e722b1ac232",
     "crates/cw-proxy/tests/pin_lifecycle.rs": "34bd4d5f49dca9853c0789b3becd5541574228c952005f6ac46471a693b81511",
-    "crates/cw-store/src/lib.rs": "548fd530d778c2d8d1363e9cc7bfd6aa1b271331eb8c25961b000933011425ee",
+    "crates/cw-store/src/lib.rs": "c21b8654e3dabd499c455a3ed7c498e899c9605eab9d17e212635a6ed24bdc11",
     "crates/cw-tui/src/lib.rs": "733220bafd80c1d749ea178166026bcf5e642b00e1e4c76200c86ab8fdfe4634",
     "plugins/pi-opencode/index.js": "9623aeefb02ac6da1346eca42567fb75c4e1a9e1bbc8469c4e950c8827a1a08e",
     "crates/cw-cli/src/commands/pin_policy.rs": "afacfde761d68f3521d2a4ab822e8885691e1535495883289fc4711dd1a66e3f",
-    "crates/cw-cli/src/main.rs": "28b970811878255f3cec1125da5a20196e1d5c56a1a309c83a258d234a06941d",
+    "crates/cw-cli/src/main.rs": "912a44b7a8653bc096847ea9040b31e7674149a86f87249f00dee95c2f721a82",
     "web/src/lib/pinPolicy.ts": "f37159c76351c436f29e966466ab85f5d81525f43ddcf763c7939a5cabac93aa",
     "web/src/lib/PinContextPolicy.svelte": "83a30ebd821df5f3de25ec42a1c14937e348fc9fe21d26e89f759c8cca2bc63b",
     "crates/cw-tui/src/pin_policy.rs": "fb77a9a4bd1af93baca60fcb16cbcf3601d78793b189bf9aee9bb0348ee305c6",
     "crates/cw-mcp/src/lib.rs": "203fbe9cc705bf3ab4fa279caf721d94eeb4ee3707c927843958c1a1f9c9adbf",
     "scripts/cw121c2_terminal_smoke.py": "ebe0aabff8b21d4a4e0a89b6a7aed08fff69058dee96e856d953eacec991eea1"
   },
-  "qualification": "Offline operator controls and lifecycle/creation fixtures only; live runner not requalified"
+  "qualification": "Offline operator controls, lifecycle/creation fixtures, and CW-122B2-L0 proxy/admission/evidence path only; no live runner or provider requalification"
 }

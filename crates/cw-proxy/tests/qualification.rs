@@ -1042,6 +1042,64 @@ fn completed_responses_body(bytes: &[u8]) -> Option<Value> {
     None
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum L1ServiceTierError {
+    NonObjectPayload,
+    NonStandardTier,
+}
+
+fn add_expected_l1_service_tier(payload: &mut Value) -> Result<bool, L1ServiceTierError> {
+    let Some(object) = payload.as_object_mut() else {
+        return Err(L1ServiceTierError::NonObjectPayload);
+    };
+    match object.get("service_tier") {
+        None => {
+            object.insert("service_tier".into(), Value::String("default".into()));
+            Ok(true)
+        }
+        Some(tier) if tier.as_str() == Some("default") => Ok(false),
+        Some(_) => Err(L1ServiceTierError::NonStandardTier),
+    }
+}
+
+fn l1_tool_output_pointer(item_pointer: &str) -> String {
+    format!("{item_pointer}/output")
+}
+
+#[test]
+fn l1_egress_expectation_separates_default_tier_from_pruning() {
+    let mut omitted = json!({"model":"gpt-6-luna"});
+    assert_eq!(add_expected_l1_service_tier(&mut omitted), Ok(true));
+    assert_eq!(omitted["service_tier"], "default");
+
+    let mut explicit = json!({"model":"gpt-6-luna","service_tier":"default"});
+    assert_eq!(add_expected_l1_service_tier(&mut explicit), Ok(false));
+    assert_eq!(explicit["service_tier"], "default");
+
+    let mut nonstandard = json!({"model":"gpt-6-luna","service_tier":"priority"});
+    assert_eq!(
+        add_expected_l1_service_tier(&mut nonstandard),
+        Err(L1ServiceTierError::NonStandardTier)
+    );
+
+    for mut malformed in [Value::Null, json!("not an object"), json!([])] {
+        let original = malformed.clone();
+        assert_eq!(
+            add_expected_l1_service_tier(&mut malformed),
+            Err(L1ServiceTierError::NonObjectPayload)
+        );
+        assert_eq!(malformed, original);
+    }
+}
+
+#[test]
+fn l1_tool_output_pointer_uses_the_observed_item_index() {
+    let item_pointer = "/input/7";
+    let output_pointer = l1_tool_output_pointer(item_pointer);
+    assert_eq!(output_pointer, "/input/7/output");
+    assert_ne!(output_pointer, "/input/2/output");
+}
+
 fn snapshot_workspace(workspace: &std::path::Path) -> std::collections::BTreeMap<String, String> {
     std::fs::read_dir(workspace)
         .expect("read isolated workspace")
@@ -1407,6 +1465,13 @@ async fn test_cw122b2l1_live_matched_smoke_pair() {
         }
         let (target_call_id, original_tool_output, target_pointer, target_fingerprint) =
             selected.expect("bootstrap generated and consumed a real command output");
+        let declared_target_pointer = campaign
+            .pointer("/treatment/pointer")
+            .and_then(Value::as_str)
+            .expect("frozen F1 target pointer")
+            .to_owned();
+        let target_output_pointer = l1_tool_output_pointer(&target_pointer);
+        let frozen_pointer_match = target_output_pointer == declared_target_pointer;
         assert_eq!(
             snapshot_workspace(&workspace),
             initial_files,
@@ -1417,8 +1482,9 @@ async fn test_cw122b2l1_live_matched_smoke_pair() {
             .expect("bootstrap turns")
             .sequence_number;
         let rule_id = "cw122b2l1-smoke-historical-prune";
-        let stub =
-            "[cw:pruned completed diagnostic output; consumed by assistant; original retained]";
+        let stub = campaign["tasks"]["f1"]["stub"]
+            .as_str()
+            .expect("frozen F1 prune stub");
         if mode == "M2" {
             fixture
                 .store
@@ -1485,6 +1551,8 @@ async fn test_cw122b2l1_live_matched_smoke_pair() {
             let original: Value = serde_json::from_slice(&ingress).expect("ingress JSON");
             let actual: Value = serde_json::from_slice(&egress).expect("egress JSON");
             let mut expected = original.clone();
+            let service_tier_defaulted = add_expected_l1_service_tier(&mut expected)
+                .unwrap_or_else(|error| panic!("invalid L1 Responses payload: {error:?}"));
             let mut changed = false;
             if mode == "M2" && turn.sequence_number > bootstrap_max_sequence {
                 let input = expected
@@ -1513,7 +1581,9 @@ async fn test_cw122b2l1_live_matched_smoke_pair() {
                 assert_eq!(turn.applied_mutation_ids, [rule_id]);
             } else {
                 assert!(turn.applied_mutation_ids.is_empty());
-                assert_eq!(ingress, egress, "passthrough bytes changed");
+                if !service_tier_defaulted {
+                    assert_eq!(ingress, egress, "passthrough bytes changed");
+                }
             }
             let (response_bytes, complete, truncated) = fixture
                 .store
@@ -1610,6 +1680,7 @@ async fn test_cw122b2l1_live_matched_smoke_pair() {
                 },
                 "applied_rule_ids":turn.applied_mutation_ids,
                 "skipped_mutations":turn.skipped_mutations,
+                "proxy_transport_normalizations":if service_tier_defaulted {json!( ["service_tier=default"] )} else {json!([])},
                 "response_complete":complete,
                 "response_truncated":truncated
             }));
@@ -1668,6 +1739,13 @@ async fn test_cw122b2l1_live_matched_smoke_pair() {
             "coding_diagnostics":coding_diagnostics,
             "treatment":{
                 "rule_id":if mode=="M2" {json!(rule_id)} else {Value::Null},
+                "stub_sha256":sha256_hex(stub.as_bytes()),
+                "target_history_source":"live_codex_generated",
+                "target_item_pointer":target_pointer,
+                "target_output_pointer":target_output_pointer,
+                "frozen_target_output_pointer":declared_target_pointer,
+                "frozen_pointer_match":frozen_pointer_match,
+                "frozen_pointer_deviation":if frozen_pointer_match {Value::Null} else {json!({"frozen":declared_target_pointer,"observed":target_output_pointer})},
                 "target_call_id_sha256":sha256_hex(target_call_id.as_bytes()),
                 "target_output_sha256":sha256_hex(original_tool_output.as_bytes()),
                 "verified_prunes":verified_prunes,
@@ -1687,6 +1765,10 @@ async fn test_cw122b2l1_live_matched_smoke_pair() {
             &turns,
             &fixture.store,
             &[],
+        );
+        assert!(
+            attempt_started.elapsed() <= Duration::from_secs(600),
+            "per-attempt deadline exceeded before evidence finalization"
         );
         partial.complete();
         attempts.push(report);

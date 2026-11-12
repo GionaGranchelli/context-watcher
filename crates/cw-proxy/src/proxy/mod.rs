@@ -15,7 +15,7 @@ use chrono::Utc;
 use cw_core::{
     analyze_turn_from_payload,
     autopilot::evaluate_autopilot_policies_with_policy,
-    ir::{HarnessKind, MutationOp, MutationStatus, ProviderKind, Session},
+    ir::{HarnessKind, ProviderKind, Session},
     local_llm::strip_internal_cw_fields,
     mutation::{apply_mutations_to_payload_with_policy, evaluate_firewall, has_signed_content},
     normalizer::detect_provider,
@@ -152,71 +152,16 @@ pub async fn handle_proxy_request(
     let mut outbound_body = body.to_vec();
     let mut recorder = None;
 
-'tcp_capture: {
-// Capture the body or exit early
-let raw = if let Ok(v) = serde_json::from_slice(&body) { v } else {
- let _ = state.store.get_latest_turn(&session_id);
- trace_reado("failed to parse JSON");
- };
-if !raw.is_object() { break 'tcp_capture; }
-            let body_session_id = match raw.get("cw_session_id") {
-                None => None,
-                Some(Value::String(id)) => Some(id.clone()),
-                Some(_) => {
-                    return (StatusCode::BAD_REQUEST, "Invalid cw session ID").into_response();
-                }
-            };
-            let body_workspace = match raw.get("cw_workspace") {
-                None => None,
-                Some(Value::String(path))
-                    if body_session_id.is_some()
-                        && path.len() <= 4096
-                        && std::path::Path::new(path).is_absolute() =>
-                {
-                    Some(path.clone())
-                }
-                Some(_) => {
-                    return (StatusCode::BAD_REQUEST, "Invalid cw workspace").into_response();
-                }
-            };
-            if body_session_id.is_some() && uri.path() != "/v1" && !uri.path().starts_with("/v1/") {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "Body session metadata is supported only on the /v1 proxy route",
-                )
-                    .into_response();
-            }
-            raw.as_object_mut()
-                .expect("object checked")
-                .remove("cw_session_id");
-            raw.as_object_mut()
-                .expect("object checked")
-                .remove("cw_workspace");
-            if body_session_id.is_some() || body_workspace.is_some() {
-                outbound_body = match serde_json::to_vec(&raw) {
-                    Ok(body) => body,
-                    Err(error) => {
-                        return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
-                    }
-                };
-            }
-            let provider =
-                routing::provider_for_route(uri.path(), detect_provider(uri.path(), &raw));
+    'capture: {
+        if let Ok(raw) = serde_json::from_slice::<Value>(&body)
+            && raw.is_object()
+        {
+            let provider = detect_provider(uri.path(), &raw);
             let authorized = headers
                 .get("x-cw-control-token")
                 .and_then(|v| v.to_str().ok())
                 == Some(state.control_token.as_str());
             let explicit = headers.get("x-cw-session-id").and_then(|v| v.to_str().ok());
-            if body_session_id.as_deref().is_some_and(|id| {
-                !cw_core::control::is_valid_session_id(id)
-                    || explicit.is_some_and(|header_id| header_id != id)
-            }) {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "Invalid or conflicting cw session ID",
-                )
-                    .into_response();
-            }
             if explicit.is_some() && !authorized {
                 return (
                     StatusCode::FORBIDDEN,
@@ -235,16 +180,13 @@ if !raw.is_object() { break 'tcp_capture; }
                 break 'capture;
             }
             let session_id = explicit
-                .or(body_session_id.as_deref())
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("sess_{}", Uuid::new_v4().simple()));
-            let session_bound = (explicit.is_some() && authorized) || body_session_id.is_some();
             let workspace = headers
                 .get("x-cw-workspace")
                 .filter(|_| authorized)
                 .and_then(|v| v.to_str().ok())
-                .map(str::to_owned)
-                .or(body_workspace);
+                .map(str::to_owned);
             let model = raw
                 .get("model")
                 .and_then(Value::as_str)
@@ -273,11 +215,7 @@ if !raw.is_object() { break 'tcp_capture; }
                 harness: existing_session
                     .as_ref()
                     .map(|existing| existing.harness)
-                    .unwrap_or(if body_session_id.is_some() {
-                        HarnessKind::Omp
-                    } else {
-                        HarnessKind::GenericProxy
-                    }),
+                    .unwrap_or(HarnessKind::GenericProxy),
                 workspace_root: workspace.clone(),
                 model,
                 provider,
@@ -292,33 +230,11 @@ if !raw.is_object() { break 'tcp_capture; }
             };
             let cfg = state.store.get_autopilot_config().unwrap_or_default();
             let strict_shadow = cfg.shadow_policy.enabled && cfg.shadow_policy.strict_shadow_only;
-            let signed_safe_rules = if !strict_shadow
-                && cfg.enabled
-                && session_bound
-                && provider == ProviderKind::Anthropic
-                && cw_core::mutation::has_qualified_anthropic_thinking_signatures(&raw)
-            {
-                state
-                    .store
-                    .list_mutations(&session_id)
-                    .ok()
-                    .filter(|rules| {
-                        rules.iter().any(|rule| {
-                            rule.status == MutationStatus::Committed
-                                && matches!(
-                                    rule.op,
-                                    MutationOp::PruneOrStub { .. }
-                                        | MutationOp::ShadowDedupe { .. }
-                                )
-                        })
-                    })
-            } else {
-                None
-            };
             let mutation_requested = !strict_shadow
                 && cfg.enabled
-                && session_bound
-                && (!has_signed_content(&raw) || signed_safe_rules.is_some());
+                && explicit.is_some()
+                && authorized
+                && !has_signed_content(&raw);
             if let Err(error) = state.store.upsert_session(&session) {
                 if mutation_requested || headers.contains_key("x-cw-dry-run") {
                     return (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response();
@@ -348,15 +264,12 @@ if !raw.is_object() { break 'tcp_capture; }
                 .get_pin_context_policy(&session_id)
                 .unwrap_or_default();
             if active {
-                let rules = match signed_safe_rules {
-                    Some(rules) => rules,
-                    None => match state.store.list_mutations(&session_id) {
-                        Ok(rules) => rules,
-                        Err(error) => {
-                            return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
-                                .into_response();
-                        }
-                    },
+                let rules = match state.store.list_mutations(&session_id) {
+                    Ok(rules) => rules,
+                    Err(error) => {
+                        return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
+                            .into_response();
+                    }
                 };
                 let report = apply_mutations_to_payload_with_policy(
                     &mut outbound,
@@ -592,17 +505,19 @@ if !raw.is_object() { break 'tcp_capture; }
                 }
                 if let Err(error) = state.store.save_wire_request(&turn.id, &body) {
                     if active || headers.contains_key("x-cw-dry-run") {
-                        return (StatusCode::SERVICE_UNAVAILABLE, error.toString())
+                        return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
                             .into_response();
                     }
-                    trace::warn!(%error,"Wire recording unavailable; forwarding original request");
+                    tracing::warn!(%error,"Wire recording unavailable; forwarding original request");
                     break 'capture;
-                };
+                }
                 #[cfg(feature = "qualification-fault-hooks")]
                 if let Some(hook) = state.qualification_fault_hook.as_ref() {
-                    let _ = hook.pause(
-                        "after_ingress...
-                            "phase":"store -> guard -> stream poll lifecycle completed",
+                    let ingress = body.to_vec();
+                    hook.pause(
+                        "after_ingress_before_completed_egress",
+                        serde_json::json!({
+                            "phase":"proxy ingress persisted; model-bound egress not yet dispatched",
                             "session_id":session_id,
                             "turn_id":turn.id,
                             "accepted_admissions":0,
@@ -613,7 +528,8 @@ if !raw.is_object() { break 'tcp_capture; }
                             "process_cleanup":"supervisor_verified",
                         }),
                         &[("ingress.bin", &ingress)],
-                    ).await;
+                    )
+                    .await;
                 }
                 if headers.contains_key("x-cw-dry-run") {
                     return render_dry_run_response(&state, turn, outbound);

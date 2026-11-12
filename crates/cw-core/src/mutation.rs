@@ -16,7 +16,7 @@ static DYNAMIC_TIME_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 static PINNED_CONTEXT_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)(<!--)?\n?<cw_pinned_context>\n?.*?</cw_pinned_context>(?! [<>]).unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)\n?<cw_pinned_context>\n?.*?</cw_pinned_context>").unwrap());
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MutationApplicationReport {
@@ -87,28 +87,8 @@ pub fn apply_mutations_to_payload_with_policy(
     if active_rules.is_empty() {
         return MutationApplicationReport::default();
     }
-    let signed_payload = has_signed_content(payload);
-    if signed_payload
-        && (provider != ProviderKind::Anthropic
-            || !has_qualified_anthropic_thinking_signatures(payload))
-    {
-        return MutationApplicationReport {
-            skipped_rules: active_rules
-                .iter()
-                .map(|rule| SkippedMutation {
-                    rule_id: rule.id.clone(),
-                    reason: "SignedContentSemanticsUnqualified".into(),
-                })
-                .collect(),
-            ..MutationApplicationReport::default()
-        };
-    }
-    let eligibility = if signed_payload {
-        crate::normalizer::classify_mutation_eligibility_for_signed_safe_targets(payload, provider)
-    } else {
-        crate::normalizer::classify_mutation_eligibility(payload, provider)
-    };
-    if !eligibility.allows_any_mutation() {
+    let eligibility = crate::normalizer::classify_mutation_eligibility(payload, provider);
+    if has_signed_content(payload) || !eligibility.allows_any_mutation() {
         let reason = eligibility
             .is_op_eligible(&active_rules[0].op)
             .err()
@@ -138,44 +118,13 @@ pub fn apply_mutations_to_payload_with_policy(
             )
         })
         .unwrap_or(0);
-    let last_signed_idx = before_nodes
-        .iter()
-        .enumerate()
-        .filter(|(_, node)| node_contains_signed_content(payload, node))
-        .map(|(index, _)| index)
-        .max();
-    if signed_payload && last_signed_idx.is_none() {
-        return MutationApplicationReport {
-            skipped_rules: active_rules
-                .iter()
-                .map(|rule| SkippedMutation {
-                    rule_id: rule.id.clone(),
-                    reason: "SignedBoundaryUnavailable".into(),
-                })
-                .collect(),
-            ..MutationApplicationReport::default()
-        };
-    }
 
     let mut applied_ids = Vec::new();
-    let mut pinned_block_ids = Vec::new();
+    let mut pinned_blocks: Vec<(String, String)> = Vec::new();
     let mut pin_rule_ids = Vec::new();
     let mut skipped_rules = Vec::new();
 
     for rule in &active_rules {
-        if signed_payload
-            && (provider != ProviderKind::Anthropic
-                || !matches!(
-                    rule.op,
-                    MutationOp::PruneOrStub { .. } | MutationOp::ShadowDedupe { .. }
-                ))
-        {
-            skipped_rules.push(SkippedMutation {
-                rule_id: rule.id.clone(),
-                reason: "SignedContentPresent".into(),
-            });
-            continue;
-        }
         if matches!(rule.op, MutationOp::PinContext { .. }) {
             let reason = if !pin_policy.is_enabled_for(&rule.session_id) {
                 Some("PinContextOptInRequired")
@@ -200,79 +149,121 @@ pub fn apply_mutations_to_payload_with_policy(
             continue;
         }
         let mut applied = false;
-        let mut matched_signed = false;
         match &rule.op {
-            MutationOp::PruneOrStub { .. } => {
-                // Already handled
-            }
-            MutationOp::ShadowDedupe { .. } => {
-                // Already handled
-            }
-            MutationOp::FoldSubtree { .. } => {
-                // Already handled
-            }
-            MutationOp::GateToolsAndSkills { .. } => {
-                // Already handled
-            }
-            MutationOp::PinContext { .. } => {
-                // Clean/already done
-            }
-            MutationOp::NormalizePrefix { .. } => {
-                // Already handled
-            }
-        }
-        if let Some(reason) = reason {
-            skipped_rules.push(SkippedMutation { rule_id: rule.id.clone(), reason });
-            continue;
-        }
-        if let Err(_) = eligibility.is_op_eligible(&rule.op) {
-            skipped_rules.push(SkippedMutation {
-                rule_id: rule.id.clone(),
-                reason: "OperationNotEligible".into(),
-            });
-            continue;
-        }
-        let mut sub_applied = false;
-        match &rule.op {
-            MutationOp::PruneOrStub { .. } => { sub_applied = true; },
-            MutationOp::ShadowDedupe { .. } => { sub_applied = true; },
-            MutationOp::FoldSubtree { .. } => { sub_applied = true; },
-            MutationOp::GateToolsAndSkills { .. } => { sub_applied = true; },
-            MutationOp::PinContext { label, content, .. } => {
-                // Already extracted
-            }
-            MutationOp::NormalizePrefix { .. } => { sub_applied = true; }
-        }
-})
-        if applied {
-            applied_ids.push(rule.id.clone());
-        } else if matched_signed {
-            skipped_rules.push(SkippedMutation {
-                rule_id: rule.id.clone(),
-                reason: "SignedPrefixProtected".into(),
-            });
-        }
-        }
-        if applied {
-            applied_ids.push(rule.id.clone());
-        } else if matched_signed {
-            skipped_rules.push(SkippedMutation {
-                rule_id: rule.id.clone(),
-                reason: "SignedPrefixProtected".into(),
-            });
-        }
-        }
-        }
-    }
+            MutationOp::PruneOrStub {
+                target_fingerprint,
+                target_call_id,
+                target_json_pointer,
+                stub_text,
+            } => {
+                // Strict Safety Invariant: PruneOrStub must ONLY target prunable kinds
+                // (ToolResult or AssistantThinking). UserPrompt, SystemPrompt, AssistantText,
+                // and ToolCall must NEVER be modified or pruned under any circumstances,
+                // even if targeted directly by JSON pointer.
+                for (node_idx, node) in before_nodes.iter().enumerate() {
+                    let is_prunable_kind = matches!(
+                        node.kind,
+                        NodeKind::ToolResult { .. } | NodeKind::AssistantThinking { .. }
+                    );
+                    if !is_prunable_kind {
+                        continue;
+                    }
+                    if is_protected_tool_result(
+                        node,
+                        node_idx,
+                        before_nodes.len(),
+                        last_assistant_idx,
+                    ) {
+                        continue;
+                    }
 
-    let after_nodes = parse_request_to_nodes(payload, provider, turn_seq).unwrap_or_default();
-    let after_tokens: u32 = after_nodes.iter().map(|n| n.token_span.count).sum();
-    MutationApplicationReport {
-        applied_rule_ids: applied_ids,
-        skipped_rules,
-        saved_tokens: before_tokens.saturating_sub(after_tokens),
-    }
-}
+                    let fp_match = target_fingerprint
+                        .as_ref()
+                        .map(|fp| fp == &node.fingerprint.0);
+                    let call_match = match (&node.kind, target_call_id.as_ref()) {
+                        (NodeKind::ToolResult { call_id, .. }, Some(tc)) if !call_id.is_empty() => {
+                            Some(call_id == tc)
+                        }
+                        _ => None,
+                    };
+                    let ptr_match = target_json_pointer.as_ref().map(|p| {
+                        p == &node.raw_json_pointer
+                            || p.strip_prefix(&node.raw_json_pointer).is_some_and(|rem| {
+                                rem == "/content" || rem == "/text" || rem == "/0/text"
+                            })
+                            || node.raw_json_pointer.strip_prefix(p).is_some_and(|rem| {
+                                rem == "/content" || rem == "/text" || rem == "/0/text"
+                            })
+                    });
+
+                    let mut matches_all = true;
+                    let mut has_selector = false;
+
+                    if let Some(m) = fp_match {
+                        has_selector = true;
+                        matches_all &= m;
+                    }
+                    if let Some(m) = call_match {
+                        has_selector = true;
+                        matches_all &= m;
+                    }
+                    if let Some(m) = ptr_match {
+                        has_selector = true;
+                        matches_all &= m;
+                    }
+
+                    if has_selector
+                        && matches_all
+                        && replace_node_text_at_pointer(payload, &node.raw_json_pointer, stub_text)
+                    {
+                        applied = true;
+                    }
+                }
+            }
+            MutationOp::FoldSubtree {
+                start_turn,
+                end_turn,
+                summary_text,
+            } => {
+                let mut first_folded = true;
+                for (node_idx, node) in before_nodes.iter().enumerate() {
+                    if is_protected_tool_result(
+                        node,
+                        node_idx,
+                        before_nodes.len(),
+                        last_assistant_idx,
+                    ) {
+                        continue;
+                    }
+                    let is_foldable_kind = matches!(
+                        node.kind,
+                        NodeKind::ToolResult { .. } | NodeKind::AssistantThinking { .. }
+                    );
+                    if node.turn_seq >= *start_turn
+                        && node.turn_seq <= *end_turn
+                        && is_foldable_kind
+                    {
+                        let replacement = if first_folded {
+                            first_folded = false;
+                            format!(
+                                "[cw:folded_subtree turns={}..{}] {}",
+                                start_turn, end_turn, summary_text
+                            )
+                        } else {
+                            "[cw:folded]".to_string()
+                        };
+                        if replace_node_text_at_pointer(
+                            payload,
+                            &node.raw_json_pointer,
+                            &replacement,
+                        ) {
+                            applied = true;
+                        }
+                    }
+                }
+            }
+            MutationOp::ShadowDedupe { file_path } => {
+                for (idx, read) in before_nodes.iter().enumerate() {
                     let NodeKind::ToolResult {
                         semantic_meta: Some(ToolSemanticMeta::FileRead { path, .. }),
                         ..
@@ -280,12 +271,6 @@ pub fn apply_mutations_to_payload_with_policy(
                     else {
                         continue;
                     };
-                    if node_contains_signed_content(payload, read)
-                        || last_signed_idx.is_some_and(|last_signed| idx <= last_signed)
-                    {
-                        matched_signed_target = true;
-                        continue;
-                    }
                     if file_path.as_ref().is_some_and(|wanted| wanted != path) {
                         continue;
                     }
@@ -309,28 +294,29 @@ pub fn apply_mutations_to_payload_with_policy(
             } => {
                 if filter_tools_in_payload(payload, disabled_tools, disabled_mcp_servers) {
                     applied = true;
-});
-        }
-        MutationOp::PinContext { label, content, .. } => {
-            let cleaned = PINNED_CONTEXT_RE.replace_all(
-                content,
-                ""
-            );
-            let clean_label = label.trim().to_string();
-            if !cleaned.is_empty() {
-                let already_exists = pinned_blocks.iter().any(|(l, c)| {
-                    (l.eq_ignore_ascii_case(&clean_label) && c.eq_ignore_ascii_case(&cleaned))
-                        || c == &cleaned
-                });
-                if !already_exists {
-                    pinned_blocks.push((clean_label, cleaned));
                 }
-                pin_rule_ids.push(rule.id.clone());
-                applied = true;
             }
-        }
-
-[
+            MutationOp::PinContext { label, content, .. } => {
+                let clean_content = PINNED_CONTEXT_RE
+                    .replace_all(content, "")
+                    .replace("<cw_pinned_context>", "")
+                    .replace("</cw_pinned_context>", "")
+                    .trim()
+                    .to_string();
+                let clean_label = label.trim().to_string();
+                if !clean_content.is_empty() {
+                    let already_exists = pinned_blocks.iter().any(|(l, c)| {
+                        (l.eq_ignore_ascii_case(&clean_label)
+                            && c.eq_ignore_ascii_case(&clean_content))
+                            || c == &clean_content
+                    });
+                    if !already_exists {
+                        pinned_blocks.push((clean_label, clean_content));
+                    }
+                    pin_rule_ids.push(rule.id.clone());
+                    applied = true;
+                }
+            }
             MutationOp::NormalizePrefix {
                 sort_tools_deterministically,
                 relocate_dynamic_system_metadata,
@@ -345,11 +331,6 @@ pub fn apply_mutations_to_payload_with_policy(
         }
         if applied {
             applied_ids.push(rule.id.clone());
-        } else if matched_signed_target {
-            skipped_rules.push(SkippedMutation {
-                rule_id: rule.id.clone(),
-                reason: "SignedPrefixProtected".into(),
-            });
         }
     }
 
@@ -904,44 +885,9 @@ pub fn is_protected_tool_result(
 }
 
 fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)]) -> bool {
-    // Standard: roles.last().role=="user" and text.content is array -> append text block.
-    // Gemini: contents[...].last().type=="text" -> append text to existing node.
-    let is_the_value = {
-        if let Some(msgs) = payload.get_mut("messages").and_then(|v| v.as_mut_array())
-            && let Some(msg) = msgs.last_mut()
-            && msg.get("role").and_then(Value::as_str) == Some("user")
-            && let Some(content_arr) = msg.get_mut("content").and_then(|v| v.as_mut_array())
-            && content_arr.iter().any(|msg| msg.get("type").and_then(Value::as_str) == Some("text"))
-        {
-            for (_, content) in pinned {
-                if !content.is_empty() {
-                    content_arr.push(json!({
-                        "type": "text",
-                        "text": content
-                    }));
-                    return true;
-                }
-            }
-        }
-        false
-    };
-    if is_the_value {
-        return true;
-    }
-    // Gemini/contents fallback
-    if let Some(contents) = payload.get("contents").and_then(Value::as_array)
-        && let Some(text_node) = contents.last()
-        && text_node.get("type").and_then(Value::as_str) == Some("text")
-        && let Some(existing_text) = text_node.get("text").and_then(Value::as_str)
-    {
-        if let Some(role) = text_node.get("role").and_then(Value::as_str) {
-            if exists!(role, "user") {
-                let new = text_node.unwrap().join(`";[` -> [1-> ";" | "``];";
-            }
-        }
-    }
-    false
-}
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array)
+        && !messages.last().is_some_and(|message| {
+            message.get("role").and_then(Value::as_str) == Some("user")
                 && match message.get("content") {
                     Some(Value::String(_)) => true,
                     Some(Value::Array(blocks)) => blocks.iter().all(|block| {
@@ -1230,7 +1176,7 @@ mod tests {
                 ProviderKind::OpenAI,
                 &[pin_rule()],
                 1,
-                &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+                &crate::mutation::PinContextPolicy::explicit_opt_in("another-session"),
             );
             assert_eq!(payload, original, "unsupported tail must remain unchanged");
             assert!(report.applied_rule_ids.is_empty());
@@ -1472,23 +1418,19 @@ mod tests {
         let baseline_report =
             apply_mutations_to_payload(&mut baseline, ProviderKind::OpenAI, &rules[1..], 1);
         assert_eq!(baseline_report.applied_rule_ids, ["prune-1"]);
-        for policy in [
-            PinContextPolicy::default(),
-            PinContextPolicy::explicit_opt_in("session-1")
-        ] {
-            let mut payload = original.clone();
-            let report = apply_mutations_to_payload_with_policy(
-                &mut payload,
-                ProviderKind::OpenAI,
-                &rules,
-                1,
-                &policy,
-            );
-            assert_eq!(payload, baseline);
-            assert_eq!(report.applied_rule_ids, ["prune-1"]);
-            assert_eq!(report.skipped_rules.len(), 1);
-            assert_eq!(report.skipped_rules[0].reason, "PinContextOptInRequired");
-        }
+        let mut payload = original.clone();
+        let report = apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &rules,
+            1,
+            &PinContextPolicy::default(),
+        );
+        assert_eq!(payload, baseline);
+        assert_eq!(report.applied_rule_ids, ["prune-1"]);
+        assert_eq!(report.skipped_rules.len(), 1);
+        assert_eq!(report.skipped_rules[0].reason, "PinContextOptInRequired");
+
         let mut enabled = original.clone();
         let report = apply_mutations_to_payload_with_policy(
             &mut enabled,

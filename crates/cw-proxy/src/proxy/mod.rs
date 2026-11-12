@@ -361,10 +361,13 @@ pub async fn handle_proxy_request(
                             max_kv_break_tokens: MAX_KV_BREAK_TOKENS.saturating_sub(prior_used),
                             ..MutationSchedulingConfig::default()
                         };
-                        let recent_turns = state
-                            .store
-                            .list_turns_page(&session_id, 12, 0)
-                            .unwrap_or_default();
+                        let recent_turns = match state.store.list_turns_page(&session_id, 12, 0) {
+                            Ok(turns) => turns,
+                            Err(error) => {
+                                return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
+                                    .into_response();
+                            }
+                        };
                         let stable_prefix = detect_stable_prefix(&recent_turns, &scheduling);
                         let cache_confidence_known = recent_turns
                             .last()

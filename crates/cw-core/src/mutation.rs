@@ -505,6 +505,7 @@ fn mutation_op_name(op: &MutationOp) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn apply_mutations_with_scheduler(
     payload: &mut Value,
     provider: ProviderKind,
@@ -595,6 +596,9 @@ pub fn apply_mutations_with_scheduler(
         let mut decision = MutationDecisionKind::Selected;
         let mut reason = "Selected".to_string();
         let mut rule_to_apply = rule.clone();
+        let mut decision_rule_id = rule.id.clone();
+        let mut decision_saved_tokens = saved_tokens;
+        let mut decision_kv_break_tokens = kv_break_tokens;
 
         if !rule.op.is_append_only() && kv_break_tokens > 0 {
             if config.defer_prefix_when_cache_unknown && !cache_confidence_known {
@@ -608,6 +612,7 @@ pub fn apply_mutations_with_scheduler(
                     try_split_fold_subtree(rule, &before_nodes, None, remaining_budget)
                 {
                     rule_to_apply = split_rule;
+                    decision_rule_id = rule_to_apply.id.clone();
                     reason = "SelectedSplitWithinBudget".into();
                 } else {
                     decision = MutationDecisionKind::Queued;
@@ -617,25 +622,27 @@ pub fn apply_mutations_with_scheduler(
         }
 
         if decision == MutationDecisionKind::Selected {
-            let (_, effective_kv_break) =
+            let (effective_saved, effective_kv_break) =
                 estimate_mutation_impact(&rule_to_apply.op, &before_nodes, None);
             remaining_budget = remaining_budget.saturating_sub(effective_kv_break);
-            predicted_saved_tokens += saved_tokens;
+            predicted_saved_tokens += effective_saved;
             predicted_kv_break_tokens =
                 predicted_kv_break_tokens.saturating_add(effective_kv_break);
-            selected_rule_ids.push(rule.id.clone());
+            selected_rule_ids.push(rule_to_apply.id.clone());
             selected_rules.push(rule_to_apply);
+            decision_saved_tokens = effective_saved;
+            decision_kv_break_tokens = effective_kv_break;
         } else {
             queued_rule_ids.push(rule.id.clone());
         }
 
         decisions.push(MutationDecisionRecord {
-            rule_id: rule.id.clone(),
+            rule_id: decision_rule_id,
             op_name,
             decision,
             reason,
-            predicted_saved_tokens: saved_tokens,
-            predicted_kv_break_tokens: kv_break_tokens,
+            predicted_saved_tokens: decision_saved_tokens,
+            predicted_kv_break_tokens: decision_kv_break_tokens,
         });
     }
 

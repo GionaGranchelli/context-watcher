@@ -1,6 +1,8 @@
 use crate::ir::{
-    ContextNode, FirewallAction, FirewallRule, FirewallTrigger, KvCacheReport, MutationOp,
-    MutationRule, MutationStatus, NodeKind, ProviderKind, SkippedMutation, ToolSemanticMeta,
+    ContextNode, ContextTurn, FirewallAction, FirewallRule, FirewallTrigger, KvCacheReport,
+    MutationDecisionKind, MutationDecisionRecord, MutationOp, MutationRule, MutationStatus,
+    MutationTurnTelemetry, NodeKind, ProviderKind, SkippedMutation, StablePrefixTelemetry,
+    ToolSemanticMeta,
 };
 use crate::normalizer::parse_request_to_nodes;
 use crate::tokenizer::estimate_tokens;
@@ -23,6 +25,31 @@ pub struct MutationApplicationReport {
     pub applied_rule_ids: Vec<String>,
     pub skipped_rules: Vec<SkippedMutation>,
     pub saved_tokens: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct MutationSchedulingConfig {
+    pub max_kv_break_tokens: u32,
+    pub defer_prefix_when_cache_unknown: bool,
+    pub stable_prefix_min_confidence: f32,
+    pub stable_prefix_min_repeat: u32,
+}
+
+impl Default for MutationSchedulingConfig {
+    fn default() -> Self {
+        Self {
+            max_kv_break_tokens: 512,
+            defer_prefix_when_cache_unknown: true,
+            stable_prefix_min_confidence: 0.5,
+            stable_prefix_min_repeat: 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MutationSchedulingReport {
+    pub application: MutationApplicationReport,
+    pub telemetry: MutationTurnTelemetry,
 }
 
 /// Trusted callers must obtain this session-scoped policy from explicit operator consent.
@@ -349,6 +376,307 @@ pub fn apply_mutations_to_payload_with_policy(
         applied_rule_ids: applied_ids,
         skipped_rules,
         saved_tokens: before_tokens.saturating_sub(after_tokens),
+    }
+}
+
+fn stable_prefix_fingerprint(nodes: &[ContextNode], kv_report: &KvCacheReport) -> Option<String> {
+    if nodes.is_empty() {
+        return None;
+    }
+    let total_end = nodes
+        .iter()
+        .map(|n| n.token_span.end)
+        .max()
+        .unwrap_or_default();
+    let boundary = kv_report.divergence_token_index.unwrap_or(total_end);
+    let mut hasher = blake3::Hasher::new();
+    let mut count = 0usize;
+    for node in nodes {
+        if node.token_span.end <= boundary {
+            hasher.update(node.fingerprint.0.as_bytes());
+            hasher.update(b"|");
+            count += 1;
+        }
+    }
+    if count == 0 {
+        None
+    } else {
+        Some(hasher.finalize().to_hex()[..24].to_string())
+    }
+}
+
+pub fn detect_stable_prefix(
+    recent_turns: &[ContextTurn],
+    config: &MutationSchedulingConfig,
+) -> StablePrefixTelemetry {
+    let window_size = recent_turns.len() as u32;
+    if recent_turns.is_empty() {
+        return StablePrefixTelemetry {
+            fingerprint: None,
+            repeat_count: 0,
+            window_size,
+            confidence: 0.0,
+            stable: false,
+        };
+    }
+
+    let fingerprints: Vec<Option<String>> = recent_turns
+        .iter()
+        .map(|turn| stable_prefix_fingerprint(&turn.nodes, &turn.kv_cache_report))
+        .collect();
+    let latest = fingerprints.last().cloned().unwrap_or(None);
+    let Some(latest_fp) = latest else {
+        return StablePrefixTelemetry {
+            fingerprint: None,
+            repeat_count: 0,
+            window_size,
+            confidence: 0.0,
+            stable: false,
+        };
+    };
+
+    let mut repeat_count = 0u32;
+    for candidate in fingerprints.iter().rev() {
+        if candidate.as_deref() == Some(latest_fp.as_str()) {
+            repeat_count += 1;
+        } else {
+            break;
+        }
+    }
+    let confidence = if window_size == 0 {
+        0.0
+    } else {
+        repeat_count as f32 / window_size as f32
+    };
+    let stable = repeat_count >= config.stable_prefix_min_repeat
+        || (window_size >= 3 && confidence >= config.stable_prefix_min_confidence);
+    StablePrefixTelemetry {
+        fingerprint: Some(latest_fp),
+        repeat_count,
+        window_size,
+        confidence,
+        stable,
+    }
+}
+
+fn try_split_fold_subtree(
+    rule: &MutationRule,
+    nodes: &[ContextNode],
+    report: Option<&KvCacheReport>,
+    budget: u32,
+) -> Option<MutationRule> {
+    let MutationOp::FoldSubtree {
+        start_turn,
+        end_turn,
+        summary_text,
+    } = &rule.op
+    else {
+        return None;
+    };
+    if start_turn >= end_turn {
+        return None;
+    }
+
+    for candidate_start in (*start_turn + 1)..=*end_turn {
+        let candidate_op = MutationOp::FoldSubtree {
+            start_turn: candidate_start,
+            end_turn: *end_turn,
+            summary_text: summary_text.clone(),
+        };
+        let (_, kv_break) = estimate_mutation_impact(&candidate_op, nodes, report);
+        if kv_break <= budget {
+            let mut split = rule.clone();
+            split.op = candidate_op;
+            split.id = format!("{}#split-{}-{}", rule.id, candidate_start, end_turn);
+            return Some(split);
+        }
+    }
+    None
+}
+
+fn mutation_op_name(op: &MutationOp) -> &'static str {
+    match op {
+        MutationOp::PruneOrStub { .. } => "prune_or_stub",
+        MutationOp::FoldSubtree { .. } => "fold_subtree",
+        MutationOp::ShadowDedupe { .. } => "shadow_dedupe",
+        MutationOp::GateToolsAndSkills { .. } => "gate_tools_and_skills",
+        MutationOp::PinContext { .. } => "pin_context",
+        MutationOp::NormalizePrefix { .. } => "normalize_prefix",
+    }
+}
+
+pub fn apply_mutations_with_scheduler(
+    payload: &mut Value,
+    provider: ProviderKind,
+    rules: &[MutationRule],
+    turn_seq: u32,
+    pin_policy: &PinContextPolicy,
+    config: &MutationSchedulingConfig,
+    cache_confidence_known: bool,
+    stable_prefix: StablePrefixTelemetry,
+) -> MutationSchedulingReport {
+    let active_rules: Vec<MutationRule> = rules
+        .iter()
+        .filter(|r| r.status == MutationStatus::Committed)
+        .cloned()
+        .collect();
+    if active_rules.is_empty() {
+        return MutationSchedulingReport {
+            application: MutationApplicationReport::default(),
+            telemetry: MutationTurnTelemetry {
+                cache_confidence: if cache_confidence_known {
+                    "known".into()
+                } else {
+                    "unknown".into()
+                },
+                kv_budget_tokens: config.max_kv_break_tokens,
+                kv_budget_used_tokens: 0,
+                predicted_saved_tokens: 0,
+                observed_saved_tokens: 0,
+                predicted_kv_break_tokens: 0,
+                selected_rule_ids: Vec::new(),
+                queued_rule_ids: Vec::new(),
+                skipped_rule_ids: Vec::new(),
+                decisions: Vec::new(),
+                stable_prefix,
+            },
+        };
+    }
+
+    let before_nodes = parse_request_to_nodes(payload, provider, turn_seq).unwrap_or_default();
+    let eligibility = crate::normalizer::classify_mutation_eligibility(payload, provider);
+    let mut selected_rules = Vec::new();
+    let mut decisions = Vec::new();
+    let mut queued_rule_ids = Vec::new();
+    let mut skipped_rule_ids = Vec::new();
+    let mut selected_rule_ids = Vec::new();
+    let mut remaining_budget = config.max_kv_break_tokens;
+    let mut predicted_saved_tokens = 0i32;
+    let mut predicted_kv_break_tokens = 0u32;
+
+    for rule in &active_rules {
+        let op_name = mutation_op_name(&rule.op).to_string();
+        if matches!(rule.op, MutationOp::PinContext { .. }) {
+            let reason = if !pin_policy.is_enabled_for(&rule.session_id) {
+                Some("PinContextOptInRequired")
+            } else if provider == ProviderKind::Gemini {
+                Some("GeminiPinContextUnqualified")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                skipped_rule_ids.push(rule.id.clone());
+                decisions.push(MutationDecisionRecord {
+                    rule_id: rule.id.clone(),
+                    op_name,
+                    decision: MutationDecisionKind::Skipped,
+                    reason: reason.into(),
+                    predicted_saved_tokens: 0,
+                    predicted_kv_break_tokens: 0,
+                });
+                continue;
+            }
+        }
+        if let Err(reason) = eligibility.is_op_eligible(&rule.op) {
+            skipped_rule_ids.push(rule.id.clone());
+            decisions.push(MutationDecisionRecord {
+                rule_id: rule.id.clone(),
+                op_name,
+                decision: MutationDecisionKind::Skipped,
+                reason: reason.into(),
+                predicted_saved_tokens: 0,
+                predicted_kv_break_tokens: 0,
+            });
+            continue;
+        }
+
+        let (saved_tokens, kv_break_tokens) =
+            estimate_mutation_impact(&rule.op, &before_nodes, None);
+        let mut decision = MutationDecisionKind::Selected;
+        let mut reason = "Selected".to_string();
+        let mut rule_to_apply = rule.clone();
+
+        if !rule.op.is_append_only() && kv_break_tokens > 0 {
+            if config.defer_prefix_when_cache_unknown && !cache_confidence_known {
+                decision = MutationDecisionKind::Queued;
+                reason = "DeferredCacheConfidenceUnknown".into();
+            } else if !stable_prefix.stable {
+                decision = MutationDecisionKind::Queued;
+                reason = "DeferredAwaitingStablePrefix".into();
+            } else if kv_break_tokens > remaining_budget {
+                if let Some(split_rule) =
+                    try_split_fold_subtree(rule, &before_nodes, None, remaining_budget)
+                {
+                    rule_to_apply = split_rule;
+                    reason = "SelectedSplitWithinBudget".into();
+                } else {
+                    decision = MutationDecisionKind::Queued;
+                    reason = "DeferredKvBudgetExceeded".into();
+                }
+            }
+        }
+
+        if decision == MutationDecisionKind::Selected {
+            let (_, effective_kv_break) =
+                estimate_mutation_impact(&rule_to_apply.op, &before_nodes, None);
+            remaining_budget = remaining_budget.saturating_sub(effective_kv_break);
+            predicted_saved_tokens += saved_tokens;
+            predicted_kv_break_tokens =
+                predicted_kv_break_tokens.saturating_add(effective_kv_break);
+            selected_rule_ids.push(rule.id.clone());
+            selected_rules.push(rule_to_apply);
+        } else {
+            queued_rule_ids.push(rule.id.clone());
+        }
+
+        decisions.push(MutationDecisionRecord {
+            rule_id: rule.id.clone(),
+            op_name,
+            decision,
+            reason,
+            predicted_saved_tokens: saved_tokens,
+            predicted_kv_break_tokens: kv_break_tokens,
+        });
+    }
+
+    let application = if selected_rules.is_empty() {
+        MutationApplicationReport::default()
+    } else {
+        apply_mutations_to_payload_with_policy(
+            payload,
+            provider,
+            &selected_rules,
+            turn_seq,
+            pin_policy,
+        )
+    };
+    skipped_rule_ids.extend(
+        application
+            .skipped_rules
+            .iter()
+            .map(|skipped| skipped.rule_id.clone()),
+    );
+    let observed_saved_tokens = application.saved_tokens as i32;
+
+    MutationSchedulingReport {
+        application,
+        telemetry: MutationTurnTelemetry {
+            cache_confidence: if cache_confidence_known {
+                "known".into()
+            } else {
+                "unknown".into()
+            },
+            kv_budget_tokens: config.max_kv_break_tokens,
+            kv_budget_used_tokens: config.max_kv_break_tokens.saturating_sub(remaining_budget),
+            predicted_saved_tokens,
+            observed_saved_tokens,
+            predicted_kv_break_tokens,
+            selected_rule_ids,
+            queued_rule_ids,
+            skipped_rule_ids,
+            decisions,
+            stable_prefix,
+        },
     }
 }
 
@@ -1420,5 +1748,127 @@ mod tests {
                 assert_eq!(report.applied_rule_ids, ["pin-1"]);
             }
         }
+    }
+
+    #[test]
+    fn scheduler_selects_append_only_and_queues_prefix_on_unknown_cache() {
+        let mut payload = json!({"messages":[
+            {"role":"assistant","tool_calls":[{"id":"read-1","type":"function","function":{"name":"read_file","arguments":"{}"}}]},
+            {"role":"tool","tool_call_id":"read-1","content":"old log to prune"},
+            {"role":"assistant","content":"I read the result."},
+            {"role":"user","content":"Continue."}
+        ]});
+        let rules = vec![
+            pin_rule(),
+            MutationRule {
+                id: "prune-1".into(),
+                session_id: "session-1".into(),
+                op: MutationOp::PruneOrStub {
+                    target_fingerprint: None,
+                    target_call_id: Some("read-1".into()),
+                    target_json_pointer: Some("/messages/1/content".into()),
+                    stub_text: "short log".into(),
+                },
+                status: MutationStatus::Committed,
+                estimated_saved_tokens: 10,
+                estimated_kv_break_tokens: 64,
+                created_at: Utc::now(),
+            },
+        ];
+        let scheduling = MutationSchedulingConfig::default();
+        let stable_prefix = StablePrefixTelemetry {
+            fingerprint: Some("fp".into()),
+            repeat_count: 2,
+            window_size: 3,
+            confidence: 0.67,
+            stable: true,
+        };
+        let report = apply_mutations_with_scheduler(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &rules,
+            1,
+            &PinContextPolicy::explicit_opt_in("session-1"),
+            &scheduling,
+            false,
+            stable_prefix,
+        );
+        assert_eq!(report.application.applied_rule_ids, ["pin-1"]);
+        assert_eq!(report.telemetry.selected_rule_ids, ["pin-1"]);
+        assert_eq!(report.telemetry.queued_rule_ids, ["prune-1"]);
+        assert!(
+            payload["messages"][3]["content"]
+                .as_str()
+                .unwrap()
+                .contains("retain this")
+        );
+    }
+
+    #[test]
+    fn stable_prefix_detector_uses_repeated_hashes_over_recent_turns() {
+        let now = Utc::now();
+        let make_turn = |id: &str, seq: u32, text: &str| ContextTurn {
+            analysis_complete: true,
+            normalization_provider: Some(ProviderKind::OpenAI),
+            model: Some("gpt-4o-mini".into()),
+            observed_usage: None,
+            outcome: None,
+            first_body_byte_ms: None,
+            applied_mutation_ids: Vec::new(),
+            skipped_mutations: Vec::new(),
+            id: id.into(),
+            session_id: "s1".into(),
+            parent_turn_id: None,
+            sequence_number: seq,
+            nodes: vec![ContextNode {
+                id: format!("n-{seq}"),
+                turn_seq: seq,
+                fingerprint: crate::ir::NodeFingerprint::compute(
+                    crate::ir::Role::User,
+                    "user_message",
+                    "0",
+                    text,
+                ),
+                raw_json_pointer: "/messages/0/content".into(),
+                role: crate::ir::Role::User,
+                kind: NodeKind::UserMessage { text: text.into() },
+                token_span: crate::ir::TokenSpan {
+                    start: 0,
+                    end: 20,
+                    count: 20,
+                },
+                kv_status: crate::ir::KvNodeStatus::CachedHit,
+                attention_salience: 1.0,
+                cache_control: None,
+                active_mutation: None,
+                timestamp: None,
+            }],
+            response_nodes: Vec::new(),
+            token_usage: crate::ir::TokenUsageSummary::default(),
+            kv_cache_report: KvCacheReport {
+                hit_tokens: 20,
+                newly_cached_tokens: 0,
+                invalidated_tokens: 0,
+                uncached_tail_tokens: 0,
+                hit_ratio: 1.0,
+                divergence_token_index: Some(20),
+                invalidation_cause: None,
+                telemetry_available: true,
+            },
+            category_breakdown: crate::ir::CategoryBreakdown::default(),
+            lint_findings: Vec::new(),
+            health_score: 100,
+            latency_ms: None,
+            created_at: now,
+        };
+        let turns = vec![
+            make_turn("t1", 1, "stable"),
+            make_turn("t2", 2, "stable"),
+            make_turn("t3", 3, "stable"),
+        ];
+        let signal = detect_stable_prefix(&turns, &MutationSchedulingConfig::default());
+        assert!(signal.stable);
+        assert_eq!(signal.repeat_count, 3);
+        assert!(signal.confidence >= 0.9);
     }
 }

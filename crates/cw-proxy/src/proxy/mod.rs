@@ -17,7 +17,10 @@ use cw_core::{
     autopilot::evaluate_autopilot_policies_with_policy,
     ir::{HarnessKind, ProviderKind, Session},
     local_llm::strip_internal_cw_fields,
-    mutation::{apply_mutations_to_payload_with_policy, evaluate_firewall, has_signed_content},
+    mutation::{
+        MutationSchedulingConfig, apply_mutations_with_scheduler, detect_stable_prefix,
+        evaluate_firewall, has_signed_content,
+    },
     normalizer::detect_provider,
     validator::validate_protocol_invariants,
 };
@@ -40,6 +43,8 @@ use crate::{
         WsEvent,
     },
 };
+
+const MAX_KV_BREAK_TOKENS: u32 = 512;
 
 fn fallback_invalid_mutation(
     raw: &Value,
@@ -259,6 +264,7 @@ pub async fn handle_proxy_request(
             let mut outbound = raw.clone();
             let mut applied = Vec::new();
             let mut skipped_mutations = Vec::new();
+            let mut mutation_telemetry: Option<cw_core::ir::MutationTurnTelemetry> = None;
             let pin_policy = state
                 .store
                 .get_pin_context_policy(&session_id)
@@ -271,15 +277,35 @@ pub async fn handle_proxy_request(
                             .into_response();
                     }
                 };
-                let report = apply_mutations_to_payload_with_policy(
+                let recent_turns = match state.store.list_turns_page(&session_id, 12, 0) {
+                    Ok(turns) => turns,
+                    Err(error) => {
+                        return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
+                            .into_response();
+                    }
+                };
+                let scheduling = MutationSchedulingConfig {
+                    max_kv_break_tokens: MAX_KV_BREAK_TOKENS,
+                    ..MutationSchedulingConfig::default()
+                };
+                let stable_prefix = detect_stable_prefix(&recent_turns, &scheduling);
+                let cache_confidence_known = recent_turns
+                    .last()
+                    .map(|turn| turn.kv_cache_report.telemetry_available)
+                    .unwrap_or(false);
+                let report = apply_mutations_with_scheduler(
                     &mut outbound,
                     provider,
                     &rules,
                     seq,
                     &pin_policy,
+                    &scheduling,
+                    cache_confidence_known,
+                    stable_prefix,
                 );
-                applied = report.applied_rule_ids;
-                skipped_mutations = report.skipped_rules;
+                applied = report.application.applied_rule_ids;
+                skipped_mutations = report.application.skipped_rules;
+                mutation_telemetry = Some(report.telemetry);
             }
             // Disk inspection belongs on the blocking pool, never on the forwarding executor.
             let input = outbound.clone();
@@ -327,7 +353,24 @@ pub async fn handle_proxy_request(
                                     .into_response();
                             }
                         };
-                        let application = apply_mutations_to_payload_with_policy(
+                        let prior_used = mutation_telemetry
+                            .as_ref()
+                            .map(|t| t.kv_budget_used_tokens)
+                            .unwrap_or(0);
+                        let scheduling = MutationSchedulingConfig {
+                            max_kv_break_tokens: MAX_KV_BREAK_TOKENS.saturating_sub(prior_used),
+                            ..MutationSchedulingConfig::default()
+                        };
+                        let recent_turns = state
+                            .store
+                            .list_turns_page(&session_id, 12, 0)
+                            .unwrap_or_default();
+                        let stable_prefix = detect_stable_prefix(&recent_turns, &scheduling);
+                        let cache_confidence_known = recent_turns
+                            .last()
+                            .map(|turn| turn.kv_cache_report.telemetry_available)
+                            .unwrap_or(false);
+                        let application = apply_mutations_with_scheduler(
                             &mut outbound,
                             provider,
                             &creation.created,
@@ -336,9 +379,37 @@ pub async fn handle_proxy_request(
                                 .store
                                 .get_pin_context_policy(&session_id)
                                 .unwrap_or_default(),
+                            &scheduling,
+                            cache_confidence_known,
+                            stable_prefix,
                         );
-                        applied.extend(application.applied_rule_ids);
-                        skipped_mutations.extend(application.skipped_rules);
+                        applied.extend(application.application.applied_rule_ids);
+                        skipped_mutations.extend(application.application.skipped_rules);
+                        if let Some(telemetry) = &mut mutation_telemetry {
+                            telemetry.kv_budget_used_tokens = telemetry
+                                .kv_budget_used_tokens
+                                .saturating_add(application.telemetry.kv_budget_used_tokens);
+                            telemetry.predicted_saved_tokens +=
+                                application.telemetry.predicted_saved_tokens;
+                            telemetry.predicted_kv_break_tokens = telemetry
+                                .predicted_kv_break_tokens
+                                .saturating_add(application.telemetry.predicted_kv_break_tokens);
+                            telemetry.observed_saved_tokens +=
+                                application.telemetry.observed_saved_tokens;
+                            telemetry
+                                .selected_rule_ids
+                                .extend(application.telemetry.selected_rule_ids);
+                            telemetry
+                                .queued_rule_ids
+                                .extend(application.telemetry.queued_rule_ids);
+                            telemetry
+                                .skipped_rule_ids
+                                .extend(application.telemetry.skipped_rule_ids);
+                            telemetry.decisions.extend(application.telemetry.decisions);
+                            telemetry.stable_prefix = application.telemetry.stable_prefix;
+                        } else {
+                            mutation_telemetry = Some(application.telemetry);
+                        }
                     }
                     if !report.shadow_decisions.is_empty() {
                         let cache_obs = cw_core::policy::classify_cache_state(
@@ -487,6 +558,24 @@ pub async fn handle_proxy_request(
                 turn.applied_mutation_ids = applied;
                 turn.skipped_mutations = skipped_mutations;
                 turn.outcome = Some("pending".into());
+                if let Some(telemetry) = &mutation_telemetry {
+                    tracing::info!(
+                        session_id = %session_id,
+                        turn_seq = seq,
+                        cache_confidence = %telemetry.cache_confidence,
+                        kv_budget_tokens = telemetry.kv_budget_tokens,
+                        kv_budget_used_tokens = telemetry.kv_budget_used_tokens,
+                        selected = telemetry.selected_rule_ids.len(),
+                        queued = telemetry.queued_rule_ids.len(),
+                        skipped = telemetry.skipped_rule_ids.len(),
+                        predicted_saved_tokens = telemetry.predicted_saved_tokens,
+                        observed_saved_tokens = telemetry.observed_saved_tokens,
+                        predicted_kv_break_tokens = telemetry.predicted_kv_break_tokens,
+                        stable_prefix_confidence = telemetry.stable_prefix.confidence,
+                        stable_prefix_repeat_count = telemetry.stable_prefix.repeat_count,
+                        "mutation scheduling telemetry"
+                    );
+                }
                 let raw_tokens = cw_core::normalizer::parse_request_to_nodes(&raw, provider, seq)
                     .map(|n| n.iter().map(|n| n.token_span.count).sum::<u32>())
                     .unwrap_or(0);

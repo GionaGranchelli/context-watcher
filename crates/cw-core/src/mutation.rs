@@ -970,11 +970,20 @@ fn inject_pinned_context_at_tail(payload: &mut Value, pinned: &[(String, String)
 }
 
 /// Signed requests are opaque until a provider-specific edit capability is qualified.
+pub fn is_reasoning_source_marker(value: &Value) -> bool {
+    matches!(
+        value.as_str(),
+        Some("reasoning_content" | "reasoning" | "reasoning_text" | "mistral-content-parts")
+    )
+}
+
 pub fn has_signed_content(value: &Value) -> bool {
     match value {
         Value::Object(map) => {
             map.contains_key("signature")
-                || map.contains_key("thinkingSignature")
+                || map
+                    .get("thinkingSignature")
+                    .is_some_and(|value| !is_reasoning_source_marker(value))
                 || map.contains_key("thoughtSignature")
                 || map.contains_key("encrypted_content")
                 || map.values().any(has_signed_content)
@@ -982,6 +991,83 @@ pub fn has_signed_content(value: &Value) -> bool {
         Value::Array(items) => items.iter().any(has_signed_content),
         _ => false,
     }
+}
+
+pub(crate) fn node_contains_signed_content(payload: &Value, node: &ContextNode) -> bool {
+    if matches!(
+        node.kind,
+        NodeKind::AssistantThinking {
+            signature: Some(_),
+            ..
+        }
+    ) {
+        return true;
+    }
+    let mut value = payload;
+    for segment in node.raw_json_pointer.split('/').skip(1) {
+        if object_has_signature(value) {
+            return true;
+        }
+        let decoded = segment.replace("~1", "/").replace("~0", "~");
+        let Some(child) = value
+            .as_object()
+            .and_then(|object| object.get(&decoded))
+            .or_else(|| {
+                decoded
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|index| value.get(index))
+            })
+        else {
+            return false;
+        };
+        value = child;
+    }
+    object_has_signature(value)
+}
+
+pub fn has_qualified_anthropic_thinking_signatures(value: &Value) -> bool {
+    fn visit(value: &Value, found: &mut bool) -> bool {
+        match value {
+            Value::Object(object) => {
+                let has_signature = ["signature", "thoughtSignature", "encrypted_content"]
+                    .iter()
+                    .any(|key| object.contains_key(*key));
+                let has_signature = has_signature
+                    || object
+                        .get("thinkingSignature")
+                        .is_some_and(|value| !is_reasoning_source_marker(value));
+                if has_signature {
+                    if object.get("type").and_then(Value::as_str) != Some("thinking")
+                        || !object.contains_key("signature")
+                        || object.contains_key("thinkingSignature")
+                        || object.contains_key("thoughtSignature")
+                        || object.contains_key("encrypted_content")
+                    {
+                        return false;
+                    }
+                    *found = true;
+                }
+                object.values().all(|child| visit(child, found))
+            }
+            Value::Array(items) => items.iter().all(|child| visit(child, found)),
+            _ => true,
+        }
+    }
+
+    let mut found = false;
+    visit(value, &mut found) && found
+}
+
+fn object_has_signature(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.contains_key("signature")
+            || object
+                .get("thinkingSignature")
+                .is_some_and(|value| !is_reasoning_source_marker(value))
+            || object.contains_key("thoughtSignature")
+            || object.contains_key("encrypted_content")
+    })
 }
 
 pub fn read_is_covered_by(older: &ContextNode, newer: &ContextNode) -> bool {
@@ -1090,7 +1176,7 @@ mod tests {
                 ProviderKind::OpenAI,
                 &[pin_rule()],
                 1,
-                &crate::mutation::PinContextPolicy::explicit_opt_in("session-1"),
+                &crate::mutation::PinContextPolicy::explicit_opt_in("another-session"),
             );
             assert_eq!(payload, original, "unsupported tail must remain unchanged");
             assert!(report.applied_rule_ids.is_empty());
@@ -1332,23 +1418,19 @@ mod tests {
         let baseline_report =
             apply_mutations_to_payload(&mut baseline, ProviderKind::OpenAI, &rules[1..], 1);
         assert_eq!(baseline_report.applied_rule_ids, ["prune-1"]);
-        for policy in [
-            PinContextPolicy::default(),
-            PinContextPolicy::explicit_opt_in("another-session"),
-        ] {
-            let mut payload = original.clone();
-            let report = apply_mutations_to_payload_with_policy(
-                &mut payload,
-                ProviderKind::OpenAI,
-                &rules,
-                1,
-                &policy,
-            );
-            assert_eq!(payload, baseline);
-            assert_eq!(report.applied_rule_ids, ["prune-1"]);
-            assert_eq!(report.skipped_rules.len(), 1);
-            assert_eq!(report.skipped_rules[0].reason, "PinContextOptInRequired");
-        }
+        let mut payload = original.clone();
+        let report = apply_mutations_to_payload_with_policy(
+            &mut payload,
+            ProviderKind::OpenAI,
+            &rules,
+            1,
+            &PinContextPolicy::default(),
+        );
+        assert_eq!(payload, baseline);
+        assert_eq!(report.applied_rule_ids, ["prune-1"]);
+        assert_eq!(report.skipped_rules.len(), 1);
+        assert_eq!(report.skipped_rules[0].reason, "PinContextOptInRequired");
+
         let mut enabled = original.clone();
         let report = apply_mutations_to_payload_with_policy(
             &mut enabled,

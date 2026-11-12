@@ -6,8 +6,8 @@ pub mod sync;
 pub mod watcher;
 
 pub use adapters::{
-    import_agy_transcript, import_generic_jsonl_transcript, import_hermes_state_db,
-    import_opencode_state_db,
+    import_agy_transcript, import_copilot_session_store, import_generic_jsonl_transcript,
+    import_hermes_state_db, import_opencode_state_db,
 };
 pub use auto_heal::check_and_apply_auto_heal;
 pub use error::HarnessError;

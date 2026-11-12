@@ -236,6 +236,9 @@ fn parse_anthropic(payload: &Value, turn_seq: u32, nodes: &mut Vec<ContextNode>)
                                 let sig = blk
                                     .get("signature")
                                     .or_else(|| blk.get("thinkingSignature"))
+                                    .filter(|value| {
+                                        !crate::mutation::is_reasoning_source_marker(value)
+                                    })
                                     .and_then(|v| v.as_str())
                                     .map(|s| s.to_string());
                                 push_node(
@@ -1156,12 +1159,27 @@ pub fn classify_mutation_eligibility(
     payload: &Value,
     provider: ProviderKind,
 ) -> MutationEligibility {
+    classify_mutation_eligibility_with_signed_content(payload, provider, true)
+}
+
+pub(crate) fn classify_mutation_eligibility_for_signed_safe_targets(
+    payload: &Value,
+    provider: ProviderKind,
+) -> MutationEligibility {
+    classify_mutation_eligibility_with_signed_content(payload, provider, false)
+}
+
+fn classify_mutation_eligibility_with_signed_content(
+    payload: &Value,
+    provider: ProviderKind,
+    reject_signed_content: bool,
+) -> MutationEligibility {
     if !payload.is_object()
         || payload
             .get("cw_analysis_incomplete")
             .and_then(Value::as_bool)
             == Some(true)
-        || crate::mutation::has_signed_content(payload)
+        || (reject_signed_content && crate::mutation::has_signed_content(payload))
     {
         return MutationEligibility::Ineligible;
     }

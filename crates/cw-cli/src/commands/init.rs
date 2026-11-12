@@ -3,6 +3,101 @@ use std::path::{Path, PathBuf};
 
 use super::daemon::{is_daemon_running, start_daemon_detached};
 
+fn add_omp_proxy_provider(agent_dir: &Path) -> Result<bool> {
+    // shortcut: preserve YAML text with a block-map insertion; reject inline providers maps, upgrade if OMP changes this config shape.
+    let config_path = ["models.yml", "models.yaml", "models.json"]
+        .into_iter()
+        .map(|name| agent_dir.join(name))
+        .find(|path| path.exists())
+        .unwrap_or_else(|| agent_dir.join("models.yml"));
+    let provider = serde_json::json!({
+        "baseUrl": "http://127.0.0.1:4401/v1",
+        "api": "openai-completions",
+        "auth": "none",
+        "discovery": { "type": "openai-models-list" }
+    });
+
+    let updated = if config_path.extension().is_some_and(|ext| ext == "json") {
+        let mut config: serde_json::Value = if config_path.exists() {
+            serde_json::from_slice(&std::fs::read(&config_path)?)?
+        } else {
+            serde_json::json!({})
+        };
+        let providers = config
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("OMP models config root must be an object"))?
+            .entry("providers")
+            .or_insert_with(|| serde_json::json!({}));
+        let providers = providers
+            .as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("OMP providers config must be an object"))?;
+        if providers.contains_key("contextwatcher") {
+            return Ok(false);
+        }
+        providers.insert("contextwatcher".into(), provider);
+        serde_json::to_vec_pretty(&config)?
+    } else {
+        let original = if config_path.exists() {
+            std::fs::read_to_string(&config_path)?
+        } else {
+            String::new()
+        };
+        let mut lines = original.lines().collect::<Vec<_>>();
+        let providers_line = lines.iter().position(|line| *line == "providers:");
+        let block = [
+            "  contextwatcher:",
+            "    baseUrl: http://127.0.0.1:4401/v1",
+            "    api: openai-completions",
+            "    auth: none",
+            "    discovery:",
+            "      type: openai-models-list",
+        ];
+        let insert_at = if let Some(start) = providers_line {
+            let end = (start + 1..lines.len())
+                .find(|index| {
+                    let line = lines[*index];
+                    !line.trim().is_empty()
+                        && !line.trim_start().starts_with('#')
+                        && !line.chars().next().is_some_and(char::is_whitespace)
+                })
+                .unwrap_or(lines.len());
+            if lines[start + 1..end]
+                .iter()
+                .any(|line| line.starts_with("  contextwatcher:"))
+            {
+                return Ok(false);
+            }
+            end
+        } else {
+            if lines.iter().any(|line| line.starts_with("providers:")) {
+                anyhow::bail!("OMP providers uses an unsupported inline YAML form; left unchanged");
+            }
+            lines.push("providers:");
+            lines.len()
+        };
+        lines.splice(insert_at..insert_at, block);
+        format!("{}\n", lines.join("\n")).into_bytes()
+    };
+
+    if config_path.exists() {
+        let backup = config_path.with_file_name(format!(
+            "{}.cw-init-{}.bak",
+            config_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        ));
+        std::fs::copy(&config_path, backup)?;
+    } else {
+        std::fs::create_dir_all(agent_dir)?;
+    }
+    std::fs::write(config_path, updated)?;
+    Ok(true)
+}
+
 /// Registers the `contextwatcher` MCP server for Claude Code at user scope.
 ///
 /// Claude Code reads user-scoped MCP servers from `~/.claude.json` (top-level `mcpServers`),
@@ -189,9 +284,7 @@ description: Inspects and compacts the active LLM context window, KV cache prefi
 
 # contextWatcher (`cw`) — Context & KV-Cache Optimization Skill
 
-When invoked for `/context-watcher` or `/cw` with any subcommand or level (`min`, `mid`, `max`, `status`, `gain`):
-
-**Execute the exact command directly using the shell/bash tool immediately on turn 1. Do not perform preliminary environment checks, do not search for config files, and do not run `which cw` or `--help`.**
+When invoked for `/context-watcher` or `/cw` with any subcommand or level (`min`, `mid`, `max`, `status`, `gain`), perform only that requested operation once.
 
 ### Direct Shell Commands:
 - **Optimization:**
@@ -202,7 +295,8 @@ When invoked for `/context-watcher` or `/cw` with any subcommand or level (`min`
   - `status`: `~/.local/bin/cw status`
   - `gain`: `~/.local/bin/cw gain`
 
-If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, you may call it with `{"strategy_id": "<level>", "export_compacted": true}` (which applies the session overlay and exports a separate compacted `.jsonl` copy without modifying the source transcript in-place). Otherwise, execute the shell command above directly.
+If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, call it once with `{"strategy_id": "<level>", "export_compacted": true}`. Otherwise, execute the matching CLI command above once. CW uses the authenticated active session when available, or requires one unique session for the current workspace; never choose a session by recency.
+If the command fails, reports no eligible plan, or exports zero compacted steps, stop and report that result. Do not retry, run diagnostics, switch strategies, apply manual mutations, inspect or edit CW's database, or search/modify transcript files.
 "#;
 
     let skill_cw_md = r#"---
@@ -212,9 +306,7 @@ description: Inspects and compacts the active LLM context window, KV cache prefi
 
 # contextWatcher (`cw`) — Context & KV-Cache Optimization Skill
 
-When invoked for `/cw` or `/context-watcher` with any subcommand or level (`min`, `mid`, `max`, `status`, `gain`):
-
-**Execute the exact command directly using the shell/bash tool immediately on turn 1. Do not perform preliminary environment checks, do not search for config files, and do not run `which cw` or `--help`.**
+When invoked for `/cw` or `/context-watcher` with any subcommand or level (`min`, `mid`, `max`, `status`, `gain`), perform only that requested operation once.
 
 ### Direct Shell Commands:
 - **Optimization:**
@@ -225,7 +317,8 @@ When invoked for `/cw` or `/context-watcher` with any subcommand or level (`min`
   - `status`: `~/.local/bin/cw status`
   - `gain`: `~/.local/bin/cw gain`
 
-If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, you may call it with `{"strategy_id": "<level>", "export_compacted": true}` (which applies the session overlay and exports a separate compacted `.jsonl` copy without modifying the source transcript in-place). Otherwise, execute the shell command above directly.
+If the `cw_optimize_strategy` MCP tool is directly available in your active tool list, call it once with `{"strategy_id": "<level>", "export_compacted": true}`. Otherwise, execute the matching CLI command above once. CW uses the authenticated active session when available, or requires one unique session for the current workspace; never choose a session by recency.
+If the command fails, reports no eligible plan, or exports zero compacted steps, stop and report that result. Do not retry, run diagnostics, switch strategies, apply manual mutations, inspect or edit CW's database, or search/modify transcript files.
 "#;
 
     let agy_mcp_json = serde_json::to_string_pretty(&serde_json::json!({
@@ -474,6 +567,25 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
             let _ = std::fs::write(omp_skill_cw.join("SKILL.md"), skill_cw_md);
             let _ = std::fs::write(omp_skill_full.join("SKILL.md"), skill_md);
         }
+        if omp_agent_dir.exists() {
+            if dry_run {
+                println!(
+                    "           OMP provider: will add contextwatcher model discovery via http://127.0.0.1:4401/v1/models"
+                );
+            } else {
+                match add_omp_proxy_provider(&omp_agent_dir) {
+                    Ok(true) => println!(
+                        "           OMP provider: added contextwatcher with live model discovery from CW /v1/models"
+                    ),
+                    Ok(false) => println!(
+                        "           OMP provider: contextwatcher already configured; left it unchanged"
+                    ),
+                    Err(error) => println!(
+                        "           OMP provider: could not update models config ({error}); left it unchanged"
+                    ),
+                }
+            }
+        }
         println!(
             "  [6/6] Native Pi & OMP Agent  : {} (Native /context-watcher & /cw commands registered)",
             pi_ext_dir.display()
@@ -562,6 +674,11 @@ If the `cw_optimize_strategy` MCP tool is directly available in your active tool
     );
 
     println!("\n✅ contextWatcher integration complete! Verify anytime with:");
+    println!("   OpenAI-compatible proxy: http://127.0.0.1:4401/v1/");
+    println!("   Set Environment=CW_OPENAI_UPSTREAM=<engine /v1 URL> in the CW systemd service.");
+    println!(
+        "   Configure OMP auth as none or with the inference engine's API key; no CW proxy key or headers are needed."
+    );
     println!(
         "   cw gain              # Show token & dollar ($) savings across all agents & projects"
     );

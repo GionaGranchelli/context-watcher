@@ -24,6 +24,7 @@
   let loadedSessionId = $state('');
   let loadedRevision = $state('');
   let graphRequest = 0;
+  let loadingSessionId = $state('');
 
   async function apiFetch(url: string, init: RequestInit = {}) {
     const headers = new Headers(init.headers);
@@ -45,14 +46,17 @@
 
   let sessions = $state<Session[]>([]);
   let activeSessionId = $state<string>('');
+  let isSessionLoading = $derived(activeSessionId !== '' && loadingSessionId === activeSessionId);
   let latestTurn = $state<ContextTurn | null>(null);
-  let turns = $state<ContextTurn[]>([]);
   let graphNodes = $state<RadixGraphNode[]>([]);
   let graphEdges = $state<RadixGraphEdge[]>([]);
   let mutations = $state<MutationRule[]>([]);
   let fileStates = $state<FileContextState[]>([]);
   let intercepts = $state<PendingInterceptInfo[]>([]);
   let optimizationPlans = $state<OptimizationStrategyPlan[]>([]);
+  let optimizationPlanStatus = $state<string | null>(null);
+  let timelineHasMore = $state(false);
+  let loadingOlderTurns = $state(false);
   let selectedStrategyId = $state<string>('max_token_diet');
   let uncheckedItemIds = $state<Record<string, boolean>>({});
   let expandedOptItemIds = $state<Record<string, boolean>>({});
@@ -65,6 +69,7 @@
   let activeTab = $state<'timeline' | 'optimize' | 'analytics' | 'settings'>('timeline');
   let analyticsSubView = $state<'treemap' | 'advisor' | 'radix'>('treemap');
   let settingsSubView = $state<'local' | 'autopilot' | 'tools' | 'overlays'>('local');
+  let pinPolicyOpen = $state(false);
 
   // Slide-over Right Inspector Drawer (Hidden by default to eliminate visual clutter)
   let inspectorOpen = $state<boolean>(false);
@@ -184,6 +189,10 @@
         return { bg: 'rgba(59, 130, 246, 0.15)', fg: '#93c5fd', border: 'rgba(59, 130, 246, 0.34)', dot: '#3b82f6', label: 'antigravity' };
       case 'claude_code':
         return { bg: 'rgba(249, 115, 22, 0.15)', fg: '#fdba74', border: 'rgba(249, 115, 22, 0.34)', dot: '#f97316', label: 'claude' };
+      case 'copilot':
+        return { bg: 'rgba(34, 197, 94, 0.14)', fg: '#86efac', border: 'rgba(34, 197, 94, 0.32)', dot: '#22c55e', label: 'copilot' };
+      case 'generic_proxy':
+        return { bg: 'rgba(168, 85, 247, 0.15)', fg: '#d8b4fe', border: 'rgba(168, 85, 247, 0.34)', dot: '#a855f7', label: 'proxy (unattributed)' };
       default:
         return { bg: 'rgba(168, 85, 247, 0.15)', fg: '#d8b4fe', border: 'rgba(168, 85, 247, 0.34)', dot: '#a855f7', label: h };
     }
@@ -340,6 +349,8 @@
 
     return Array.from(byTurn.values()).sort((a, b) => a.turnSeq - b.turnSeq);
   });
+  let visibleTimelineCount = $state(20);
+  let visibleStoryTurns = $derived(storyTurns.slice(Math.max(0, storyTurns.length - visibleTimelineCount)));
 
   const TROUGH_SALIENCE_THRESHOLD = 0.42;
 
@@ -1133,48 +1144,118 @@
 
   async function fetchSessions() {
     try {
-      const res = await apiFetch('/api/v1/sessions');
-      sessions = await res.json();
-      if (!activeSessionId && sessions.length > 0) {
-        const withWorkspace = sessions.find((s) => s.workspace_root && s.title);
-        activeSessionId = withWorkspace ? withWorkspace.id : sessions[0].id;
+      const pageSize = 200;
+      const discovered: Session[] = [];
+      for (let offset = 0; ; offset += pageSize) {
+        const res = await apiFetch(`/api/v1/sessions?limit=${pageSize}&offset=${offset}`);
+        if (!res.ok) throw new Error(`Session list failed: ${res.status}`);
+        const page: Session[] = await res.json();
+        discovered.push(...page);
+        if (page.length < pageSize) break;
       }
-      if (activeSessionId) {
-        await fetchSessionGraph(activeSessionId);
-      }
+      sessions = discovered;
     } catch (e) {
       console.error(e);
     }
   }
 
-  async function fetchSessionGraph(sessionId: string) {
+  type SessionDataMode = 'timeline' | 'plans' | 'full';
+
+  function sessionDataModeForTab(): SessionDataMode {
+    if (activeTab === 'optimize') return 'plans';
+    if (activeTab === 'analytics') return 'full';
+    return 'timeline';
+  }
+
+  async function fetchSessionGraph(sessionId: string, mode: SessionDataMode = sessionDataModeForTab()) {
     if (!sessionId) return;
     const request = ++graphRequest;
-    const res = await apiFetch(`/api/v1/sessions/${sessionId}/graph`);
-    const data = await res.json();
-    if (request !== graphRequest || activeSessionId !== sessionId) return;
     const changedSession = loadedSessionId !== sessionId;
-    loadedSessionId = sessionId;
-    loadedRevision = data.revision;
-    latestTurn = data.mutation_preview || data.latest_turn;
-    turns = data.turns || [];
-    graphNodes = data.radix_graph?.nodes || [];
-    graphEdges = data.radix_graph?.edges || [];
-    mutations = data.mutations || [];
-    fileStates = data.file_states || [];
-    optimizationPlans = data.optimization_plans || [];
-    costAndPerf = data.cost_and_perf || null;
-    localModelAnalysis = data.local_model_analysis || null;
-    autopilotConfig = data.autopilot_config || null;
-    transcriptSourcePath = data.transcript_source_path || null;
-    if (changedSession) uncheckedItemIds = {};
-    if (optimizationPlans.length > 0 && !optimizationPlans.some((p) => p.id === selectedStrategyId)) {
-      const nonEmpty = optimizationPlans.find((p) => p.items.length > 0);
-      selectedStrategyId = nonEmpty ? nonEmpty.id : optimizationPlans[0].id;
+    loadingSessionId = sessionId;
+    if (changedSession) {
+      loadedSessionId = '';
+      loadedRevision = '';
+      latestTurn = null;
+      graphNodes = [];
+      graphEdges = [];
+      mutations = [];
+      fileStates = [];
+      optimizationPlans = [];
+      optimizationPlanStatus = null;
+      timelineHasMore = false;
+      costAndPerf = null;
+      localModelAnalysis = null;
+      autopilotConfig = null;
+      transcriptSourcePath = null;
+      visibleTimelineCount = 20;
+      selectedNodeId = null;
+      uncheckedItemIds = {};
+      pinPolicyOpen = false;
+      statusBanner = '';
     }
-    if (latestTurn && latestTurn.nodes.length > 0 && !selectedNodeId) {
-      selectedNodeId = latestTurn.nodes[0].id;
+    try {
+      const params = new URLSearchParams({ compact: 'true', include_optimization_plans: String(mode === 'plans') });
+      if (mode !== 'full') params.set('timeline_limit', '20');
+      const res = await apiFetch(`/api/v1/sessions/${sessionId}/graph?${params}`);
+      const data = await res.json();
+      if (request !== graphRequest || activeSessionId !== sessionId) return;
+      loadedSessionId = sessionId;
+      loadedRevision = data.revision;
+      latestTurn = data.mutation_preview || data.latest_turn;
+      graphNodes = data.radix_graph?.nodes || [];
+      graphEdges = data.radix_graph?.edges || [];
+      mutations = data.mutations || [];
+      fileStates = data.file_states || [];
+      optimizationPlans = data.optimization_plans || [];
+      optimizationPlanStatus = data.optimization_plan_status || null;
+      timelineHasMore = data.timeline_has_more || false;
+      costAndPerf = data.cost_and_perf || null;
+      localModelAnalysis = data.local_model_analysis || null;
+      autopilotConfig = data.autopilot_config || null;
+      transcriptSourcePath = data.transcript_source_path || null;
+      if (optimizationPlans.length > 0 && !optimizationPlans.some((p) => p.id === selectedStrategyId)) {
+        const nonEmpty = optimizationPlans.find((p) => p.items.length > 0);
+        selectedStrategyId = nonEmpty ? nonEmpty.id : optimizationPlans[0].id;
+      }
+      if (latestTurn && latestTurn.nodes.length > 0) {
+        selectedNodeId = latestTurn.nodes[0].id;
+      }
+    } catch (error) {
+      if (request === graphRequest && activeSessionId === sessionId) {
+        statusBanner = error instanceof Error ? error.message : 'Could not load the selected session.';
+      }
+    } finally {
+      if (request === graphRequest) loadingSessionId = '';
     }
+  }
+
+  async function loadOlderTimelineTurns() {
+    const sessionId = activeSessionId;
+    const beforeTurn = storyTurns[0]?.turnSeq;
+    if (!sessionId || !beforeTurn || loadingOlderTurns || !latestTurn) return;
+    loadingOlderTurns = true;
+    try {
+      const params = new URLSearchParams({ compact: 'true', timeline_limit: '20', timeline_before_turn: String(beforeTurn), include_optimization_plans: 'false' });
+      const res = await apiFetch(`/api/v1/sessions/${sessionId}/graph?${params}`);
+      const data = await res.json();
+      if (activeSessionId !== sessionId || !latestTurn) return;
+      const olderNodes: ContextNode[] = data.mutation_preview?.nodes || [];
+      const existingIds = new Set(latestTurn.nodes.map((node) => node.id));
+      const uniqueOlderNodes = olderNodes.filter((node) => !existingIds.has(node.id));
+      latestTurn = { ...latestTurn, nodes: [...uniqueOlderNodes, ...latestTurn.nodes] };
+      visibleTimelineCount += 20;
+      timelineHasMore = data.timeline_has_more || false;
+    } catch (error) {
+      statusBanner = error instanceof Error ? error.message : 'Could not load older turns.';
+    } finally {
+      loadingOlderTurns = false;
+    }
+  }
+
+  async function selectDashboardTab(tab: typeof activeTab) {
+    activeTab = tab;
+    if (tab !== 'timeline' && tab !== 'optimize' && tab !== 'analytics') return;
+    await fetchSessionGraph(activeSessionId, sessionDataModeForTab());
   }
 
   async function applyMutation(op: Record<string, any>, status: 'committed' | 'draft' = 'committed', msg = 'Mutation rule stored; application is separate') {
@@ -1219,7 +1300,8 @@
     if (res.ok) {
       const result = await res.json();
       statusBanner = strategyConfirmation({ status, name: strategyName, result });
-      await fetchSessionGraph(activeSessionId);
+      if (status === 'committed') activeTab = 'timeline';
+      await fetchSessionGraph(activeSessionId, sessionDataModeForTab());
     }
   }
 
@@ -1351,6 +1433,7 @@
     });
     activeSessionId = sessId;
     await fetchSessions();
+    await fetchSessionGraph(sessId, sessionDataModeForTab());
     statusBanner = 'Loaded Cloud Demo Session under project "contextWatcher".';
   }
 
@@ -1427,6 +1510,7 @@
     activeTab = 'settings';
     settingsSubView = 'local';
     await fetchSessions();
+    await fetchSessionGraph(sessId, sessionDataModeForTab());
     statusBanner = 'Loaded Local LLM session (Ollama qwen2.5-coder:32b).';
   }
 
@@ -1463,6 +1547,7 @@
     sessionStorage.setItem('cw-control-token', token);
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
+    const sessionRefreshTimer = setInterval(fetchSessions, 60_000);
     let socket: WebSocket | undefined;
     function connect() {
       if (disposed) return;
@@ -1477,13 +1562,16 @@
       socket.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          if (message.event === 'turn_completed' || message.event === 'mutations_updated') fetchSessions();
+          if (message.event === 'turn_completed' || message.event === 'mutations_updated') {
+            fetchSessions();
+            if (message.session_id === activeSessionId) fetchSessionGraph(activeSessionId, sessionDataModeForTab());
+          }
           else if (message.event === 'firewall_intercepted') intercepts = [...intercepts, message.intercept];
         } catch { statusBanner = 'Received an unreadable update. Refresh the session.'; }
       };
     }
     connect();
-    return () => { disposed = true; clearTimeout(timer); socket?.close(); };
+    return () => { disposed = true; clearTimeout(timer); clearInterval(sessionRefreshTimer); socket?.close(); };
   });
 
   function kvColor(status: string): string {
@@ -1619,7 +1707,7 @@
         {/if}
 
         <button
-          onclick={() => (activeTab = 'optimize')}
+          onclick={() => selectDashboardTab('optimize')}
           style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 5px 12px; font-size: 12px; font-weight: 600; cursor: pointer;"
         >
           Optimize {latestTurn.lint_findings.length > 0 ? `(${latestTurn.lint_findings.length})` : ''}
@@ -1683,7 +1771,7 @@
           >
             <option value="ALL">All Agents ({allHarnessNames.length})</option>
             {#each allHarnessNames as h}
-              <option value={h}>{h}</option>
+              <option value={h}>{harnessBadgeStyle(h).label}</option>
             {/each}
           </select>
 
@@ -1817,7 +1905,7 @@
               style="position: relative; display: flex; align-items: center; height: 100%; border-bottom: 2px solid {activeTab === id ? '#3b82f6' : 'transparent'};"
             >
               <button
-                onclick={() => (activeTab = id as any)}
+                onclick={() => selectDashboardTab(id as any)}
                 style="padding: 0 4px; height: 100%; border: none; background: transparent; font-size: 13px; font-weight: {activeTab === id ? '600' : '400'}; color: {activeTab === id ? '#f4f4f5' : '#a1a1aa'}; cursor: pointer;"
               >
                 {label}
@@ -1893,11 +1981,12 @@
       </nav>
 
       <!-- Main Scrollable Content Area (Full-Width Central Workspace) -->
-      <main style="flex: 1; overflow-y: auto; padding: 20px 28px; width: 100%; max-width: none; box-sizing: border-box;">
-        {#if activeSessionId}
-          {#key activeSessionId}
-            <PinContextPolicy sessionId={activeSessionId} revision={loadedRevision} request={apiFetch} />
-          {/key}
+      <main aria-busy={isSessionLoading} style="position: relative; flex: 1; overflow-y: auto; padding: 20px 28px; width: 100%; max-width: none; box-sizing: border-box;">
+        {#if isSessionLoading}
+          <div role="status" aria-live="polite" style="position: absolute; z-index: 5; inset: 0; min-height: 180px; display: flex; align-items: flex-start; justify-content: center; padding-top: 72px; gap: 10px; background: rgba(9, 9, 11, 0.88); color: #d4d4d8; font-size: 13px;">
+            <span class="cw-loading-spinner" aria-hidden="true"></span>
+            <span>Loading selected session and preparing its timeline…</span>
+          </div>
         {/if}
         {#if !latestTurn}
           <div style="text-align: center; padding: 90px 20px; color: #71717a;">
@@ -1908,8 +1997,17 @@
         {:else if activeTab === 'timeline'}
           <!-- VIEW 1: CLEAN CHRONOLOGICAL TIMELINE -->
           <div style="display: flex; flex-direction: column; gap: 16px;">
-            {#each storyTurns as st, idx}
-              {@const isLastTurn = idx === storyTurns.length - 1}
+            {#if timelineHasMore}
+              <button
+                onclick={loadOlderTimelineTurns}
+                disabled={loadingOlderTurns}
+                style="align-self: flex-start; background: #18181b; color: #a1a1aa; border: 1px solid #27272a; border-radius: 6px; padding: 7px 11px; font-size: 12px; cursor: {loadingOlderTurns ? 'wait' : 'pointer'}; opacity: {loadingOlderTurns ? '0.7' : '1'};"
+              >
+                {loadingOlderTurns ? 'Loading older turns…' : 'Load 20 older turns'}
+              </button>
+            {/if}
+            {#each visibleStoryTurns as st, idx}
+              {@const isLastTurn = idx === visibleStoryTurns.length - 1}
               {@const stepsExpanded = expandAllTurns || expandedTurnSteps[st.turnSeq] || (isLastTurn && st.toolActions.length <= 4)}
               <div style="background: #141418; border: 1px solid #1f1f26; border-radius: 10px; overflow: hidden;">
                 <!-- Turn Header -->
@@ -2044,7 +2142,7 @@
               1. Select an Optimization Strategy
             </h3>
             <p style="margin: 2px 0 0 0; font-size: 11.5px; color: #a1a1aa;">
-              Choose a compaction preset below to preview how many tokens can be cut and how it impacts your KV cache.
+              Plans target the latest recorded request in this session; timeline cards do not change the plan target.
             </p>
           </div>
           <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 22px;">
@@ -2077,6 +2175,12 @@
               </button>
             {/each}
           </div>
+
+          {#if optimizationPlanStatus}
+            <p role="status" style="margin: 0 0 18px; padding: 10px 12px; border: 1px solid #713f12; border-radius: 7px; background: #1c1917; color: #fcd34d; font-size: 12px;">
+              {optimizationPlanStatus}
+            </p>
+          {/if}
 
           {#if activeStrategyPlan}
             <!-- Section 2: Scoreboard & Action Bar -->
@@ -3010,6 +3114,23 @@
               </div>
             {/if}
 
+            <div style="background: #141418; border: 1px solid #45403a; border-radius: 8px; padding: 14px; margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="font-size: 13px; font-weight: 600; color: #e4e4e7;">PinContext reinforcement</div>
+                  <div style="font-size: 12px; color: #fbbf24; margin-top: 3px;">Experimental and potentially harmful; loading its preview is on demand.</div>
+                </div>
+                <button onclick={() => (pinPolicyOpen = !pinPolicyOpen)}>
+                  {pinPolicyOpen ? 'Close policy' : 'Load policy preview'}
+                </button>
+              </div>
+              {#if pinPolicyOpen && activeSessionId}
+                {#key activeSessionId}
+                  <PinContextPolicy sessionId={activeSessionId} revision={loadedRevision} request={apiFetch} />
+                {/key}
+              {/if}
+            </div>
+
             <div style="background: #141418; border: 1px solid #1f1f26; border-radius: 8px; padding: 14px; display: flex; justify-content: space-between; align-items: center;">
               <div>
                 <div style="font-size: 13px; font-weight: 600; color: #e4e4e7;">On-Disk Transcript Sync-Back</div>
@@ -3308,3 +3429,19 @@
     {/if}
   </div>
 </div>
+
+<style>
+  @keyframes cw-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .cw-loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #3f3f46;
+    border-top-color: #60a5fa;
+    border-radius: 50%;
+    animation: cw-spin 0.8s linear infinite;
+    flex: 0 0 auto;
+  }
+</style>

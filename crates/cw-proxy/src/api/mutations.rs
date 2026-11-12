@@ -234,6 +234,19 @@ pub async fn api_auto_optimize(
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    if state
+        .store
+        .get_session(&id)
+        .ok()
+        .flatten()
+        .is_some_and(|session| session.harness == cw_core::ir::HarnessKind::Copilot)
+    {
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Copilot sessions are imported for inspection only; CW mutation delivery is unsupported.",
+        )
+            .into_response();
+    }
     let req: OptimizeRequest = if body.is_empty() {
         OptimizeRequest::default()
     } else {

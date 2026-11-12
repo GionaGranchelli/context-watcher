@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, process::Stdio};
 
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
-use cw_harnesses::spawn_transcript_watcher;
+use cw_harnesses::{scan_and_import_all_transcripts_once, spawn_transcript_watcher};
 use cw_mcp::run_mcp_stdio_server;
 use cw_proxy::{DaemonState, build_api_router, build_proxy_router};
 use cw_store::CwStore;
@@ -39,6 +39,9 @@ enum Commands {
     },
     /// Print the private local control credential for connecting the web UI
     AuthToken,
+    /// Discover local harness transcripts without blocking the daemon
+    #[command(hide = true)]
+    Discover,
     /// Explicitly purge cw history and owned exports; never deletes the source transcript
     Purge {
         #[arg(long)]
@@ -490,6 +493,11 @@ async fn main() -> Result<()> {
         Commands::AuthToken => {
             println!("{}", cw_core::control::control_token(true)?);
         }
+        Commands::Discover => {
+            let store = CwStore::open(&db_path)?;
+            let imported = scan_and_import_all_transcripts_once(&store);
+            println!("Discovered local harness transcripts imported={imported}");
+        }
         Commands::Mcp { daemon_url } => {
             run_mcp_stdio_server(&daemon_url).await?;
         }
@@ -512,14 +520,9 @@ async fn main() -> Result<()> {
                 .init();
 
             let store = CwStore::open(&db_path)?;
-            let ws_root = workspace.or_else(|| {
-                std::env::current_dir()
-                    .ok()
-                    .and_then(|p| p.to_str().map(|s| s.to_string()))
-            });
-            spawn_transcript_watcher(store.clone(), ws_root);
+            spawn_transcript_watcher(store.clone(), workspace.clone());
 
-            let mut state = DaemonState::new(store);
+            let mut state = DaemonState::new(store.clone());
             state.control_token = cw_core::control::control_token(true)?;
             state.spend_guard = l0_smoke_spend_guard_from_environment()?;
             if state.spend_guard.is_some() != state.live_provider_model.is_some() {
@@ -569,6 +572,29 @@ async fn main() -> Result<()> {
 
             let proxy_listener = tokio::net::TcpListener::bind(&proxy_addr).await?;
             let ui_listener = tokio::net::TcpListener::bind(&ui_addr).await?;
+            if workspace.is_none() {
+                let executable = std::env::current_exe()?;
+                match std::process::Command::new(executable)
+                    .arg("--db")
+                    .arg(&db_path)
+                    .arg("discover")
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::inherit())
+                    .stderr(Stdio::inherit())
+                    .spawn()
+                {
+                    Ok(mut child) => {
+                        tokio::task::spawn_blocking(move || {
+                            if let Err(error) = child.wait() {
+                                tracing::warn!(%error, "Could not reap transcript discovery worker");
+                            }
+                        });
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "Could not start local transcript discovery");
+                    }
+                }
+            }
 
             tokio::try_join!(
                 axum::serve(proxy_listener, proxy_app),

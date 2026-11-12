@@ -2,6 +2,7 @@ use crate::ir::{
     ContextTurn, LintRuleId, MutationOp, MutationRule, MutationStatus, NodeKind, ProviderKind,
     ToolSemanticMeta,
 };
+use crate::mutation::PinContextPolicy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -45,17 +46,7 @@ pub struct OptimizationStrategyPlan {
 /// Generates all 5 interactive Optimization Strategy Plans for a `ContextTurn`,
 /// with heuristic per-node estimates. Use the payload variant for whole-plan totals.
 pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyPlan> {
-    if !turn.analysis_complete
-        || turn.nodes.iter().any(|node| {
-            matches!(
-                &node.kind,
-                NodeKind::AssistantThinking {
-                    signature: Some(_),
-                    ..
-                }
-            )
-        })
-    {
+    if !turn.analysis_complete {
         return Vec::new();
     }
     let total_tokens = turn.token_usage.input_tokens.max(1);
@@ -114,6 +105,15 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         .unwrap_or(0);
 
     for (node_idx, n) in turn.nodes.iter().enumerate() {
+        if matches!(
+            n.kind,
+            NodeKind::AssistantThinking {
+                signature: Some(_),
+                ..
+            }
+        ) {
+            continue;
+        }
         let tok = n.token_span.count;
         let text = n.kind.text_for_tokenization();
         if text.starts_with("[cw:pruned")
@@ -158,7 +158,8 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
         }
 
         // 2. Stale or duplicate file reads
-        if stale_or_dup_node_ids.contains(&n.id)
+        if !text.starts_with("[cw:shadow_deduped")
+            && stale_or_dup_node_ids.contains(&n.id)
             && turn
                 .nodes
                 .iter()
@@ -284,6 +285,8 @@ pub fn build_optimization_plans(turn: &ContextTurn) -> Vec<OptimizationStrategyP
                 ..
             }
         ) && n.turn_seq < max_turn
+            && !text.starts_with("[cw:pruned")
+            && !text.starts_with("[cw:folded")
         {
             let after_tok = 8u32.min(tok);
             let saved = (tok as i32) - (after_tok as i32);
@@ -493,12 +496,45 @@ pub fn build_optimization_plans_for_payload(
     payload: &serde_json::Value,
     provider: ProviderKind,
 ) -> Vec<OptimizationStrategyPlan> {
-    if !crate::normalizer::supports_mutation_payload(payload, provider)
-        || crate::mutation::has_signed_content(payload)
+    if !crate::normalizer::supports_mutation_payload(payload, provider) {
+        return Vec::new();
+    }
+    let signed = crate::mutation::has_signed_content(payload);
+    if signed
+        && (provider != ProviderKind::Anthropic
+            || !crate::mutation::has_qualified_anthropic_thinking_signatures(payload))
     {
         return Vec::new();
     }
     let mut plans = build_optimization_plans(turn);
+    if signed {
+        let last_signed_idx = turn
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, node)| crate::mutation::node_contains_signed_content(payload, node))
+            .map(|(index, _)| index)
+            .max();
+        plans.iter_mut().for_each(|plan| {
+            plan.items.retain(|item| {
+                let node = item.node_id.as_ref().and_then(|id| {
+                    turn.nodes
+                        .iter()
+                        .enumerate()
+                        .find(|(_, node)| &node.id == id)
+                });
+                matches!(
+                    &item.mutation_op,
+                    MutationOp::PruneOrStub { .. } | MutationOp::ShadowDedupe { .. }
+                ) && provider == ProviderKind::Anthropic
+                    && node.is_some_and(|(index, node)| {
+                        last_signed_idx.is_some_and(|last_signed| index > last_signed)
+                            && !crate::mutation::node_contains_signed_content(payload, node)
+                    })
+            });
+        });
+        plans.retain(|plan| !plan.items.is_empty());
+    }
     let count = |value: &serde_json::Value| {
         crate::normalizer::parse_request_to_nodes(value, provider, turn.sequence_number)
             .map(|nodes| nodes.iter().map(|n| n.token_span.count).sum::<u32>())
@@ -536,6 +572,44 @@ pub fn build_optimization_plans_for_payload(
         };
     }
     plans
+}
+
+pub fn build_optimization_plans_for_payload_with_mutations(
+    turn: &ContextTurn,
+    payload: &serde_json::Value,
+    provider: ProviderKind,
+    rules: &[MutationRule],
+    pin_policy: &PinContextPolicy,
+    workspace_root: Option<&str>,
+) -> Vec<OptimizationStrategyPlan> {
+    if rules.is_empty() {
+        return build_optimization_plans_for_payload(turn, payload, provider);
+    }
+    let mut effective_payload = payload.clone();
+    let report = crate::mutation::apply_mutations_to_payload_with_policy(
+        &mut effective_payload,
+        provider,
+        rules,
+        turn.sequence_number,
+        pin_policy,
+    );
+    let Ok((mut effective_turn, _)) = crate::analyze_turn_from_payload(
+        turn.id.clone(),
+        turn.session_id.clone(),
+        turn.parent_turn_id.clone(),
+        turn.sequence_number,
+        &effective_payload,
+        provider,
+        None,
+        None,
+        workspace_root,
+    ) else {
+        return Vec::new();
+    };
+    effective_turn.token_usage.saved_by_mutations = report.saved_tokens;
+    effective_turn.applied_mutation_ids = report.applied_rule_ids;
+    effective_turn.skipped_mutations = report.skipped_rules;
+    build_optimization_plans_for_payload(&effective_turn, &effective_payload, provider)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -27,8 +27,7 @@ pub fn project_label_from_workspace(ws: Option<&str>) -> String {
         .to_string()
 }
 
-/// Resolves a target session ID from explicit flag, environment variable, current workspace directory,
-/// or prefix match.
+/// Resolves a target session ID from an explicit ID or one unique current-workspace match.
 pub fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Option<String>> {
     let selected = explicit
         .or_else(|| std::env::var("CW_SESSION_ID").ok())
@@ -50,14 +49,30 @@ pub fn resolve_session(store: &CwStore, explicit: Option<String>) -> Result<Opti
     }
     let cwd = std::env::current_dir()?;
     let sessions = store.list_sessions()?;
-    if let Some(matching) = sessions.iter().find(|s| {
-        s.workspace_root
-            .as_deref()
-            .is_some_and(|root| std::path::Path::new(root) == cwd)
-    }) {
-        return Ok(Some(matching.id.clone()));
+    let matching: Vec<_> = sessions
+        .iter()
+        .filter(|s| {
+            s.workspace_root
+                .as_deref()
+                .is_some_and(|root| std::path::Path::new(root) == cwd)
+        })
+        .collect();
+    match matching.as_slice() {
+        [session] => Ok(Some(session.id.clone())),
+        [] if sessions.is_empty() => Ok(None),
+        [] => anyhow::bail!(
+            "No session matches current workspace '{}'; pass --session explicitly.",
+            cwd.display()
+        ),
+        many => anyhow::bail!(
+            "Multiple sessions match current workspace '{}': [{}]. Pass --session explicitly.",
+            cwd.display(),
+            many.iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
-    Ok(sessions.first().map(|s| s.id.clone()))
 }
 
 /// Persists an interactive CLI mutation to the session overlay store.
@@ -208,6 +223,14 @@ pub fn run_lint(store: &CwStore, session: Option<String>, fix: bool) -> Result<(
         println!("No active sessions found.");
         return Ok(());
     };
+    if store
+        .get_session(&sess_id)?
+        .is_some_and(|session| session.harness == HarnessKind::Copilot)
+    {
+        anyhow::bail!(
+            "GitHub Copilot sessions are imported for inspection only; CW mutation delivery is unsupported."
+        );
+    }
     let Some(turn) = store.get_latest_turn(&sess_id)? else {
         println!("No turns recorded.");
         return Ok(());
@@ -302,10 +325,16 @@ pub fn run_optimize(
         let mut total_synced = 0usize;
 
         for s in &target_sessions {
+            if s.harness == HarnessKind::Copilot {
+                continue;
+            }
             let Some(turn) = store.get_latest_turn(&s.id)? else {
                 continue;
             };
             let plans = store.optimization_plans(&turn)?;
+            if plans.is_empty() {
+                continue;
+            }
             let Some(plan) = plans.iter().find(|p| p.id == strat_id) else {
                 anyhow::bail!(
                     "Unknown strategy '{}'. Valid IDs: cache_safe_boost, clean_code_state, surgical_log_diet, deep_trajectory_fold, max_token_diet",
@@ -396,6 +425,11 @@ pub fn run_optimize(
         return Ok(());
     };
     let plans = store.optimization_plans(&turn)?;
+    if plans.is_empty() {
+        anyhow::bail!(
+            "No safe optimization plan is available for session '{sess_id}'; request data may be missing, incomplete, signed, or unsupported."
+        );
+    }
 
     if strategy.is_none() || dry_run {
         println!(

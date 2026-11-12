@@ -94,6 +94,12 @@ pub fn import_hermes_state_db(
         let session_id = format!("hermes_{raw_id}");
         let created_at = DateTime::from_timestamp(started_f as i64, 0).unwrap_or_else(Utc::now);
         let updated_at = DateTime::from_timestamp(updated_f as i64, 0).unwrap_or(created_at);
+        if store.get_session(&session_id)?.is_some_and(|session| {
+            session.harness == HarnessKind::Hermes && session.updated_at >= updated_at
+        }) {
+            imported_ids.push(session_id);
+            continue;
+        }
 
         let anchor_prompt_tokens: Option<u32> = serde_json::from_str::<Value>(&model_cfg_str)
             .ok()

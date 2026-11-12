@@ -22,7 +22,7 @@ export function strategyConfirmation({ status, name, result }: {
   const action = status === 'draft' ? 'Staged' : 'Created';
   return `Proposed ${proposed} ${proposed === 1 ? 'rule' : 'rules'} from "${name}". ` +
     `${action} ${created} ${status} ${created === 1 ? 'rule' : 'rules'}. ` +
-    `${preview} eligible in the current preview. ` +
-    `Estimated token reduction from created rules: ${estimate.toLocaleString()} tokens. ` +
-    'Measured savings: unavailable.';
+    `CW applied ${preview} in its local overlay preview. ` +
+    `Estimated reduction: ${estimate.toLocaleString()} tokens. ` +
+    'No provider request or measured savings is confirmed.';
 }

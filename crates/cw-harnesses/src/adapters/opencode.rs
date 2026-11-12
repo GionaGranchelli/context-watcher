@@ -103,6 +103,12 @@ pub fn import_opencode_state_db(
         let session_id = format!("opencode_{raw_id}");
         let created_at = DateTime::from_timestamp_millis(created_ms).unwrap_or_else(Utc::now);
         let updated_at = DateTime::from_timestamp_millis(updated_ms).unwrap_or(created_at);
+        if store.get_session(&session_id)?.is_some_and(|session| {
+            session.harness == HarnessKind::OpenCode && session.updated_at >= updated_at
+        }) {
+            imported_ids.push(session_id);
+            continue;
+        }
 
         let model = if let Ok(v) = serde_json::from_str::<Value>(&raw_model) {
             v.get("id")

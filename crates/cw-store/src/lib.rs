@@ -24,6 +24,8 @@ pub enum StoreError {
     PinContextSessionTerminated,
     #[error("Session changed; refresh the plan before applying it")]
     Conflict,
+    #[error("Copilot CLI sessions are observation-only")]
+    ReadOnlySession,
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
     #[error("SQLite error: {0}")]
@@ -56,6 +58,19 @@ pub struct CwStore {
 }
 
 impl CwStore {
+    fn ensure_session_mutable(conn: &Connection, session_id: &str) -> Result<(), StoreError> {
+        let harness = conn
+            .query_row(
+                "SELECT harness FROM sessions WHERE id=?1",
+                params![session_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if harness.as_deref() == Some("copilot") {
+            return Err(StoreError::ReadOnlySession);
+        }
+        Ok(())
+    }
     #[cfg(feature = "r11a-qualification")]
     pub fn qualification_lock_wait(&self) -> Result<Duration, StoreError> {
         let started = Instant::now();
@@ -880,14 +895,15 @@ impl CwStore {
     }
 
     pub fn get_latest_turn(&self, session_id: &str) -> Result<Option<ContextTurn>, StoreError> {
-        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
-        let raw: Option<String> = conn
-            .query_row(
+        let raw: Option<String> = {
+            let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+            conn.query_row(
                 "SELECT turn_json FROM turns WHERE session_id = ?1 ORDER BY seq_num DESC, created_at DESC LIMIT 1",
                 params![session_id],
                 |row| row.get(0),
             )
-            .optional()?;
+            .optional()?
+        };
         match raw {
             Some(s) => Ok(Some(serde_json::from_str(&s)?)),
             None => Ok(None),
@@ -963,6 +979,7 @@ impl CwStore {
         };
         let revision = Self::revision(&tx, session_id)?;
         tx.commit()?;
+        drop(conn);
         Ok((
             turns
                 .into_iter()
@@ -971,6 +988,40 @@ impl CwStore {
             rules
                 .into_iter()
                 .map(|s| serde_json::from_str(&s))
+                .collect::<Result<_, _>>()?,
+            revision,
+        ))
+    }
+
+    pub fn latest_turn_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<(Option<ContextTurn>, Vec<MutationRule>, String), StoreError> {
+        let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let tx = conn.transaction()?;
+        let turn = tx
+            .query_row(
+                "SELECT turn_json FROM turns WHERE session_id=?1 ORDER BY seq_num DESC,created_at DESC LIMIT 1",
+                params![session_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let rules = {
+            let mut query = tx.prepare(
+                "SELECT rule_json FROM mutations WHERE session_id=?1 ORDER BY created_at ASC,id ASC",
+            )?;
+            query
+                .query_map(params![session_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        let revision = Self::revision(&tx, session_id)?;
+        tx.commit()?;
+        drop(conn);
+        Ok((
+            turn.map(|json| serde_json::from_str(&json)).transpose()?,
+            rules
+                .into_iter()
+                .map(|json| serde_json::from_str(&json))
                 .collect::<Result<_, _>>()?,
             revision,
         ))
@@ -986,9 +1037,21 @@ impl CwStore {
         let Some(raw) = self.get_turn_raw_payload(&turn.id)? else {
             return Ok(Vec::new());
         };
-        Ok(cw_core::optimizer::build_optimization_plans_for_payload(
-            turn, &raw, provider,
-        ))
+        let rules = self.list_mutations(&turn.session_id)?;
+        let pin_policy = self.get_pin_context_policy(&turn.session_id)?;
+        let workspace_root = self
+            .get_session(&turn.session_id)?
+            .and_then(|session| session.workspace_root);
+        Ok(
+            cw_core::optimizer::build_optimization_plans_for_payload_with_mutations(
+                turn,
+                &raw,
+                provider,
+                &rules,
+                &pin_policy,
+                workspace_root.as_deref(),
+            ),
+        )
     }
 
     pub fn session_revision(&self, session_id: &str) -> Result<String, StoreError> {
@@ -1049,6 +1112,7 @@ impl CwStore {
     ) -> Result<MutationCreationReport, StoreError> {
         let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        Self::ensure_session_mutable(&tx, session_id)?;
         if let Some(expected) = revision
             && Self::revision(&tx, session_id)? != expected
         {
@@ -1118,6 +1182,7 @@ impl CwStore {
     ) -> Result<usize, StoreError> {
         let rules = self.list_mutations(session_id)?;
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        Self::ensure_session_mutable(&conn, session_id)?;
         let mut deleted = 0usize;
         for r in rules {
             let should_delete = if only_pins {
@@ -1149,6 +1214,7 @@ impl CwStore {
     ) -> Result<usize, StoreError> {
         let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        Self::ensure_session_mutable(&tx, session_id)?;
         if Self::revision(&tx, session_id)? != revision {
             return Err(StoreError::Conflict);
         }
@@ -1588,13 +1654,24 @@ impl CwStore {
         Ok(row.map(|(p, off)| (p, off.max(0) as u64)))
     }
 
-    pub fn list_session_sources(&self) -> Result<HashMap<String, String>, StoreError> {
+    pub fn list_session_sources(
+        &self,
+    ) -> Result<HashMap<String, (String, u64, String)>, StoreError> {
         let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
-        let mut stmt = conn.prepare("SELECT session_id, transcript_path FROM session_sources")?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let mut stmt = conn.prepare(
+            "SELECT session_id, transcript_path, last_byte_offset, updated_at FROM session_sources",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?.max(0) as u64,
+                r.get::<_, String>(3)?,
+            ))
+        })?;
         let mut map = HashMap::new();
         for r in rows.flatten() {
-            map.insert(r.0, r.1);
+            map.insert(r.0, (r.1, r.2, r.3));
         }
         Ok(map)
     }

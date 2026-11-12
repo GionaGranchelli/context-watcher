@@ -409,6 +409,10 @@ pub fn inject_local_engine_kv_optimizations(
 /// Strips any internal `cw_*` metadata fields (`cw_timestamp`, `cw_turn_seq`, etc.) from a JSON
 /// payload before forwarding to strict upstream LLM providers (Anthropic, OpenAI, Gemini).
 pub fn strip_internal_cw_fields(val: &mut Value) {
+    if let Some(map) = val.as_object_mut() {
+        map.remove("cw_session_id");
+        map.remove("cw_workspace");
+    }
     for key in ["messages", "input", "contents"] {
         if let Some(items) = val.get_mut(key).and_then(Value::as_array_mut) {
             for item in items {

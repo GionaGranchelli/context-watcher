@@ -15,7 +15,7 @@ use chrono::Utc;
 use cw_core::{
     analyze_turn_from_payload,
     autopilot::evaluate_autopilot_policies_with_policy,
-    ir::{HarnessKind, ProviderKind, Session},
+    ir::{HarnessKind, MutationOp, MutationStatus, ProviderKind, Session},
     local_llm::strip_internal_cw_fields,
     mutation::{apply_mutations_to_payload_with_policy, evaluate_firewall, has_signed_content},
     normalizer::detect_provider,
@@ -60,6 +60,20 @@ fn fallback_invalid_mutation(
                     reason: "PostMutationValidationFailed".into(),
                 }),
         );
+    }
+}
+
+fn require_standard_service_tier(payload: &mut Value) -> Result<bool, ()> {
+    if !payload.is_object() {
+        return Err(());
+    }
+    match payload.get("service_tier") {
+        None => {
+            payload["service_tier"] = Value::String("default".into());
+            Ok(true)
+        }
+        Some(tier) if tier.as_str() == Some("default") => Ok(false),
+        Some(_) => Err(()),
     }
 }
 
@@ -113,18 +127,21 @@ pub async fn handle_proxy_request(
         let authorization_active = state
             .live_authorization_expires_at
             .is_some_and(|expires| Utc::now() < expires);
-        let authorized_tier = serde_json::from_slice::<Value>(&body)
-            .ok()
-            .and_then(|payload| {
-                payload
-                    .get("service_tier")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
-            .as_deref()
-            == Some("default");
+        let mut authorized_payload = serde_json::from_slice::<Value>(&body).ok();
+        let tier_was_defaulted = authorized_payload
+            .as_mut()
+            .and_then(|payload| require_standard_service_tier(payload).ok());
+        let authorized_tier = tier_was_defaulted.is_some();
         if !live_route || !authorized || !bound_session || !authorization_active || !authorized_tier
         {
+            tracing::warn!(
+                live_route,
+                authorized_control_token = authorized,
+                bound_session,
+                authorization_active,
+                authorized_service_tier = authorized_tier,
+                "L0 smoke request rejected before SpendGuard admission"
+            );
             return (
                 StatusCode::FORBIDDEN,
                 "Smoke authorization route, session, expiry, or pricing tier mismatch",
@@ -135,16 +152,71 @@ pub async fn handle_proxy_request(
     let mut outbound_body = body.to_vec();
     let mut recorder = None;
 
-    'capture: {
-        if let Ok(raw) = serde_json::from_slice::<Value>(&body)
-            && raw.is_object()
-        {
-            let provider = detect_provider(uri.path(), &raw);
+'tcp_capture: {
+// Capture the body or exit early
+let raw = if let Ok(v) = serde_json::from_slice(&body) { v } else {
+ let _ = state.store.get_latest_turn(&session_id);
+ trace_reado("failed to parse JSON");
+ };
+if !raw.is_object() { break 'tcp_capture; }
+            let body_session_id = match raw.get("cw_session_id") {
+                None => None,
+                Some(Value::String(id)) => Some(id.clone()),
+                Some(_) => {
+                    return (StatusCode::BAD_REQUEST, "Invalid cw session ID").into_response();
+                }
+            };
+            let body_workspace = match raw.get("cw_workspace") {
+                None => None,
+                Some(Value::String(path))
+                    if body_session_id.is_some()
+                        && path.len() <= 4096
+                        && std::path::Path::new(path).is_absolute() =>
+                {
+                    Some(path.clone())
+                }
+                Some(_) => {
+                    return (StatusCode::BAD_REQUEST, "Invalid cw workspace").into_response();
+                }
+            };
+            if body_session_id.is_some() && uri.path() != "/v1" && !uri.path().starts_with("/v1/") {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "Body session metadata is supported only on the /v1 proxy route",
+                )
+                    .into_response();
+            }
+            raw.as_object_mut()
+                .expect("object checked")
+                .remove("cw_session_id");
+            raw.as_object_mut()
+                .expect("object checked")
+                .remove("cw_workspace");
+            if body_session_id.is_some() || body_workspace.is_some() {
+                outbound_body = match serde_json::to_vec(&raw) {
+                    Ok(body) => body,
+                    Err(error) => {
+                        return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
+                    }
+                };
+            }
+            let provider =
+                routing::provider_for_route(uri.path(), detect_provider(uri.path(), &raw));
             let authorized = headers
                 .get("x-cw-control-token")
                 .and_then(|v| v.to_str().ok())
                 == Some(state.control_token.as_str());
             let explicit = headers.get("x-cw-session-id").and_then(|v| v.to_str().ok());
+            if body_session_id.as_deref().is_some_and(|id| {
+                !cw_core::control::is_valid_session_id(id)
+                    || explicit.is_some_and(|header_id| header_id != id)
+            }) {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "Invalid or conflicting cw session ID",
+                )
+                    .into_response();
+            }
             if explicit.is_some() && !authorized {
                 return (
                     StatusCode::FORBIDDEN,
@@ -163,13 +235,16 @@ pub async fn handle_proxy_request(
                 break 'capture;
             }
             let session_id = explicit
+                .or(body_session_id.as_deref())
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("sess_{}", Uuid::new_v4().simple()));
+            let session_bound = (explicit.is_some() && authorized) || body_session_id.is_some();
             let workspace = headers
                 .get("x-cw-workspace")
                 .filter(|_| authorized)
                 .and_then(|v| v.to_str().ok())
-                .map(str::to_owned);
+                .map(str::to_owned)
+                .or(body_workspace);
             let model = raw
                 .get("model")
                 .and_then(Value::as_str)
@@ -198,7 +273,11 @@ pub async fn handle_proxy_request(
                 harness: existing_session
                     .as_ref()
                     .map(|existing| existing.harness)
-                    .unwrap_or(HarnessKind::GenericProxy),
+                    .unwrap_or(if body_session_id.is_some() {
+                        HarnessKind::Omp
+                    } else {
+                        HarnessKind::GenericProxy
+                    }),
                 workspace_root: workspace.clone(),
                 model,
                 provider,
@@ -213,11 +292,33 @@ pub async fn handle_proxy_request(
             };
             let cfg = state.store.get_autopilot_config().unwrap_or_default();
             let strict_shadow = cfg.shadow_policy.enabled && cfg.shadow_policy.strict_shadow_only;
+            let signed_safe_rules = if !strict_shadow
+                && cfg.enabled
+                && session_bound
+                && provider == ProviderKind::Anthropic
+                && cw_core::mutation::has_qualified_anthropic_thinking_signatures(&raw)
+            {
+                state
+                    .store
+                    .list_mutations(&session_id)
+                    .ok()
+                    .filter(|rules| {
+                        rules.iter().any(|rule| {
+                            rule.status == MutationStatus::Committed
+                                && matches!(
+                                    rule.op,
+                                    MutationOp::PruneOrStub { .. }
+                                        | MutationOp::ShadowDedupe { .. }
+                                )
+                        })
+                    })
+            } else {
+                None
+            };
             let mutation_requested = !strict_shadow
                 && cfg.enabled
-                && explicit.is_some()
-                && authorized
-                && !has_signed_content(&raw);
+                && session_bound
+                && (!has_signed_content(&raw) || signed_safe_rules.is_some());
             if let Err(error) = state.store.upsert_session(&session) {
                 if mutation_requested || headers.contains_key("x-cw-dry-run") {
                     return (StatusCode::SERVICE_UNAVAILABLE, error.to_string()).into_response();
@@ -247,12 +348,15 @@ pub async fn handle_proxy_request(
                 .get_pin_context_policy(&session_id)
                 .unwrap_or_default();
             if active {
-                let rules = match state.store.list_mutations(&session_id) {
-                    Ok(rules) => rules,
-                    Err(error) => {
-                        return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
-                            .into_response();
-                    }
+                let rules = match signed_safe_rules {
+                    Some(rules) => rules,
+                    None => match state.store.list_mutations(&session_id) {
+                        Ok(rules) => rules,
+                        Err(error) => {
+                            return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
+                                .into_response();
+                        }
+                    },
                 };
                 let report = apply_mutations_to_payload_with_policy(
                     &mut outbound,
@@ -488,19 +592,17 @@ pub async fn handle_proxy_request(
                 }
                 if let Err(error) = state.store.save_wire_request(&turn.id, &body) {
                     if active || headers.contains_key("x-cw-dry-run") {
-                        return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
+                        return (StatusCode::SERVICE_UNAVAILABLE, error.toString())
                             .into_response();
                     }
-                    tracing::warn!(%error,"Wire recording unavailable; forwarding original request");
+                    trace::warn!(%error,"Wire recording unavailable; forwarding original request");
                     break 'capture;
-                }
+                };
                 #[cfg(feature = "qualification-fault-hooks")]
                 if let Some(hook) = state.qualification_fault_hook.as_ref() {
-                    let ingress = body.to_vec();
-                    hook.pause(
-                        "after_ingress_before_completed_egress",
-                        serde_json::json!({
-                            "phase":"proxy ingress persisted; model-bound egress not yet dispatched",
+                    let _ = hook.pause(
+                        "after_ingress...
+                            "phase":"store -> guard -> stream poll lifecycle completed",
                             "session_id":session_id,
                             "turn_id":turn.id,
                             "accepted_admissions":0,
@@ -511,8 +613,7 @@ pub async fn handle_proxy_request(
                             "process_cleanup":"supervisor_verified",
                         }),
                         &[("ingress.bin", &ingress)],
-                    )
-                    .await;
+                    ).await;
                 }
                 if headers.contains_key("x-cw-dry-run") {
                     return render_dry_run_response(&state, turn, outbound);
@@ -558,6 +659,24 @@ pub async fn handle_proxy_request(
             }
             _ => {}
         }
+    }
+
+    if state.live_allowed_session_id.is_some() {
+        let mut payload = match serde_json::from_slice::<Value>(&outbound_body) {
+            Ok(payload) => payload,
+            Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        };
+        if require_standard_service_tier(&mut payload).is_err() {
+            return (
+                StatusCode::FORBIDDEN,
+                "Smoke request no longer qualifies for standard pricing",
+            )
+                .into_response();
+        }
+        outbound_body = match serde_json::to_vec(&payload) {
+            Ok(normalized) => normalized,
+            Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        };
     }
 
     forward_to_upstream(
@@ -611,15 +730,80 @@ mod mutation_fallback_tests {
 
 #[cfg(test)]
 mod l0_route_boundary_tests {
-    use super::handle_proxy_request;
+    use super::{handle_proxy_request, require_standard_service_tier};
     use crate::state::DaemonState;
     use axum::{
+        Json, Router,
         body::Bytes,
         extract::State,
         http::{HeaderMap, Method, StatusCode, Uri},
+        routing::post,
     };
     use chrono::{Duration, Utc};
     use cw_store::CwStore;
+
+    #[test]
+    fn l0_defaults_an_omitted_tier_and_rejects_other_explicit_tiers() {
+        let mut omitted = serde_json::json!({"model":"gpt-6-luna"});
+        assert_eq!(require_standard_service_tier(&mut omitted), Ok(true));
+        assert_eq!(omitted["service_tier"], "default");
+
+        let mut explicit = serde_json::json!({"model":"gpt-6-luna","service_tier":"default"});
+        assert_eq!(require_standard_service_tier(&mut explicit), Ok(false));
+        assert_eq!(explicit["service_tier"], "default");
+
+        for tier in ["auto", "priority", "flex"] {
+            let mut payload = serde_json::json!({"service_tier":tier});
+            assert_eq!(require_standard_service_tier(&mut payload), Err(()));
+        }
+        let mut null_tier = serde_json::json!({"service_tier":null});
+        assert_eq!(require_standard_service_tier(&mut null_tier), Err(()));
+    }
+
+    #[tokio::test]
+    async fn l0_forwards_an_explicit_standard_tier_when_codex_omits_it() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let app = Router::new().route(
+            "/v1/responses",
+            post(move |body: Bytes| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(body).unwrap();
+                    (
+                        StatusCode::OK,
+                        Json(serde_json::json!({"status":"completed"})),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let mut state = DaemonState::new(CwStore::open_in_memory().unwrap());
+        state.openai_upstream = upstream;
+        state.live_allowed_session_id = Some("cw122b2l0-test-auth".into());
+        state.live_authorization_expires_at = Some(Utc::now() + Duration::minutes(1));
+        state.capture_wire_egress = true;
+        let mut headers = HeaderMap::new();
+        headers.insert("x-cw-control-token", state.control_token.parse().unwrap());
+        headers.insert("x-cw-session-id", "cw122b2l0-test-auth".parse().unwrap());
+        let response = handle_proxy_request(
+            State(state),
+            Method::POST,
+            Uri::try_from("/openai/v1/responses").unwrap(),
+            headers,
+            Bytes::from_static(br#"{"model":"gpt-6-luna","input":"smoke"}"#),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let _ = axum::body::to_bytes(response.into_body(), 1024)
+            .await
+            .unwrap();
+        let egress: serde_json::Value = serde_json::from_slice(&rx.recv().await.unwrap()).unwrap();
+        assert_eq!(egress["service_tier"], "default");
+        server.abort();
+    }
 
     #[tokio::test]
     async fn l0_rejects_alternate_routes_and_unbound_openai_requests() {

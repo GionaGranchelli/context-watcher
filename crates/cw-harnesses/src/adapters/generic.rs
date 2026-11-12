@@ -61,7 +61,7 @@ pub fn import_generic_jsonl_transcript(
 ) -> Result<String, HarnessError> {
     let mut harness = harness;
     let path_str = path.to_string_lossy();
-    if harness == HarnessKind::Pi && path_str.contains("/.omp/") {
+    if path_str.contains("/.omp/agent/sessions/") {
         harness = HarnessKind::Omp;
     }
     let stem = path

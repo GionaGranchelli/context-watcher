@@ -19,6 +19,7 @@ pub enum HarnessKind {
     OpenCode,
     Aider,
     ClaudeCode,
+    Copilot,
     GenericProxy,
 }
 
@@ -33,6 +34,7 @@ impl HarnessKind {
             Self::OpenCode => "opencode",
             Self::Aider => "aider",
             Self::ClaudeCode => "claude_code",
+            Self::Copilot => "copilot",
             Self::GenericProxy => "generic_proxy",
         }
     }
@@ -47,6 +49,7 @@ impl HarnessKind {
             "opencode" => Self::OpenCode,
             "aider" => Self::Aider,
             "claude_code" | "claude" => Self::ClaudeCode,
+            "copilot" | "github_copilot" => Self::Copilot,
             _ => Self::GenericProxy,
         }
     }

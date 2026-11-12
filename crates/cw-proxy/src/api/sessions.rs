@@ -73,31 +73,123 @@ pub struct SessionGraphResponse {
     pub mutations: Vec<MutationRule>,
     pub file_states: Vec<FileContextState>,
     pub optimization_plans: Vec<OptimizationStrategyPlan>,
+    pub optimization_plan_status: Option<String>,
+    pub timeline_has_more: bool,
     pub cost_and_perf: Option<CostAndPerfReport>,
     pub local_model_analysis: Option<LocalModelAnalysis>,
     pub autopilot_config: cw_core::autopilot::AutoPilotConfig,
     pub transcript_source_path: Option<String>,
 }
 
+#[derive(Deserialize, Default)]
+pub struct SessionGraphQuery {
+    /// Return only the latest turn for dashboard views that do not need full history.
+    pub compact: Option<bool>,
+    /// Limit timeline nodes to one page; older pages are requested explicitly.
+    pub timeline_limit: Option<usize>,
+    pub timeline_before_turn: Option<u32>,
+    /// Defer expensive strategy planning until the Optimize view is opened.
+    pub include_optimization_plans: Option<bool>,
+}
+
 pub async fn api_get_session_graph(
     State(state): State<DaemonState>,
     Path(id): Path<String>,
+    Query(query): Query<SessionGraphQuery>,
 ) -> impl IntoResponse {
     let session = state.store.get_session(&id).ok().flatten();
-    let (full_turns, mutations, revision) = match state.store.session_history_snapshot(&id) {
+    let compact = query.compact == Some(true);
+    let snapshot = if compact {
+        state
+            .store
+            .latest_turn_snapshot(&id)
+            .map(|(latest, rules, revision)| (latest.into_iter().collect(), rules, revision))
+    } else {
+        state.store.session_history_snapshot(&id)
+    };
+    let (full_turns, mutations, revision) = match snapshot {
         Ok(snapshot) => snapshot,
         Err(error) => {
             return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
         }
     };
     let latest_turn = full_turns.last().cloned();
-    let radix_graph = match &latest_turn {
-        Some(lt) => build_radix_graph(lt, &full_turns),
-        None => RadixGraph::default(),
+    let timeline_page = query.timeline_limit.is_some();
+    let radix_graph = match (&latest_turn, timeline_page) {
+        (Some(_), true) => RadixGraph::default(),
+        (Some(lt), false) => build_radix_graph(lt, &full_turns),
+        (None, _) => RadixGraph::default(),
     };
-    let optimization_plans = match &latest_turn {
-        Some(lt) => state.store.optimization_plans(lt).unwrap_or_default(),
-        None => Vec::new(),
+    let (optimization_plans, optimization_plan_status) = if query.include_optimization_plans
+        == Some(false)
+        || query.timeline_before_turn.is_some()
+    {
+        (Vec::new(), None)
+    } else {
+        match (session.as_ref().map(|s| s.harness), &latest_turn) {
+            (Some(HarnessKind::Copilot), _) => (
+                Vec::new(),
+                Some("Copilot sessions are imported for inspection only; CW cannot deliver mutations to Copilot.".to_string()),
+            ),
+            (_, None) => (Vec::new(), Some("No recorded request is available for optimization.".to_string())),
+            (_, Some(turn)) if !turn.analysis_complete => (
+                Vec::new(),
+                Some("Request analysis is incomplete; CW cannot prove which nodes are safe to edit.".to_string()),
+            ),
+            (_, Some(turn)) if turn.normalization_provider.is_none() => (
+                Vec::new(),
+                Some("The request provider could not be identified; CW abstained.".to_string()),
+            ),
+            (_, Some(turn)) => {
+                let raw = state.store.get_turn_raw_payload(&turn.id).ok().flatten();
+                match raw {
+                    None => (
+                        Vec::new(),
+                        Some("The original request payload is unavailable; CW cannot verify safe edit targets.".to_string()),
+                    ),
+                    Some(raw) if !cw_core::normalizer::supports_mutation_payload(
+                        &raw,
+                        turn.normalization_provider.unwrap(),
+                    ) => (
+                        Vec::new(),
+                        Some("This request format contains unsupported or opaque content; CW abstained.".to_string()),
+                    ),
+                    Some(raw) => {
+                        let signed = cw_core::mutation::has_signed_content(&raw);
+                        let pin_policy =
+                            state.store.get_pin_context_policy(&id).unwrap_or_default();
+                        let plans = cw_core::optimizer::build_optimization_plans_for_payload_with_mutations(
+                            turn,
+                            &raw,
+                            turn.normalization_provider.unwrap(),
+                            &mutations,
+                            &pin_policy,
+                            session
+                                .as_ref()
+                                .and_then(|session| session.workspace_root.as_deref()),
+                        );
+                        let status = if plans.is_empty() {
+                            Some(if signed {
+                                if turn.normalization_provider == Some(ProviderKind::Anthropic)
+                                    && cw_core::mutation::has_qualified_anthropic_thinking_signatures(&raw)
+                                {
+                                    "Signed thinking can bind its preceding request prefix. CW found no eligible target after the last signed block, so it left the request unchanged.".to_string()
+                                } else {
+                                    "This request contains a signature format without a verified local edit boundary; CW preserved it and abstained.".to_string()
+                                }
+                            } else {
+                                "CW found no eligible cleanup candidates in this request.".to_string()
+                            })
+                        } else if signed {
+                            Some("Signed blocks and any bound request prefix are preserved. Plans include only verified targets after the last signed block.".to_string())
+                        } else {
+                            None
+                        };
+                        (plans, status)
+                    }
+                }
+            }
+        }
     };
 
     let mutation_preview = latest_turn.as_ref().and_then(|latest| {
@@ -106,7 +198,10 @@ pub async fn api_get_session_graph(
             .get_turn_raw_payload(&latest.id)
             .ok()
             .flatten()?;
-        preview_turn(latest, &raw, &mutations, session.as_ref()?.provider)
+        let provider = latest
+            .normalization_provider
+            .or_else(|| session.as_ref().map(|session| session.provider))?;
+        preview_turn(latest, &raw, &mutations, provider)
     });
 
     let model_str = session
@@ -126,13 +221,17 @@ pub async fn api_get_session_graph(
         .map(|lt| analyze_local_model_kv(lt, &id, model_str, provider_kind));
 
     // Pillar 6: Lightweight historical turns (strip heavy `nodes` array from older turns so 350k+ token sessions load in <5ms)
-    let turns_lightweight: Vec<ContextTurn> = full_turns
-        .into_iter()
-        .map(|mut t| {
-            t.nodes.clear();
-            t
-        })
-        .collect();
+    let turns_lightweight: Vec<ContextTurn> = if compact {
+        Vec::new()
+    } else {
+        full_turns
+            .into_iter()
+            .map(|mut turn| {
+                turn.nodes.clear();
+                turn
+            })
+            .collect()
+    };
 
     let file_states = state.store.get_file_states(&id).unwrap_or_default();
     let autopilot_config = state.store.get_autopilot_config().unwrap_or_default();
@@ -143,6 +242,17 @@ pub async fn api_get_session_graph(
         .flatten()
         .map(|(p, _)| p);
 
+    let (mut mutation_preview, latest_turn) = if compact {
+        (mutation_preview.or_else(|| latest_turn.clone()), None)
+    } else {
+        (mutation_preview, latest_turn)
+    };
+    let timeline_has_more =
+        if let (Some(preview), Some(limit)) = (&mut mutation_preview, query.timeline_limit) {
+            slice_timeline_page(preview, limit, query.timeline_before_turn)
+        } else {
+            false
+        };
     Json(SessionGraphResponse {
         revision,
         mutation_preview,
@@ -153,12 +263,32 @@ pub async fn api_get_session_graph(
         mutations,
         file_states,
         optimization_plans,
+        optimization_plan_status,
+        timeline_has_more,
         cost_and_perf,
         local_model_analysis,
         autopilot_config,
         transcript_source_path,
     })
     .into_response()
+}
+
+fn slice_timeline_page(turn: &mut ContextTurn, limit: usize, before_turn: Option<u32>) -> bool {
+    let mut turn_sequences: Vec<u32> = turn
+        .nodes
+        .iter()
+        .map(|node| node.turn_seq.max(1))
+        .filter(|sequence| before_turn.is_none_or(|before| *sequence < before))
+        .collect();
+    turn_sequences.sort_unstable();
+    turn_sequences.dedup();
+    let limit = limit.clamp(1, 50);
+    let start = turn_sequences.len().saturating_sub(limit);
+    let has_more = start > 0;
+    let page = &turn_sequences[start..];
+    turn.nodes
+        .retain(|node| page.binary_search(&node.turn_seq.max(1)).is_ok());
+    has_more
 }
 
 pub async fn api_sync_transcript_back(

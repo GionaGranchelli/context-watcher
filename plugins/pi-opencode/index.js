@@ -175,6 +175,10 @@ function runCwCli(args, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     execFile("cw", args, { timeout: 15000, env }, (error, stdout, stderr) => {
       if (error) {
+        if (error.code !== "ENOENT") {
+          reject(new Error(stderr || error.message));
+          return;
+        }
         const fallbackPath = `${process.env.HOME || "/tmp"}/.local/bin/cw`;
         execFile(fallbackPath, args, { timeout: 15000, env }, (err2, out2, errStr2) => {
           if (err2) return reject(new Error(errStr2 || err2.message));
@@ -249,6 +253,8 @@ export default function contextWatcherExtension(pi) {
     try {
       if (!Array.isArray(event?.messages)) return;
       const sid = getCanonicalSessionId(ctx, pi);
+      if (sid) process.env.CW_SESSION_ID = sid;
+      else delete process.env.CW_SESSION_ID;
       const provider = resolveProvider(ctx, event);
       const transformed = await transformMessages(event.messages, sid, provider);
 
@@ -266,10 +272,16 @@ export default function contextWatcherExtension(pi) {
   // Strictly skips transformation if context hook already processed the turn to prevent double-mutation.
   pi.on?.("before_provider_request", async (event, ctx) => {
     try {
-      const messages = event?.payload?.messages;
-      if (!Array.isArray(messages)) return event?.payload;
-
+      const originalPayload = event?.payload;
       const sid = getCanonicalSessionId(ctx, pi);
+      const modelApi = ctx?.model?.api;
+      const proxySessionBinding =
+        modelApi === "openai-completions" || modelApi === "openai-responses";
+      const payload = sid && proxySessionBinding && originalPayload && typeof originalPayload === "object"
+        ? { ...originalPayload, cw_session_id: sid, cw_workspace: process.cwd() }
+        : originalPayload;
+      const messages = payload?.messages;
+      if (!Array.isArray(messages)) return payload;
 
       // Single-pass idempotency check: If context hook already transformed this turn, pass through cleanly.
       const isAlreadyTransformed =
@@ -278,7 +290,7 @@ export default function contextWatcherExtension(pi) {
           messages.some((m) => m && typeof m === "object" && transformedMessageObjects.has(m)));
 
       if (isAlreadyTransformed) {
-        return event.payload;
+        return payload;
       }
 
       const provider = resolveProvider(ctx, event);
@@ -287,14 +299,14 @@ export default function contextWatcherExtension(pi) {
       if (transformed && transformed !== messages) {
         markTransformed(transformed);
         return {
-          ...event.payload,
+          ...payload,
           messages: transformed,
         };
       }
+      return payload;
     } catch {
       return event?.payload;
     }
-    return event?.payload;
   });
 
   // 3. Register canonical slash commands

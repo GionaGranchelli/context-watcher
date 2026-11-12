@@ -26,6 +26,7 @@ Every harness integration is categorized according to four qualification tiers:
 | **Codex CLI (`0.166.0`)** | 🟢 Verified | 🟢 Verified (3-Turn Native Resume & Overlays) | 🟢 Verified (`gpt-4o-mini` multi-turn live continuation) | 🟢 Supported (Responses API) | Qualified in CW-112 & CW-114 |
 | **Hermes Agent (`0.22.5`)** | 🟢 Verified | 🟢 Verified (Multi-turn resume & concurrency hardened) | 🟡 Opt-in Suite C | 🟢 Supported (OpenAI / DeepSeek middleware) | Qualified in CW-113 & CW-114 |
 | **OMP / Oh My Pi (`18.12.6`)** | 🟢 Verified | 🟢 Verified (Native Runtime Hardened) | 🟡 Opt-in Suite C | 🟢 Supported (Native `context` hook) | Qualified in CW-111B & CW-114 |
+| **GitHub Copilot CLI** | 🟡 Session-store import | 🔴 Not qualified | 🔴 Not qualified | 🔴 Observation only | Local history discovery only; no proxy mutation qualification |
 
 ---
 
@@ -108,6 +109,7 @@ Every harness integration is categorized according to four qualification tiers:
 ### 4.3 OMP / Oh My Pi (`18.12.6`) — Native Runtime Context Hook & Hardened Isolation
 * **Status:** **Harness Binary Verified (Native Runtime Hardened & Multi-Turn Resume Verified)** · Completed in CW-111 / CW-111B.
 * **Wire Protocol:** OpenAI Chat Completions (`/v1/chat/completions`) & Anthropic Messages (`/v1/messages`).
+* **Simple OpenAI-compatible proxy setup:** `cw init` adds the `contextwatcher` OMP provider at `http://127.0.0.1:4401/v1/` with live model discovery. Set `CW_OPENAI_UPSTREAM` to the inference engine's base URL; OMP's configured inference API key is forwarded unchanged. The installed plugin attaches the native OMP session ID and working directory as `cw_session_id` and `cw_workspace` request metadata, which CW strips before persistence and provider forwarding. No CW inference key or custom headers are required.
 * **Architecture & Security Boundary (CW-111B Hardening):**
   - `plugins/pi-opencode/index.js` registers native OMP runtime event hooks `pi.on("context", ...)` and `pi.on("before_provider_request", ...)`.
   - **Zero Credential Exposure in Config:** `models.json` contains zero custom headers or privileged CW control tokens. The unsafe helper `omp_proxy_models_config_with_headers()` has been completely removed from `cw-harnesses`.

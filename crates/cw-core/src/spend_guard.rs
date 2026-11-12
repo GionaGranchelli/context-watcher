@@ -202,6 +202,85 @@ fn parse_luna_usage(usage: &Value) -> Result<LunaUsage, SpendGuardError> {
     Ok(parsed)
 }
 
+fn cache_write_usage_from_request(
+    usage: &Value,
+    request: &Value,
+) -> Result<Value, SpendGuardError> {
+    fn has_conflicting_breakpoint_ttl(value: &Value, ttl: &str) -> bool {
+        match value {
+            Value::Object(object) => {
+                object
+                    .get("prompt_cache_breakpoint")
+                    .and_then(Value::as_object)
+                    .and_then(|breakpoint| breakpoint.get("ttl"))
+                    .is_some_and(|value| value.as_str() != Some(ttl))
+                    || object
+                        .values()
+                        .any(|value| has_conflicting_breakpoint_ttl(value, ttl))
+            }
+            Value::Array(values) => values
+                .iter()
+                .any(|value| has_conflicting_breakpoint_ttl(value, ttl)),
+            _ => false,
+        }
+    }
+
+    if usage
+        .pointer("/input_tokens_details/cache_write_tokens_details")
+        .is_some()
+    {
+        return Err(SpendGuardError::UsageTelemetryUnavailable {
+            reason: "partial cache-write TTL telemetry cannot be inferred".into(),
+        });
+    }
+    let options = request.get("prompt_cache_options");
+    // OpenAI's Responses API defaults prompt_cache_options.ttl to 30m.
+    let ttl = match options {
+        None => "30m",
+        Some(Value::Object(options)) => match options.get("ttl") {
+            None => "30m",
+            Some(Value::String(ttl)) if matches!(ttl.as_str(), "30m" | "12h") => ttl,
+            Some(_) => {
+                return Err(SpendGuardError::UsageTelemetryUnavailable {
+                    reason: "invalid prompt_cache_options.ttl for cache-write inference".into(),
+                });
+            }
+        },
+        Some(_) => {
+            return Err(SpendGuardError::UsageTelemetryUnavailable {
+                reason: "invalid prompt_cache_options for cache-write inference".into(),
+            });
+        }
+    };
+    if has_conflicting_breakpoint_ttl(request, ttl) {
+        return Err(SpendGuardError::UsageTelemetryUnavailable {
+            reason: "mixed cache-write TTLs cannot be inferred from aggregate usage".into(),
+        });
+    }
+    let write_tokens = usage
+        .pointer("/input_tokens_details/cache_write_tokens")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+            reason: "missing aggregate cache_write_tokens".into(),
+        })?;
+    let mut normalized = usage.clone();
+    let details = normalized
+        .pointer_mut("/input_tokens_details")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+            reason: "missing input_tokens_details".into(),
+        })?;
+    details.insert(
+        "cache_write_tokens_details".into(),
+        if ttl == "30m" {
+            serde_json::json!({"ttl_30m_tokens":write_tokens,"ttl_12h_tokens":0})
+        } else {
+            serde_json::json!({"ttl_30m_tokens":0,"ttl_12h_tokens":write_tokens})
+        },
+    );
+    Ok(normalized)
+}
+
 fn luna_rate_milli_usd_per_mtok(value: &Value) -> Result<u64, SpendGuardError> {
     let raw = value
         .as_str()
@@ -733,8 +812,19 @@ impl RequestPermit {
     /// Settle with provider-reported usage. Missing/invalid usage or unverified pricing
     /// charges the full reservation (conservative) and trips the killswitch.
     pub fn settle(
+        self,
+        usage: Option<&Value>,
+        provider: ProviderKind,
+        model: &str,
+    ) -> Result<f64, SpendGuardError> {
+        self.settle_with_request(usage, None, provider, model)
+    }
+
+    /// Settle aggregate cache-write usage using the exact request's effective TTL when needed.
+    pub fn settle_with_request(
         mut self,
         usage: Option<&Value>,
+        request: Option<&Value>,
         provider: ProviderKind,
         model: &str,
     ) -> Result<f64, SpendGuardError> {
@@ -752,7 +842,21 @@ impl RequestPermit {
                 .ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
                     reason: "provider returned no usage object".into(),
                 })
-                .and_then(|raw| price_luna_usage(raw, provider, model))
+                .and_then(|raw| {
+                    let normalized = if raw
+                        .pointer("/input_tokens_details/cache_write_tokens_details")
+                        .is_none()
+                    {
+                        let request =
+                            request.ok_or_else(|| SpendGuardError::UsageTelemetryUnavailable {
+                                reason: "request evidence required to classify cache writes".into(),
+                            })?;
+                        Some(cache_write_usage_from_request(raw, request)?)
+                    } else {
+                        None
+                    };
+                    price_luna_usage(normalized.as_ref().unwrap_or(raw), provider, model)
+                })
         } else {
             observed.and_then(|u| {
                 let p = find_pricing_profile(provider, model).ok_or_else(|| {
@@ -1026,6 +1130,82 @@ mod tests {
         );
         assert_eq!(guard.total_spent_usd(), 0.000641);
         assert_eq!(guard.total_reserved_usd(), 0.0);
+    }
+
+    #[test]
+    fn gpt6_luna_settles_aggregate_writes_from_unambiguous_request_ttl() {
+        let usage = json!({"input_tokens":1_000,"output_tokens":1_000,"total_tokens":2_000,
+            "input_tokens_details":{"cached_tokens":100,"cache_write_tokens":200}});
+        let request_30m = json!({"model":"gpt-6-luna"});
+        let guard = live_guard();
+        assert_eq!(
+            guard
+                .admit_request("luna-default-ttl")
+                .unwrap()
+                .settle_with_request(
+                    Some(&usage),
+                    Some(&request_30m),
+                    ProviderKind::OpenAI,
+                    "gpt-6-luna"
+                )
+                .unwrap(),
+            0.000596
+        );
+
+        let request_12h = json!({"prompt_cache_options":{"ttl":"12h"}});
+        let guard = live_guard();
+        assert_eq!(
+            guard
+                .admit_request("luna-12h-ttl")
+                .unwrap()
+                .settle_with_request(
+                    Some(&usage),
+                    Some(&request_12h),
+                    ProviderKind::OpenAI,
+                    "gpt-6-luna"
+                )
+                .unwrap(),
+            0.000621
+        );
+
+        let mixed_request =
+            json!({"input":[{"content":[{"prompt_cache_breakpoint":{"ttl":"12h"}}]}]});
+        let guard = live_guard();
+        assert!(
+            guard
+                .admit_request("luna-mixed-ttl")
+                .unwrap()
+                .settle_with_request(
+                    Some(&usage),
+                    Some(&mixed_request),
+                    ProviderKind::OpenAI,
+                    "gpt-6-luna"
+                )
+                .is_err()
+        );
+        assert_eq!(guard.total_spent_usd(), 0.01);
+        assert!(guard.is_killswitch_tripped());
+    }
+
+    #[test]
+    fn gpt6_luna_settles_the_captured_live_usage_at_documented_default_ttl() {
+        let usage = json!({"input_tokens":10_088,"output_tokens":12,"total_tokens":10_100,
+            "input_tokens_details":{"cached_tokens":0,"cache_write_tokens":10_085}});
+        let request = json!({"model":"gpt-6-luna","service_tier":"default"});
+        let guard = live_guard();
+        assert_eq!(
+            guard
+                .admit_request("luna-live-evidence-replay")
+                .unwrap()
+                .settle_with_request(
+                    Some(&usage),
+                    Some(&request),
+                    ProviderKind::OpenAI,
+                    "gpt-6-luna"
+                )
+                .unwrap(),
+            0.001267
+        );
     }
 
     #[test]

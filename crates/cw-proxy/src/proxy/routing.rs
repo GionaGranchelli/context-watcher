@@ -3,7 +3,9 @@ use axum::http::Uri;
 use cw_core::ir::ProviderKind;
 
 pub fn provider_for_route(path: &str, fallback: ProviderKind) -> ProviderKind {
-    if path.starts_with("/openai/") || path == "/openai" {
+    if path == "/v1" || path.starts_with("/v1/") {
+        ProviderKind::OpenAICompatible
+    } else if path.starts_with("/openai/") || path == "/openai" {
         ProviderKind::OpenAI
     } else if path.starts_with("/anthropic/") || path == "/anthropic" {
         ProviderKind::Anthropic
@@ -22,6 +24,11 @@ pub fn provider_for_route(path: &str, fallback: ProviderKind) -> ProviderKind {
 /// Resolves the upstream target URL from the incoming request URI and daemon state.
 pub fn resolve_upstream_target(state: &DaemonState, uri: &Uri) -> String {
     let path = uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
+    if path == "/v1" || path.starts_with("/v1/") {
+        let base = state.openai_upstream.trim_end_matches('/');
+        let base = base.strip_suffix("/v1").unwrap_or(base);
+        return format!("{base}{path}");
+    }
     let routes = [
         ("/anthropic", &state.anthropic_upstream),
         ("/openai", &state.openai_upstream),

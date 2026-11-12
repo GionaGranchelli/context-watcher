@@ -51,14 +51,15 @@ pub fn codex_direct_config_args() -> Vec<String> {
     .collect()
 }
 
-/// Generates isolated models.json content for OMP pointing to contextWatcher's proxy.
+/// Generates isolated models.json content for OMP pointing to contextWatcher's OpenAI-compatible proxy.
 pub fn omp_proxy_models_config(proxy_port: u16, model_id: &str) -> serde_json::Value {
     serde_json::json!({
         "providers": {
             "cw-proxy": {
-                "baseUrl": format!("http://127.0.0.1:{proxy_port}/openai/v1"),
+                "baseUrl": format!("http://127.0.0.1:{proxy_port}/v1"),
                 "api": "openai-completions",
-                "apiKey": "cw-authenticated",
+                "auth": "none",
+                "discovery": { "type": "openai-models-list" },
                 "models": [{
                     "id": model_id,
                     "name": format!("contextWatcher ({model_id})"),
@@ -164,6 +165,7 @@ pub fn check_harness_readiness(harness: HarnessKind) -> HarnessReadinessReport {
         HarnessKind::Hermes => "hermes",
         HarnessKind::Aider => "aider",
         HarnessKind::ClaudeCode => "claude",
+        HarnessKind::Copilot => "copilot",
         HarnessKind::Pi => "pi",
         HarnessKind::Antigravity => "agy",
         HarnessKind::GenericProxy => "proxy",
@@ -275,8 +277,10 @@ mod tests {
         let cfg = omp_proxy_models_config(4401, "gpt-4o-mini");
         assert_eq!(
             cfg["providers"]["cw-proxy"]["baseUrl"],
-            "http://127.0.0.1:4401/openai/v1"
+            "http://127.0.0.1:4401/v1"
         );
+        assert!(cfg["providers"]["cw-proxy"].get("apiKey").is_none());
+        assert_eq!(cfg["providers"]["cw-proxy"]["auth"], "none");
         assert_eq!(
             cfg["providers"]["cw-proxy"]["models"][0]["id"],
             "gpt-4o-mini"

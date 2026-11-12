@@ -263,6 +263,39 @@ class SmokeAuthorizationTests(unittest.TestCase):
         self.assertEqual(smoke.provider_response_service_tiers(raw), [])
         self.assertEqual(smoke.provider_response_service_tiers(
             b'{"response":{"service_tier":"default"}}'), ['default'])
+        self.assertTrue(smoke.provider_response_completed(
+            b'data: {"type":"response.completed","response":{"status":"completed"}}\n\n'))
+        self.assertFalse(smoke.provider_response_completed(
+            b'data: {"type":"response.output_text.delta","delta":"x"}\n\n'))
+
+    def test_authorized_egress_defaults_only_an_omitted_standard_tier(self):
+        ingress = {'model':'gpt-6-luna','input':'local mock'}
+        self.assertEqual(smoke.expected_smoke_egress(ingress),
+                         {**ingress,'service_tier':'default'})
+        explicit = {**ingress,'service_tier':'default'}
+        self.assertEqual(smoke.expected_smoke_egress(explicit), explicit)
+        for tier in ('auto','priority','flex',None):
+            self.assertIsNone(smoke.expected_smoke_egress({**ingress,'service_tier':tier}))
+
+    def test_aggregate_cache_writes_require_one_request_ttl(self):
+        usage = {'input_tokens':10079,'output_tokens':12,'total_tokens':10091,
+                 'input_tokens_details':{'cached_tokens':0,'cache_write_tokens':10076}}
+        default = smoke.classify_provider_usage(usage, {'service_tier':'default'})
+        self.assertEqual(default['cache_write_ttl_source'], 'request_ttl_30m')
+        self.assertEqual(default['usage']['input_tokens_details']['cache_write_tokens_details'],
+                         {'ttl_30m_tokens':10076,'ttl_12h_tokens':0})
+        long = smoke.classify_provider_usage(usage, {'prompt_cache_options':{'ttl':'12h'}})
+        self.assertEqual(long['cache_write_ttl_source'], 'request_ttl_12h')
+        self.assertEqual(long['usage']['input_tokens_details']['cache_write_tokens_details'],
+                         {'ttl_30m_tokens':0,'ttl_12h_tokens':10076})
+        mixed = {'input':[{'prompt_cache_breakpoint':{'ttl':'12h'}}]}
+        self.assertIsNone(smoke.classify_provider_usage(usage, mixed))
+        missing_total = {'input_tokens':10079,'output_tokens':12,
+                         'input_tokens_details':{'cached_tokens':0}}
+        self.assertIsNone(smoke.classify_provider_usage(missing_total, {'model':'gpt-6-luna'}))
+        partial = {**usage,'input_tokens_details':{**usage['input_tokens_details'],
+            'cache_write_tokens_details':{'ttl_30m_tokens':10076}}}
+        self.assertIsNone(smoke.classify_provider_usage(partial, {'model':'gpt-6-luna'}))
 
     def test_cli_defaults_and_run_flag_are_no_go_before_any_launch(self):
         with self.assertRaises(SystemExit) as absent:
@@ -330,6 +363,12 @@ class SmokeAuthorizationTests(unittest.TestCase):
             child_command[index:index + 2]
             for index, value in enumerate(child_command[:-1]) if value == '--config'
         ])
+        config_overrides = [
+            child_command[index + 1]
+            for index, value in enumerate(child_command[:-1]) if value == '--config'
+        ]
+        self.assertIn('model_providers.context_watcher.request_max_retries=0', config_overrides)
+        self.assertIn('model_providers.context_watcher.stream_max_retries=0', config_overrides)
         self.assertNotIn(str(self.cred), child_command)
         self.assertNotIn('CW_OPENAI_API_KEY_FILE', child_command)
         self.assertNotIn('OPENAI_API_KEY', child_command)
@@ -433,7 +472,9 @@ class SmokeAuthorizationTests(unittest.TestCase):
                     session = self.headers['x-cw-session-id']
                     conn.execute('INSERT INTO turns VALUES(?,?,?)',('turn-1',json.dumps(turn),'2026-11-05'))
                     conn.execute('INSERT INTO wire_requests VALUES(?,?)',('turn-1',body))
-                    conn.execute('INSERT INTO wire_egress VALUES(?,?)',('turn-1',body))
+                    egress = dict(request)
+                    egress.setdefault('service_tier','default')
+                    conn.execute('INSERT INTO wire_egress VALUES(?,?)',('turn-1',json.dumps(egress).encode()))
                     conn.execute('INSERT INTO wire_responses VALUES(?,?,?,?)',('turn-1',response,1,0))
                     conn.execute('INSERT INTO spend_guard_ledger VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                         ('turn-1',session,'OpenAI',request['model'],'ADMITTED',0.3,'SETTLED',0.000002,

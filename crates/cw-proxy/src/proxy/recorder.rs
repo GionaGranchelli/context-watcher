@@ -246,7 +246,19 @@ impl Recorder {
                 .as_ref()
                 .map(|turn| turn.id.as_str())
                 .unwrap_or_default();
-            let settlement = permit.settle(self.usage.as_ref(), self.provider, &model);
+            let request = self
+                .state
+                .store
+                .get_wire_egress(turn_id)
+                .ok()
+                .flatten()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+            let settlement = permit.settle_with_request(
+                self.usage.as_ref(),
+                request.as_ref(),
+                self.provider,
+                &model,
+            );
             let (status, settled_usd, error) = match settlement {
                 Ok(cost) => ("SETTLED", Some(cost), None),
                 Err(error) => {

@@ -472,6 +472,48 @@ pub struct SkippedMutation {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MutationDecisionKind {
+    Selected,
+    Queued,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MutationDecisionRecord {
+    pub rule_id: String,
+    pub op_name: String,
+    pub decision: MutationDecisionKind,
+    pub reason: String,
+    pub predicted_saved_tokens: i32,
+    pub predicted_kv_break_tokens: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StablePrefixTelemetry {
+    pub fingerprint: Option<String>,
+    pub repeat_count: u32,
+    pub window_size: u32,
+    pub confidence: f32,
+    pub stable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MutationTurnTelemetry {
+    pub cache_confidence: String,
+    pub kv_budget_tokens: u32,
+    pub kv_budget_used_tokens: u32,
+    pub predicted_saved_tokens: i32,
+    pub observed_saved_tokens: i32,
+    pub predicted_kv_break_tokens: u32,
+    pub selected_rule_ids: Vec<String>,
+    pub queued_rule_ids: Vec<String>,
+    pub skipped_rule_ids: Vec<String>,
+    pub decisions: Vec<MutationDecisionRecord>,
+    pub stable_prefix: StablePrefixTelemetry,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum MutationOp {

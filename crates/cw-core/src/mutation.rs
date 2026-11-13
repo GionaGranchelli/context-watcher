@@ -550,6 +550,7 @@ pub fn apply_mutations_with_scheduler(
     let mut decisions = Vec::new();
     let mut queued_rule_ids = Vec::new();
     let mut skipped_rule_ids = Vec::new();
+    let mut preflight_skipped = Vec::new();
     let mut selected_rule_ids = Vec::new();
     let mut remaining_budget = config.max_kv_break_tokens;
     let mut predicted_saved_tokens = 0i32;
@@ -567,6 +568,10 @@ pub fn apply_mutations_with_scheduler(
             };
             if let Some(reason) = reason {
                 skipped_rule_ids.push(rule.id.clone());
+                preflight_skipped.push(SkippedMutation {
+                    rule_id: rule.id.clone(),
+                    reason: reason.into(),
+                });
                 decisions.push(MutationDecisionRecord {
                     rule_id: rule.id.clone(),
                     op_name,
@@ -580,6 +585,10 @@ pub fn apply_mutations_with_scheduler(
         }
         if let Err(reason) = eligibility.is_op_eligible(&rule.op) {
             skipped_rule_ids.push(rule.id.clone());
+            preflight_skipped.push(SkippedMutation {
+                rule_id: rule.id.clone(),
+                reason: reason.into(),
+            });
             decisions.push(MutationDecisionRecord {
                 rule_id: rule.id.clone(),
                 op_name,
@@ -646,7 +655,7 @@ pub fn apply_mutations_with_scheduler(
         });
     }
 
-    let application = if selected_rules.is_empty() {
+    let mut application = if selected_rules.is_empty() {
         MutationApplicationReport::default()
     } else {
         apply_mutations_to_payload_with_policy(
@@ -657,6 +666,7 @@ pub fn apply_mutations_with_scheduler(
             pin_policy,
         )
     };
+    application.skipped_rules.extend(preflight_skipped);
     skipped_rule_ids.extend(
         application
             .skipped_rules

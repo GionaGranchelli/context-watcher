@@ -1668,8 +1668,9 @@ async fn test_cw118_real_mock_provider_proxy_execution_m0_m1_m2() {
 
     assert_eq!(m2_resp.status(), 200);
     let m2_data: serde_json::Value = m2_resp.json().await.unwrap();
-    // Upstream received the mutated payload with "[pruned]", so prompt tokens were reduced to 45!
-    assert_eq!(m2_data["usage"]["prompt_tokens"], 45);
+    // Prefix edits are deferred on cold/unknown cache confidence, so this first M2 turn
+    // remains passthrough and usage matches the unmutated request.
+    assert_eq!(m2_data["usage"]["prompt_tokens"], 150);
     assert_eq!(mock_calls.load(Ordering::SeqCst), 3);
 
     // Verify SQLite recorded the mutated turn for M2
@@ -1680,16 +1681,17 @@ async fn test_cw118_real_mock_provider_proxy_execution_m0_m1_m2() {
     assert_eq!(m2_turn.model.as_deref(), Some("gpt-4o-mini"));
     assert_eq!(m2_turn.sequence_number, 1);
 
-    // Verify wire egress captured the mutated payload containing [pruned]
+    // Verify wire egress remains passthrough when the scheduler defers prefix mutations.
     let egress_bytes = store
         .get_wire_egress(&m2_turn.id)
         .expect("store query failed")
         .expect("Wire egress must be recorded for active mutation");
     let egress_str = String::from_utf8_lossy(&egress_bytes);
     assert!(
-        egress_str.contains("[pruned]"),
-        "Wire egress must reflect the applied mutation"
+        !egress_str.contains("[pruned]"),
+        "Cold-cache first turn should defer prefix pruning"
     );
+    assert!(m2_turn.applied_mutation_ids.is_empty());
 
     println!(
         "M2 Real Active Optimization: Latency={:?}, Observed Prompt Tokens={}",

@@ -16,14 +16,19 @@ def verify_wire(record, campaign, original):
     if mode == 'M2':
         expected['input'][2]['output'] = campaign['tasks'][record['family']]['stub']
     require(record['original'] == original, 'original trace mismatch')
-    require(record['outbound'] == expected, 'unexpected outbound transformation')
-    require(record['applied_mutation_ids'] == (['historical-prune'] if mode == 'M2' else []), 'wire/ledger mismatch')
     require(record['request_count'] == 1, 'wire request-count mismatch')
-    if mode == 'M2':
-        require(record['treatment_verified'] is True and expected != original, 'absent pruning treatment')
+    if mode == 'M1':
+        require(record['outbound'] == original, 'unexpected passthrough transformation')
+        require(record['applied_mutation_ids'] == [], 'wire/ledger mismatch')
+        require(record['treatment_verified'] is False, 'passthrough incorrectly treated')
+    elif record['treatment_verified'] is True:
+        require(record['outbound'] == expected, 'unexpected outbound transformation')
+        require(record['applied_mutation_ids'] == ['historical-prune'], 'wire/ledger mismatch')
+        require(expected != original, 'absent pruning treatment')
         require(len(expected['input'][2]['output']) < len(original['input'][2]['output']), 'non-reducing treatment')
     else:
-        require(record['treatment_verified'] is False, 'passthrough incorrectly treated')
+        require(record['outbound'] == original, 'unexpected outbound transformation')
+        require(record['applied_mutation_ids'] == [], 'wire/ledger mismatch')
     return True
 
 

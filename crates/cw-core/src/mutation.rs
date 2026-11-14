@@ -420,7 +420,10 @@ pub fn detect_stable_prefix(
         };
     }
 
-    let fingerprints: Vec<Option<String>> = recent_turns
+    let mut ordered_turns: Vec<&ContextTurn> = recent_turns.iter().collect();
+    ordered_turns.sort_by_key(|turn| turn.sequence_number);
+
+    let fingerprints: Vec<Option<String>> = ordered_turns
         .iter()
         .map(|turn| stable_prefix_fingerprint(&turn.nodes, &turn.kv_cache_report))
         .collect();

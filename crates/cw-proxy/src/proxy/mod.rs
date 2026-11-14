@@ -265,6 +265,23 @@ pub async fn handle_proxy_request(
             let mut applied = Vec::new();
             let mut skipped_mutations = Vec::new();
             let mut mutation_telemetry: Option<cw_core::ir::MutationTurnTelemetry> = None;
+            let mut recent_turns = if active {
+                match state.store.list_turns_page(&session_id, 12, 0) {
+                    Ok(turns) => turns,
+                    Err(error) => {
+                        return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
+                            .into_response();
+                    }
+                }
+            } else {
+                Vec::new()
+            };
+            // Keep order deterministic for stable-prefix detection, regardless of store paging order.
+            recent_turns.sort_by_key(|turn| turn.sequence_number);
+            let cache_confidence_known = recent_turns
+                .last()
+                .map(|turn| turn.kv_cache_report.telemetry_available)
+                .unwrap_or(false);
             let pin_policy = state
                 .store
                 .get_pin_context_policy(&session_id)
@@ -277,22 +294,11 @@ pub async fn handle_proxy_request(
                             .into_response();
                     }
                 };
-                let recent_turns = match state.store.list_turns_page(&session_id, 12, 0) {
-                    Ok(turns) => turns,
-                    Err(error) => {
-                        return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
-                            .into_response();
-                    }
-                };
                 let scheduling = MutationSchedulingConfig {
                     max_kv_break_tokens: MAX_KV_BREAK_TOKENS,
                     ..MutationSchedulingConfig::default()
                 };
                 let stable_prefix = detect_stable_prefix(&recent_turns, &scheduling);
-                let cache_confidence_known = recent_turns
-                    .last()
-                    .map(|turn| turn.kv_cache_report.telemetry_available)
-                    .unwrap_or(false);
                 let report = apply_mutations_with_scheduler(
                     &mut outbound,
                     provider,
@@ -361,27 +367,13 @@ pub async fn handle_proxy_request(
                             max_kv_break_tokens: MAX_KV_BREAK_TOKENS.saturating_sub(prior_used),
                             ..MutationSchedulingConfig::default()
                         };
-                        let recent_turns = match state.store.list_turns_page(&session_id, 12, 0) {
-                            Ok(turns) => turns,
-                            Err(error) => {
-                                return (StatusCode::SERVICE_UNAVAILABLE, error.to_string())
-                                    .into_response();
-                            }
-                        };
                         let stable_prefix = detect_stable_prefix(&recent_turns, &scheduling);
-                        let cache_confidence_known = recent_turns
-                            .last()
-                            .map(|turn| turn.kv_cache_report.telemetry_available)
-                            .unwrap_or(false);
                         let application = apply_mutations_with_scheduler(
                             &mut outbound,
                             provider,
                             &creation.created,
                             seq,
-                            &state
-                                .store
-                                .get_pin_context_policy(&session_id)
-                                .unwrap_or_default(),
+                            &pin_policy,
                             &scheduling,
                             cache_confidence_known,
                             stable_prefix,

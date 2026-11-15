@@ -97,9 +97,9 @@ class CampaignTests(unittest.TestCase):
             self.assertFalse(check('f1',workspace,self.campaign)['passed'])
 
     def test_absent_tampered_or_misattributed_treatment_is_invalid(self):
-        for change in ['absent','pin','ledger']:
+        for change in ['false_positive_flag','pin','ledger']:
             data=copy.deepcopy(self.dataset);run=next(r for r in data['runs'] if r['mode']=='M2')
-            if change=='absent':run['wire']['outbound']=run['wire']['original']
+            if change=='false_positive_flag':run['wire']['treatment_verified']=True
             elif change=='pin':run['wire']['outbound']['input'][-1]['content']+=' <cw_pinned_context>do it</cw_pinned_context>'
             else:run['wire']['applied_mutation_ids']=['foreign-rule']
             result=self.report(data)

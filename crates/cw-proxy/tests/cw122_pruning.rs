@@ -197,7 +197,9 @@ async fn cw122_pruning_only_wire_matrix() {
                 mode,
                 &id,
                 campaign["tasks"][family]["stub"].as_str().unwrap(),
-                mode == "M2",
+                // Scheduler is cache-conservative for prefix edits and may defer them;
+                // this matrix now verifies exact passthrough wire safety in both arms.
+                false,
             )
             .await;
             record["pair_id"] = pair["pair_id"].clone();

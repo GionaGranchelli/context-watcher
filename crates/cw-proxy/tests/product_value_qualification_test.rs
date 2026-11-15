@@ -1668,8 +1668,9 @@ async fn test_cw118_real_mock_provider_proxy_execution_m0_m1_m2() {
 
     assert_eq!(m2_resp.status(), 200);
     let m2_data: serde_json::Value = m2_resp.json().await.unwrap();
-    // Upstream received the mutated payload with "[pruned]", so prompt tokens were reduced to 45!
-    assert_eq!(m2_data["usage"]["prompt_tokens"], 45);
+    // Prefix edits are deferred on cold/unknown cache confidence, so this first M2 turn
+    // remains passthrough and usage matches the unmutated request.
+    assert_eq!(m2_data["usage"]["prompt_tokens"], 150);
     assert_eq!(mock_calls.load(Ordering::SeqCst), 3);
 
     // Verify SQLite recorded the mutated turn for M2
@@ -1680,16 +1681,74 @@ async fn test_cw118_real_mock_provider_proxy_execution_m0_m1_m2() {
     assert_eq!(m2_turn.model.as_deref(), Some("gpt-4o-mini"));
     assert_eq!(m2_turn.sequence_number, 1);
 
-    // Verify wire egress captured the mutated payload containing [pruned]
+    // Verify wire egress remains passthrough when the scheduler defers prefix mutations.
     let egress_bytes = store
         .get_wire_egress(&m2_turn.id)
         .expect("store query failed")
         .expect("Wire egress must be recorded for active mutation");
     let egress_str = String::from_utf8_lossy(&egress_bytes);
     assert!(
-        egress_str.contains("[pruned]"),
-        "Wire egress must reflect the applied mutation"
+        !egress_str.contains("[pruned]"),
+        "Cold-cache first turn should defer prefix pruning"
     );
+    assert!(m2_turn.applied_mutation_ids.is_empty());
+
+    // Turn 2: establish known cache telemetry to support stable-prefix release on turn 3.
+    let mut turn1_record = m2_turn.clone();
+    turn1_record.kv_cache_report.telemetry_available = true;
+    turn1_record.kv_cache_report.hit_tokens = 150;
+    turn1_record.kv_cache_report.divergence_token_index = Some(150);
+    store
+        .save_turn(&turn1_record, Some(&raw_request_body), None, None)
+        .expect("update turn 1 telemetry");
+
+    let m2_turn2_resp = client
+        .post(format!("{proxy_url}/openai/v1/chat/completions"))
+        .header("x-cw-session-id", m2_session_id)
+        .header("x-cw-control-token", &control_token)
+        .json(&raw_request_body)
+        .send()
+        .await
+        .expect("M2 turn 2 proxy request failed");
+    assert_eq!(m2_turn2_resp.status(), 200);
+    let _m2_turn2_data: serde_json::Value = m2_turn2_resp.json().await.unwrap();
+    let mut turn2_record = store
+        .list_turns_page(m2_session_id, 10, 0)
+        .expect("store query failed")
+        .into_iter()
+        .find(|t| t.sequence_number == 2)
+        .expect("turn 2 saved");
+    turn2_record.kv_cache_report.telemetry_available = true;
+    turn2_record.kv_cache_report.hit_tokens = 150;
+    turn2_record.kv_cache_report.divergence_token_index = Some(150);
+    store
+        .save_turn(&turn2_record, Some(&raw_request_body), None, None)
+        .expect("update turn 2 telemetry");
+
+    // Turn 3: repeat_count reaches threshold and deferred pruning should apply.
+    let m2_turn3_resp = client
+        .post(format!("{proxy_url}/openai/v1/chat/completions"))
+        .header("x-cw-session-id", m2_session_id)
+        .header("x-cw-control-token", &control_token)
+        .json(&raw_request_body)
+        .send()
+        .await
+        .expect("M2 turn 3 proxy request failed");
+    assert_eq!(m2_turn3_resp.status(), 200);
+    let m2_turn3_data: serde_json::Value = m2_turn3_resp.json().await.unwrap();
+    assert_eq!(m2_turn3_data["usage"]["prompt_tokens"], 45);
+    let m2_turn3 = store
+        .list_turns_page(m2_session_id, 10, 0)
+        .expect("store query failed")
+        .into_iter()
+        .find(|t| t.sequence_number == 3)
+        .expect("turn 3 saved");
+    let egress3_bytes = store
+        .get_wire_egress(&m2_turn3.id)
+        .expect("store query failed")
+        .expect("turn 3 wire egress");
+    assert!(String::from_utf8_lossy(&egress3_bytes).contains("[pruned]"));
+    assert!(!m2_turn3.applied_mutation_ids.is_empty());
 
     println!(
         "M2 Real Active Optimization: Latency={:?}, Observed Prompt Tokens={}",

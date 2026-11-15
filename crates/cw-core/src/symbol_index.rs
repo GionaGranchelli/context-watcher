@@ -10,6 +10,7 @@ use std::fs::{self, DirEntry};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 /// Stable URI for a workspace symbol: `repo://<rel_path>` or `repo://<rel_path>#<symbol>`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -752,6 +753,128 @@ fn render_file_line(rel_path: &str, symbols: &[&SymbolEntry]) -> String {
     line
 }
 
+/// Marker used for the idempotency check: a payload whose system prompt already
+/// carries this tag is left untouched on every subsequent call.
+const ZONE1_MARKER: &str = "<workspace_symbol_map>";
+
+/// Inject `zone1_block` into the outgoing system prompt (Zone 1) of an outbound
+/// provider payload. Returns `true` when injected, `false` when the payload
+/// already carries a `<workspace_symbol_map>` (idempotency), uses an unsupported
+/// shape for the provider, or is a provider outside Zone 1 scope (Gemini).
+///
+/// - OpenAI / OpenAI-compatible: appends `"\n\n" + zone1_block` to the first
+///   `system`/`developer` message with string content in `payload["messages"]`,
+///   or prepends a fresh `{"role":"system","content":zone1_block}` message.
+/// - Anthropic: appends to `payload["system"]`, handling both the plain-string
+///   form and the array-of-text-blocks form (last text block, or a new one when
+///   none exists). A payload without any `system` field is left unmodified.
+pub fn inject_zone1_prefix(payload: &mut Value, provider: crate::ir::ProviderKind, zone1_block: &str) -> bool {
+    if payload_has_symbol_map(payload) {
+        return false;
+    }
+
+    match provider {
+        crate::ir::ProviderKind::OpenAI | crate::ir::ProviderKind::OpenAICompatible => {
+            inject_openai_family(payload, zone1_block)
+        }
+        crate::ir::ProviderKind::Anthropic => inject_anthropic(payload, zone1_block),
+        // Gemini Zone 1 injection is out of scope for this milestone.
+        crate::ir::ProviderKind::Gemini => false,
+    }
+}
+
+fn inject_openai_family(payload: &mut Value, zone1_block: &str) -> bool {
+    let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
+        return false;
+    };
+    for message in messages.iter_mut() {
+        let is_system_role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .is_some_and(|role| role == "system" || role == "developer");
+        if !is_system_role {
+            continue;
+        }
+        // String content only: non-string is not eligible, keep looking.
+        match message.get_mut("content") {
+            Some(Value::String(content)) => {
+                *content = format!("{content}\n\n{zone1_block}");
+                return true;
+            }
+            _ => continue,
+        }
+    }
+    messages.insert(0, json!({ "role": "system", "content": zone1_block }));
+    true
+}
+
+fn inject_anthropic(payload: &mut Value, zone1_block: &str) -> bool {
+    let Some(system) = payload.get_mut("system") else {
+        return false; // conservative: never invent a system field.
+    };
+    match system {
+        Value::String(text) => {
+            *text = format!("{text}\n\n{zone1_block}");
+            true
+        }
+        Value::Array(blocks) => {
+            for block in blocks.iter_mut().rev() {
+                if block.get("type").and_then(Value::as_str) != Some("text") {
+                    continue;
+                }
+                if let Some(Value::String(text)) = block.get_mut("text") {
+                    *text = format!("{text}\n\n{zone1_block}");
+                    return true;
+                }
+            }
+            blocks.push(json!({ "type": "text", "text": zone1_block }));
+            true
+        }
+        _ => false, // unsupported system shape: leave the payload untouched.
+    }
+}
+
+/// True when any provider-relevant system prompt location already contains the
+/// Zone 1 marker (OpenAI-family message content or Anthropic `system`).
+fn payload_has_symbol_map(payload: &Value) -> bool {
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            if message
+                .get("role")
+                .and_then(Value::as_str)
+                .is_some_and(|role| role == "system" || role == "developer")
+                && message_content_contains(message, ZONE1_MARKER)
+            {
+                return true;
+            }
+        }
+    }
+
+    match payload.get("system") {
+        Some(Value::String(text)) => text.contains(ZONE1_MARKER),
+        Some(Value::Array(blocks)) => blocks.iter().any(|block| {
+            block
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains(ZONE1_MARKER))
+        }),
+        _ => false,
+    }
+}
+
+/// String content (or any `text` part of a parts-array) containing `marker`.
+fn message_content_contains(message: &Value, marker: &str) -> bool {
+    match message.get("content") {
+        Some(Value::String(text)) => text.contains(marker),
+        Some(Value::Array(parts)) => parts.iter().any(|part| {
+            part.get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| text.contains(marker))
+        }),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1199,5 +1322,171 @@ mod tests {
         assert!(tiny.ends_with("</workspace_symbol_map>"));
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    const TEST_ZONE1_BLOCK: &str = "<workspace_symbol_map>\nrepo://src/x.rs: fn f() (L1-2)\n</workspace_symbol_map>";
+
+    #[test]
+    fn inject_openai_existing_system_message() {
+        let mut payload = json!({
+            "model": "gpt-test",
+            "messages": [
+                { "role": "system", "content": "You are helpful." },
+                { "role": "user", "content": "hi" }
+            ]
+        });
+        assert!(inject_zone1_prefix(
+            &mut payload,
+            crate::ir::ProviderKind::OpenAI,
+            TEST_ZONE1_BLOCK
+        ));
+        let messages = payload["messages"].as_array().unwrap();
+        assert_eq!(messages[0]["content"], format!("You are helpful.\n\n{TEST_ZONE1_BLOCK}"));
+        assert_eq!(messages[1], json!({ "role": "user", "content": "hi" }));
+        // Non-system fields stay intact.
+        assert_eq!(payload["model"], "gpt-test");
+    }
+
+    #[test]
+    fn inject_openai_missing_system_message_prepends() {
+        let mut payload = json!({
+            "model": "gpt-test",
+            "messages": [ { "role": "user", "content": "hi" } ]
+        });
+        assert!(inject_zone1_prefix(
+            &mut payload,
+            crate::ir::ProviderKind::OpenAICompatible,
+            TEST_ZONE1_BLOCK
+        ));
+        let messages = payload["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0], json!({ "role": "system", "content": TEST_ZONE1_BLOCK }));
+        assert_eq!(messages[1]["content"], "hi");
+    }
+
+    #[test]
+    fn inject_openai_double_call_is_idempotent() {
+        let mut payload = json!({
+            "model": "gpt-test",
+            "messages": [
+                { "role": "system", "content": "base" },
+                { "role": "user", "content": "hi" }
+            ]
+        });
+        assert!(inject_zone1_prefix(
+            &mut payload,
+            crate::ir::ProviderKind::OpenAI,
+            TEST_ZONE1_BLOCK
+        ));
+        let after_first = payload.clone();
+        // Second call: no modification, reports false.
+        assert!(!inject_zone1_prefix(
+            &mut payload,
+            crate::ir::ProviderKind::OpenAI,
+            TEST_ZONE1_BLOCK
+        ));
+        assert_eq!(payload, after_first);
+        let content = after_first["messages"][0]["content"].as_str().unwrap();
+        assert_eq!(content.match_indices(TEST_ZONE1_BLOCK).count(), 1);
+    }
+
+    #[test]
+    fn inject_openai_developer_role_counts_as_system() {
+        let mut payload = json!({
+            "model": "gpt-test",
+            "messages": [
+                { "role": "developer", "content": "dev instructions" },
+                { "role": "user", "content": "hi" }
+            ]
+        });
+        assert!(inject_zone1_prefix(
+            &mut payload,
+            crate::ir::ProviderKind::OpenAI,
+            TEST_ZONE1_BLOCK
+        ));
+        let messages = payload["messages"].as_array().unwrap();
+        assert_eq!(messages[0]["content"], format!("dev instructions\n\n{TEST_ZONE1_BLOCK}"));
+    }
+
+    #[test]
+    fn inject_anthropic_string_system() {
+        let mut payload = json!({
+            "model": "claude-test",
+            "system": "base system prompt",
+            "messages": [ { "role": "user", "content": "hi" } ]
+        });
+        assert!(inject_zone1_prefix(
+            &mut payload,
+            crate::ir::ProviderKind::Anthropic,
+            TEST_ZONE1_BLOCK
+        ));
+        assert_eq!(payload["system"], format!("base system prompt\n\n{TEST_ZONE1_BLOCK}"));
+        // And a second call is a no-op.
+        let after_first = payload.clone();
+        assert!(!inject_zone1_prefix(
+            &mut payload,
+            crate::ir::ProviderKind::Anthropic,
+            TEST_ZONE1_BLOCK
+        ));
+        assert_eq!(payload, after_first);
+    }
+
+    #[test]
+    fn inject_anthropic_block_array_system() {
+        let mut payload = json!({
+            "model": "claude-test",
+            "system": [
+                { "type": "text", "text": "first block" },
+                { "type": "redacted_thinking", "data": "opaque" },
+                { "type": "text", "text": "second block" }
+            ],
+            "messages": []
+        });
+        assert!(inject_zone1_prefix(
+            &mut payload,
+            crate::ir::ProviderKind::Anthropic,
+            TEST_ZONE1_BLOCK
+        ));
+        let system = payload["system"].as_array().unwrap();
+        // Appended to the last text block; non-text blocks untouched.
+        assert_eq!(system[0]["text"], "first block");
+        assert_eq!(system[1], json!({ "type": "redacted_thinking", "data": "opaque" }));
+        assert_eq!(system[2]["text"], format!("second block\n\n{TEST_ZONE1_BLOCK}"));
+
+        // Array without any text block: a new one is appended.
+        let mut no_text = json!({ "model": "claude-test", "system": [ { "type": "redacted_thinking", "data": "x" } ] });
+        assert!(inject_zone1_prefix(
+            &mut no_text,
+            crate::ir::ProviderKind::Anthropic,
+            TEST_ZONE1_BLOCK
+        ));
+        let system = no_text["system"].as_array().unwrap();
+        assert_eq!(system.len(), 2);
+        assert_eq!(system[1], json!({ "type": "text", "text": TEST_ZONE1_BLOCK }));
+
+        // Payload without any `system` field: untouched.
+        let mut no_system = json!({ "model": "claude-test", "messages": [] });
+        assert!(!inject_zone1_prefix(
+            &mut no_system,
+            crate::ir::ProviderKind::Anthropic,
+            TEST_ZONE1_BLOCK
+        ));
+        assert!(no_system.get("system").is_none());
+    }
+
+    #[test]
+    fn inject_gemini_payload_is_out_of_scope() {
+        let mut payload = json!({
+            "model": "gemini-test",
+            "contents": [ { "role": "user", "parts": [{ "text": "hi" }] } ]
+        });
+        assert!(!inject_zone1_prefix(
+            &mut payload,
+            crate::ir::ProviderKind::Gemini,
+            TEST_ZONE1_BLOCK
+        ));
+        // Unmodified.
+        assert_eq!(payload["model"], "gemini-test");
+        assert!(payload.get("system").is_none());
     }
 }

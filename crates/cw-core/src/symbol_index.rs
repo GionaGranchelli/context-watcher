@@ -598,6 +598,18 @@ fn match_python_decl(line: &str) -> Option<(SymbolKind, String)> {
 }
 
 impl SymbolIndex {
+    /// Build an index from in-memory sources `(rel_path, content)` in the given
+    /// order; deterministic for a fixed input sequence.
+    pub fn build_from_sources(sources: &[(&str, &str)]) -> Self {
+        let mut index = Self::default();
+        for (rel_path, source) in sources {
+            for extracted in extract_symbols_from_source(rel_path, source) {
+                index.entries.entry(extracted.uri.clone()).or_insert(extracted);
+            }
+        }
+        index
+    }
+
     /// Build a deterministic [`SymbolIndex`] over `workspace_root`.
     ///
     /// Walks the tree in sorted directory-entry order (so first-wins URI collision
@@ -653,6 +665,91 @@ fn collect_entries(root: &Path, dir: &Path, index: &mut SymbolIndex) -> std::io:
         }
     }
     Ok(())
+}
+
+/// Fixed memory-protocol header of the Zone 1 block. These four instruction lines
+/// are rendered verbatim on every render so the prefix stays byte-stable across turns.
+const ZONE1_PROTOCOL_HEADER: &str = "\
+<cw_memory_protocol>
+- Use <workspace_symbol_map> URIs (repo://<path>#<symbol>) to locate code without bash find/grep/cat.
+- Call cw_mount(uri, mode) to load signatures or full implementations into Zone 2 (<mounted_context>).
+- Call cw_unmount(uri) when finished with a symbol to keep context lean.
+- Call cw_pin(key, rule) to lock discovered architectural invariants.
+</cw_memory_protocol>
+<workspace_symbol_map>
+";
+
+const ZONE1_MAP_CLOSE: &str = "</workspace_symbol_map>";
+
+impl SymbolIndex {
+    /// Render the deterministic Zone 1 prefix block (memory protocol + workspace
+    /// symbol map), enforcing a `max_tokens` budget via
+    /// [`crate::tokenizer::estimate_tokens`].
+    ///
+    /// Format: the fixed `<cw_memory_protocol>` header, then one line per file in
+    /// `BTreeMap` (URI-sorted) order — files without symbols are omitted — of the
+    /// form `repo://<rel_path>: <signature> (L<a>-<b>)[, ...]`, closing with
+    /// `<\/workspace_symbol_map>` and no trailing newline. File lines are dropped
+    /// from the end once the budget would be exceeded; when truncated a
+    /// `# ... truncated (<remaining> files)` marker is appended before the closing
+    /// tag whenever it still fits in the budget (pathologically small budgets may
+    /// omit even the marker, but never emit more file lines than fit).
+    pub fn render_zone1_prefix(&self, max_tokens: usize) -> String {
+        // Group non-file entries by rel_path; BTreeMap iteration already yields
+        // files in deterministic sorted order with symbols sorted inside each.
+        let mut groups: Vec<(String, Vec<&SymbolEntry>)> = Vec::new();
+        for entry in self.entries.values() {
+            if entry.kind == SymbolKind::File {
+                continue;
+            }
+            match groups.last_mut() {
+                Some((path, symbols)) if path == &entry.rel_path => symbols.push(entry),
+                _ => groups.push((entry.rel_path.clone(), vec![entry])),
+            }
+        }
+
+        let mut out = ZONE1_PROTOCOL_HEADER.to_string();
+        let mut rendered_files = 0usize;
+        for (path, symbols) in &groups {
+            let line = render_file_line(path, symbols);
+            let candidate = format!("{out}{line}\n{ZONE1_MAP_CLOSE}");
+            if crate::tokenizer::estimate_tokens(&candidate) as usize > max_tokens {
+                break;
+            }
+            out.push_str(&line);
+            out.push('\n');
+            rendered_files += 1;
+        }
+
+        let remaining = groups.len() - rendered_files;
+        if remaining > 0 {
+            // Prefer the spec marker when it fits the budget.
+            let with_marker = format!(
+                "{out}# ... truncated ({remaining} files)\n{ZONE1_MAP_CLOSE}"
+            );
+            out = if crate::tokenizer::estimate_tokens(&with_marker) as usize <= max_tokens {
+                with_marker
+            } else {
+                format!("{out}{ZONE1_MAP_CLOSE}")
+            };
+        } else {
+            out.push_str(ZONE1_MAP_CLOSE);
+        }
+        out
+    }
+}
+
+/// One symbol-map line: `repo://<rel_path>: <sig> (L<a>-<b>)[, ...]`.
+fn render_file_line(rel_path: &str, symbols: &[&SymbolEntry]) -> String {
+    let mut line = format!("repo://{rel_path}: ");
+    for (i, symbol) in symbols.iter().enumerate() {
+        if i > 0 {
+            line.push_str(", ");
+        }
+        line.push_str(&symbol.signature);
+        line.push_str(&format!(" (L{}-{})", symbol.start_line, symbol.end_line));
+    }
+    line
 }
 
 #[cfg(test)]
@@ -998,6 +1095,108 @@ mod tests {
         assert_eq!(&"export class A {}\n"[a.start_byte..a.end_byte], "export class A {}");
         let b = index.entries.get(&SymbolUri("repo://src/b.rs#b_one".into())).unwrap();
         assert_eq!(&"fn b_one() {}\n"[b.start_byte..b.end_byte], "fn b_one() {}");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn zone1_prefix_render_matches_spec_format() {
+        // Mirrors the spec example: a lib.rs whose only symbol is `mod symbol_index`.
+        let index = SymbolIndex::build_from_sources(&[("crates/cw-core/src/lib.rs", "pub mod symbol_index;\n")]);
+        let rendered = index.render_zone1_prefix(usize::MAX / 2);
+        assert_eq!(
+            rendered,
+            "<cw_memory_protocol>\n\
+             - Use <workspace_symbol_map> URIs (repo://<path>#<symbol>) to locate code without bash find/grep/cat.\n\
+             - Call cw_mount(uri, mode) to load signatures or full implementations into Zone 2 (<mounted_context>).\n\
+             - Call cw_unmount(uri) when finished with a symbol to keep context lean.\n\
+             - Call cw_pin(key, rule) to lock discovered architectural invariants.\n\
+             </cw_memory_protocol>\n\
+             <workspace_symbol_map>\n\
+             repo://crates/cw-core/src/lib.rs: mod symbol_index (L1-1)\n\
+             </workspace_symbol_map>"
+        );
+    }
+
+    #[test]
+    fn zone1_prefix_deterministic_across_builds() {
+        let root = std::env::temp_dir().join(format!("cw_zone1_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("src/alpha.rs"),
+            "fn a_one() {}\n\nstruct Alpha {\n    x: u8,\n}\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/beta.py"), "def beta():\n    pass\n").unwrap();
+        fs::write(root.join("top.js"), "function gamma() {}\nclass Delta {}\n").unwrap();
+
+        let first = SymbolIndex::build(&root).unwrap();
+        let second = SymbolIndex::build(&root).unwrap();
+        let budget = usize::MAX / 2;
+        assert_eq!(first.render_zone1_prefix(budget), second.render_zone1_prefix(budget));
+
+        let rendered = first.render_zone1_prefix(budget);
+        assert!(rendered.starts_with(ZONE1_PROTOCOL_HEADER));
+        // Files appear in BTreeMap (URI) sorted order; within a file, symbols are
+        // URI-sorted too (case-sensitive: `Alpha` precedes `a_one`).
+        let alpha_pos = rendered
+            .find("repo://src/alpha.rs: struct Alpha (L3-5), fn a_one() (L1-1)")
+            .expect("alpha line");
+        let beta_pos = rendered
+            .find("repo://src/beta.py: def beta() (L1-2)")
+            .expect("beta line");
+        let top_pos = rendered
+            .find("repo://top.js: class Delta (L2-2), function gamma() (L1-1)")
+            .expect("top line");
+        assert!(alpha_pos < beta_pos && beta_pos < top_pos);
+        assert!(!rendered.contains("truncated"));
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn zone1_prefix_respects_token_budget() {
+        let root = std::env::temp_dir().join(format!("cw_zone1_budget_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("src")).unwrap();
+        for name in ["alpha.rs", "beta.rs", "gamma.rs"] {
+            let stem = name.strip_suffix(".rs").unwrap_or(name);
+            fs::write(
+                root.join(format!("src/{name}")),
+                format!("fn one_{stem}() {{}}\nfn two_{stem}()\n    {{}}\n"),
+            )
+            .unwrap();
+        }
+
+        let index = SymbolIndex::build(&root).unwrap();
+        let full = index.render_zone1_prefix(usize::MAX / 2);
+        assert!(!full.contains("truncated"));
+
+        // One token below the full render must drop at least one file line and
+        // still respect the budget strictly (monotone estimator guarantees this).
+        let tight_budget = crate::tokenizer::estimate_tokens(&full) as usize - 1;
+        let truncated = index.render_zone1_prefix(tight_budget);
+        assert_ne!(truncated, full);
+        assert!(crate::tokenizer::estimate_tokens(&truncated) as usize <= tight_budget);
+        // Fewer file lines than the full render.
+        let count_map_lines = |s: &str| -> usize {
+            s.lines()
+                .filter(|l| l.starts_with("repo://"))
+                .count()
+        };
+        assert!(count_map_lines(&truncated) < count_map_lines(&full));
+
+        // The marker, when present, reports the remaining file count.
+        if let Some(marker) = truncated.lines().find(|l| l.contains("truncated")) {
+            assert!(marker.starts_with("# ... truncated ("), "{marker}");
+            assert!(marker.ends_with("files)"), "{marker}");
+        }
+
+        // Degenerate budget: the protocol frame is still intact.
+        let tiny = index.render_zone1_prefix(4);
+        assert!(tiny.starts_with("<cw_memory_protocol>"));
+        assert!(tiny.ends_with("</workspace_symbol_map>"));
 
         let _ = fs::remove_dir_all(&root);
     }

@@ -46,6 +46,9 @@ use crate::{
 
 const MAX_KV_BREAK_TOKENS: u32 = 512;
 
+/// Token budget for the rendered Zone 1 symbol map prefix (opt-in).
+const ZONE1_MAX_TOKENS: usize = 512;
+
 fn fallback_invalid_mutation(
     raw: &Value,
     outbound: &mut Value,
@@ -82,8 +85,35 @@ fn require_standard_service_tier(payload: &mut Value) -> Result<bool, ()> {
     }
 }
 
+/// Renders the Zone 1 symbol map prefix for an enabled opt-in run. The workspace root is taken
+/// from `CW_WORKSPACE_ROOT` (falling back to the daemon's working directory, mirroring the CLI's
+/// transcript-watcher default) and indexed once at proxy startup.
+fn zone1_block_from_env() -> Option<String> {
+    let root = match std::env::var_os("CW_WORKSPACE_ROOT") {
+        Some(root) if !root.is_empty() => std::path::PathBuf::from(root),
+        _ => std::env::current_dir().ok()?,
+    };
+    cw_core::symbol_index::SymbolIndex::build(&root)
+        .ok()
+        .map(|index| index.render_zone1_prefix(ZONE1_MAX_TOKENS))
+}
+
 /// Builds the Intercepting Proxy Router (`127.0.0.1:4401`).
 pub fn build_proxy_router(state: DaemonState) -> Router {
+    let mut state = state;
+    // Zone 1 symbol map is opt-in and parsed exactly once at proxy startup. When
+    // enabled, the index is built over `CW_WORKSPACE_ROOT` (or the daemon's working
+    // directory) and rendered into a stable prefix block cached in the state.
+    if std::env::var_os("CW_ENABLE_SYMBOL_MAP")
+        .is_some_and(|value| value == "1" || value == "true")
+    {
+        match zone1_block_from_env() {
+            Some(block) => state.zone1_block = Some(block),
+            None => tracing::warn!(
+                "CW_ENABLE_SYMBOL_MAP is set but the workspace symbol index could not be built; Zone 1 injection disabled"
+            ),
+        }
+    }
     Router::new()
         .route("/health", get(|| async { Json(json!({ "status": "ok" })) }))
         .route(
@@ -262,6 +292,11 @@ pub async fn handle_proxy_request(
             let previous_nodes = previous.as_ref().map(|t| t.nodes.clone());
             let active = !strict_shadow && mutation_requested;
             let mut outbound = raw.clone();
+            // Zone 1 (opt-in): inject the deterministic symbol map prefix into the system prompt
+            // before mutation scheduling runs, so stable-prefix detection hashes it naturally.
+            if active && let Some(block) = state.zone1_block.as_deref() {
+                cw_core::symbol_index::inject_zone1_prefix(&mut outbound, provider, block);
+            }
             let mut applied = Vec::new();
             let mut skipped_mutations = Vec::new();
             let mut mutation_telemetry: Option<cw_core::ir::MutationTurnTelemetry> = None;
@@ -874,5 +909,192 @@ mod l0_route_boundary_tests {
             .await;
             assert_eq!(response.status(), StatusCode::FORBIDDEN, "route {path}");
         }
+    }
+}
+
+#[cfg(test)]
+mod zone1_injection_tests {
+    use super::{handle_proxy_request, ZONE1_MAX_TOKENS};
+    use crate::state::DaemonState;
+    use axum::{
+        Json, body::Bytes, extract::State, http::HeaderMap, response::Response, routing::post,
+    };
+
+    const SESSION_ID: &str = "cw-zone1-test";
+
+    /// Builds a deterministic Zone 1 block without touching the real workspace.
+    fn test_zone1_block() -> String {
+        let index = cw_core::symbol_index::SymbolIndex::build_from_sources(&[
+            ("src/app.rs", "pub fn run() {}\n"),
+            ("lib/main.ts", "export function start(): void {\n  console.log(\"go\");\n}\n"),
+        ]);
+        index.render_zone1_prefix(ZONE1_MAX_TOKENS)
+    }
+
+    #[tokio::test]
+    async fn zone1_prefix_is_byte_identical_across_turns_and_stable_on_second() {
+        // Mock OpenAI upstream that captures every egress body.
+        let (egress_tx, mut egress_rx) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            post(move |body: Bytes| {
+                let tx = egress_tx.clone();
+                async move {
+                    let _ = tx.send(body);
+                    (
+                        axum::http::StatusCode::OK,
+                        Json(serde_json::json!({
+                            "id": "chatcmpl-zone1",
+                            "object": "chat.completion",
+                            "model": "gpt-test",
+                            "choices": [{
+                                "index": 0,
+                                "message": {"role": "assistant", "content": "ok"},
+                                "finish_reason": "stop"
+                            }],
+                            "usage": {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15}
+                        })),
+                    )
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_url = format!("http://{}", listener.local_addr().unwrap());
+        let _server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        // Shared in-memory store (cloned DaemonStates share the connection), with
+        // autopilot enabled so mutation_requested -> active on both turns.
+        let base_state = DaemonState::new(cw_store::CwStore::open_in_memory().unwrap());
+        let autopilot = cw_core::autopilot::AutoPilotConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        base_state.store.set_autopilot_config(&autopilot).unwrap();
+
+        // Harnesses re-send the full unmutated conversation on every turn, so both turns
+        // carry byte-identical payloads (a continuation/retry of the same request). The
+        // proxy must therefore inject an identical Zone 1 block each time.
+        let payload = serde_json::json!({
+            "model": "gpt-test",
+            "messages": [
+                {"role": "system", "content": "base system prompt"},
+                {"role": "user", "content": "hello"}
+            ]
+        });
+
+        async fn post_turn(state: DaemonState, payload: &serde_json::Value) -> Response {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "x-cw-control-token",
+                state.control_token.as_str().parse().unwrap(),
+            );
+            headers.insert("x-cw-session-id", SESSION_ID.parse().unwrap());
+            handle_proxy_request(
+                State(state),
+                axum::http::Method::POST,
+                axum::http::Uri::try_from("/openai/v1/chat/completions").unwrap(),
+                headers,
+                Bytes::from(serde_json::to_vec(payload).unwrap()),
+            )
+            .await
+        }
+
+        let mut turn1_state = base_state.clone();
+        turn1_state.openai_upstream = upstream_url.clone();
+        turn1_state.zone1_block = Some(test_zone1_block());
+        let response_1 = post_turn(turn1_state, &payload).await;
+        assert_eq!(response_1.status(), axum::http::StatusCode::OK);
+
+        let mut turn2_state = base_state.clone();
+        turn2_state.openai_upstream = upstream_url.clone();
+        turn2_state.zone1_block = Some(test_zone1_block());
+        let response_2 = post_turn(turn2_state, &payload).await;
+        assert_eq!(response_2.status(), axum::http::StatusCode::OK);
+
+        // Both egress bodies carry the Zone 1 block, byte-identical across turns.
+        let body_1: serde_json::Value =
+            serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
+        let body_2: serde_json::Value =
+            serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
+        let system_1 = body_1["messages"][0]["content"]
+            .as_str()
+            .expect("injected system message")
+            .to_owned();
+        let system_2 = body_2["messages"][0]["content"]
+            .as_str()
+            .expect("injected system message")
+            .to_owned();
+        assert_eq!(system_1, system_2, "Zone 1 bytes must be identical across turns");
+        assert!(
+            system_1.starts_with("base system prompt"),
+            "injection appends to the base prompt: {system_1}"
+        );
+        assert!(system_1.contains("<cw_memory_protocol>"));
+        assert!(system_1.contains("<workspace_symbol_map>"));
+        assert!(system_1.contains("</workspace_symbol_map>"));
+        assert!(system_1.contains("repo://src/app.rs"));
+
+        // The persisted turns expose the same prefix: on turn 2 the detector reports stable.
+        let turns = base_state.store.list_turns_page(SESSION_ID, 10, 0).unwrap();
+        assert_eq!(turns.len(), 2);
+        let telemetry = cw_core::mutation::detect_stable_prefix(
+            &turns,
+            &cw_core::mutation::MutationSchedulingConfig::default(),
+        );
+        assert_eq!(telemetry.repeat_count, 2, "both turns must share the prefix fingerprint");
+        assert!(
+            telemetry.stable,
+            "expected stable prefix on turn 2: {telemetry:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn zone1_injection_is_off_by_default_and_leaves_payloads_untouched() {
+        let (egress_tx, mut egress_rx) = tokio::sync::mpsc::unbounded_channel::<Bytes>();
+        let app = axum::Router::new().route(
+            "/v1/chat/completions",
+            post(move |body: Bytes| {
+                let tx = egress_tx.clone();
+                async move {
+                    let _ = tx.send(body);
+                    (axum::http::StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_url = format!("http://{}", listener.local_addr().unwrap());
+        let _server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        // No zone1_block set (CW_ENABLE_SYMBOL_MAP unset) => byte-exact passthrough.
+        let state = DaemonState::new(cw_store::CwStore::open_in_memory().unwrap());
+        let mut request_state = state.clone();
+        request_state.openai_upstream = upstream_url;
+
+        let payload = serde_json::json!({
+            "model": "gpt-test",
+            "messages": [
+                {"role": "system", "content": "base system prompt"},
+                {"role": "user", "content": "hello"}
+            ]
+        });
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-cw-control-token",
+            request_state.control_token.as_str().parse().unwrap(),
+        );
+        headers.insert("x-cw-session-id", SESSION_ID.parse().unwrap());
+        let response = handle_proxy_request(
+            State(request_state),
+            axum::http::Method::POST,
+            axum::http::Uri::try_from("/openai/v1/chat/completions").unwrap(),
+            headers,
+            Bytes::from(serde_json::to_vec(&payload).unwrap()),
+        )
+        .await;
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+
+        let egress: serde_json::Value =
+            serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
+        assert_eq!(egress, payload, "default-off proxy must forward the original bytes");
     }
 }

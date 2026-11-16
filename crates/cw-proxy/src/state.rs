@@ -161,6 +161,10 @@ pub struct DaemonState {
     pub capture_wire_egress: bool,
     /// Opt-in exact response body capture for bounded, private qualification runs.
     pub capture_wire_response: bool,
+    /// Zone 1 symbol map prefix (opt-in via `CW_ENABLE_SYMBOL_MAP`, enabled at proxy
+    /// startup by [`crate::proxy::build_proxy_router`]). When `Some`, active turns
+    /// receive this block injected into the system prompt before mutation scheduling.
+    pub zone1_block: Option<String>,
     /// Optional provider/model allowlist for separately authorized smoke runs.
     pub live_provider_model: Option<(cw_core::ir::ProviderKind, String)>,
     pub live_allowed_session_id: Option<String>,
@@ -311,6 +315,8 @@ impl DaemonState {
                 == Some("1"),
             capture_wire_response: std::env::var("CW_CAPTURE_WIRE_RESPONSE").ok().as_deref()
                 == Some("1"),
+            // Populated by build_proxy_router when CW_ENABLE_SYMBOL_MAP is enabled.
+            zone1_block: None,
             live_provider_model: std::env::var("CW_L0_ALLOWED_MODEL")
                 .ok()
                 .filter(|model| !model.trim().is_empty())

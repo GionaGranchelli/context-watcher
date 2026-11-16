@@ -10,8 +10,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
-use crate::symbol_index::{SymbolIndex, SymbolKind, SymbolUri};
+use crate::symbol_index::{SymbolIndex, SymbolKind, SymbolUri, ZONE1_MARKER};
 use crate::tokenizer::estimate_tokens;
 
 /// How a mounted slice is materialized into Zone 2.
@@ -128,6 +129,208 @@ impl WorkingSetState {
         }
         total
     }
+
+    /// Render the deterministic Zone 2 block, or `None` when nothing is mounted
+    /// and no invariant is pinned. Mounted slices render in `BTreeMap` URI order,
+    /// invariant lines in key order — never insertion or access order — so the
+    /// block (and therefore every KV-cache prefix after it) is a pure function of
+    /// register content:
+    ///
+    /// ```text
+    /// <mounted_context>
+    /// ### [repo://src/lib.rs#foo] (mode: full, lines: 10-25)
+    /// <exact slice content>
+    /// </mounted_context>
+    ///
+    /// <pinned_invariants>
+    /// - [key]: rule text
+    /// </pinned_invariants>
+    /// ```
+    pub fn render_zone2_block(&self) -> Option<String> {
+        if self.mounted.is_empty() && self.invariants.is_empty() {
+            return None;
+        }
+
+        let mut out = String::new();
+        if !self.mounted.is_empty() {
+            out.push_str("<mounted_context>\n");
+            for (uri, slice) in &self.mounted {
+                let mode = match slice.mode {
+                    MountMode::Full => "full",
+                    MountMode::Signature => "signature",
+                };
+                out.push_str(&format!(
+                    "### [{}] (mode: {}, lines: {}-{})\n",
+                    uri.0, mode, slice.start_line, slice.end_line
+                ));
+                out.push_str(&slice.content);
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            }
+            out.push_str("</mounted_context>");
+        }
+
+        if !self.invariants.is_empty() {
+            if !out.is_empty() {
+                out.push_str("\n\n");
+            }
+            out.push_str("<pinned_invariants>\n");
+            for (key, rule) in &self.invariants {
+                out.push_str(&format!("- [{key}]: {rule}\n"));
+            }
+            out.push_str("</pinned_invariants>");
+        }
+
+        Some(out)
+    }
+}
+
+/// Zone 2 idempotency markers: a payload whose system prompt already carries
+/// either frame is left untouched on every subsequent call. The newline anchor is
+/// required: the Zone 1 protocol header *mentions* `<mounted_context>` in prose
+/// ("into Zone 2 (<mounted_context>)."), so a bare tag scan would false-positive on
+/// every Zone 1-injected payload. Real frames always open with `<tag>\n`.
+const ZONE2_MARKERS: [&str; 2] = ["<mounted_context>\n", "<pinned_invariants>\n"];
+
+/// Inject `zone2_block` into the outgoing system prompt (Zone 2) of an outbound
+/// provider payload, immediately after Zone 1 (`<workspace_symbol_map>`) and
+/// before any user/assistant/tool message, so mounting or unmounting symbols can
+/// never change Zone 1's byte prefix. Returns `true` when injected, `false` when
+/// the payload already carries a Zone 2 frame (idempotency), uses an unsupported
+/// shape for the provider, or is outside Zone 2 scope (Gemini).
+///
+/// - OpenAI / OpenAI-compatible: appends `"\n\n" + zone2_block` to the first
+///   `system`/`developer` string message that carries the Zone 1 marker; without
+///   one, inserts a fresh system message immediately after the first existing
+///   `system`/`developer` message (or prepends when none exists).
+/// - Anthropic: appends to `payload["system"]`, handling both the plain-string
+///   form and the array-of-text-blocks form. A payload without any `system`
+///   field is left unmodified.
+pub fn inject_zone2_registers(
+    payload: &mut Value,
+    provider: crate::ir::ProviderKind,
+    zone2_block: &str,
+) -> bool {
+    if payload_has_zone2_marker(payload) {
+        return false;
+    }
+
+    match provider {
+        crate::ir::ProviderKind::OpenAI | crate::ir::ProviderKind::OpenAICompatible => {
+            inject_openai_family_zone2(payload, zone2_block)
+        }
+        crate::ir::ProviderKind::Anthropic => inject_anthropic_zone2(payload, zone2_block),
+        // Gemini Zone 2 injection is out of scope for this milestone.
+        crate::ir::ProviderKind::Gemini => false,
+    }
+}
+
+fn is_system_role(message: &Value) -> bool {
+    message
+        .get("role")
+        .and_then(Value::as_str)
+        .is_some_and(|role| role == "system" || role == "developer")
+}
+
+fn inject_openai_family_zone2(payload: &mut Value, zone2_block: &str) -> bool {
+    let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
+        return false;
+    };
+
+    // Preferred placement: right after Zone 1 in the first eligible system/developer
+    // string message, so the appended registers follow the stable prefix.
+    for message in messages.iter_mut() {
+        if !is_system_role(message) {
+            continue;
+        }
+        if let Some(Value::String(content)) = message.get_mut("content")
+            && content.contains(ZONE1_MARKER)
+        {
+            *content = format!("{content}\n\n{zone2_block}");
+            return true;
+        }
+    }
+
+    // No Zone 1 anchor: insert a fresh system message immediately after the first
+    // existing system/developer message, preserving its exact bytes.
+    if let Some(position) = messages.iter().position(is_system_role) {
+        messages.insert(
+            position + 1,
+            json!({ "role": "system", "content": zone2_block }),
+        );
+        return true;
+    }
+
+    messages.insert(0, json!({ "role": "system", "content": zone2_block }));
+    true
+}
+
+fn inject_anthropic_zone2(payload: &mut Value, zone2_block: &str) -> bool {
+    let Some(system) = payload.get_mut("system") else {
+        return false; // conservative: never invent a system field.
+    };
+    match system {
+        Value::String(text) => {
+            *text = format!("{text}\n\n{zone2_block}");
+            true
+        }
+        Value::Array(blocks) => {
+            for block in blocks.iter_mut().rev() {
+                if block.get("type").and_then(Value::as_str) != Some("text") {
+                    continue;
+                }
+                if let Some(Value::String(text)) = block.get_mut("text") {
+                    *text = format!("{text}\n\n{zone2_block}");
+                    return true;
+                }
+            }
+            blocks.push(json!({ "type": "text", "text": zone2_block }));
+            true
+        }
+        _ => false, // unsupported system shape: leave the payload untouched.
+    }
+}
+
+/// True when any provider-relevant system prompt location already carries a Zone 2
+/// frame marker (OpenAI-family message content or Anthropic `system`).
+fn payload_has_zone2_marker(payload: &Value) -> bool {
+    if let Some(messages) = payload.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            if is_system_role(message) && message_content_contains_any(message, &ZONE2_MARKERS) {
+                return true;
+            }
+        }
+    }
+
+    match payload.get("system") {
+        Some(Value::String(text)) => contains_any_marker(text, &ZONE2_MARKERS),
+        Some(Value::Array(blocks)) => blocks.iter().any(|block| {
+            block
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| contains_any_marker(text, &ZONE2_MARKERS))
+        }),
+        _ => false,
+    }
+}
+
+/// String content (or any `text` part of a parts-array) containing one of the markers.
+fn message_content_contains_any(message: &Value, markers: &[&str]) -> bool {
+    match message.get("content") {
+        Some(Value::String(text)) => contains_any_marker(text, markers),
+        Some(Value::Array(parts)) => parts.iter().any(|part| {
+            part.get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|text| contains_any_marker(text, markers))
+        }),
+        _ => false,
+    }
+}
+
+/// `true` when any marker occurs in `text`.
+fn contains_any_marker(text: &str, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| text.contains(marker))
 }
 
 #[cfg(test)]
@@ -270,5 +473,261 @@ mod tests {
             estimate_tokens("kv-rule") as usize + estimate_tokens("keep Zone 1 static") as usize
         );
         cleanup_dir(&root);
+    }
+
+    // ----- Task 2: Zone 2 renderer & prefix-safe injector tests -----
+
+    fn test_slice(uri: &str, content: &str, start_line: usize, end_line: usize) -> MountedSlice {
+        MountedSlice {
+            uri: SymbolUri(uri.to_string()),
+            rel_path: "src/lib.rs".to_string(),
+            mode: MountMode::Full,
+            start_line,
+            end_line,
+            content: content.to_string(),
+            token_estimate: estimate_tokens(content) as usize,
+        }
+    }
+
+    fn test_zone1_block() -> String {
+        let index = SymbolIndex::build_from_sources(&[(
+            "src/lib.rs",
+            "pub fn foo() {}\npub fn bar(x: u32) -> u32 {\n    x\n}\n",
+        )]);
+        index.render_zone1_prefix(512)
+    }
+
+    #[test]
+    fn render_zone2_is_deterministic_and_sorted_by_key() {
+        // Two states filled in different orders must render identically.
+        let mut a = WorkingSetState::default();
+        a.mounted.insert(
+            SymbolUri("repo://src/lib.rs#beta".into()),
+            test_slice("repo://src/lib.rs#beta", "fn beta()", 1, 4),
+        );
+        a.mounted.insert(
+            SymbolUri("repo://src/lib.rs#alpha".into()),
+            test_slice("repo://src/lib.rs#alpha", "fn alpha()", 5, 9),
+        );
+        a.pin("zeta-rule", "last pinned first");
+        a.pin("alpha-rule", "first invariant");
+
+        let mut b = WorkingSetState::default();
+        b.mounted.insert(
+            SymbolUri("repo://src/lib.rs#alpha".into()),
+            test_slice("repo://src/lib.rs#alpha", "fn alpha()", 5, 9),
+        );
+        b.mounted.insert(
+            SymbolUri("repo://src/lib.rs#beta".into()),
+            test_slice("repo://src/lib.rs#beta", "fn beta()", 1, 4),
+        );
+        b.pin("alpha-rule", "first invariant");
+        b.pin("zeta-rule", "last pinned first");
+
+        let ra = a.render_zone2_block().expect("non-empty state renders");
+        let rb = b.render_zone2_block().expect("non-empty state renders");
+        assert_eq!(ra, rb);
+
+        // Exact frame layout: URI-sorted entries, then key-sorted invariants.
+        assert_eq!(
+            ra,
+            "<mounted_context>\n\
+             ### [repo://src/lib.rs#alpha] (mode: full, lines: 5-9)\n\
+             fn alpha()\n\
+             ### [repo://src/lib.rs#beta] (mode: full, lines: 1-4)\n\
+             fn beta()\n\
+             </mounted_context>\n\n\
+             <pinned_invariants>\n\
+             - [alpha-rule]: first invariant\n\
+             - [zeta-rule]: last pinned first\n\
+             </pinned_invariants>"
+        );
+
+        assert!(WorkingSetState::default().render_zone2_block().is_none());
+    }
+
+    #[test]
+    fn zone1_prefix_bytes_are_unchanged_by_zone2_mounts_and_unmounts() {
+        let payload = json!({
+            "model": "gpt-test",
+            "messages": [
+                {"role": "system", "content": "base system prompt"},
+                {"role": "user", "content": "hello"}
+            ]
+        });
+
+        let mut payload1 = payload.clone();
+        assert!(crate::symbol_index::inject_zone1_prefix(
+            &mut payload1,
+            crate::ir::ProviderKind::OpenAI,
+            &test_zone1_block()
+        ));
+        let system_before = payload1["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        // Mount symbols (out of order) and pin invariants; Zone 2 must land after
+        // Zone 1 without touching a single byte before or inside it.
+        let mut state = WorkingSetState::default();
+        state.mounted.insert(
+            SymbolUri("repo://src/lib.rs#bar".into()),
+            test_slice("repo://src/lib.rs#bar", "fn bar(x: u32) -> u32", 2, 4),
+        );
+        state.mounted.insert(
+            SymbolUri("repo://src/lib.rs#foo".into()),
+            test_slice("repo://src/lib.rs#foo", "fn foo()", 1, 1),
+        );
+        state.pin("kv-rule", "keep Zone 1 static");
+
+        let zone2 = state.render_zone2_block().expect("registers render");
+        assert!(inject_zone2_registers(
+            &mut payload1,
+            crate::ir::ProviderKind::OpenAI,
+            &zone2
+        ));
+        let system_after = payload1["messages"][0]["content"].as_str().unwrap();
+
+        // Zone 1 byte prefix (through its closing tag) is identical before/after.
+        let zone1_end = system_before.find("</workspace_symbol_map>").unwrap()
+            + "</workspace_symbol_map>".len();
+        assert_eq!(
+            &system_after[..zone1_end],
+            &system_before[..zone1_end],
+            "Zone 1 byte prefix must be untouched by Zone 2 injection"
+        );
+        assert!(system_after.starts_with(system_before.as_str()));
+        let z2_pos = system_after.find("<mounted_context>\n").unwrap();
+        assert!(z2_pos > zone1_end, "Zone 2 must follow the Zone 1 frame");
+
+        // Unmounting everything renders nothing new; a later mount cannot re-inject
+        // over an existing frame either (idempotency).
+        state.unmount("repo://src/lib.rs#foo");
+        assert!(state.render_zone2_block().is_some()); // invariants still pinned
+        let again = state.render_zone2_block().unwrap();
+        assert!(
+            !inject_zone2_registers(&mut payload1, crate::ir::ProviderKind::OpenAI, &again),
+            "second injection must be rejected (frame already present)"
+        );
+
+        // Unmounting the remaining register leaves only invariants: still a block.
+        state.unmount("repo://src/lib.rs#bar");
+        let invariants_only = state.render_zone2_block().expect("invariants render alone");
+        assert!(!invariants_only.contains("<mounted_context>"));
+    }
+
+    #[test]
+    fn zone2_double_injection_is_idempotent() {
+        let payload = json!({
+            "messages": [
+                {"role": "system", "content": "base"},
+                {"role": "user", "content": "hi"}
+            ]
+        });
+        let mut p = payload.clone();
+        assert!(inject_zone2_registers(
+            &mut p,
+            crate::ir::ProviderKind::OpenAICompatible,
+            "<mounted_context>\n### [repo://x.rs#a] (mode: full, lines: 1-2)\nfn a()\n</mounted_context>"
+        ));
+        let snapshot = serde_json::to_string(&p).unwrap();
+        assert!(
+            !inject_zone2_registers(
+                &mut p,
+                crate::ir::ProviderKind::OpenAICompatible,
+                "<mounted_context>\n### [repo://y.rs#b] (mode: full, lines: 1-3)\nfn b()\n</mounted_context>"
+            ),
+            "payload already carries a Zone 2 frame"
+        );
+        assert_eq!(serde_json::to_string(&p).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn zone2_anthropic_handles_string_array_and_missing_system() {
+        let block = "<mounted_context>\n### [repo://x.rs#a] (mode: full, lines: 1-2)\nfn a()\n</mounted_context>";
+
+        // String system with Zone 1 already present: appended right after it.
+        let base_system = format!("base\n\ncw memory protocol + {ZONE1_MARKER} frame");
+        let mut p = json!({ "system": base_system.clone(), "messages": [] });
+        assert!(inject_zone2_registers(
+            &mut p,
+            crate::ir::ProviderKind::Anthropic,
+            block
+        ));
+        let system = p["system"].as_str().unwrap();
+        assert!(system.starts_with(base_system.as_str()));
+        assert!(system.ends_with(block));
+
+        // Array-of-text-blocks system: appended into the last text block.
+        let mut p = json!({
+            "system": [
+                {"type": "text", "text": "first"},
+                {"type": "text", "text": format!("zone1 {ZONE1_MARKER}")},
+            ],
+            "messages": []
+        });
+        assert!(inject_zone2_registers(
+            &mut p,
+            crate::ir::ProviderKind::Anthropic,
+            block
+        ));
+        let last = p["system"][1]["text"].as_str().unwrap();
+        assert_eq!(last, format!("zone1 {ZONE1_MARKER}\n\n{block}"));
+        assert_eq!(p["system"][0]["text"], "first");
+
+        // No system field: conservative no-op.
+        let mut p = json!({ "messages": [] });
+        let snapshot = serde_json::to_string(&p).unwrap();
+        assert!(!inject_zone2_registers(
+            &mut p,
+            crate::ir::ProviderKind::Anthropic,
+            block
+        ));
+        assert_eq!(serde_json::to_string(&p).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn zone2_openai_fallbacks_preserve_existing_system_bytes() {
+        let block = "<pinned_invariants>\n- [k]: r\n</pinned_invariants>";
+
+        // Existing system without Zone 1: fresh system message inserted right after it.
+        let mut p = json!({ "messages": [
+            {"role": "system", "content": "original"},
+            {"role": "user", "content": "hi"}
+        ]});
+        assert!(inject_zone2_registers(
+            &mut p,
+            crate::ir::ProviderKind::OpenAI,
+            block
+        ));
+        let messages = p["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(
+            messages[0]["content"], "original",
+            "first system bytes preserved"
+        );
+        assert_eq!(messages[1]["role"], "system");
+        assert_eq!(messages[1]["content"], block);
+
+        // No system message at all: prepended.
+        let mut p = json!({ "messages": [ {"role": "user", "content": "hi"} ] });
+        assert!(inject_zone2_registers(
+            &mut p,
+            crate::ir::ProviderKind::OpenAI,
+            block
+        ));
+        let messages = p["messages"].as_array().unwrap();
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], block);
+
+        // Gemini is out of scope: untouched.
+        let mut p = json!({ "system": "base", "messages": [] });
+        let snapshot = serde_json::to_string(&p).unwrap();
+        assert!(!inject_zone2_registers(
+            &mut p,
+            crate::ir::ProviderKind::Gemini,
+            block
+        ));
+        assert_eq!(serde_json::to_string(&p).unwrap(), snapshot);
     }
 }

@@ -14,6 +14,7 @@ pub mod repository;
 pub mod slot_bridge;
 pub mod spend_guard;
 pub mod swarm;
+pub mod symbol_index;
 pub mod tokenizer;
 pub mod validator;
 

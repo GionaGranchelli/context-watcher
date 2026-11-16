@@ -44,6 +44,15 @@ pub struct SymbolEntry {
 }
 
 /// Deterministic workspace symbol index keyed by URI.
+///
+/// URI collision semantics (Milestone A): when two declarations yield the same URI,
+/// `build`/`build_from_sources` keep the first in walk order (`.or_insert`); with
+/// sorted directory and line ordering this is fully deterministic. Known collisions:
+/// impl-block URIs fragment on the first identifier after `impl`, so a file holding
+/// two blocks for the same trait or type indexes only the first, and an inherent
+/// `impl Widget` shares its URI (and loses) with the same-file `struct Widget`. If
+/// full impl coverage is wanted later, disambiguate impl URIs, e.g.
+/// `#impl-Iterator-for-Widget` or `#impl@L<line>`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SymbolIndex {
     pub entries: BTreeMap<SymbolUri, SymbolEntry>,

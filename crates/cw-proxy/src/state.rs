@@ -165,8 +165,9 @@ pub struct DaemonState {
     /// startup by [`crate::proxy::build_proxy_router`]). When `Some`, active turns
     /// receive this block injected into the system prompt before mutation scheduling.
     /// Built once per process; workspace changes after startup are not picked up until
-    /// daemon restart.
-    pub zone1_block: Option<String>,
+    /// daemon restart. Allocated as `Arc<str>` because `DaemonState` is cloned for every
+    /// request via axum's `State` extractor — clones must stay allocation-free.
+    pub zone1_block: Option<Arc<str>>,
     /// Optional provider/model allowlist for separately authorized smoke runs.
     pub live_provider_model: Option<(cw_core::ir::ProviderKind, String)>,
     pub live_allowed_session_id: Option<String>,

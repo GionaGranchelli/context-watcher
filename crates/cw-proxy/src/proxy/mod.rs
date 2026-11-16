@@ -25,6 +25,7 @@ use cw_core::{
     validator::validate_protocol_invariants,
 };
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -110,7 +111,7 @@ pub fn build_proxy_router(state: DaemonState) -> Router {
     if std::env::var_os("CW_ENABLE_SYMBOL_MAP").is_some_and(|value| value == "1" || value == "true")
     {
         match zone1_block_from_env() {
-            Some(block) => state.zone1_block = Some(block),
+            Some(block) => state.zone1_block = Some(Arc::from(block)),
             None => tracing::warn!(
                 "CW_ENABLE_SYMBOL_MAP is set but the workspace symbol index could not be built; Zone 1 injection disabled"
             ),
@@ -921,6 +922,7 @@ mod zone1_injection_tests {
     use axum::{
         Json, body::Bytes, extract::State, http::HeaderMap, response::Response, routing::post,
     };
+    use std::sync::Arc;
 
     const SESSION_ID: &str = "cw-zone1-test";
 
@@ -1006,13 +1008,13 @@ mod zone1_injection_tests {
 
         let mut turn1_state = base_state.clone();
         turn1_state.openai_upstream = upstream_url.clone();
-        turn1_state.zone1_block = Some(test_zone1_block());
+        turn1_state.zone1_block = Some(Arc::from(test_zone1_block()));
         let response_1 = post_turn(turn1_state, &payload).await;
         assert_eq!(response_1.status(), axum::http::StatusCode::OK);
 
         let mut turn2_state = base_state.clone();
         turn2_state.openai_upstream = upstream_url.clone();
-        turn2_state.zone1_block = Some(test_zone1_block());
+        turn2_state.zone1_block = Some(Arc::from(test_zone1_block()));
         let response_2 = post_turn(turn2_state, &payload).await;
         assert_eq!(response_2.status(), axum::http::StatusCode::OK);
 
@@ -1097,20 +1099,23 @@ mod zone1_injection_tests {
             request_state.control_token.as_str().parse().unwrap(),
         );
         headers.insert("x-cw-session-id", SESSION_ID.parse().unwrap());
+        // Keep the exact serialized request bytes: passthrough must be verified at byte
+        // level, not via re-parsed JSON values (which would also pass a re-serialization).
+        let original = serde_json::to_vec(&payload).unwrap();
         let response = handle_proxy_request(
             State(request_state),
             axum::http::Method::POST,
             axum::http::Uri::try_from("/openai/v1/chat/completions").unwrap(),
             headers,
-            Bytes::from(serde_json::to_vec(&payload).unwrap()),
+            Bytes::from(original.clone()),
         )
         .await;
         assert_eq!(response.status(), axum::http::StatusCode::OK);
 
-        let egress: serde_json::Value =
-            serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
+        let egress = egress_rx.recv().await.unwrap();
         assert_eq!(
-            egress, payload,
+            egress.as_ref(),
+            original.as_slice(),
             "default-off proxy must forward the original bytes"
         );
     }

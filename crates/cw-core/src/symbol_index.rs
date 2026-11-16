@@ -172,11 +172,15 @@ pub fn extract_symbols_from_source(rel_path: &str, source: &str) -> Vec<SymbolEn
     if extension == "py" {
         extract_python(rel_path, source, &lines, &mut entries);
     } else {
+        // In Rust/Kotlin a `'` is a lifetime token unless it forms a char literal; in
+        // JS/TS it delimits a string.
+        let single_quote_is_string = matches!(extension, "ts" | "tsx" | "js");
         extract_brace_lang(
             rel_path,
             source,
             &lines,
             keywords_for(extension),
+            single_quote_is_string,
             &mut entries,
         );
     }
@@ -221,22 +225,88 @@ fn keywords_for(extension: &str) -> &'static [(&'static str, SymbolKind)] {
 }
 
 /// Scanner state carried across lines for brace languages: current brace depth
-/// (clamped at zero) and whether we are inside a `/* */` block comment. String
-/// literals do not persist across lines (line-local approximation; raw string
-/// delimiters such as Rust `r#"..."#` are a documented limitation).
+/// (clamped at zero), paren/bracket group depth (drives continuation detection for
+/// brace-less declarations, clamped at zero) and whether we are inside a `/* */`
+/// block comment. String literals do not persist across lines (line-local
+/// approximation; raw string delimiters such as Rust `r#"..."#` are a documented
+/// limitation).
 struct BraceScanState {
     depth: usize,
+    paren_depth: usize,
     in_block_comment: bool,
+}
+
+/// Consume the quoted literal starting at byte offset `start` (the opening quote) in
+/// `line`, returning the offset just past its closing quote. When no closing quote
+/// exists on this line, returns `line.len()` (line-local approximation).
+fn skip_quoted(line: &str, start: usize, quote: char) -> usize {
+    let mut i = start + 1;
+    while i < line.len() {
+        let ch = line[i..].chars().next().unwrap();
+        if ch == '\\' {
+            i += 1 + line.get(i + 1..)
+                .and_then(|rest| rest.chars().next())
+                .map(char::len_utf8)
+                .unwrap_or(0);
+        } else if ch == quote {
+            return i + 1;
+        } else {
+            i += ch.len_utf8();
+        }
+    }
+    line.len()
+}
+
+/// Handle a Rust/Kotlin `'` at byte offset `start`: returns the offset just past a
+/// well-formed char literal (`'x'`, `'\n'`, or `'\u{7B}'`). Any other occurrence is a
+/// lifetime token (e.g. `fn f<'a>`) and must not consume the rest of the line, which
+/// would hide structural `{`/`}` behind it.
+fn skip_char_literal_or_lifetime(line: &str, start: usize) -> usize {
+    let tail = &line[start + 1..];
+    match tail.chars().next() {
+        None => start + 1, // dangling quote at EOL (invalid code): consume nothing more.
+        Some('\'') => start + 2,
+        Some('\\') => {
+            let after_backslash = &tail[1..];
+            if after_backslash.starts_with("u{") {
+                // `\u{...}` escape: skip to the closing brace, then expect `'`.
+                match after_backslash.find('}') {
+                    Some(off) if after_backslash.get(2 + off..).is_some_and(|rest| rest.starts_with('\'')) => {
+                        start + 1 + 1 + (2 + off) + 1
+                    }
+                    _ => start + 1,
+                }
+            } else if let Some(ch) = after_backslash.chars().next()
+                && after_backslash.get(1..).is_some_and(|rest| rest.starts_with('\''))
+            {
+                // `\x` escape: the escaped character is one code point.
+                start + 1 + 1 + ch.len_utf8() + 1
+            } else {
+                start + 1
+            }
+        }
+        Some(ch) => {
+            // Plain character: the closing quote must follow its code point directly.
+            if tail.get(ch.len_utf8()..).is_some_and(|rest| rest.starts_with('\'')) {
+                start + 1 + ch.len_utf8() + 1
+            } else {
+                start + 1 // lifetime, e.g. `'a`.
+            }
+        }
+    }
 }
 
 /// Scan one line of brace-language source updating [`BraceScanState`], invoking
 /// `on_structural(c, abs)` for each `{`, `}` or statement-terminating `;` found
 /// outside strings and comments, where `abs` is the absolute byte offset of that
-/// character within the whole file.
+/// character within the whole file. When `single_quote_is_string` is false (Rust,
+/// Kotlin), a `'` only opens a string in char-literal shape; otherwise it is treated
+/// as a lifetime token and skipped.
 fn scan_brace_line(
     line: &str,
     state: &mut BraceScanState,
     line_start: usize,
+    single_quote_is_string: bool,
     mut on_structural: impl FnMut(char, usize),
 ) {
     let bytes = line.as_bytes();
@@ -259,27 +329,16 @@ fn scan_brace_line(
                 state.in_block_comment = true;
                 i += 2;
             }
-            q @ ('"' | '\'' | '`') => {
-                i += 1;
-                while i < line.len() {
-                    let ch = line[i..].chars().next().unwrap();
-                    if ch == '\\' {
-                        i += 1 + line.get(i + 1..)
-                            .and_then(|rest| rest.chars().next())
-                            .map(char::len_utf8)
-                            .unwrap_or(0);
-                    } else if ch == q {
-                        break;
-                    } else {
-                        i += ch.len_utf8();
-                    }
-                }
-                // Consume the closing quote when present; otherwise string state
-                // simply ends at end-of-line (line-local approximation). All three
-                // supported quotes are ASCII, so a byte compare is exact.
-                if i < line.len() && line.as_bytes()[i] == q as u8 {
-                    i += 1;
-                }
+            '"' | '`' => {
+                i = skip_quoted(line, i, c);
+            }
+            '\'' if single_quote_is_string => {
+                // JS/TS: `'` delimits a (line-local) string.
+                i = skip_quoted(line, i, '\'');
+            }
+            '\'' => {
+                // Rust/Kotlin: char literal or lifetime token (see helper).
+                i = skip_char_literal_or_lifetime(line, i);
             }
             '{' => {
                 state.depth += 1;
@@ -291,6 +350,16 @@ fn scan_brace_line(
                     state.depth -= 1;
                 }
                 on_structural(c, line_start + i);
+                i += 1;
+            }
+            '(' | '[' => {
+                state.paren_depth += 1;
+                i += 1;
+            }
+            ')' | ']' => {
+                if state.paren_depth > 0 {
+                    state.paren_depth -= 1;
+                }
                 i += 1;
             }
             ';' => {
@@ -319,13 +388,16 @@ fn scan_for_close(
     state: &mut BraceScanState,
     line_start: usize,
     saw_brace_at_line_start: bool,
+    single_quote_is_string: bool,
 ) -> (Option<usize>, bool) {
     // Collect structural events first so the closure does not borrow `state`
     // while it is also updated through the same call.
     // The depth at the start of this line drives the replay below.
     let start_depth = state.depth;
     let mut events = Vec::new();
-    scan_brace_line(line, state, line_start, |c, abs| events.push((c, abs)));
+    scan_brace_line(line, state, line_start, single_quote_is_string, |c, abs| {
+        events.push((c, abs))
+    });
 
     let mut depth = start_depth;
     let mut saw_brace = saw_brace_at_line_start;
@@ -436,33 +508,81 @@ fn extract_brace_lang(
     source: &str,
     lines: &[(usize, usize)],
     keywords: &[(&str, SymbolKind)],
+    single_quote_is_string: bool,
     entries: &mut Vec<SymbolEntry>,
 ) {
     let mut state = BraceScanState {
         depth: 0,
+        paren_depth: 0,
         in_block_comment: false,
     };
     let mut pending: Option<PendingDecl> = None;
+    // Byte offset just past the last non-whitespace character seen while a brace-less
+    // declaration is still open. Expression-body declarations (e.g. Kotlin `fun a(): Int = 1`)
+    // have no structural close signal, so this becomes their end boundary when terminated.
+    let mut pending_content_end: Option<usize> = None;
 
     for (idx, &(line_start, line_end)) in lines.iter().enumerate() {
         let line = &source[line_start..line_end];
+        let content_end = (!line.trim().is_empty()).then(|| line_start + line.trim_end().len());
 
         if let Some(decl) = pending.take() {
-            // Continuation of an open declaration.
-            let (close_at, saw_open) = scan_for_close(line, &mut state, line_start, decl.saw_brace);
-            match close_at {
-                Some(end_byte) => emit_decl(entries, rel_path, source, lines, &decl, end_byte),
-                None => pending = Some(PendingDecl {
-                    saw_brace: decl.saw_brace || saw_open,
-                    ..decl
-                }),
+            // Continuation of an open declaration. A brace-less declaration has no
+            // structural close signal: when the next line is a fresh top-level one (no open
+            // braces, no unbalanced paren/bracket group from earlier lines), the previous
+            // declaration ends just before it — otherwise it would swallow every subsequent
+            // top-level item until EOF.
+            let terminated = !decl.saw_brace
+                && state.depth == 0
+                && state.paren_depth == 0
+                && !state.in_block_comment
+                && content_end.is_some();
+            if terminated {
+                emit_decl(
+                    entries,
+                    rel_path,
+                    source,
+                    lines,
+                    &decl,
+                    pending_content_end.unwrap_or(decl.start_byte),
+                );
+                // Fall through: process this line as a fresh top-level line.
+            } else {
+                let (close_at, saw_open) = scan_for_close(
+                    line,
+                    &mut state,
+                    line_start,
+                    decl.saw_brace,
+                    single_quote_is_string,
+                );
+                match close_at {
+                    Some(end_byte) => emit_decl(entries, rel_path, source, lines, &decl, end_byte),
+                    None => pending = Some(PendingDecl {
+                        saw_brace: decl.saw_brace || saw_open,
+                        ..decl
+                    }),
+                }
+                if let Some(p) = &pending && !p.saw_brace {
+                    pending_content_end = content_end.or(pending_content_end);
+                } else {
+                    pending_content_end = None;
+                }
+                continue;
             }
-        } else if state.depth == 0 && !state.in_block_comment {
+        }
+
+        if state.depth == 0 && !state.in_block_comment {
             // Top level. Detect a declaration start first so that a same-line
             // closing brace is attributed to the new declaration; otherwise this
             // call is just plain state maintenance.
             let matched = match_decl_start(line, keywords);
-            let (close_at, saw_open) = scan_for_close(line, &mut state, line_start, false);
+            let (close_at, saw_open) = scan_for_close(
+                line,
+                &mut state,
+                line_start,
+                false,
+                single_quote_is_string,
+            );
             if let Some((kind, name)) = matched {
                 let decl = PendingDecl {
                     start_byte: line_start + (line.len() - line.trim_start().len()),
@@ -473,21 +593,25 @@ fn extract_brace_lang(
                 };
                 match close_at {
                     Some(end_byte) => emit_decl(entries, rel_path, source, lines, &decl, end_byte),
-                    None => pending = Some(PendingDecl {
-                        saw_brace: saw_open,
-                        ..decl
-                    }),
+                    None => {
+                        pending = Some(PendingDecl {
+                            saw_brace: saw_open,
+                            ..decl
+                        });
+                        pending_content_end = content_end;
+                    }
                 }
             }
         } else {
             // Inside another declaration or a block comment: state maintenance only.
-            scan_brace_line(line, &mut state, line_start, |_, _| {});
+            scan_brace_line(line, &mut state, line_start, single_quote_is_string, |_, _| {});
         }
     }
 
-    // Unterminated declaration at EOF: extend the range to end of source.
+    // Unterminated declaration at EOF: end at its last content byte (brace-less) or the
+    // end of source (unterminated block).
     if let Some(decl) = pending {
-        emit_decl(entries, rel_path, source, lines, &decl, source.len());
+        emit_decl(entries, rel_path, source, lines, &decl, pending_content_end.unwrap_or(source.len()));
     }
 }
 
@@ -1488,5 +1612,119 @@ mod tests {
         // Unmodified.
         assert_eq!(payload["model"], "gemini-test");
         assert!(payload.get("system").is_none());
+    }
+
+    // Regression (review 2026-11-15): a brace-less, `;`-less top-level declaration (Kotlin
+    // expression body) must not swallow every subsequent top-level item until EOF.
+    #[test]
+    fn kotlin_expression_body_fun_must_not_swallow_next_decl() {
+        let src = "fun a(): Int = 1\nclass B {\n    val x = 1\n}\n";
+        let entries = extract_symbols_from_source("app/B.kt", src);
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e.uri.0.rsplit('#').next().unwrap())
+            .collect();
+        assert!(
+            names.contains(&"B"),
+            "class B must be a separate entry; got: {names:?}"
+        );
+        let a = entries
+            .iter()
+            .find(|e| e.kind == SymbolKind::Function)
+            .expect("fun a must be extracted");
+        assert_eq!(
+            &src[a.start_byte..a.end_byte],
+            "fun a(): Int = 1",
+            "fun a must end at its own line, not swallow class B"
+        );
+    }
+
+    // Regression (review 2026-11-15): an intervening non-tracked statement also terminates a
+    // brace-less declaration instead of being absorbed into its range.
+    #[test]
+    fn kotlin_expression_body_fun_ends_before_next_statement() {
+        let src = "fun a(): Int = 1\nval b: Int = 2\nclass C {\n}\n";
+        let entries = extract_symbols_from_source("app/C.kt", src);
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e.uri.0.rsplit('#').next().unwrap())
+            .collect();
+        assert!(names.contains(&"C"), "got: {names:?}");
+        let a = entries
+            .iter()
+            .find(|e| e.kind == SymbolKind::Function)
+            .expect("fun a must be extracted");
+        assert_eq!(
+            &src[a.start_byte..a.end_byte],
+            "fun a(): Int = 1",
+            "val b is a separate top-level statement, not part of fun a"
+        );
+    }
+
+    // Regression (review 2026-11-15): Rust lifetime tokens (`'a`) must not open string mode
+    // and desync brace depth, which would push the declaration's close to EOF.
+    #[test]
+    fn rust_lifetimes_must_not_desync_brace_depth() {
+        let src = "pub fn pick<'a>(items: &'a [u8]) -> &'a u8 { items[0] }\n\nfn after() {\n    let _ = 1;\n}\n";
+        let entries = extract_symbols_from_source("crates/x/src/lib.rs", src);
+        let pick = entries
+            .iter()
+            .find(|e| e.signature.starts_with("fn pick"))
+            .expect("fn pick must be extracted");
+        assert_eq!(
+            &src[pick.start_byte..pick.end_byte],
+            "pub fn pick<'a>(items: &'a [u8]) -> &'a u8 { items[0] }",
+            "fn pick must end at its own closing brace"
+        );
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e.uri.0.rsplit('#').next().unwrap())
+            .collect();
+        assert!(
+            names.contains(&"after"),
+            "fn after must be a separate entry; got: {names:?}"
+        );
+    }
+
+    // A char literal containing braces (`'{'`) is still consumed as a string, so its braces
+    // never count toward depth.
+    #[test]
+    fn rust_char_literal_with_braces_does_not_desync_depth() {
+        let src = "fn f(c: char) -> bool {\n    c == '{'\n}\n\nfn g() {}\n";
+        let entries = extract_symbols_from_source("crates/x/src/chars.rs", src);
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e.uri.0.rsplit('#').next().unwrap())
+            .collect();
+        assert!(names.contains(&"g"), "got: {names:?}");
+        let f = entries
+            .iter()
+            .find(|e| e.signature.starts_with("fn f"))
+            .expect("fn f must be extracted");
+        assert_eq!(
+            &src[f.start_byte..f.end_byte],
+            "fn f(c: char) -> bool {\n    c == '{'\n}",
+        );
+    }
+
+    // Multi-line signatures stay one declaration: unbalanced parens mark continuation lines,
+    // so the new top-level-termination rule does not split them.
+    #[test]
+    fn rust_multiline_signature_is_not_split_by_termination_rule() {
+        let src = "pub fn long(\n    x: u32,\n    y: &[u8],\n) -> i32 {\n    0\n}\n\nfn after() {}\n";
+        let entries = extract_symbols_from_source("crates/x/src/long.rs", src);
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e.uri.0.rsplit('#').next().unwrap())
+            .collect();
+        assert!(names.contains(&"after"), "got: {names:?}");
+        let long = entries
+            .iter()
+            .find(|e| e.signature.starts_with("fn long"))
+            .expect("fn long must be extracted");
+        assert_eq!(
+            &src[long.start_byte..long.end_byte],
+            "pub fn long(\n    x: u32,\n    y: &[u8],\n) -> i32 {\n    0\n}",
+        );
     }
 }

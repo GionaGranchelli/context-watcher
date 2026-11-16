@@ -333,6 +333,234 @@ fn contains_any_marker(text: &str, markers: &[&str]) -> bool {
     markers.iter().any(|marker| text.contains(marker))
 }
 
+/// Stub prefix shared by the eviction replacement and its idempotency check.
+const ZONE3_STUB_PREFIX: &str = "[Mounted in Zone 2:";
+
+/// Mounted-file summary used for Zone 3 scrubbing, keyed by rel_path in
+/// `BTreeMap` order (the first — lexicographically smallest — mounted URI of a
+/// file becomes the canonical one naming its stubs).
+struct MountedFile<'a> {
+    uri: &'a str,
+    contents: Vec<&'a str>,
+}
+
+/// Replace historical raw file-read tool results in Zone 3 whose content
+/// duplicates a file already mounted in Zone 2 with the single line
+/// `[Mounted in Zone 2: <uri> — raw duplicate evicted]`, and return how many
+/// tool results were scrubbed.
+///
+/// Deterministic matching rule (per result): scrub when its text either
+/// (a) contains any non-empty mounted slice content verbatim (raw dump), or
+/// (b) opens with the file path as a header line (`<rel_path>` alone, or
+/// `<rel_path>:` prefixed). Results already carrying the stub prefix and
+/// outputs of unmounted files are left untouched.
+///
+/// - OpenAI / OpenAI-compatible: `role == "tool"` messages with string content.
+/// - Anthropic: `type == "tool_result"` blocks inside user messages (string
+///   content or `text` parts).
+/// - Gemini is out of scope for this milestone.
+pub fn stub_mounted_reads_in_zone3(
+    payload: &mut Value,
+    provider: crate::ir::ProviderKind,
+    state: &WorkingSetState,
+) -> usize {
+    let mut by_file: BTreeMap<String, MountedFile> = BTreeMap::new();
+    for (uri, slice) in &state.mounted {
+        let entry = by_file
+            .entry(slice.rel_path.clone())
+            .or_insert_with(|| MountedFile {
+                uri: &uri.0,
+                contents: Vec::new(),
+            });
+        if !slice.content.is_empty() {
+            entry.contents.push(&slice.content);
+        }
+    }
+    if by_file.is_empty() {
+        return 0;
+    }
+
+    let mut scrubbed = 0usize;
+    match provider {
+        crate::ir::ProviderKind::OpenAI | crate::ir::ProviderKind::OpenAICompatible => {
+            if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+                for message in messages.iter_mut() {
+                    let is_tool = message
+                        .get("role")
+                        .and_then(Value::as_str)
+                        .is_some_and(|role| role == "tool");
+                    if !is_tool {
+                        continue;
+                    }
+                    if let Some(Value::String(text)) = message.get_mut("content")
+                        && scrub_text(text, &by_file)
+                    {
+                        scrubbed += 1;
+                    }
+                }
+            }
+        }
+        crate::ir::ProviderKind::Anthropic => {
+            if let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) {
+                for message in messages.iter_mut() {
+                    // tool_result blocks live inside user-message content arrays:
+                    // block.content is a string or an array of text parts.
+                    let Some(blocks) = message
+                        .get("role")
+                        .and_then(Value::as_str)
+                        .is_some_and(|role| role == "user")
+                        .then(|| message.get_mut("content"))
+                        .flatten()
+                        .and_then(Value::as_array_mut)
+                    else {
+                        continue;
+                    };
+                    for block in blocks.iter_mut() {
+                        if block.get("type").and_then(Value::as_str) != Some("tool_result") {
+                            continue;
+                        }
+                        let mut scrubbed_block = false;
+                        match block.get_mut("content") {
+                            Some(Value::String(text)) => {
+                                scrubbed_block = scrub_text(text, &by_file);
+                            }
+                            Some(Value::Array(parts)) => {
+                                for part in parts.iter_mut() {
+                                    if part.get("type").and_then(Value::as_str) == Some("text")
+                                        && let Some(Value::String(text)) = part.get_mut("text")
+                                        && scrub_text(text, &by_file)
+                                    {
+                                        scrubbed_block = true;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        if scrubbed_block {
+                            scrubbed += 1;
+                        }
+                    }
+                }
+            }
+        }
+        crate::ir::ProviderKind::Gemini => {}
+    }
+    scrubbed
+}
+
+/// In-place stub replacement for one text region; `true` when it was replaced.
+fn scrub_text(text: &mut String, by_file: &BTreeMap<String, MountedFile>) -> bool {
+    if text.is_empty() || text.starts_with(ZONE3_STUB_PREFIX) {
+        return false; // already stubbed (or nothing to match).
+    }
+    let Some(first_line) = text.lines().find(|line| !line.trim().is_empty()) else {
+        return false;
+    };
+    for (rel_path, file) in by_file {
+        let header_dump =
+            first_line == rel_path.as_str() || first_line.starts_with(&format!("{rel_path}:"));
+        let verbatim_dump = file.contents.iter().any(|content| text.contains(content));
+        if header_dump || verbatim_dump {
+            *text = format!("[Mounted in Zone 2: {} — raw duplicate evicted]", file.uri);
+            return true;
+        }
+    }
+    false
+}
+
+/// Append the one-line budget HUD to the tail of the final user/tool message:
+/// `[cw: {active}/{budget} tok | mounted: N | pinned: M | zone1_prefix_bytes: B]`.
+/// Idempotent: when the content already ends with a `[cw:` line it is replaced,
+/// never stacked — so repeated calls (or a changed budget between turns) leave
+/// exactly one HUD line. No-op when the provider/payload has no eligible message.
+pub fn append_budget_hud(
+    payload: &mut Value,
+    provider: crate::ir::ProviderKind,
+    active_tokens: usize,
+    budget_tokens: usize,
+    state: &WorkingSetState,
+    zone1_bytes: usize,
+) {
+    let hud = format!(
+        "[cw: {active_tokens}/{budget_tokens} tok | mounted: {} | pinned: {} | zone1_prefix_bytes: {}]",
+        state.mounted.len(),
+        state.invariants.len(),
+        zone1_bytes
+    );
+
+    match provider {
+        crate::ir::ProviderKind::OpenAI | crate::ir::ProviderKind::OpenAICompatible => {
+            let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
+                return;
+            };
+            let Some(index) = messages.iter().rposition(|message| {
+                message
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .is_some_and(|role| role == "user" || role == "tool")
+            }) else {
+                return;
+            };
+            if let Some(Value::String(text)) = messages[index].get_mut("content") {
+                *text = with_hud_line(text, &hud);
+            }
+        }
+        crate::ir::ProviderKind::Anthropic => {
+            let Some(messages) = payload.get_mut("messages").and_then(Value::as_array_mut) else {
+                return;
+            };
+            let Some(index) = messages
+                .iter()
+                .rposition(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+            else {
+                return;
+            };
+            match messages[index].get_mut("content") {
+                Some(Value::String(text)) => *text = with_hud_line(text, &hud),
+                Some(Value::Array(parts)) => {
+                    for part in parts.iter_mut().rev() {
+                        if part.get("type").and_then(Value::as_str) == Some("text")
+                            && let Some(Value::String(text)) = part.get_mut("text")
+                        {
+                            *text = with_hud_line(text, &hud);
+                            return;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        crate::ir::ProviderKind::Gemini => {}
+    }
+}
+
+/// Content with a single trailing HUD line (existing `[cw:` tail replaced).
+fn with_hud_line(text: &str, hud: &str) -> String {
+    let body = if text.ends_with('\n') && !text.is_empty() {
+        &text[..text.len() - 1]
+    } else {
+        text
+    };
+    match body.rfind('\n') {
+        Some(pos) => {
+            let tail = &body[pos + 1..];
+            if tail.starts_with("[cw:") {
+                let prefix = &body[..pos]; // replace the stale HUD line
+                format!("{prefix}\n{hud}")
+            } else {
+                format!("{body}\n{hud}")
+            }
+        }
+        None => {
+            if body.starts_with("[cw:") {
+                hud.to_string()
+            } else {
+                format!("{body}\n{hud}")
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -729,5 +957,209 @@ mod tests {
             block
         ));
         assert_eq!(serde_json::to_string(&p).unwrap(), snapshot);
+    }
+
+    // ----- Task 3: Zone 3 stubbing & budget HUD tests -----
+
+    const DUMP: &str = "pub fn foo() {\n    let answer = 42;\n    answer\n}\n";
+
+    fn state_with_one_mount() -> WorkingSetState {
+        let mut state = WorkingSetState::default();
+        state.mounted.insert(
+            SymbolUri("repo://src/lib.rs#foo".into()),
+            test_slice("repo://src/lib.rs#foo", DUMP, 1, 4),
+        );
+        state.pin("kv-rule", "keep Zone 1 static");
+        state
+    }
+
+    #[test]
+    fn stubbed_mounted_read_collapses_and_unmounted_outputs_stay() {
+        let state = state_with_one_mount();
+        let unrelated = "total 8\ndrwxr-xr-x 2 u g\n-rw-r--r-- 1 u g";
+        let mut p = json!({ "messages": [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "read the file"},
+            {"role": "assistant", "content": null, "tool_calls": [{"id": "c1"}]},
+            {"role": "tool", "tool_call_id": "c1", "content": format!("Contents of src/lib.rs:\n{DUMP}")},
+            {"role": "tool", "tool_call_id": "c2", "content": unrelated}
+        ]});
+
+        let scrubbed = stub_mounted_reads_in_zone3(&mut p, crate::ir::ProviderKind::OpenAI, &state);
+        assert_eq!(scrubbed, 1, "only the mounted file's raw dump is evicted");
+        assert_eq!(
+            p["messages"][3]["content"],
+            "[Mounted in Zone 2: repo://src/lib.rs#foo — raw duplicate evicted]"
+        );
+        assert_eq!(p["messages"][4]["content"], unrelated);
+
+        // Already-stubbed results are never re-counted or rewritten.
+        let again = stub_mounted_reads_in_zone3(&mut p, crate::ir::ProviderKind::OpenAI, &state);
+        assert_eq!(again, 0);
+    }
+
+    #[test]
+    fn path_header_dump_is_stubbed_without_verbatim_content() {
+        // Mounted content differs from the dump body; only the header matches.
+        let mut state = WorkingSetState::default();
+        state.mounted.insert(
+            SymbolUri("repo://src/lib.rs#other".into()),
+            test_slice("repo://src/lib.rs#other", "fn other()", 9, 12),
+        );
+        let mut p = json!({ "messages": [
+            {"role": "tool", "content": format!("src/lib.rs:\npub fn stale() {{}}\n")},
+            // A path mentioned mid-text is NOT a header dump: stays untouched.
+            {"role": "tool", "content": "grep hit in src/lib.rs at line 3"}
+        ]});
+
+        let scrubbed = stub_mounted_reads_in_zone3(&mut p, crate::ir::ProviderKind::OpenAI, &state);
+        assert_eq!(scrubbed, 1);
+        assert_eq!(
+            p["messages"][0]["content"],
+            "[Mounted in Zone 2: repo://src/lib.rs#other — raw duplicate evicted]"
+        );
+        assert_eq!(
+            p["messages"][1]["content"],
+            "grep hit in src/lib.rs at line 3"
+        );
+    }
+
+    #[test]
+    fn anthropic_tool_result_blocks_are_stubbed_in_both_shapes() {
+        let state = state_with_one_mount();
+        let mut p = json!({ "messages": [
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": DUMP}]},
+            {"role": "user", "content": [
+                {"type": "text", "text": "note"},
+                {"type": "tool_result", "tool_use_id": "t2", "content": [{"type": "text", "text": format!("file src/lib.rs:\n{DUMP}")}]},
+                {"type": "tool_result", "tool_use_id": "t3", "content": "unrelated output"}
+            ]}
+        ]});
+
+        let scrubbed =
+            stub_mounted_reads_in_zone3(&mut p, crate::ir::ProviderKind::Anthropic, &state);
+        assert_eq!(scrubbed, 2, "one per evicted tool_result block");
+        assert_eq!(
+            p["messages"][0]["content"][0]["content"],
+            "[Mounted in Zone 2: repo://src/lib.rs#foo — raw duplicate evicted]"
+        );
+        let blocks = &p["messages"][1]["content"];
+        assert_eq!(
+            blocks[0]["text"], "note",
+            "non-tool_result blocks untouched"
+        );
+        assert_eq!(
+            blocks[1]["content"][0]["text"],
+            "[Mounted in Zone 2: repo://src/lib.rs#foo — raw duplicate evicted]"
+        );
+        assert_eq!(blocks[2]["content"], "unrelated output");
+
+        let again = stub_mounted_reads_in_zone3(&mut p, crate::ir::ProviderKind::Anthropic, &state);
+        assert_eq!(again, 0);
+    }
+
+    #[test]
+    fn budget_hud_appends_exact_line_and_replaces_on_repeat() {
+        let state = state_with_one_mount(); // mounted: 1, pinned: 1
+        let mut p = json!({ "messages": [
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "tool", "content": "result text"}
+        ]});
+
+        append_budget_hud(
+            &mut p,
+            crate::ir::ProviderKind::OpenAI,
+            123,
+            500,
+            &state,
+            97,
+        );
+        let hud = "[cw: 123/500 tok | mounted: 1 | pinned: 1 | zone1_prefix_bytes: 97]";
+        assert_eq!(p["messages"][3]["content"], format!("result text\n{hud}"));
+        assert_eq!(
+            p["messages"][1]["content"], "hi",
+            "HUD lands on the final user/tool message"
+        );
+
+        // Repeat with a changed budget: replaces, never stacks.
+        append_budget_hud(
+            &mut p,
+            crate::ir::ProviderKind::OpenAI,
+            200,
+            500,
+            &state,
+            97,
+        );
+        let content = p["messages"][3]["content"].as_str().unwrap();
+        let hud_lines: Vec<&str> = content
+            .lines()
+            .filter(|line| line.starts_with("[cw:"))
+            .collect();
+        assert_eq!(hud_lines.len(), 1, "exactly one HUD line after repeat");
+        assert_eq!(
+            hud_lines[0],
+            "[cw: 200/500 tok | mounted: 1 | pinned: 1 | zone1_prefix_bytes: 97]"
+        );
+
+        // Anthropic string content on the final user message.
+        let mut p = json!({ "messages": [
+            {"role": "assistant", "content": [{"type": "text", "text": "done"}]},
+            {"role": "user", "content": "next turn"}
+        ]});
+        append_budget_hud(
+            &mut p,
+            crate::ir::ProviderKind::Anthropic,
+            10,
+            500,
+            &state,
+            97,
+        );
+        assert_eq!(
+            p["messages"][1]["content"],
+            "next turn\n[cw: 10/500 tok | mounted: 1 | pinned: 1 | zone1_prefix_bytes: 97]"
+        );
+
+        // Anthropic parts-array user message: HUD goes into the last text part.
+        let mut p = json!({ "messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": "first"},
+                {"type": "tool_result", "tool_use_id": "t1", "content": "x"},
+                {"type": "text", "text": "last"}
+            ]}
+        ]});
+        append_budget_hud(
+            &mut p,
+            crate::ir::ProviderKind::Anthropic,
+            10,
+            500,
+            &state,
+            97,
+        );
+        assert_eq!(p["messages"][0]["content"][0]["text"], "first");
+        assert_eq!(
+            p["messages"][0]["content"][2]["text"],
+            "last\n[cw: 10/500 tok | mounted: 1 | pinned: 1 | zone1_prefix_bytes: 97]"
+        );
+    }
+
+    #[test]
+    fn empty_state_scrubs_nothing_and_hud_is_still_appended() {
+        let state = WorkingSetState::default();
+        let mut p = json!({ "messages": [
+            {"role": "tool", "content": DUMP},
+        ]});
+        assert_eq!(
+            stub_mounted_reads_in_zone3(&mut p, crate::ir::ProviderKind::OpenAI, &state),
+            0
+        );
+        assert_eq!(p["messages"][0]["content"], DUMP);
+
+        append_budget_hud(&mut p, crate::ir::ProviderKind::OpenAI, 5, 100, &state, 0);
+        let content = p["messages"][0]["content"].as_str().unwrap();
+        assert!(
+            content.ends_with("[cw: 5/100 tok | mounted: 0 | pinned: 0 | zone1_prefix_bytes: 0]")
+        );
     }
 }

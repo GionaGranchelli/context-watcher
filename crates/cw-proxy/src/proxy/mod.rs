@@ -107,8 +107,7 @@ pub fn build_proxy_router(state: DaemonState) -> Router {
     // prefix block cached in the state for the lifetime of this process. Workspace changes
     // after startup are NOT picked up — restart the daemon to re-index. Build failure keeps
     // injection disabled with a warning rather than failing proxy startup.
-    if std::env::var_os("CW_ENABLE_SYMBOL_MAP")
-        .is_some_and(|value| value == "1" || value == "true")
+    if std::env::var_os("CW_ENABLE_SYMBOL_MAP").is_some_and(|value| value == "1" || value == "true")
     {
         match zone1_block_from_env() {
             Some(block) => state.zone1_block = Some(block),
@@ -917,7 +916,7 @@ mod l0_route_boundary_tests {
 
 #[cfg(test)]
 mod zone1_injection_tests {
-    use super::{handle_proxy_request, ZONE1_MAX_TOKENS};
+    use super::{ZONE1_MAX_TOKENS, handle_proxy_request};
     use crate::state::DaemonState;
     use axum::{
         Json, body::Bytes, extract::State, http::HeaderMap, response::Response, routing::post,
@@ -929,7 +928,10 @@ mod zone1_injection_tests {
     fn test_zone1_block() -> String {
         let index = cw_core::symbol_index::SymbolIndex::build_from_sources(&[
             ("src/app.rs", "pub fn run() {}\n"),
-            ("lib/main.ts", "export function start(): void {\n  console.log(\"go\");\n}\n"),
+            (
+                "lib/main.ts",
+                "export function start(): void {\n  console.log(\"go\");\n}\n",
+            ),
         ]);
         index.render_zone1_prefix(ZONE1_MAX_TOKENS)
     }
@@ -1027,7 +1029,10 @@ mod zone1_injection_tests {
             .as_str()
             .expect("injected system message")
             .to_owned();
-        assert_eq!(system_1, system_2, "Zone 1 bytes must be identical across turns");
+        assert_eq!(
+            system_1, system_2,
+            "Zone 1 bytes must be identical across turns"
+        );
         assert!(
             system_1.starts_with("base system prompt"),
             "injection appends to the base prompt: {system_1}"
@@ -1044,7 +1049,10 @@ mod zone1_injection_tests {
             &turns,
             &cw_core::mutation::MutationSchedulingConfig::default(),
         );
-        assert_eq!(telemetry.repeat_count, 2, "both turns must share the prefix fingerprint");
+        assert_eq!(
+            telemetry.repeat_count, 2,
+            "both turns must share the prefix fingerprint"
+        );
         assert!(
             telemetry.stable,
             "expected stable prefix on turn 2: {telemetry:?}"
@@ -1060,7 +1068,10 @@ mod zone1_injection_tests {
                 let tx = egress_tx.clone();
                 async move {
                     let _ = tx.send(body);
-                    (axum::http::StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
+                    (
+                        axum::http::StatusCode::OK,
+                        Json(serde_json::json!({"status": "ok"})),
+                    )
                 }
             }),
         );
@@ -1098,6 +1109,9 @@ mod zone1_injection_tests {
 
         let egress: serde_json::Value =
             serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
-        assert_eq!(egress, payload, "default-off proxy must forward the original bytes");
+        assert_eq!(
+            egress, payload,
+            "default-off proxy must forward the original bytes"
+        );
     }
 }

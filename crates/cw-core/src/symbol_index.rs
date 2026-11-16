@@ -244,7 +244,8 @@ fn skip_quoted(line: &str, start: usize, quote: char) -> usize {
     while i < line.len() {
         let ch = line[i..].chars().next().unwrap();
         if ch == '\\' {
-            i += 1 + line.get(i + 1..)
+            i += 1 + line
+                .get(i + 1..)
                 .and_then(|rest| rest.chars().next())
                 .map(char::len_utf8)
                 .unwrap_or(0);
@@ -271,13 +272,19 @@ fn skip_char_literal_or_lifetime(line: &str, start: usize) -> usize {
             if after_backslash.starts_with("u{") {
                 // `\u{...}` escape: skip to the closing brace, then expect `'`.
                 match after_backslash.find('}') {
-                    Some(off) if after_backslash.get(2 + off..).is_some_and(|rest| rest.starts_with('\'')) => {
+                    Some(off)
+                        if after_backslash
+                            .get(2 + off..)
+                            .is_some_and(|rest| rest.starts_with('\'')) =>
+                    {
                         start + 1 + 1 + (2 + off) + 1
                     }
                     _ => start + 1,
                 }
             } else if let Some(ch) = after_backslash.chars().next()
-                && after_backslash.get(1..).is_some_and(|rest| rest.starts_with('\''))
+                && after_backslash
+                    .get(1..)
+                    .is_some_and(|rest| rest.starts_with('\''))
             {
                 // `\x` escape: the escaped character is one code point.
                 start + 1 + 1 + ch.len_utf8() + 1
@@ -287,7 +294,10 @@ fn skip_char_literal_or_lifetime(line: &str, start: usize) -> usize {
         }
         Some(ch) => {
             // Plain character: the closing quote must follow its code point directly.
-            if tail.get(ch.len_utf8()..).is_some_and(|rest| rest.starts_with('\'')) {
+            if tail
+                .get(ch.len_utf8()..)
+                .is_some_and(|rest| rest.starts_with('\''))
+            {
                 start + 1 + ch.len_utf8() + 1
             } else {
                 start + 1 // lifetime, e.g. `'a`.
@@ -557,12 +567,16 @@ fn extract_brace_lang(
                 );
                 match close_at {
                     Some(end_byte) => emit_decl(entries, rel_path, source, lines, &decl, end_byte),
-                    None => pending = Some(PendingDecl {
-                        saw_brace: decl.saw_brace || saw_open,
-                        ..decl
-                    }),
+                    None => {
+                        pending = Some(PendingDecl {
+                            saw_brace: decl.saw_brace || saw_open,
+                            ..decl
+                        })
+                    }
                 }
-                if let Some(p) = &pending && !p.saw_brace {
+                if let Some(p) = &pending
+                    && !p.saw_brace
+                {
                     pending_content_end = content_end.or(pending_content_end);
                 } else {
                     pending_content_end = None;
@@ -576,13 +590,8 @@ fn extract_brace_lang(
             // closing brace is attributed to the new declaration; otherwise this
             // call is just plain state maintenance.
             let matched = match_decl_start(line, keywords);
-            let (close_at, saw_open) = scan_for_close(
-                line,
-                &mut state,
-                line_start,
-                false,
-                single_quote_is_string,
-            );
+            let (close_at, saw_open) =
+                scan_for_close(line, &mut state, line_start, false, single_quote_is_string);
             if let Some((kind, name)) = matched {
                 let decl = PendingDecl {
                     start_byte: line_start + (line.len() - line.trim_start().len()),
@@ -604,14 +613,27 @@ fn extract_brace_lang(
             }
         } else {
             // Inside another declaration or a block comment: state maintenance only.
-            scan_brace_line(line, &mut state, line_start, single_quote_is_string, |_, _| {});
+            scan_brace_line(
+                line,
+                &mut state,
+                line_start,
+                single_quote_is_string,
+                |_, _| {},
+            );
         }
     }
 
     // Unterminated declaration at EOF: end at its last content byte (brace-less) or the
     // end of source (unterminated block).
     if let Some(decl) = pending {
-        emit_decl(entries, rel_path, source, lines, &decl, pending_content_end.unwrap_or(source.len()));
+        emit_decl(
+            entries,
+            rel_path,
+            source,
+            lines,
+            &decl,
+            pending_content_end.unwrap_or(source.len()),
+        );
     }
 }
 
@@ -729,7 +751,10 @@ impl SymbolIndex {
         let mut index = Self::default();
         for (rel_path, source) in sources {
             for extracted in extract_symbols_from_source(rel_path, source) {
-                index.entries.entry(extracted.uri.clone()).or_insert(extracted);
+                index
+                    .entries
+                    .entry(extracted.uri.clone())
+                    .or_insert(extracted);
             }
         }
         index
@@ -785,7 +810,10 @@ fn collect_entries(root: &Path, dir: &Path, index: &mut SymbolIndex) -> std::io:
             };
             let rel_path = rel_path.to_string_lossy().replace('\\', "/");
             for extracted in extract_symbols_from_source(&rel_path, &content) {
-                index.entries.entry(extracted.uri.clone()).or_insert(extracted);
+                index
+                    .entries
+                    .entry(extracted.uri.clone())
+                    .or_insert(extracted);
             }
         }
     }
@@ -849,9 +877,8 @@ impl SymbolIndex {
         let remaining = groups.len() - rendered_files;
         if remaining > 0 {
             // Prefer the spec marker when it fits the budget.
-            let with_marker = format!(
-                "{out}# ... truncated ({remaining} files)\n{ZONE1_MAP_CLOSE}"
-            );
+            let with_marker =
+                format!("{out}# ... truncated ({remaining} files)\n{ZONE1_MAP_CLOSE}");
             out = if crate::tokenizer::estimate_tokens(&with_marker) as usize <= max_tokens {
                 with_marker
             } else {
@@ -892,7 +919,11 @@ const ZONE1_MARKER: &str = "<workspace_symbol_map>";
 /// - Anthropic: appends to `payload["system"]`, handling both the plain-string
 ///   form and the array-of-text-blocks form (last text block, or a new one when
 ///   none exists). A payload without any `system` field is left unmodified.
-pub fn inject_zone1_prefix(payload: &mut Value, provider: crate::ir::ProviderKind, zone1_block: &str) -> bool {
+pub fn inject_zone1_prefix(
+    payload: &mut Value,
+    provider: crate::ir::ProviderKind,
+    zone1_block: &str,
+) -> bool {
     if payload_has_symbol_map(payload) {
         return false;
     }
@@ -1004,7 +1035,9 @@ mod tests {
     use super::*;
 
     fn entry(uri: &str, kind: SymbolKind) -> SymbolEntry {
-        let rel_path = file_part(uri).strip_prefix("repo://").unwrap_or(file_part(uri));
+        let rel_path = file_part(uri)
+            .strip_prefix("repo://")
+            .unwrap_or(file_part(uri));
         SymbolEntry {
             uri: SymbolUri(uri.to_string()),
             rel_path: rel_path.to_string(),
@@ -1022,12 +1055,18 @@ mod tests {
         for (uri, kind) in [
             ("repo://crates/cw-core/src/lib.rs", SymbolKind::File),
             ("repo://crates/cw-core/src/ir.rs", SymbolKind::File),
-            ("repo://crates/cw-core/src/ir.rs#ContextNode", SymbolKind::Struct),
+            (
+                "repo://crates/cw-core/src/ir.rs#ContextNode",
+                SymbolKind::Struct,
+            ),
             (
                 "repo://crates/cw-core/src/lib.rs#calibration",
                 SymbolKind::Module,
             ),
-            ("repo://crates/cw-core/src/lib.rs#control", SymbolKind::Module),
+            (
+                "repo://crates/cw-core/src/lib.rs#control",
+                SymbolKind::Module,
+            ),
             ("repo://crates/cw-core/src/lib.rs#ir", SymbolKind::Module),
             (
                 "repo://crates/cw-core/src/lib.rs#linter",
@@ -1047,7 +1086,9 @@ mod tests {
     #[test]
     fn resolve_exact_uri() {
         let index = test_index();
-        let hit = index.resolve("repo://crates/cw-core/src/lib.rs#ir").unwrap();
+        let hit = index
+            .resolve("repo://crates/cw-core/src/lib.rs#ir")
+            .unwrap();
         assert_eq!(hit.rel_path, "crates/cw-core/src/lib.rs");
         assert_eq!(hit.kind, SymbolKind::Module);
 
@@ -1116,7 +1157,10 @@ mod tests {
         // Whole-file entry spans the exact source.
         assert_eq!(entries[0].kind, SymbolKind::File);
         assert_eq!(&src[entries[0].start_byte..entries[0].end_byte], src);
-        assert_eq!(entries[0].uri, SymbolUri("repo://crates/demo/src/lib.rs".into()));
+        assert_eq!(
+            entries[0].uri,
+            SymbolUri("repo://crates/demo/src/lib.rs".into())
+        );
         assert_eq!(entries[0].signature, "crates/demo/src/lib.rs");
         assert_eq!(entries[0].end_line, 18);
 
@@ -1134,7 +1178,10 @@ mod tests {
 
         let mod_ir = &entries[1];
         assert_eq!(&src[mod_ir.start_byte..mod_ir.end_byte], "pub mod ir;");
-        assert_eq!(mod_ir.uri, SymbolUri("repo://crates/demo/src/lib.rs#ir".into()));
+        assert_eq!(
+            mod_ir.uri,
+            SymbolUri("repo://crates/demo/src/lib.rs#ir".into())
+        );
         assert_eq!(mod_ir.signature, "mod ir");
         assert_eq!((mod_ir.start_line, mod_ir.end_line), (2, 2));
 
@@ -1143,7 +1190,10 @@ mod tests {
             &src[widget.start_byte..widget.end_byte],
             "pub struct Widget {\n    pub x: u32,\n}"
         );
-        assert_eq!(widget.uri, SymbolUri("repo://crates/demo/src/lib.rs#Widget".into()));
+        assert_eq!(
+            widget.uri,
+            SymbolUri("repo://crates/demo/src/lib.rs#Widget".into())
+        );
         assert_eq!(widget.signature, "struct Widget");
         assert_eq!((widget.start_line, widget.end_line), (5, 7));
 
@@ -1152,7 +1202,10 @@ mod tests {
             &src[impl_w.start_byte..impl_w.end_byte],
             "impl Iterator for Widget {\n    fn new() -> Self {\n        Self { x: 0 }\n    }\n}"
         );
-        assert_eq!(impl_w.uri, SymbolUri("repo://crates/demo/src/lib.rs#Iterator".into()));
+        assert_eq!(
+            impl_w.uri,
+            SymbolUri("repo://crates/demo/src/lib.rs#Iterator".into())
+        );
         assert_eq!(impl_w.signature, "impl Iterator for Widget");
         assert_eq!((impl_w.start_line, impl_w.end_line), (9, 13));
 
@@ -1195,14 +1248,23 @@ mod tests {
 
         let widget = &entries[1];
         assert_eq!(widget.kind, SymbolKind::Class);
-        assert_eq!(widget.uri, SymbolUri("repo://app/src/main/kt/demo/Widget.kt#Widget".into()));
-        assert_eq!(&src[widget.start_byte..widget.end_byte], "data class Widget(val x: Int) {\n    fun describe(): String = max(x, 0).toString()\n}");
+        assert_eq!(
+            widget.uri,
+            SymbolUri("repo://app/src/main/kt/demo/Widget.kt#Widget".into())
+        );
+        assert_eq!(
+            &src[widget.start_byte..widget.end_byte],
+            "data class Widget(val x: Int) {\n    fun describe(): String = max(x, 0).toString()\n}"
+        );
         assert_eq!(widget.signature, "class Widget(val x: Int)");
         assert_eq!((widget.start_line, widget.end_line), (7, 9));
 
         let main = &entries[2];
         assert_eq!(main.kind, SymbolKind::Function);
-        assert_eq!(&src[main.start_byte..main.end_byte], "fun main(args: Array<String>) {\n    println(Widget(1))\n}");
+        assert_eq!(
+            &src[main.start_byte..main.end_byte],
+            "fun main(args: Array<String>) {\n    println(Widget(1))\n}"
+        );
         assert_eq!(main.signature, "fun main(args: Array<String>)");
 
         // Brace-less expression-body fun: unterminated at EOF extends to end of source.
@@ -1212,8 +1274,19 @@ mod tests {
         assert_eq!((top.start_line, top.end_line), (15, 15));
 
         // The nested `describe` fun is not a separate entry.
-        let names: Vec<&str> = entries.iter().map(|e| e.uri.0.rsplit('#').next().unwrap()).collect();
-        assert_eq!(names, ["repo://app/src/main/kt/demo/Widget.kt", "Widget", "main", "top"]);
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e.uri.0.rsplit('#').next().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "repo://app/src/main/kt/demo/Widget.kt",
+                "Widget",
+                "main",
+                "top"
+            ]
+        );
     }
 
     #[test]
@@ -1244,27 +1317,45 @@ mod tests {
 
         let load_config = &entries[1];
         assert_eq!(load_config.kind, SymbolKind::Function);
-        assert_eq!(&src[load_config.start_byte..load_config.end_byte], "async def load_config(path: str):\n    \"\"\"Load config.\"\"\"\n    return {\"path\": path}");
+        assert_eq!(
+            &src[load_config.start_byte..load_config.end_byte],
+            "async def load_config(path: str):\n    \"\"\"Load config.\"\"\"\n    return {\"path\": path}"
+        );
         assert_eq!(load_config.signature, "def load_config(path: str)");
         assert_eq!((load_config.start_line, load_config.end_line), (4, 6));
 
         let registry = &entries[2];
         assert_eq!(registry.kind, SymbolKind::Class);
-        assert_eq!(registry.uri, SymbolUri("repo://tools/loader.py#Registry".into()));
+        assert_eq!(
+            registry.uri,
+            SymbolUri("repo://tools/loader.py#Registry".into())
+        );
         // The nested method lives inside the class byte range.
         let slice = &src[registry.start_byte..registry.end_byte];
         assert!(slice.contains("def add(self, item)"));
         assert!(!slice.ends_with('\n'));
-        assert_eq!(slice, "class Registry:\n    \"\"\"Holds items.\"\"\"\n\n    def add(self, item) -> None:\n        self._items.append(item)");
+        assert_eq!(
+            slice,
+            "class Registry:\n    \"\"\"Holds items.\"\"\"\n\n    def add(self, item) -> None:\n        self._items.append(item)"
+        );
         assert_eq!((registry.start_line, registry.end_line), (9, 13));
 
         let main = &entries[3];
-        assert_eq!(&src[main.start_byte..main.end_byte], "def main():\n    print(\"done\")");
+        assert_eq!(
+            &src[main.start_byte..main.end_byte],
+            "def main():\n    print(\"done\")"
+        );
         assert_eq!(main.signature, "def main()");
 
         // The nested `add` method is not a separate entry.
-        let names: Vec<&str> = entries.iter().map(|e| e.uri.0.rsplit('#').next().unwrap()).collect();
-        assert_eq!(names, ["repo://tools/loader.py", "load_config", "Registry", "main"]);
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| e.uri.0.rsplit('#').next().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            ["repo://tools/loader.py", "load_config", "Registry", "main"]
+        );
     }
 
     #[test]
@@ -1289,16 +1380,25 @@ mod tests {
         assert_eq!(ts_entries.len(), 4, "{ts_entries:?}");
         let point = &ts_entries[1];
         assert_eq!(point.kind, SymbolKind::Trait);
-        assert_eq!(&src[point.start_byte..point.end_byte], "export interface Point {\n    x: number;\n}");
+        assert_eq!(
+            &src[point.start_byte..point.end_byte],
+            "export interface Point {\n    x: number;\n}"
+        );
         assert_eq!(point.signature, "interface Point");
 
         let engine = &ts_entries[2];
         assert_eq!(engine.kind, SymbolKind::Class);
-        assert_eq!(&src[engine.start_byte..engine.end_byte], "export default class Engine {\n    run() { return 1; }\n}");
+        assert_eq!(
+            &src[engine.start_byte..engine.end_byte],
+            "export default class Engine {\n    run() { return 1; }\n}"
+        );
         assert_eq!(engine.signature, "class Engine");
 
         let tick = &ts_entries[3];
-        assert_eq!(&src[tick.start_byte..tick.end_byte], "function tick(step = 1) {\n    const f = () => 2;\n    void f;\n}");
+        assert_eq!(
+            &src[tick.start_byte..tick.end_byte],
+            "function tick(step = 1) {\n    const f = () => 2;\n    void f;\n}"
+        );
         assert_eq!(tick.signature, "function tick(step = 1)");
 
         // Same source indexed as plain JS: identical structure (keywords shared).
@@ -1308,7 +1408,8 @@ mod tests {
 
     #[test]
     fn build_walks_sorted_and_is_deterministic() {
-        let root = std::env::temp_dir().join(format!("cw_symbol_index_test_{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("cw_symbol_index_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("src")).unwrap();
         fs::create_dir_all(root.join("target")).unwrap();
@@ -1319,7 +1420,11 @@ mod tests {
         fs::write(root.join("target/ignored.rs"), "fn nope() {}\n").unwrap();
         fs::write(root.join(".git/nested.py"), "def nope():\n    pass\n").unwrap();
         fs::write(root.join("node_modules/pkg/x.js"), "function nope() {}\n").unwrap();
-        fs::write(root.join("README.md"), "# not indexed (no source extension)\n").unwrap();
+        fs::write(
+            root.join("README.md"),
+            "# not indexed (no source extension)\n",
+        )
+        .unwrap();
 
         let index = SymbolIndex::build(&root).unwrap();
         let keys: Vec<String> = index.entries.keys().map(|k| k.0.clone()).collect();
@@ -1338,10 +1443,22 @@ mod tests {
         assert_eq!(index.entries, again.entries);
 
         // Extracted slices round-trip against the on-disk file content.
-        let a = index.entries.get(&SymbolUri("repo://src/a.ts#A".into())).unwrap();
-        assert_eq!(&"export class A {}\n"[a.start_byte..a.end_byte], "export class A {}");
-        let b = index.entries.get(&SymbolUri("repo://src/b.rs#b_one".into())).unwrap();
-        assert_eq!(&"fn b_one() {}\n"[b.start_byte..b.end_byte], "fn b_one() {}");
+        let a = index
+            .entries
+            .get(&SymbolUri("repo://src/a.ts#A".into()))
+            .unwrap();
+        assert_eq!(
+            &"export class A {}\n"[a.start_byte..a.end_byte],
+            "export class A {}"
+        );
+        let b = index
+            .entries
+            .get(&SymbolUri("repo://src/b.rs#b_one".into()))
+            .unwrap();
+        assert_eq!(
+            &"fn b_one() {}\n"[b.start_byte..b.end_byte],
+            "fn b_one() {}"
+        );
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -1349,7 +1466,10 @@ mod tests {
     #[test]
     fn zone1_prefix_render_matches_spec_format() {
         // Mirrors the spec example: a lib.rs whose only symbol is `mod symbol_index`.
-        let index = SymbolIndex::build_from_sources(&[("crates/cw-core/src/lib.rs", "pub mod symbol_index;\n")]);
+        let index = SymbolIndex::build_from_sources(&[(
+            "crates/cw-core/src/lib.rs",
+            "pub mod symbol_index;\n",
+        )]);
         let rendered = index.render_zone1_prefix(usize::MAX / 2);
         assert_eq!(
             rendered,
@@ -1381,7 +1501,10 @@ mod tests {
         let first = SymbolIndex::build(&root).unwrap();
         let second = SymbolIndex::build(&root).unwrap();
         let budget = usize::MAX / 2;
-        assert_eq!(first.render_zone1_prefix(budget), second.render_zone1_prefix(budget));
+        assert_eq!(
+            first.render_zone1_prefix(budget),
+            second.render_zone1_prefix(budget)
+        );
 
         let rendered = first.render_zone1_prefix(budget);
         assert!(rendered.starts_with(ZONE1_PROTOCOL_HEADER));
@@ -1404,7 +1527,8 @@ mod tests {
 
     #[test]
     fn zone1_prefix_respects_token_budget() {
-        let root = std::env::temp_dir().join(format!("cw_zone1_budget_test_{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("cw_zone1_budget_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("src")).unwrap();
         for name in ["alpha.rs", "beta.rs", "gamma.rs"] {
@@ -1427,11 +1551,8 @@ mod tests {
         assert_ne!(truncated, full);
         assert!(crate::tokenizer::estimate_tokens(&truncated) as usize <= tight_budget);
         // Fewer file lines than the full render.
-        let count_map_lines = |s: &str| -> usize {
-            s.lines()
-                .filter(|l| l.starts_with("repo://"))
-                .count()
-        };
+        let count_map_lines =
+            |s: &str| -> usize { s.lines().filter(|l| l.starts_with("repo://")).count() };
         assert!(count_map_lines(&truncated) < count_map_lines(&full));
 
         // The marker, when present, reports the remaining file count.
@@ -1448,7 +1569,8 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
     }
 
-    const TEST_ZONE1_BLOCK: &str = "<workspace_symbol_map>\nrepo://src/x.rs: fn f() (L1-2)\n</workspace_symbol_map>";
+    const TEST_ZONE1_BLOCK: &str =
+        "<workspace_symbol_map>\nrepo://src/x.rs: fn f() (L1-2)\n</workspace_symbol_map>";
 
     #[test]
     fn inject_openai_existing_system_message() {
@@ -1465,7 +1587,10 @@ mod tests {
             TEST_ZONE1_BLOCK
         ));
         let messages = payload["messages"].as_array().unwrap();
-        assert_eq!(messages[0]["content"], format!("You are helpful.\n\n{TEST_ZONE1_BLOCK}"));
+        assert_eq!(
+            messages[0]["content"],
+            format!("You are helpful.\n\n{TEST_ZONE1_BLOCK}")
+        );
         assert_eq!(messages[1], json!({ "role": "user", "content": "hi" }));
         // Non-system fields stay intact.
         assert_eq!(payload["model"], "gpt-test");
@@ -1484,7 +1609,10 @@ mod tests {
         ));
         let messages = payload["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0], json!({ "role": "system", "content": TEST_ZONE1_BLOCK }));
+        assert_eq!(
+            messages[0],
+            json!({ "role": "system", "content": TEST_ZONE1_BLOCK })
+        );
         assert_eq!(messages[1]["content"], "hi");
     }
 
@@ -1529,7 +1657,10 @@ mod tests {
             TEST_ZONE1_BLOCK
         ));
         let messages = payload["messages"].as_array().unwrap();
-        assert_eq!(messages[0]["content"], format!("dev instructions\n\n{TEST_ZONE1_BLOCK}"));
+        assert_eq!(
+            messages[0]["content"],
+            format!("dev instructions\n\n{TEST_ZONE1_BLOCK}")
+        );
     }
 
     #[test]
@@ -1544,7 +1675,10 @@ mod tests {
             crate::ir::ProviderKind::Anthropic,
             TEST_ZONE1_BLOCK
         ));
-        assert_eq!(payload["system"], format!("base system prompt\n\n{TEST_ZONE1_BLOCK}"));
+        assert_eq!(
+            payload["system"],
+            format!("base system prompt\n\n{TEST_ZONE1_BLOCK}")
+        );
         // And a second call is a no-op.
         let after_first = payload.clone();
         assert!(!inject_zone1_prefix(
@@ -1574,8 +1708,14 @@ mod tests {
         let system = payload["system"].as_array().unwrap();
         // Appended to the last text block; non-text blocks untouched.
         assert_eq!(system[0]["text"], "first block");
-        assert_eq!(system[1], json!({ "type": "redacted_thinking", "data": "opaque" }));
-        assert_eq!(system[2]["text"], format!("second block\n\n{TEST_ZONE1_BLOCK}"));
+        assert_eq!(
+            system[1],
+            json!({ "type": "redacted_thinking", "data": "opaque" })
+        );
+        assert_eq!(
+            system[2]["text"],
+            format!("second block\n\n{TEST_ZONE1_BLOCK}")
+        );
 
         // Array without any text block: a new one is appended.
         let mut no_text = json!({ "model": "claude-test", "system": [ { "type": "redacted_thinking", "data": "x" } ] });
@@ -1586,7 +1726,10 @@ mod tests {
         ));
         let system = no_text["system"].as_array().unwrap();
         assert_eq!(system.len(), 2);
-        assert_eq!(system[1], json!({ "type": "text", "text": TEST_ZONE1_BLOCK }));
+        assert_eq!(
+            system[1],
+            json!({ "type": "text", "text": TEST_ZONE1_BLOCK })
+        );
 
         // Payload without any `system` field: untouched.
         let mut no_system = json!({ "model": "claude-test", "messages": [] });
@@ -1711,7 +1854,8 @@ mod tests {
     // so the new top-level-termination rule does not split them.
     #[test]
     fn rust_multiline_signature_is_not_split_by_termination_rule() {
-        let src = "pub fn long(\n    x: u32,\n    y: &[u8],\n) -> i32 {\n    0\n}\n\nfn after() {}\n";
+        let src =
+            "pub fn long(\n    x: u32,\n    y: &[u8],\n) -> i32 {\n    0\n}\n\nfn after() {}\n";
         let entries = extract_symbols_from_source("crates/x/src/long.rs", src);
         let names: Vec<&str> = entries
             .iter()

@@ -914,8 +914,9 @@ fn render_file_line(rel_path: &str, symbols: &[&SymbolEntry]) -> String {
 }
 
 /// Marker used for the idempotency check: a payload whose system prompt already
-/// carries this tag is left untouched on every subsequent call.
-const ZONE1_MARKER: &str = "<workspace_symbol_map>";
+/// carries this tag is left untouched on every subsequent call. Also anchors Zone 2
+/// register injection, which must land immediately after it (prefix-stability rule).
+pub const ZONE1_MARKER: &str = "<workspace_symbol_map>";
 
 /// Inject `zone1_block` into the outgoing system prompt (Zone 1) of an outbound
 /// provider payload. Returns `true` when injected, `false` when the payload

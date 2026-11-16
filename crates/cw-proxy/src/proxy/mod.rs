@@ -101,9 +101,12 @@ fn zone1_block_from_env() -> Option<String> {
 /// Builds the Intercepting Proxy Router (`127.0.0.1:4401`).
 pub fn build_proxy_router(state: DaemonState) -> Router {
     let mut state = state;
-    // Zone 1 symbol map is opt-in and parsed exactly once at proxy startup. When
-    // enabled, the index is built over `CW_WORKSPACE_ROOT` (or the daemon's working
-    // directory) and rendered into a stable prefix block cached in the state.
+    // Zone 1 symbol map is opt-in and parsed exactly once at proxy startup: only the exact
+    // values `1`/`true` enable it (case-sensitive). When enabled, the index is built over
+    // `CW_WORKSPACE_ROOT` (or the daemon's working directory) and rendered into a stable
+    // prefix block cached in the state for the lifetime of this process. Workspace changes
+    // after startup are NOT picked up — restart the daemon to re-index. Build failure keeps
+    // injection disabled with a warning rather than failing proxy startup.
     if std::env::var_os("CW_ENABLE_SYMBOL_MAP")
         .is_some_and(|value| value == "1" || value == "true")
     {

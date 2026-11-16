@@ -164,6 +164,8 @@ pub struct DaemonState {
     /// Zone 1 symbol map prefix (opt-in via `CW_ENABLE_SYMBOL_MAP`, enabled at proxy
     /// startup by [`crate::proxy::build_proxy_router`]). When `Some`, active turns
     /// receive this block injected into the system prompt before mutation scheduling.
+    /// Built once per process; workspace changes after startup are not picked up until
+    /// daemon restart.
     pub zone1_block: Option<String>,
     /// Optional provider/model allowlist for separately authorized smoke runs.
     pub live_provider_model: Option<(cw_core::ir::ProviderKind, String)>,

@@ -256,34 +256,34 @@ pub fn mcp_tool_definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "uri": { "type": "string" },
+                    "uri": { "type": "string", "description": "Symbol or file URI formatted as repo://<rel_path> or repo://<rel_path>#<symbol>" },
                     "mode": { "type": "string", "enum": ["full", "signature"], "default": "full" },
-                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or \"default\")" }
+                    "session_id": { "type": "string", "description": "Optional session identifier" }
                 },
                 "required": ["uri"]
             }
         },
         {
             "name": "cw_unmount",
-            "description": "Unmount a previously mounted URI from Zone 2 (<mounted_context>) once you are done with it, to keep context lean.",
+            "description": "Evict a previously mounted symbol or file URI from Zone 2 (<mounted_context>) to free context tokens.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "uri": { "type": "string" },
-                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or \"default\")" }
+                    "session_id": { "type": "string" }
                 },
                 "required": ["uri"]
             }
         },
         {
             "name": "cw_pin",
-            "description": "Pin an architectural invariant into Zone 2 (<pinned_invariants>) so it is re-stated on every subsequent turn (e.g. key='arch', rule='no unwrap in proxy').",
+            "description": "Pin a short architectural invariant or constraint into Zone 2 (<pinned_invariants>) so it persists across turns.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "key": { "type": "string" },
-                    "rule": { "type": "string" },
-                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or \"default\")" }
+                    "key": { "type": "string", "description": "Short unique identifier for the invariant" },
+                    "rule": { "type": "string", "description": "Concise invariant statement" },
+                    "session_id": { "type": "string" }
                 },
                 "required": ["key", "rule"]
             }

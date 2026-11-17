@@ -473,6 +473,10 @@ fn scrub_text(text: &mut String, by_file: &BTreeMap<String, MountedFile>) -> boo
 /// Idempotent: when the content already ends with a `[cw:` line it is replaced,
 /// never stacked — so repeated calls (or a changed budget between turns) leave
 /// exactly one HUD line. No-op when the provider/payload has no eligible message.
+/// Units are display heuristics, not provider-billed tokens: `active_tokens` is
+/// estimated over the serialized JSON payload (keys, escapes and metadata
+/// included), while `budget_tokens` is a fixed reference value supplied by the
+/// caller — not per-model or per-session.
 pub fn append_budget_hud(
     payload: &mut Value,
     provider: crate::ir::ProviderKind,

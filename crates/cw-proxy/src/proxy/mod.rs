@@ -596,9 +596,18 @@ pub async fn handle_proxy_request(
                 // when the zone-modified payload survived validation: a fallback revert above
                 // restored `raw` exactly, in which case no zones — and no HUD — go out.
                 if zone1_active && outbound != raw {
-                    let active_tokens = cw_core::tokenizer::estimate_tokens(
-                        &serde_json::to_string(&outbound).unwrap_or_default(),
-                    ) as usize;
+                    // Token estimate reuses one serialization pass: no intermediate String, the
+                    // UTF-8 slice is borrowed straight from the vec. The egress body below must
+                    // re-serialize after append_budget_hud mutates a message in place — a single
+                    // pass cannot cover both, because the HUD line itself references the count.
+                    let active_tokens = serde_json::to_vec(&outbound)
+                        .ok()
+                        .and_then(|bytes| {
+                            std::str::from_utf8(&bytes)
+                                .ok()
+                                .map(cw_core::tokenizer::estimate_tokens)
+                        })
+                        .unwrap_or(0) as usize;
                     let zone1_bytes = state.zone1_block.as_deref().map(str::len).unwrap_or(0);
                     cw_core::working_set::append_budget_hud(
                         &mut outbound,
@@ -958,7 +967,7 @@ mod l0_route_boundary_tests {
 
 #[cfg(test)]
 mod zone1_injection_tests {
-    use super::{ZONE1_MAX_TOKENS, handle_proxy_request};
+    use super::{HUD_CONTEXT_BUDGET_TOKENS, ZONE1_MAX_TOKENS, handle_proxy_request};
     use crate::state::DaemonState;
     use axum::{
         Json, body::Bytes, extract::State, http::HeaderMap, response::Response, routing::post,
@@ -1223,14 +1232,27 @@ mod zone1_injection_tests {
         ws.pin("kv-rule", "keep Zone 1 static");
         base_state.store.save_working_set(SESSION_ID, &ws).unwrap();
 
-        // Turn payload carries a duplicate raw file read in the tool history.
-        let payload = serde_json::json!({
+        // Turn 1 payload carries a duplicate raw file read in the tool history.
+        let turn1_payload = serde_json::json!({
             "model": "gpt-test",
             "messages": [
                 {"role": "system", "content": "base system prompt"},
                 {"role": "user", "content": "inspect foo"},
                 {"role": "assistant", "content": null, "tool_calls": [{"id": "c1"}]},
                 {"role": "tool", "tool_call_id": "c1", "content": format!("src/lib.rs:\n{THREE_ZONE_DUMP}")}
+            ]
+        });
+        // Turn 2 resends the full turn-1 history plus the assistant reply and a new user
+        // message — proving the HUD lands on the fresh final message, not on accumulated state.
+        let turn2_payload = serde_json::json!({
+            "model": "gpt-test",
+            "messages": [
+                {"role": "system", "content": "base system prompt"},
+                {"role": "user", "content": "inspect foo"},
+                {"role": "assistant", "content": null, "tool_calls": [{"id": "c1"}]},
+                {"role": "tool", "tool_call_id": "c1", "content": format!("src/lib.rs:\n{THREE_ZONE_DUMP}")},
+                {"role": "assistant", "content": "the answer is 42"},
+                {"role": "user", "content": "verify it"}
             ]
         });
 
@@ -1255,7 +1277,7 @@ mod zone1_injection_tests {
         turn1_state.openai_upstream = upstream_url.clone();
         turn1_state.zone1_block = Some(Arc::from(test_zone1_block()));
         assert_eq!(
-            post_turn(turn1_state, &payload).await.status(),
+            post_turn(turn1_state, &turn1_payload).await.status(),
             axum::http::StatusCode::OK
         );
 
@@ -1263,7 +1285,7 @@ mod zone1_injection_tests {
         turn2_state.openai_upstream = upstream_url.clone();
         turn2_state.zone1_block = Some(Arc::from(test_zone1_block()));
         assert_eq!(
-            post_turn(turn2_state, &payload).await.status(),
+            post_turn(turn2_state, &turn2_payload).await.status(),
             axum::http::StatusCode::OK
         );
 
@@ -1272,7 +1294,15 @@ mod zone1_injection_tests {
         let body_2: serde_json::Value =
             serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
 
-        for (turn, body) in [(1, &body_1), (2, &body_2)] {
+        // Zone 3 stub prefix, expected HUD line shape (F1: assert the full line, not substrings),
+        // and per-turn index of the final user/tool message each HUD must land on.
+        let stub_prefix = "[Mounted in Zone 2: repo://src/lib.rs#foo — raw duplicate evicted]";
+        let hud_shape = format!(
+            "/{HUD_CONTEXT_BUDGET_TOKENS} tok | mounted: 1 | pinned: 1 | zone1_prefix_bytes: {}",
+            test_zone1_block().len()
+        );
+
+        for (turn, body, hud_index) in [(1usize, &body_1, 3usize), (2, &body_2, 5)] {
             // Zone 1 -> Zone 2 inside the system prompt, in order.
             let system = body["messages"][0]["content"]
                 .as_str()
@@ -1301,24 +1331,35 @@ mod zone1_injection_tests {
             // Zone 3: the duplicate raw file read is evicted to a one-line stub.
             let tool_content = body["messages"][3]["content"].as_str().unwrap();
             assert!(
-                tool_content.starts_with(
-                    "[Mounted in Zone 2: repo://src/lib.rs#foo — raw duplicate evicted]"
-                ),
+                tool_content.starts_with(stub_prefix),
                 "raw dump must be stubbed (turn {turn}): {tool_content}"
             );
 
-            // HUD at the tail of the final user/tool message with exact register counts.
-            let hud_lines: Vec<&str> = tool_content
+            // HUD at the tail of the final user/tool message, full line shape.
+            let hud_content = body["messages"][hud_index]["content"].as_str().unwrap();
+            let hud_lines: Vec<&str> = hud_content
                 .lines()
                 .filter(|l| l.starts_with("[cw:"))
                 .collect();
             assert_eq!(hud_lines.len(), 1, "exactly one HUD line (turn {turn})");
-            assert!(hud_lines[0].contains("mounted: 1"), "turn {turn}");
-            assert!(hud_lines[0].contains("pinned: 1"), "turn {turn}");
-            assert!(hud_lines[0].contains("zone1_prefix_bytes:"), "turn {turn}");
+            assert!(
+                hud_lines[0].starts_with("[cw: "),
+                "HUD must open with '[cw: ' (turn {turn}): {}",
+                hud_lines[0]
+            );
+            assert!(
+                hud_lines[0].contains(&hud_shape),
+                "full HUD line shape (turn {turn}): {}",
+                hud_lines[0]
+            );
+            assert!(
+                hud_lines[0].ends_with("]"),
+                "HUD must close with ']' (turn {turn})"
+            );
         }
 
-        // Zone 1 (and the whole deterministic system prefix) is byte-identical across turns.
+        // Zone 1 (and the whole deterministic system prefix) is byte-identical across turns,
+        // even though turn 2 carries extra history.
         let sys_1 = body_1["messages"][0]["content"].as_str().unwrap();
         let sys_2 = body_2["messages"][0]["content"].as_str().unwrap();
         assert_eq!(

@@ -1283,7 +1283,6 @@ mod zone1_injection_tests {
         let body_1: serde_json::Value =
             serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
         let body_2: serde_json::Value =
-            serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
 
         // Zone 3 stub prefix, expected HUD line shape (F1: assert the full line, not substrings),
         // and per-turn index of the final user/tool message each HUD must land on.

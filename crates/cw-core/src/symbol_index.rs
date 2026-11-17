@@ -801,6 +801,18 @@ impl SymbolIndex {
         if !path.is_file() {
             return Ok(()); // Deleted mid-session: the stale entries are already gone.
         }
+        // Workspace containment guard (Milestone C review): `rel_path` originates from
+        // agent-supplied URIs, so a path escaping the root — via `..` traversal, an
+        // absolute path, or a symlink pointing outside — is not workspace content and
+        // must never be indexed. Comparing canonicalized paths resolves symlinks on both
+        // sides without false positives when the workspace root itself is reached through
+        // a symlink.
+        let (Ok(root_c), Ok(file_c)) = (workspace_root.canonicalize(), path.canonicalize()) else {
+            return Ok(());
+        };
+        if !file_c.starts_with(&root_c) {
+            return Ok(());
+        }
         let content = fs::read_to_string(&path)?;
         for extracted in extract_symbols_from_source(&normalized, &content) {
             self.entries
@@ -1908,5 +1920,67 @@ mod tests {
             &src[long.start_byte..long.end_byte],
             "pub fn long(\n    x: u32,\n    y: &[u8],\n) -> i32 {\n    0\n}",
         );
+    }
+
+    // Milestone C review regression: `refresh_file` takes caller-supplied relative paths
+    // (agent URIs), so traversal, absolute and symlink escapes must never be indexed.
+    #[test]
+    fn refresh_file_never_indexes_outside_the_workspace_root() {
+        let base =
+            std::env::temp_dir().join(format!("cw_refresh_guard_test_{}", std::process::id()));
+        let root = base.join("proj");
+        let outside_dir = base.join("outside");
+        for dir in [&root, &outside_dir] {
+            let _ = fs::remove_dir_all(dir);
+        }
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap(); // fs::write does not create parents
+        fs::write(root.join("src/a.rs"), "pub fn inside() {}\n").unwrap();
+        fs::write(outside_dir.join("secret.rs"), "fn secret() {}\n").unwrap();
+
+        let mut index = SymbolIndex::build(&root).unwrap();
+        assert_eq!(index.entries.len(), 2); // file entry + `inside`
+
+        // Classic `..` traversal and an absolute path, both pointing at a real readable
+        // file outside the workspace root.
+        for rel in [
+            "../outside/secret.rs".to_string(),
+            outside_dir.join("secret.rs").to_string_lossy().into_owned(),
+        ] {
+            assert!(index.refresh_file(&root, &rel).is_ok(), "{rel}");
+            assert_eq!(
+                index.entries.len(),
+                2,
+                "nothing outside the root may be indexed ({rel})"
+            );
+        }
+
+        // A symlink inside the workspace that points outside is rejected as well.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside_dir.join("secret.rs"), root.join("src/link.rs"))
+                .unwrap();
+            assert!(index.refresh_file(&root, "src/link.rs").is_ok());
+            assert_eq!(
+                index.entries.len(),
+                2,
+                "a symlink escape must not be indexed"
+            );
+        }
+
+        // Legitimate in-workspace refresh still works after the guard.
+        fs::write(
+            root.join("src/a.rs"),
+            "pub fn inside() {}\npub fn added() {}\n",
+        )
+        .unwrap();
+        index.refresh_file(&root, "src/a.rs").unwrap();
+        assert!(
+            index
+                .entries
+                .contains_key(&SymbolUri("repo://src/a.rs#added".into()))
+        );
+
+        let _ = fs::remove_dir_all(&base);
     }
 }

@@ -37,9 +37,9 @@ pub struct VirtualMemoryContext {
 
 impl VirtualMemoryContext {
     /// Wrap a daemon-provided store handle. The workspace root comes from the
-    /// `CW_WORKSPACE_ROOT` environment variable, falling back to the current
-    /// directory (an empty or missing root yields an empty path; indexing then
-    /// fails with a clear error rather than guessing).
+    /// `CW_WORKSPACE_ROOT` environment variable when set and non-empty, otherwise
+    /// from the current directory; only if that also fails is the root an empty
+    /// path (indexing then fails with a clear error rather than guessing).
     pub fn new(store: CwStore) -> Self {
         let workspace_root = std::env::var_os("CW_WORKSPACE_ROOT")
             .map(PathBuf::from)

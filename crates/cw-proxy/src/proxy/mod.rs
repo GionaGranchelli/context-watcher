@@ -596,9 +596,18 @@ pub async fn handle_proxy_request(
                 // when the zone-modified payload survived validation: a fallback revert above
                 // restored `raw` exactly, in which case no zones — and no HUD — go out.
                 if zone1_active && outbound != raw {
-                    let active_tokens = cw_core::tokenizer::estimate_tokens(
-                        &serde_json::to_string(&outbound).unwrap_or_default(),
-                    ) as usize;
+                    // Token estimate reuses one serialization pass: no intermediate String, the
+                    // UTF-8 slice is borrowed straight from the vec. The egress body below must
+                    // re-serialize after append_budget_hud mutates a message in place — a single
+                    // pass cannot cover both, because the HUD line itself references the count.
+                    let active_tokens = serde_json::to_vec(&outbound)
+                        .ok()
+                        .and_then(|bytes| {
+                            std::str::from_utf8(&bytes)
+                                .ok()
+                                .map(cw_core::tokenizer::estimate_tokens)
+                        })
+                        .unwrap_or(0) as usize;
                     let zone1_bytes = state.zone1_block.as_deref().map(str::len).unwrap_or(0);
                     cw_core::working_set::append_budget_hud(
                         &mut outbound,
@@ -1283,6 +1292,7 @@ mod zone1_injection_tests {
         let body_1: serde_json::Value =
             serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
         let body_2: serde_json::Value =
+            serde_json::from_slice(&egress_rx.recv().await.unwrap()).unwrap();
 
         // Zone 3 stub prefix, expected HUD line shape (F1: assert the full line, not substrings),
         // and per-turn index of the final user/tool message each HUD must land on.

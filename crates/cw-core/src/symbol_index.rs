@@ -781,6 +781,34 @@ impl SymbolIndex {
         collect_entries(workspace_root, workspace_root, &mut index)?;
         Ok(index)
     }
+
+    /// Re-index a single workspace file in place.
+    ///
+    /// Normalizes backslashes to `/`, drops every entry belonging to `rel_path`
+    /// first, then — if the file still exists under `workspace_root` as a regular
+    /// file — re-extracts its symbols from disk via [`extract_symbols_from_source`]
+    /// and re-inserts them. Entries of other files are retained untouched. A
+    /// deleted target leaves no entries for that path (`Ok(())`, mirroring
+    /// [`Self::build`]'s skip semantics); a read failure on an existing file
+    /// propagates as the returned IO error. After the preceding `retain`, no URI
+    /// of this file can pre-exist, so `or_insert` is equivalent to plain insert
+    /// and stays deterministic (first-wins within one extraction pass).
+    pub fn refresh_file(&mut self, workspace_root: &Path, rel_path: &str) -> std::io::Result<()> {
+        let normalized = rel_path.replace('\\', "/");
+        self.entries.retain(|_, entry| entry.rel_path != normalized);
+
+        let path = workspace_root.join(&normalized);
+        if !path.is_file() {
+            return Ok(()); // Deleted mid-session: the stale entries are already gone.
+        }
+        let content = fs::read_to_string(&path)?;
+        for extracted in extract_symbols_from_source(&normalized, &content) {
+            self.entries
+                .entry(extracted.uri.clone())
+                .or_insert(extracted);
+        }
+        Ok(())
+    }
 }
 
 fn collect_entries(root: &Path, dir: &Path, index: &mut SymbolIndex) -> std::io::Result<()> {

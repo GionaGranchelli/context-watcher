@@ -17,6 +17,7 @@ pub mod swarm;
 pub mod symbol_index;
 pub mod tokenizer;
 pub mod validator;
+pub mod working_set;
 
 use chrono::Utc;
 use ir::{ContextNode, ContextTurn, ProviderKind, SessionId, TokenUsageSummary, TurnId};

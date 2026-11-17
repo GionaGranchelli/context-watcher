@@ -5,6 +5,7 @@ use cw_core::{
         ContextTurn, FileContextState, FirewallAction, FirewallRule, FirewallTrigger, HarnessKind,
         MutationRule, MutationStatus, ProviderKind, Session,
     },
+    working_set::WorkingSetState,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
@@ -302,6 +303,11 @@ impl CwStore {
                 session_id TEXT PRIMARY KEY,
                 terminated_at TEXT NOT NULL,
                 reason TEXT
+            );
+            CREATE TABLE IF NOT EXISTS session_working_sets (
+                session_id TEXT PRIMARY KEY,
+                state_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );")?;
 
         // Ensure any sessions originating from ~/.omp/ are properly categorized as OMP
@@ -467,6 +473,37 @@ impl CwStore {
                 updated_at: DateTime::parse_from_rfc3339(&row.get::<_, String>(8)?).map(|d|d.with_timezone(&Utc)).unwrap_or_default(),
             })
         ).optional().map_err(StoreError::from)
+    }
+
+    /// Load the session's Zone 2 register state; a missing row yields an empty
+    /// [`WorkingSetState`] (fresh sessions start with nothing mounted or pinned).
+    pub fn get_working_set(&self, session_id: &str) -> Result<WorkingSetState, StoreError> {
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        match conn.query_row(
+            "SELECT state_json FROM session_working_sets WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(state_json) => serde_json::from_str(&state_json).map_err(StoreError::Json),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Default::default()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Persist (upsert) the session's Zone 2 register state as serialized JSON.
+    pub fn save_working_set(
+        &self,
+        session_id: &str,
+        state: &WorkingSetState,
+    ) -> Result<(), StoreError> {
+        let state_json = serde_json::to_string(state)?;
+        let conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        conn.execute(
+            "INSERT INTO session_working_sets(session_id,state_json,updated_at) VALUES (?1,?2,?3) \
+             ON CONFLICT(session_id) DO UPDATE SET state_json=excluded.state_json,updated_at=excluded.updated_at",
+            params![session_id, state_json, Utc::now().to_rfc3339()],
+        )?;
+        Ok(())
     }
 
     /// Missing, revoked, or unreadable policy never grants reinforcement permission.
@@ -2548,6 +2585,92 @@ mod tests {
         assert_eq!(
             serde_json::to_value(store.list_mutations("scope-a").unwrap()).unwrap(),
             before
+        );
+    }
+
+    #[test]
+    fn save_and_load_session_working_set() {
+        use cw_core::{
+            symbol_index::SymbolUri,
+            working_set::{MountMode, MountedSlice},
+        };
+
+        let store = CwStore::open_in_memory().unwrap();
+
+        // Missing row: fresh sessions load the empty state.
+        let empty = store.get_working_set("sess_ws").unwrap();
+        assert!(empty.mounted.is_empty());
+        assert!(empty.invariants.is_empty());
+
+        fn slice(uri: &str, rel_path: &str, content: &str) -> MountedSlice {
+            let token_estimate = cw_core::tokenizer::estimate_tokens(content) as usize;
+            MountedSlice {
+                uri: SymbolUri(uri.to_string()),
+                rel_path: rel_path.to_string(),
+                mode: MountMode::Full,
+                start_line: 1,
+                end_line: 4,
+                content: content.to_string(),
+                token_estimate,
+            }
+        }
+
+        let mut state = cw_core::working_set::WorkingSetState::default();
+        // Insert out of order: BTreeMap order must be what survives the round-trip.
+        state.mounted.insert(
+            SymbolUri("repo://src/b.rs#beta".into()),
+            slice("repo://src/b.rs#beta", "src/b.rs", "pub fn beta() {}\n"),
+        );
+        state.mounted.insert(
+            SymbolUri("repo://src/a.rs#alpha".into()),
+            slice(
+                "repo://src/a.rs#alpha",
+                "src/a.rs",
+                "pub fn alpha(x: u32) -> u32 {\n    x\n}\n",
+            ),
+        );
+        state.pin("z-rule", "pin last");
+        state.pin("a-rule", "pin first");
+
+        store.save_working_set("sess_ws", &state).unwrap();
+        let loaded = store.get_working_set("sess_ws").unwrap();
+        assert_eq!(
+            loaded, state,
+            "round-trip must be exact, BTreeMap order included"
+        );
+
+        // Key order preserved through serialization.
+        assert_eq!(
+            loaded
+                .mounted
+                .keys()
+                .map(|u| u.0.clone())
+                .collect::<Vec<_>>(),
+            ["repo://src/a.rs#alpha", "repo://src/b.rs#beta"]
+        );
+        assert_eq!(
+            loaded
+                .invariants
+                .keys()
+                .map(|k| k.as_str())
+                .collect::<Vec<_>>(),
+            ["a-rule", "z-rule"]
+        );
+
+        // Upsert replaces the row instead of duplicating it.
+        state.unmount("repo://src/a.rs#alpha");
+        store.save_working_set("sess_ws", &state).unwrap();
+        let reloaded = store.get_working_set("sess_ws").unwrap();
+        assert_eq!(reloaded, state);
+        assert_eq!(reloaded.mounted.len(), 1);
+
+        // Other sessions are unaffected.
+        assert!(
+            store
+                .get_working_set("other-session")
+                .unwrap()
+                .mounted
+                .is_empty()
         );
     }
 }

@@ -27,7 +27,7 @@
     "crates/cw-core/src/normalizer.rs": "74d4738f29846838b3722b16e0035c81e1696592919b67223c9a6a962b429312",
     "crates/cw-core/src/spend_guard.rs": "1ac3c942761d5e7cef270d4d0af4b99545d9d2bff51f515e0e8a859e7d21f00a",
     "crates/cw-core/src/validator.rs": "ca29feab5d18b00d9466386e6f80b181d5e6a3922b866564fa2d2b43447d00dc",
-    "crates/cw-proxy/src/proxy/mod.rs": "a6a76a0eb7a6efd9437a820acc929b2f74052d00a12db368842a55281914e38f",
+    "crates/cw-proxy/src/proxy/mod.rs": "d87c9e6559a962cea15ca13cffdce9f47d8db114b1acca0023cdda457954d863",
     "crates/cw-proxy/tests/cw122_pruning.rs": "6320ea11cbcd24e748e2b3b9f9853cfff06709a1bca07e1abc6be51d736e42f6",
     "docs/CW-122A-PREREGISTRATION.md": "3ec48b71baaa89c9429fa9c115cae65bb3361f3f2a0fe1a3eca857d88d7ea3d3",
     "benchmark/cw122a/offline_env.py": "2ea652cc029bc2218eb3f14ee9ec7b812221694f580ee9477481ca0885eb260b",

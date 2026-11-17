@@ -33,7 +33,7 @@
     "crates/cw-proxy/src/api/mutations.rs": "460114501ec41b7d8566c55e90a6c60dc7f2aa31f2c0e20618396eb0fe752f69",
     "crates/cw-proxy/src/api/pin_policy.rs": "8e57e86a92c884b1065bc6a257d0a772a53045c8653525512045a6966803ca3e",
     "crates/cw-proxy/src/api/transform.rs": "249d9e257908c94376d5cb0b9ab3eefcb20a935ab8b32cdae12a15d1d9fd13c1",
-    "crates/cw-proxy/src/proxy/mod.rs": "a6a76a0eb7a6efd9437a820acc929b2f74052d00a12db368842a55281914e38f",
+    "crates/cw-proxy/src/proxy/mod.rs": "d87c9e6559a962cea15ca13cffdce9f47d8db114b1acca0023cdda457954d863",
     "crates/cw-proxy/tests/pin_lifecycle.rs": "34bd4d5f49dca9853c0789b3becd5541574228c952005f6ac46471a693b81511",
     "crates/cw-store/src/lib.rs": "cb958da38aea16672233f21a5e12e88c1a1fd95bb274deeb4c34c207b0a5df44",
     "crates/cw-tui/src/lib.rs": "733220bafd80c1d749ea178166026bcf5e642b00e1e4c76200c86ab8fdfe4634",

@@ -43,7 +43,7 @@
     "web/src/lib/pinPolicy.ts": "f37159c76351c436f29e966466ab85f5d81525f43ddcf763c7939a5cabac93aa",
     "web/src/lib/PinContextPolicy.svelte": "83a30ebd821df5f3de25ec42a1c14937e348fc9fe21d26e89f759c8cca2bc63b",
     "crates/cw-tui/src/pin_policy.rs": "fb77a9a4bd1af93baca60fcb16cbcf3601d78793b189bf9aee9bb0348ee305c6",
-    "crates/cw-mcp/src/lib.rs": "def86e14b4b9cacd4ff718726b10b7e6da1492e27a38c4c1f28af0931c1663f2",
+    "crates/cw-mcp/src/lib.rs": "2c7d27ea8314b65988db27d339fe23dc5660d0bd741ae1e3223ca0d311389e76",
     "scripts/cw121c2_terminal_smoke.py": "ebe0aabff8b21d4a4e0a89b6a7aed08fff69058dee96e856d953eacec991eea1"
   },
   "qualification": "Offline operator controls, lifecycle/creation fixtures, and CW-122B2-L0 proxy/admission/evidence path only; no live runner or provider requalification"

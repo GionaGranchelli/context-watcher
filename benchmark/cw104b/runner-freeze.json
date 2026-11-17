@@ -39,11 +39,11 @@
     "crates/cw-tui/src/lib.rs": "733220bafd80c1d749ea178166026bcf5e642b00e1e4c76200c86ab8fdfe4634",
     "plugins/pi-opencode/index.js": "9623aeefb02ac6da1346eca42567fb75c4e1a9e1bbc8469c4e950c8827a1a08e",
     "crates/cw-cli/src/commands/pin_policy.rs": "afacfde761d68f3521d2a4ab822e8885691e1535495883289fc4711dd1a66e3f",
-    "crates/cw-cli/src/main.rs": "912a44b7a8653bc096847ea9040b31e7674149a86f87249f00dee95c2f721a82",
+    "crates/cw-cli/src/main.rs": "cbeeaa5d14ae090399dfb629f50d50b635bd39c6891c7dc25e897e2ac6c8fe9b",
     "web/src/lib/pinPolicy.ts": "f37159c76351c436f29e966466ab85f5d81525f43ddcf763c7939a5cabac93aa",
     "web/src/lib/PinContextPolicy.svelte": "83a30ebd821df5f3de25ec42a1c14937e348fc9fe21d26e89f759c8cca2bc63b",
     "crates/cw-tui/src/pin_policy.rs": "fb77a9a4bd1af93baca60fcb16cbcf3601d78793b189bf9aee9bb0348ee305c6",
-    "crates/cw-mcp/src/lib.rs": "203fbe9cc705bf3ab4fa279caf721d94eeb4ee3707c927843958c1a1f9c9adbf",
+    "crates/cw-mcp/src/lib.rs": "def86e14b4b9cacd4ff718726b10b7e6da1492e27a38c4c1f28af0931c1663f2",
     "scripts/cw121c2_terminal_smoke.py": "ebe0aabff8b21d4a4e0a89b6a7aed08fff69058dee96e856d953eacec991eea1"
   },
   "qualification": "Offline operator controls, lifecycle/creation fixtures, and CW-122B2-L0 proxy/admission/evidence path only; no live runner or provider requalification"

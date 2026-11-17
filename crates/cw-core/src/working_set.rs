@@ -1011,7 +1011,7 @@ mod tests {
             test_slice("repo://src/lib.rs#other", "fn other()", 9, 12),
         );
         let mut p = json!({ "messages": [
-            {"role": "tool", "content": format!("src/lib.rs:\npub fn stale() {{}}\n")},
+            {"role": "tool", "content": "src/lib.rs:\npub fn stale() {}\n"},
             // A path mentioned mid-text is NOT a header dump: stays untouched.
             {"role": "tool", "content": "grep hit in src/lib.rs at line 3"}
         ]});

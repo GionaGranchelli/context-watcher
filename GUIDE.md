@@ -26,6 +26,24 @@ For direct Hermes launches, set `model.base_url` in `~/.hermes/config.yaml` to `
 
 CLI commands accept `--session <id>`. Without an explicit ID or `CW_SESSION_ID`, session selection requires a unique exact workspace match. MCP calls also accept an optional `session_id` and fall back to `CW_SESSION_ID` or a unique exact workspace match (returning candidate session IDs when multiple sessions match). Multiple matching IDE sessions require selection in the tool window.
 
+## Deterministic virtual memory (opt-in)
+
+Setting `CW_ENABLE_SYMBOL_MAP=1` (the exact values `1` or `true`, case-sensitive, are parsed once at daemon startup) enables a deterministic three-zone context layout on active proxied turns for OpenAI/OpenAI-compatible and Anthropic payloads; Gemini is out of scope. The symbol map is built over `CW_WORKSPACE_ROOT`, falling back to the daemon's working directory; workspace changes after startup are not picked up, so restart the daemon to re-index Zone 1. If index building fails, a warning is logged and injection stays disabled rather than failing proxy startup (fail-open).
+
+- **Zone 1** — `<cw_memory_protocol>` + `<workspace_symbol_map>`, injected into the system prompt of every active turn. It is byte-stable for the life of the daemon, so it preserves KV-cache prefixes; mounting or unmounting can never alter its bytes.
+- **Zone 2** — `<mounted_context>` (mounted symbol/file registers) + `<pinned_invariants>`, rendered immediately after Zone 1 from per-session state in the store. Registers are managed by the MCP syscalls below and persist across turns.
+- **Zone 3** — duplicate raw file reads of a mounted URI in tool history are replaced with a one-line stub; once unmounted, the same history is left untouched again.
+
+When zones are active, each turn gets a budget HUD line `[cw: used/budget tok | mounted: N | pinned: M | zone1_prefix_bytes: B]` appended to its final user/tool message (replaced on repeat, never stacked). The token figure is an estimate, not provider-observed usage.
+
+### MCP virtual memory syscalls
+
+The built-in MCP server (`cw mcp`) exposes three tools that write Zone 2 registers directly into the daemon's store — the same database file and session space the proxy reads on every turn (no daemon round-trip). URI form is `repo://<path>` or `repo://<path>#<symbol>`, relative to `CW_WORKSPACE_ROOT` (or the MCP process working directory). For these three tools, `session_id` resolution is explicit argument > `CW_SESSION_ID` > `default`.
+
+- **`cw_mount(uri, mode = "full" | "signature", session_id?)`** — mounts a symbol or whole file into Zone 2. The target file is re-indexed from disk before any bytes are sliced (freshness invariant), so mid-session edits change the mounted lines and content immediately. An unknown URI returns `"URI not found: ..."` with the nearest valid URIs as an ordinary result, not a transport error. Use `mode: "signature"` for interfaces you only need to read; use `"full"` when actively editing or debugging bodies.
+- **`cw_unmount(uri, session_id?)`** — evicts a mounted register once it is no longer needed, keeping context lean. Unmounting something that was not mounted reports so without erroring, and the store is only rewritten when state actually changed.
+- **`cw_pin(key, rule, session_id?)`** — pins an architectural invariant (for example `key: "arch"`, `rule: "no unwrap in proxy"`) into `<pinned_invariants>` so it is re-stated on every subsequent turn; pinning the same key replaces the previous rule. Registers are strictly per-session: one session's mounts and pins never appear in another's turns.
+
 ## Import, inspect and preview
 
 ```sh

@@ -306,7 +306,16 @@ pub async fn handle_proxy_request(
             // request; nothing here writes it back (Milestone C's cw_mount owns register writes).
             let zone1_active = active && state.zone1_block.is_some();
             let working_set = if zone1_active {
-                state.store.get_working_set(&session_id).unwrap_or_default()
+                match state.store.get_working_set(&session_id) {
+                    Ok(ws) => ws,
+                    Err(error) => {
+                        // Fail open: a store error must not break the proxied request; we
+                        // continue without Zone 2/3 registers (same idiom as the observation
+                        // recording failures above).
+                        tracing::warn!(%error, %session_id, "Working set load failed; continuing without Zone 2/3 registers");
+                        cw_core::working_set::WorkingSetState::default()
+                    }
+                }
             } else {
                 cw_core::working_set::WorkingSetState::default()
             };

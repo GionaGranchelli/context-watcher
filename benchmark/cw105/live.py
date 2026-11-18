@@ -1,6 +1,7 @@
 """Run the scored benchmark only with a reviewed, authorized execution plan."""
 import argparse
 import json
+import hashlib
 from functools import partial
 from pathlib import Path
 
@@ -17,6 +18,14 @@ from spend import Spend
 from verify_task import verify_task
 
 
+def binary_identities(omp, cw):
+    identities = {}
+    for name, path in (("omp", omp), ("cw", cw)):
+        with path.open("rb") as binary:
+            identities[name] = hashlib.file_digest(binary, "sha256").hexdigest()
+    return identities
+
+
 def run_live(plan, document, *, checkout, merged_revision, repository, output, omp, cw):
     if plan.get("status") != "ready_for_authorization":
         raise ValueError("Live execution plan has not passed readiness review")
@@ -25,6 +34,8 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
                   "smoke_max_requests", "smoke_max_seconds"):
         if plan.get(field) != frozen[field]:
             raise ValueError(f"Execution envelope differs from the frozen {field}")
+    if plan.get("binaries_sha256") != binary_identities(omp, cw):
+        raise ValueError("Execution binaries do not match the approved hashes")
     if output.exists():
         raise FileExistsError(output)
     rates = plan["pricing"]

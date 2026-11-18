@@ -22,6 +22,7 @@ def proposal():
         "version": 1,
         "provider": PROVIDER,
         "benchmark_revision": None,
+        "binaries_sha256": None,
         "endpoint": ENDPOINT,
         "model": MODEL,
         "concurrency": 1,

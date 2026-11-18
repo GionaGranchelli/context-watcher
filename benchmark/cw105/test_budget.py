@@ -25,5 +25,6 @@ class BudgetTest(unittest.TestCase):
         now[0] = 5
         with self.assertRaises(BudgetExceeded):
             budget.admit("a")
+        now[0] = 4
         with self.assertRaises(ValueError):
             budget.start("a", request_limit=3, seconds=10)

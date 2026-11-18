@@ -1,20 +1,13 @@
 """Rehearse one matched block using real OMP/CW and a scripted provider."""
 import argparse
 import json
-import socket
-from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from agent import enable_memory, offline_agent
-from attempt import attempt
 from budget import Budget
-from capture import relay
-from daemon import daemon
 from report import summarize
-from routing import route
 from schedule import schedule
-from test_capture import serving
+from campaign import execute_plan, run_attempt, serving
 
 
 class Mock(BaseHTTPRequestHandler):
@@ -38,46 +31,19 @@ def rehearse(repository, output, omp, cw):
     output.mkdir(mode=0o700)
     plan = list(schedule())[:3]
     budget = Budget(campaign_limit=3, seconds=120)
-    results = []
+    execution = [dict(entry, request_cap=1, budget_seconds=30) for entry in plan]
     with serving(HTTPServer(("127.0.0.1", 0), Mock)) as upstream:
-        for entry in plan:
-            run_id, mode = entry["run_id"], entry["mode"]
-            records = []
-            budget.start(run_id, request_limit=1, seconds=30)
+        def execute(entry):
+            metadata = {key: entry[key] for key in plan[0]}
+            return run_attempt(
+                metadata, repository, output / entry["run_id"], omp, cw, upstream, budget,
+                prompt="Reply with cw105-rehearsed.", verify=lambda *_: None, seconds=20,
+            )
 
-            @contextmanager
-            def launch(worktree, root):
-                with serving(relay(upstream, budget, run_id, records.append)) as capture:
-                    with socket.socket() as api, socket.socket() as proxy:
-                        api.bind(("127.0.0.1", 0))
-                        proxy.bind(("127.0.0.1", 0))
-                        api_port, proxy_port = api.getsockname()[1], proxy.getsockname()[1]
-                    selected = route(mode, capture, proxy_port, worktree)
-                    state = root / "omp"
-                    argv, env = offline_agent(
-                        omp, state, capture, "Reply with cw105-rehearsed.",
-                        mode=mode, proxy_port=proxy_port, workspace=worktree,
-                    )
-                    with daemon(cw, selected, workspace=worktree, state=root / "cw",
-                                api_port=api_port, proxy_port=proxy_port) as control:
-                        if control:
-                            profile = state / "models.json"
-                            config = json.loads(profile.read_text())
-                            config["providers"]["cw105"]["headers"] = {
-                                "x-cw-session-id": run_id, "x-cw-control-token": control,
-                            }
-                            profile.write_text(json.dumps(config))
-                        if selected.virtual_memory:
-                            enable_memory(argv, state, binary=cw, daemon_state=root / "cw",
-                                          api_port=api_port, session_id=run_id)
-                        yield argv, env
-
-            # Scripted replies can qualify transport only. They earn no task credit.
-            results.append(attempt(entry, repository, output / run_id, launch,
-                                   lambda *_: None, seconds=20, records=records))
+        results = execute_plan(execution, budget, execute)
     report = summarize(results, plan)
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
-    return all(result["status"] == "complete" for result in results)
+    return len(results) == len(plan) and all(r["status"] == "complete" for r in results)
 
 
 if __name__ == "__main__":

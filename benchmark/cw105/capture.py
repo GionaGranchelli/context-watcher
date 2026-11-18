@@ -10,7 +10,7 @@ from stream_metrics import StreamMetrics
 PATH = "/v1/chat/completions"
 
 
-def relay(upstream_port, budget, run_id, evidence, *, spend=None):
+def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             if self.path != PATH:
@@ -24,6 +24,8 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None):
                 body = self.rfile.read(size)
                 if len(body) != size:
                     raise ValueError("Incomplete body")
+                if guard is not None:
+                    guard()
                 remaining = budget.admit(run_id)
                 if spend is not None:
                     spend.reserve()

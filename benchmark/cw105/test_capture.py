@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from budget import Budget
+from budget import Budget, BudgetExceeded
 from spend import Spend
 from capture import PATH, relay
 
@@ -27,6 +27,27 @@ class CaptureTest(unittest.TestCase):
 
     def test_missing_usage_prevents_further_admission(self):
         self.check_admission(missing_usage=True)
+
+    def test_resource_fault_denies_request_before_provider_access(self):
+        evidence = []
+        budget = Budget(campaign_limit=1, seconds=10)
+        budget.start("run", request_limit=1, seconds=10)
+
+        def reject():
+            raise BudgetExceeded("Stale GPU telemetry")
+
+        with serving(relay(1, budget, "run", evidence.append, guard=reject)) as port:
+            connection = HTTPConnection("127.0.0.1", port, timeout=3)
+            try:
+                connection.request("POST", PATH, b"{}")
+                self.assertEqual(connection.getresponse().status, 429)
+            finally:
+                connection.close()
+        self.assertEqual(len(evidence), 1)
+        self.assertFalse(evidence[0]["admitted"])
+        self.assertEqual(evidence[0]["error"], "Stale GPU telemetry")
+        with self.assertRaisesRegex(BudgetExceeded, "Stale GPU telemetry"):
+            budget.admit("run")
 
     def check_admission(self, missing_usage):
         forwarded, evidence = [], []

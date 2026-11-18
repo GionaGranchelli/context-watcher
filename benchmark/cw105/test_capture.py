@@ -98,3 +98,25 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual(evidence[0]["cost_nanodollars"], 9)
         self.assertEqual(evidence[0]["usage"]["input_tokens"], 3)
         self.assertIsNone(evidence[0]["usage"]["cached_input_tokens"])
+
+    def test_external_transport_requires_guards_and_follows_policy(self):
+        budget = Budget(campaign_limit=1, seconds=10)
+        budget.start("run", request_limit=1, seconds=10)
+        events = []
+
+        def connect(_):
+            self.fail("Must reject before connecting")
+
+        def reject(_):
+            raise BudgetExceeded("Unexpected model")
+
+        with self.assertRaisesRegex(ValueError, "requires"):
+            relay(None, budget, "run", events.append, connect=connect)
+        spend = Spend(cap=0, input_rate=0, output_rate=0, max_input=10, max_output=2)
+        with serving(relay(None, budget, "run", events.append, connect=connect,
+                           spend=spend, guard=lambda: None, request_policy=reject)) as port:
+            from contextlib import closing
+            with closing(HTTPConnection("127.0.0.1", port, timeout=3)) as conn:
+                conn.request("POST", PATH, b"{}")
+                self.assertEqual(conn.getresponse().status, 429)
+        self.assertEqual(events[0]["error"], "Unexpected model")

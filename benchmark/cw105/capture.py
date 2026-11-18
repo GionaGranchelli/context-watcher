@@ -11,7 +11,10 @@ from stream_metrics import StreamMetrics
 PATH = "/v1/chat/completions"
 
 
-def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, request_policy=None):
+def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, request_policy=None, connect=None):
+    if connect is not None and (upstream_port is not None or
+                                any(value is None for value in (spend, guard, request_policy))):
+        raise ValueError("External transport requires spend, resource, and request guards")
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             if self.path != PATH:
@@ -42,12 +45,14 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                 self.send_error(400)
                 return
             metrics = StreamMetrics(time.monotonic())
-            upstream = HTTPConnection("127.0.0.1", upstream_port, timeout=remaining)
+            upstream = None
             response_digest = hashlib.sha256()
             response_bytes = 0
             error = None
             sent_headers = False
             try:
+                upstream = (connect(remaining) if connect is not None else
+                            HTTPConnection("127.0.0.1", upstream_port, timeout=remaining))
                 upstream.request("POST", PATH, body, {"Content-Type": "application/json"})
                 response = upstream.getresponse()
                 if response.status != 200 or response.headers.get_content_type() != "text/event-stream":
@@ -68,12 +73,13 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                     self.wfile.flush()
                     if metrics.ended and not line.strip():
                         break
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, BudgetExceeded) as exc:
                 error = str(exc)
                 if not sent_headers:
                     self.send_error(502)
             finally:
-                upstream.close()
+                if upstream is not None:
+                    upstream.close()
                 cost = None
                 if spend is not None:
                     try:

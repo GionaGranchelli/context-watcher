@@ -25,14 +25,14 @@ def serving(server):
 
 
 def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
-                prompt, verify, seconds, spend=None, guard=None, request_policy=None):
+                prompt, verify, seconds, spend=None, guard=None, request_policy=None, connect=None):
     run_id, mode = entry["run_id"], entry["mode"]
     records = []
 
     @contextmanager
     def launch(worktree, root):
         with serving(relay(upstream, budget, run_id, records.append, spend=spend, guard=guard,
-                           request_policy=request_policy)) as capture:
+                           request_policy=request_policy, connect=connect)) as capture:
             with socket.socket() as api, socket.socket() as proxy:
                 api.bind(("127.0.0.1", 0))
                 proxy.bind(("127.0.0.1", 0))

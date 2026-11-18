@@ -27,7 +27,10 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None):
                 remaining = budget.admit(run_id)
                 if spend is not None:
                     spend.reserve()
-            except BudgetExceeded:
+            except BudgetExceeded as exc:
+                budget.stop(str(exc))
+                evidence({"run_id": run_id, "admitted": False, "complete": False,
+                          "usage": None, "ttft_seconds": None, "error": str(exc)})
                 self.send_error(429)
                 return
             except (ValueError, OSError):
@@ -68,8 +71,12 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None):
                         cost = spend.settle(metrics.usage if metrics.complete and error is None else None)
                     except BudgetExceeded as exc:
                         error = error or str(exc)
+                if not metrics.complete and error is None:
+                    error = "Completion ended without terminal usage"
+                if error is not None:
+                    budget.stop(error)
                 evidence({
-                    "cost_nanodollars": cost,
+                    "admitted": True, "cost_nanodollars": cost,
                     "run_id": run_id, "usage": asdict(metrics.usage) if metrics.usage else None,
                     "ttft_seconds": metrics.ttft_seconds,
                     "elapsed_seconds": time.monotonic() - metrics.started,

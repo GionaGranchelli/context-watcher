@@ -61,6 +61,11 @@ class CaptureTest(unittest.TestCase):
                     response.read()
                     connection.close()
         self.assertEqual(forwarded, [b'{}'])
+        self.assertTrue(evidence[0]["admitted"])
+        self.assertFalse(evidence[1]["admitted"])
+        budget.start("next", request_limit=1, seconds=10)
+        with self.assertRaisesRegex(RuntimeError, "denied|Unsettled"):
+            budget.admit("next")
         if missing_usage:
             self.assertFalse(evidence[0]["complete"])
             self.assertIsNone(evidence[0]["cost_nanodollars"])

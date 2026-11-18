@@ -17,6 +17,7 @@ class Budget:
         self._deadline = clock() + seconds
         self._remaining = campaign_limit
         self._runs = {}
+        self._stop_reason = None
         self._lock = threading.Lock()
 
     def start(self, run_id, *, request_limit, seconds):
@@ -28,9 +29,16 @@ class Budget:
             deadline = min(self._deadline, self._clock() + seconds)
             self._runs[run_id] = (request_limit, deadline)
 
+    def stop(self, reason):
+        with self._lock:
+            if self._stop_reason is None:
+                self._stop_reason = reason
+
     def admit(self, run_id):
         """Debit before I/O. Failed or cancelled attempts are never refunded."""
         with self._lock:
+            if self._stop_reason is not None:
+                raise BudgetExceeded(self._stop_reason)
             remaining, deadline = self._runs.get(run_id, (0, self._deadline))
             seconds_left = deadline - self._clock()
             if seconds_left <= 0 or self._remaining <= 0 or remaining <= 0:

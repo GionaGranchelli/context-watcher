@@ -1,6 +1,8 @@
 """Shared attempt launch through the loopback capture path."""
 import json
 import socket
+import sys
+from pathlib import Path
 import threading
 from contextlib import contextmanager
 
@@ -55,7 +57,9 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
                 if selected.virtual_memory:
                     enable_memory(argv, state, binary=cw, daemon_state=root / "cw",
                                   api_port=api_port, session_id=run_id)
-                yield argv, env
+                wrapper = Path(__file__).with_name("network_guard.py").resolve()
+                yield [sys.executable, str(wrapper),
+                       str(capture if mode == "M0" else proxy_port), *argv], env
 
     def supervise():
         budget.check_running(run_id)

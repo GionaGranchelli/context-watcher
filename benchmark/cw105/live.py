@@ -12,7 +12,7 @@ from machinist import read_sample
 from plan import MODEL, proposal
 from report import summarize
 from request_policy import check_request
-from schedule import schedule
+from schedule import REVISION, schedule
 from spend import Spend
 from verify_task import verify_task
 
@@ -21,7 +21,8 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
     if plan.get("status") != "ready_for_authorization":
         raise ValueError("Live execution plan has not passed readiness review")
     frozen = proposal()
-    for field in ("runs", "max_requests", "max_wall_seconds", "concurrency"):
+    for field in ("runs", "max_requests", "max_wall_seconds", "concurrency",
+                  "smoke_max_requests", "smoke_max_seconds"):
         if plan.get(field) != frozen[field]:
             raise ValueError(f"Execution envelope differs from the frozen {field}")
     if output.exists():
@@ -55,7 +56,20 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
             verify=lambda worktree, evidence: verify_task(worktree, evidence, row["task"]),
         )
 
-    results = execute_plan(plan["runs"], budget, execute)
+    smoke_entry = {"run_id": "provider-smoke", "mode": "M0", "revision": REVISION}
+    smoke_seconds = plan["smoke_max_seconds"]
+    budget.start(smoke_entry["run_id"], request_limit=plan["smoke_max_requests"],
+                 seconds=smoke_seconds)
+    smoke = run_attempt(
+        smoke_entry, repository, output / "provider-smoke", omp, cw, None, budget,
+        prompt="Reply with hi.", verify=lambda *_: None, seconds=smoke_seconds,
+        spend=spend, guard=guard, request_policy=policy, connect=connect,
+    )
+    if smoke["status"] != "complete" or not smoke.get("telemetry_complete"):
+        budget.stop("Provider smoke did not capture complete usage")
+        results = []
+    else:
+        results = execute_plan(plan["runs"], budget, execute)
     (output / "report.json").write_text(json.dumps(summarize(results), indent=2) + "\n")
     return len(results) == len(plan["runs"]) and all(r["correct"] is True for r in results)
 

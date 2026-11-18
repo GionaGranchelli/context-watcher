@@ -52,8 +52,10 @@ deadline. There is no provider charge in the rehearsal.
 
 The intended live route is Machinist LM Studio with model
 `qwen3.8-27b-ud`. Before requesting authorization, establish the exact live
-envelope, verify pricing or local-only billing and resource limits, and
-qualify shared SpendGuard enforcement and cancellation. Required telemetry
+envelope, reconfirm that LM Studio reports the loaded model as Local and qualify the
+resource limits and server cancellation. The proposed provider charge and
+cap are both $0 for the pinned local endpoint. LM Studio documents local
+operation and a free local model tier. [Offline operation](https://lmstudio.ai/docs/app/offline) · [Pricing](https://lmstudio.ai/pricing). Required telemetry
 includes complete request usage and wall time. Cache comparisons additionally
 need provider cache observations and evidence of comparable initial state.
 Missing optional data must remain visible.

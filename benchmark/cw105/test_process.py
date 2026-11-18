@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 from process import run
+from budget import BudgetExceeded
 
 
 class ProcessTest(unittest.TestCase):
@@ -29,3 +30,23 @@ class ProcessTest(unittest.TestCase):
             self.assertFalse(result.timed_out)
             with self.assertRaises(FileExistsError):
                 run(command, **kwargs)
+
+    def test_guard_cancels_running_process_and_keeps_partial_log(self):
+        polls = 0
+
+        def guard():
+            nonlocal polls
+            polls += 1
+            if polls == 2:
+                raise BudgetExceeded("GPU temperature limit")
+
+        with tempfile.TemporaryDirectory() as root:
+            log = Path(root) / "agent.log"
+            result = run(
+                [sys.executable, "-u", "-c", "print('partial'); import time; time.sleep(30)"],
+                cwd=root, env=os.environ, log=log, timeout=10, guard=guard,
+            )
+            self.assertEqual(result.cancelled_reason, "GPU temperature limit")
+            self.assertFalse(result.timed_out)
+            self.assertLess(result.returncode, 0)
+            self.assertEqual(log.read_text(), "partial\n")

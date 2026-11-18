@@ -10,7 +10,7 @@ from tool_metrics import tool_metrics
 from workspace import checkout, cleanup, diff
 
 
-def attempt(entry, repository, root, launch, verify, *, seconds, records=None):
+def attempt(entry, repository, root, launch, verify, *, seconds, records=None, guard=None):
     """Use a context manager supplied by the offline transport for argv and env."""
     root.mkdir(mode=0o700)
     worktree = root / "workspace"
@@ -22,9 +22,9 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None):
         checkout(repository, worktree, revision)
         checked_out = True
         with launch(worktree, root) as (argv, env):
-            agent = run(argv, cwd=worktree, env=env, log=root / "agent.log", timeout=seconds)
+            agent = run(argv, cwd=worktree, env=env, log=root / "agent.log", timeout=seconds, guard=guard)
         result.update(agent=asdict(agent), wall_seconds=agent.elapsed_seconds)
-        if agent.timed_out:
+        if agent.timed_out or agent.cancelled_reason:
             result["status"] = "cancelled"
         elif agent.returncode:
             result["status"] = "failed"

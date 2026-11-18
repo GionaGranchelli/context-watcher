@@ -72,11 +72,12 @@ Missing optional data must remain visible.
   and Spring. Approval, replay prevention, request and spend enforcement, and
   local process cancellation have deterministic tests. Live LM Studio usage
   and cancellation remain unverified.
-- The tool list and private profiles isolate configuration. OMP's Bash tool
-  still runs under the benchmark operator's OS account. A worktree and
-  `--offline` provide no OS security boundary. Verify outbound containment
-  before treating the relay limits as enforced against agent-generated shell
-  commands.
+- The same Linux Landlock TCP policy applies to the agent and its child
+  processes in each mode. It permits only the assigned relay or proxy port.
+  The direct Machinist completion port (1234) is denied. Landlock filters
+  TCP ports rather than addresses and does not filter UDP or Unix sockets.
+  Use this runner for a trusted local benchmark. It is not isolation for a
+  hostile agent or third-party workspace.
 - Record exact binaries, endpoint identity, cache controls, and the approved
   merged revision for the separately authorized experiment.
 

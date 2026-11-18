@@ -8,7 +8,13 @@ from authorization import claim, plan_digest
 
 class AuthorizationTest(unittest.TestCase):
     now = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
-    plan = {"revision": "fixture", "requests": 10, "endpoint": "loopback"}
+    plan = {
+        "revision": "fixture", "max_requests": 10, "max_wall_seconds": 60,
+        "endpoint": "loopback", "status": "ready_for_authorization",
+        "provider_cost_cap_nanodollars": 0,
+        "local_resource_cap": {"gpu_watts": 100, "junction_c": 80,
+                               "sample_max_age_seconds": 5},
+    }
 
     def document(self):
         return {
@@ -24,7 +30,7 @@ class AuthorizationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             registry = Path(directory) / "claims"
             with self.assertRaisesRegex(ValueError, "match"):
-                claim(self.document(), dict(self.plan, requests=11), registry, now=self.now)
+                claim(self.document(), dict(self.plan, max_requests=11), registry, now=self.now)
             self.assertFalse(registry.exists())
             claim(self.document(), self.plan, registry, now=self.now)
             with self.assertRaisesRegex(ValueError, "consumed"):
@@ -37,4 +43,15 @@ class AuthorizationTest(unittest.TestCase):
                         dict(self.document(), issued_at="2026-11-19T11:00:00")):
                 with self.assertRaises(ValueError):
                     claim(doc, self.plan, registry, now=self.now)
+            self.assertFalse(registry.exists())
+
+    def test_incomplete_proposal_cannot_consume_authorization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "claims"
+            for plan in (dict(self.plan, status="not_ready_for_authorization"),
+                         dict(self.plan, provider_cost_cap_nanodollars=None),
+                         dict(self.plan, local_resource_cap={})):
+                doc = dict(self.document(), plan_sha256=plan_digest(plan))
+                with self.assertRaises(ValueError):
+                    claim(doc, plan, registry, now=self.now)
             self.assertFalse(registry.exists())

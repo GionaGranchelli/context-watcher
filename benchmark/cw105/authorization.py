@@ -13,6 +13,21 @@ def plan_digest(plan):
 
 def claim(document, plan, registry, *, now=None):
     """Consume only after all preflight checks, before opening provider access."""
+    if plan.get("status") != "ready_for_authorization":
+        raise ValueError("Execution plan is not ready for authorization")
+    for field in ("max_requests", "max_wall_seconds"):
+        limit = plan.get(field)
+        if type(limit) is not int or limit <= 0:
+            raise ValueError(f"Missing or invalid {field}")
+    cost = plan.get("provider_cost_cap_nanodollars")
+    if type(cost) is not int or cost < 0:
+        raise ValueError("Missing or invalid provider cost cap")
+    resource = plan.get("local_resource_cap")
+    if not isinstance(resource, dict) or any(
+        type(resource.get(key)) is not int or resource[key] <= 0
+        for key in ("gpu_watts", "junction_c", "sample_max_age_seconds")
+    ):
+        raise ValueError("Missing or invalid local resource caps")
     now = datetime.now(timezone.utc) if now is None else now
     if not isinstance(document, dict) or set(document) != {
         "authorization_id", "approved_by", "approval_reference",

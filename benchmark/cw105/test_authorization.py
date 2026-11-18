@@ -58,3 +58,14 @@ class AuthorizationTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     claim(doc, plan, registry, now=self.now)
             self.assertFalse(registry.exists())
+
+    def test_authorization_must_cover_campaign_wall_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "claims"
+            plan = dict(self.plan, max_wall_seconds=108600)
+            doc = dict(self.document(), plan_sha256=plan_digest(plan))
+            with self.assertRaisesRegex(ValueError, "entire campaign"):
+                claim(doc, plan, registry, now=self.now)
+            self.assertFalse(registry.exists())
+            doc["expires_at"] = "2026-11-20T19:00:00Z"
+            claim(doc, plan, registry, now=self.now)

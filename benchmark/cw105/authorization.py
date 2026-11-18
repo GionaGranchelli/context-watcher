@@ -58,11 +58,14 @@ def claim(document, plan, registry, *, now=None):
     try:
         issued = datetime.fromisoformat(document["issued_at"])
         expires = datetime.fromisoformat(document["expires_at"])
-        valid = issued <= now < expires <= issued + timedelta(hours=24)
+        valid = (
+            issued <= now < expires <= issued + timedelta(hours=48)
+            and (expires - now).total_seconds() >= plan["max_wall_seconds"]
+        )
     except (TypeError, ValueError, OverflowError):
         valid = False
     if not valid:
-        raise ValueError("Authorization requires a current time window of at most 24 hours")
+        raise ValueError("Authorization must cover the entire campaign within a 48-hour validity window")
 
     registry.mkdir(mode=0o700, exist_ok=True)
     info = registry.lstat()

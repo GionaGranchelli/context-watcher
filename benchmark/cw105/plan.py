@@ -33,7 +33,18 @@ def proposal():
         "smoke_max_seconds": SMOKE_MAX_SECONDS,
         "attempt_overhead_seconds": ATTEMPT_OVERHEAD_SECONDS,
         "provider_cost_cap_nanodollars": None,
-        "local_resource_cap": None,
+        "local_resource_cap": {
+            "gpu_watts": 707,
+            "junction_c": 80,
+            "sample_max_age_seconds": 5,
+        },
+        "pricing": {
+            "input_nanodollars_per_token": None,
+            "output_nanodollars_per_token": None,
+            "evidence": None,
+        },
+        "cache_policy": "Report observed usage and unknown initial cache state",
+        "service_tier": "Server default; no service tier override",
         "status": "not_ready_for_authorization",
         "runs": runs,
     }

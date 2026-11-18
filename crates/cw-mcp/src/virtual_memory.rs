@@ -20,7 +20,7 @@ use std::sync::Mutex;
 
 use anyhow::{Result, anyhow, bail};
 use cw_core::symbol_index::SymbolIndex;
-use cw_core::working_set::MountMode;
+use cw_core::working_set::{MountMode, WorkingSetState};
 use cw_store::CwStore;
 use serde_json::Value;
 
@@ -86,10 +86,18 @@ pub fn execute_virtual_memory_tool(
     }
 }
 
-/// Session resolution chain: explicit `session_id` argument > `CW_SESSION_ID`
-/// environment variable > `"default"`. Explicit values are validated with the
-/// same rule as every other MCP tool.
-fn resolve_session_id(args: &Value) -> Result<String> {
+/// Session resolution chain matches the other MCP tools: explicit `session_id`
+/// `CW_SESSION_ID`, then the unique session for this workspace. Ambiguous or
+/// missing sessions require an explicit ID instead of silently using `default`.
+fn resolve_session_id(args: &Value, vm: &VirtualMemoryContext) -> Result<String> {
+    resolve_session_id_with_env(args, vm, std::env::var("CW_SESSION_ID").ok().as_deref())
+}
+
+fn resolve_session_id_with_env(
+    args: &Value,
+    vm: &VirtualMemoryContext,
+    env_id: Option<&str>,
+) -> Result<String> {
     if let Some(id) = args
         .get("session_id")
         .and_then(|v| v.as_str())
@@ -101,7 +109,7 @@ fn resolve_session_id(args: &Value) -> Result<String> {
         }
         return Ok(id.to_string());
     }
-    if let Ok(env_id) = std::env::var("CW_SESSION_ID") {
+    if let Some(env_id) = env_id {
         let trimmed = env_id.trim();
         if !trimmed.is_empty() {
             if !cw_core::control::is_valid_session_id(trimmed) {
@@ -110,7 +118,17 @@ fn resolve_session_id(args: &Value) -> Result<String> {
             return Ok(trimmed.to_string());
         }
     }
-    Ok("default".to_string())
+    let sessions = vm.store.list_sessions()?;
+    let sessions: Vec<Value> = sessions
+        .iter()
+        .map(|session| {
+            serde_json::json!({
+                "id": session.id.as_str(),
+                "workspace_root": session.workspace_root.as_deref(),
+            })
+        })
+        .collect();
+    crate::resolve_session_from_list(&sessions, Some(vm.workspace_root()))
 }
 
 fn required_string(args: &Value, field: &str) -> Result<String> {
@@ -147,19 +165,23 @@ fn mount_tool(vm: &VirtualMemoryContext, args: &Value) -> Result<String> {
         "signature" => MountMode::Signature,
         other => bail!("Invalid mode '{other}': expected 'full' or 'signature'"),
     };
-    let session_id = resolve_session_id(args)?;
-
-    let mut state = vm.store.get_working_set(&session_id)?;
+    let session_id = resolve_session_id(args, vm)?;
     // Freshness invariant: re-index the target file from disk before slicing.
     let mounted = with_index(vm, |index| {
+        let mut state = WorkingSetState::default();
         state
             .mount_fresh(index, vm.workspace_root(), &uri, mode)
-            .map(|slice| (slice.start_line, slice.end_line, slice.token_estimate))
+            .cloned()
     })?;
 
     match mounted {
-        Ok((start_line, end_line, tokens)) => {
-            vm.store.save_working_set(&session_id, &state)?;
+        Ok(slice) => {
+            let (start_line, end_line, tokens) =
+                (slice.start_line, slice.end_line, slice.token_estimate);
+            vm.store.update_working_set(&session_id, |state| {
+                state.mounted.insert(slice.uri.clone(), slice);
+                Ok(((), true))
+            })?;
             Ok(format!(
                 "Mounted {uri} (mode: {mode_raw}, lines: {start_line}-{end_line}, ~{tokens} tokens) into Zone 2."
             ))
@@ -177,31 +199,33 @@ fn mount_tool(vm: &VirtualMemoryContext, args: &Value) -> Result<String> {
 
 fn unmount_tool(vm: &VirtualMemoryContext, args: &Value) -> Result<String> {
     let uri = required_string(args, "uri")?;
-    let session_id = resolve_session_id(args)?;
-
-    let mut state = vm.store.get_working_set(&session_id)?;
-    if !state.unmount(&uri) {
+    let session_id = resolve_session_id(args, vm)?;
+    let removed = vm.store.update_working_set(&session_id, |state| {
+        let removed = state.unmount(&uri);
+        Ok((removed, removed))
+    })?;
+    if !removed {
         return Ok(format!("URI was not mounted: {uri}."));
     }
-    // Persist only when the register actually changed.
-    vm.store.save_working_set(&session_id, &state)?;
     Ok(format!("Unmounted {uri} from Zone 2."))
 }
 
 fn pin_tool(vm: &VirtualMemoryContext, args: &Value) -> Result<String> {
     let key = required_string(args, "key")?;
     let rule = required_string(args, "rule")?;
-    let session_id = resolve_session_id(args)?;
-
-    let mut state = vm.store.get_working_set(&session_id)?;
-    state.pin(&key, rule);
-    vm.store.save_working_set(&session_id, &state)?;
+    let session_id = resolve_session_id(args, vm)?;
+    vm.store.update_working_set(&session_id, |state| {
+        state.pin(key.clone(), rule);
+        Ok(((), true))
+    })?;
     Ok(format!("Pinned invariant [{key}] in Zone 2."))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use cw_core::ir::{HarnessKind, ProviderKind, Session};
     use cw_core::symbol_index::SymbolUri;
     use serde_json::json;
 
@@ -219,7 +243,25 @@ mod tests {
         std::fs::write(root.join("src/lib.rs"), SOURCE_V1).unwrap();
         let store = CwStore::open_in_memory().unwrap();
         let context = VirtualMemoryContext::with_workspace_root(store, root.clone());
+        add_session(&context, "default", &root);
         (root, context)
+    }
+
+    fn add_session(vm: &VirtualMemoryContext, id: &str, workspace_root: &Path) {
+        let now = Utc::now();
+        vm.store
+            .upsert_session(&Session {
+                id: id.to_string(),
+                parent_session_id: None,
+                harness: HarnessKind::GenericProxy,
+                workspace_root: Some(workspace_root.to_string_lossy().into_owned()),
+                model: "test".into(),
+                provider: ProviderKind::OpenAICompatible,
+                title: None,
+                created_at: now,
+                updated_at: now,
+            })
+            .unwrap();
     }
 
     #[test]
@@ -363,6 +405,30 @@ mod tests {
         );
         let sess_a = vm.store.get_working_set("sess-a").unwrap();
         assert_eq!(sess_a.invariants.get("k"), Some(&"r".to_string()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn omitted_session_id_resolves_unique_workspace_or_requires_explicit_choice() {
+        let (root, vm) = fresh_context();
+        // `fresh_context` records one session for this workspace.
+        assert_eq!(
+            resolve_session_id_with_env(&json!({}), &vm, None).unwrap(),
+            "default"
+        );
+
+        add_session(&vm, "another-session", &root);
+        assert!(
+            resolve_session_id_with_env(&json!({}), &vm, None)
+                .unwrap_err()
+                .to_string()
+                .contains("Multiple sessions match workspace")
+        );
+        assert_eq!(
+            resolve_session_id_with_env(&json!({"session_id":"another-session"}), &vm, None)
+                .unwrap(),
+            "another-session"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

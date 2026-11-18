@@ -122,6 +122,40 @@ const SOURCE_EXTENSIONS: &[&str] = &["rs", "kt", "ts", "tsx", "js", "py"];
 /// Hidden entries (leading `.`) are always skipped as well.
 const EXCLUDED_DIRS: &[&str] = &["target", "node_modules", "dist", "build"];
 
+fn is_indexable_source_path(rel_path: &str) -> bool {
+    let path = Path::new(rel_path);
+    let components: Vec<_> = path.components().collect();
+    if path.is_absolute()
+        || components.is_empty()
+        || components.iter().any(|component| {
+            let std::path::Component::Normal(name) = component else {
+                return true;
+            };
+            name.to_str().is_none_or(|name| name.starts_with('.'))
+        })
+        || components[..components.len() - 1].iter().any(|component| {
+            let std::path::Component::Normal(name) = component else {
+                return true;
+            };
+            name.to_str()
+                .is_none_or(|name| EXCLUDED_DIRS.contains(&name))
+        })
+    {
+        return false;
+    }
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| SOURCE_EXTENSIONS.contains(&extension))
+}
+
+fn has_symlink_component(root: &Path, rel_path: &str) -> bool {
+    let mut path = root.to_path_buf();
+    Path::new(rel_path).components().any(|component| {
+        path.push(component);
+        fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+    })
+}
+
 /// Leading declaration modifiers that signature normalization strips, in a loop, so
 /// combinations like `pub async fn` or `export default class` normalize cleanly.
 /// Longer visibility forms must precede their shorter prefixes.
@@ -797,6 +831,11 @@ impl SymbolIndex {
         let normalized = rel_path.replace('\\', "/");
         self.entries.retain(|_, entry| entry.rel_path != normalized);
 
+        if !is_indexable_source_path(&normalized)
+            || has_symlink_component(workspace_root, &normalized)
+        {
+            return Ok(());
+        }
         let path = workspace_root.join(&normalized);
         if !path.is_file() {
             return Ok(()); // Deleted mid-session: the stale entries are already gone.
@@ -845,19 +884,16 @@ fn collect_entries(root: &Path, dir: &Path, index: &mut SymbolIndex) -> std::io:
             let _ = collect_entries(root, &entry.path(), index);
         } else if file_type.is_file() && !file_type.is_symlink() {
             let path = entry.path();
-            let Some(extension) = path.extension().and_then(|e| e.to_str()) else {
+            let Some(rel_path) = path.strip_prefix(root).ok() else {
                 continue;
             };
-            if !SOURCE_EXTENSIONS.contains(&extension) {
+            let rel_path = rel_path.to_string_lossy().replace('\\', "/");
+            if !is_indexable_source_path(&rel_path) {
                 continue;
             }
             let Ok(content) = fs::read_to_string(&path) else {
                 continue; // binary or unreadable file: not indexable.
             };
-            let Some(rel_path) = path.strip_prefix(root).ok() else {
-                continue;
-            };
-            let rel_path = rel_path.to_string_lossy().replace('\\', "/");
             for extracted in extract_symbols_from_source(&rel_path, &content) {
                 index
                     .entries
@@ -1982,5 +2018,39 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn refresh_file_uses_the_build_index_eligibility_policy() {
+        let root = std::env::temp_dir().join(format!("cw_refresh_policy_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for dir in [".github", "node_modules/pkg", "target/generated", "src"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for path in [
+            ".env",
+            ".github/private-config.rs",
+            "node_modules/pkg/leaked.ts",
+            "target/generated/leaked.rs",
+            "secrets.txt",
+            "src/good.rs",
+        ] {
+            fs::write(root.join(path), "pub fn visible() {}\n").unwrap();
+        }
+
+        let mut index = SymbolIndex::build(&root).unwrap();
+        assert_eq!(index.entries.len(), 2);
+        for path in [
+            ".env",
+            ".github/private-config.rs",
+            "node_modules/pkg/leaked.ts",
+            "target/generated/leaked.rs",
+            "secrets.txt",
+        ] {
+            index.refresh_file(&root, path).unwrap();
+            assert!(!index.entries.keys().any(|uri| uri.0.contains(path)));
+        }
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

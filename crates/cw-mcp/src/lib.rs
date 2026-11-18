@@ -258,7 +258,7 @@ pub fn mcp_tool_definitions() -> Value {
                 "properties": {
                     "uri": { "type": "string", "description": "Symbol or file URI formatted as repo://<rel_path> or repo://<rel_path>#<symbol>" },
                     "mode": { "type": "string", "enum": ["full", "signature"], "default": "full" },
-                    "session_id": { "type": "string", "description": "Optional session identifier" }
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or the unique session matching the current workspace; pass explicitly when several sessions share the workspace)" }
                 },
                 "required": ["uri"]
             }
@@ -270,7 +270,7 @@ pub fn mcp_tool_definitions() -> Value {
                 "type": "object",
                 "properties": {
                     "uri": { "type": "string" },
-                    "session_id": { "type": "string" }
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or the unique session matching the current workspace; pass explicitly when several sessions share the workspace)" }
                 },
                 "required": ["uri"]
             }
@@ -283,7 +283,7 @@ pub fn mcp_tool_definitions() -> Value {
                 "properties": {
                     "key": { "type": "string", "description": "Short unique identifier for the invariant" },
                     "rule": { "type": "string", "description": "Concise invariant statement" },
-                    "session_id": { "type": "string" }
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or the unique session matching the current workspace; pass explicitly when several sessions share the workspace)" }
                 },
                 "required": ["key", "rule"]
             }

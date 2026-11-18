@@ -380,11 +380,9 @@ struct MountedFile<'a> {
 /// `[Mounted in Zone 2: <uri> — raw duplicate evicted]`, and return how many
 /// tool results were scrubbed.
 ///
-/// Deterministic matching rule (per result): scrub when its text either
-/// (a) contains any non-empty mounted slice content verbatim (raw dump), or
-/// (b) opens with the file path as a header line (`<rel_path>` alone, or
-/// `<rel_path>:` prefixed). Results already carrying the stub prefix and
-/// outputs of unmounted files are left untouched.
+/// A result is scrubbed only when the complete text equals a mounted slice, or
+/// consists of a recognized path header followed by exactly that slice. Mixed
+/// output stays intact so diagnostics and other evidence are never discarded.
 ///
 /// - OpenAI / OpenAI-compatible: `role == "tool"` messages with string content.
 /// - Anthropic: `type == "tool_result"` blocks inside user messages (string
@@ -479,20 +477,33 @@ pub fn stub_mounted_reads_in_zone3(
     scrubbed
 }
 
-/// In-place stub replacement for one text region; `true` when it was replaced.
+/// In-place stub replacement only when the entire text region is redundant.
 fn scrub_text(text: &mut String, by_file: &BTreeMap<String, MountedFile>) -> bool {
     if text.is_empty() || text.starts_with(ZONE3_STUB_PREFIX) {
         return false; // already stubbed (or nothing to match).
     }
-    let Some(first_line) = text.lines().find(|line| !line.trim().is_empty()) else {
-        return false;
+    let (body, hud) = match text.rsplit_once('\n') {
+        Some((body, hud)) if hud.starts_with("[cw:") && hud.ends_with(']') => (body, Some(hud)),
+        _ => (text.as_str(), None),
     };
     for (rel_path, file) in by_file {
-        let header_dump =
-            first_line == rel_path.as_str() || first_line.starts_with(&format!("{rel_path}:"));
-        let verbatim_dump = file.contents.iter().any(|content| text.contains(content));
-        if header_dump || verbatim_dump {
-            *text = format!("[Mounted in Zone 2: {} — raw duplicate evicted]", file.uri);
+        let duplicate = file.contents.iter().any(|content| {
+            let candidates = [
+                (*content).to_string(),
+                format!("Contents of {rel_path}:\n{content}"),
+                format!("file {rel_path}:\n{content}"),
+                format!("{rel_path}:\n{content}"),
+            ];
+            candidates.iter().any(|candidate| {
+                body == candidate
+                    || body
+                        .strip_suffix('\n')
+                        .is_some_and(|without_newline| without_newline == candidate)
+            })
+        });
+        if duplicate {
+            let stub = format!("[Mounted in Zone 2: {} — raw duplicate evicted]", file.uri);
+            *text = hud.map_or(stub.clone(), |hud| format!("{stub}\n{hud}"));
             return true;
         }
     }
@@ -1034,8 +1045,7 @@ mod tests {
     }
 
     #[test]
-    fn path_header_dump_is_stubbed_without_verbatim_content() {
-        // Mounted content differs from the dump body; only the header matches.
+    fn stale_path_header_and_mixed_tool_output_are_preserved() {
         let mut state = WorkingSetState::default();
         state.mounted.insert(
             SymbolUri("repo://src/lib.rs#other".into()),
@@ -1044,18 +1054,31 @@ mod tests {
         let mut p = json!({ "messages": [
             {"role": "tool", "content": "src/lib.rs:\npub fn stale() {}\n"},
             // A path mentioned mid-text is NOT a header dump: stays untouched.
-            {"role": "tool", "content": "grep hit in src/lib.rs at line 3"}
+            {"role": "tool", "content": "grep hit in src/lib.rs at line 3"},
+            {"role": "tool", "content": format!("Contents of src/lib.rs:\n{DUMP}\nerror: type mismatch")},
+            {"role": "tool", "content": format!("Contents of src/lib.rs:\n{DUMP}\nwarning: unused variable")},
+            {"role": "tool", "content": format!("Contents of src/lib.rs:\n{DUMP}\nContents of other.rs:\nfn other() {{}}")}
         ]});
 
         let scrubbed = stub_mounted_reads_in_zone3(&mut p, crate::ir::ProviderKind::OpenAI, &state);
-        assert_eq!(scrubbed, 1);
+        assert_eq!(scrubbed, 0);
         assert_eq!(
             p["messages"][0]["content"],
-            "[Mounted in Zone 2: repo://src/lib.rs#other — raw duplicate evicted]"
+            "src/lib.rs:\npub fn stale() {}\n"
         );
         assert_eq!(
-            p["messages"][1]["content"],
-            "grep hit in src/lib.rs at line 3"
+            p["messages"][2]["content"],
+            format!("Contents of src/lib.rs:\n{DUMP}\nerror: type mismatch")
+        );
+        assert_eq!(
+            p["messages"][3]["content"],
+            format!("Contents of src/lib.rs:\n{DUMP}\nwarning: unused variable")
+        );
+        assert!(
+            p["messages"][4]["content"]
+                .as_str()
+                .unwrap()
+                .contains("Contents of other.rs:")
         );
     }
 
@@ -1284,6 +1307,54 @@ mod tests {
         assert!(sig.content.contains("fn helper() -> u8"));
         assert!(sig.content.contains("fn target_fn() -> u32"));
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mount_fresh_cannot_bypass_symbol_index_path_exclusions() {
+        let root = std::env::temp_dir().join(format!("cw_mount_exclusions_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for dir in ["src", ".github", "node_modules/pkg", "target"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for (path, secret) in [
+            (".env", "ENV_SECRET_DO_NOT_EXPOSE"),
+            (".github/private-config.json", "CONFIG_SECRET_DO_NOT_EXPOSE"),
+            (
+                "node_modules/pkg/file.ts",
+                "DEPENDENCY_SECRET_DO_NOT_EXPOSE",
+            ),
+            ("target/generated.rs", "BUILD_SECRET_DO_NOT_EXPOSE"),
+            ("secrets.txt", "TEXT_SECRET_DO_NOT_EXPOSE"),
+        ] {
+            std::fs::write(root.join(path), secret).unwrap();
+        }
+        std::fs::write(root.join("src/lib.rs"), "pub fn safe() {}\n").unwrap();
+
+        let mut index = SymbolIndex::build(&root).unwrap();
+        assert_eq!(index.entries.len(), 2);
+        let mut state = WorkingSetState::default();
+        for path in [
+            ".env",
+            ".github/private-config.json",
+            "node_modules/pkg/file.ts",
+            "target/generated.rs",
+            "secrets.txt",
+        ] {
+            assert!(
+                state
+                    .mount_fresh(
+                        &mut index,
+                        &root,
+                        &format!("repo://{path}"),
+                        MountMode::Full
+                    )
+                    .is_err(),
+                "direct mount should reject {path}"
+            );
+        }
+        let serialized = serde_json::to_string(&state).unwrap();
+        assert!(!serialized.contains("SECRET_DO_NOT_EXPOSE"));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

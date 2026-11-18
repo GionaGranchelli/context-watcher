@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from agent import offline_agent
+from agent import enable_memory, offline_agent
 from attempt import attempt
 from budget import Budget
 from capture import relay
@@ -67,6 +67,9 @@ def rehearse(repository, output, omp, cw):
                                 "x-cw-session-id": run_id, "x-cw-control-token": control,
                             }
                             profile.write_text(json.dumps(config))
+                        if selected.virtual_memory:
+                            enable_memory(argv, state, binary=cw, daemon_state=root / "cw",
+                                          api_port=api_port, session_id=run_id)
                         yield argv, env
 
             # Scripted replies can qualify transport only. They earn no task credit.

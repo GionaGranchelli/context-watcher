@@ -9,7 +9,7 @@ from pathlib import Path
 
 from daemon import daemon
 from routing import route
-from agent import offline_agent
+from agent import enable_memory, offline_agent
 from budget import Budget
 from capture import relay
 from process import run
@@ -37,16 +37,22 @@ class OmpSmokeTest(unittest.TestCase):
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 delta, finish = {"content": "cw105-mock-pass"}, "stop"
-                if mode == "M2" and len(requests) == 1:
+                steps = [
+                    ("cw_pin", {"key": "fixture", "rule": "cw105-private-register"}),
+                    ("cw_mount", {"uri": "repo://fixture.py", "mode": "full"}),
+                    ("cw_unmount", {"uri": "repo://fixture.py"}),
+                ]
+                if mode == "M2" and len(requests) <= len(steps):
+                    tool, arguments = steps[len(requests) - 1]
+                    arguments["session_id"] = "cw105-smoke"
                     name = next(
                         t["function"]["name"] for t in requests[0]["tools"]
-                        if t["function"]["name"].endswith("cw_pin")
+                        if t["function"]["name"].endswith(tool)
                     )
-                    delta = {"tool_calls": [{"index": 0, "id": "call_cw105_pin",
+                    delta = {"tool_calls": [{"index": 0, "id": f"call_{tool}",
                                              "type": "function", "function": {
                         "name": name,
-                        "arguments": json.dumps({"session_id": "cw105-smoke",
-                                                 "key": "fixture", "rule": "cw105-private-register"}),
+                        "arguments": json.dumps(arguments),
                     }}]}
                     finish = "tool_calls"
                 for chunk in (
@@ -62,8 +68,8 @@ class OmpSmokeTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "fixture.py").write_text("def fixture(): pass\n")
-            request_count = 3 if mode == "M2" else 1
+            (root / "fixture.py").write_text("def fixture():\n    return 'mounted-only-marker'\n")
+            request_count = 5 if mode == "M2" else 1
             budget = Budget(campaign_limit=request_count, seconds=30)
             budget.start("smoke", request_limit=request_count, seconds=30)
             with serving(HTTPServer(("127.0.0.1", 0), Mock)) as upstream:
@@ -88,17 +94,11 @@ class OmpSmokeTest(unittest.TestCase):
                             }
                             config_path.write_text(json.dumps(config))
                         if mode == "M2":
-                            state = root / "state"
-                            overlay = state / "mcp-settings.yml"
-                            overlay.write_text("tools:\n  xdev: false\nmcp:\n  startupTimeoutMs: 5000\n")
-                            (state / "mcp.json").write_text(json.dumps({
-                                "mcpServers": {"cw": {
-                                    "command": os.environ["CW105_CW"],
-                                    "args": ["--db", str(root / "cw/cw.db"), "mcp"],
-                                }},
-                            }))
-                            argv[1:1] = ["--config", str(overlay)]
-                            argv.remove("--no-tools")
+                            enable_memory(
+                                argv, root / "state", binary=os.environ["CW105_CW"],
+                                daemon_state=root / "cw", api_port=api_port,
+                                session_id="cw105-smoke",
+                            )
                         result = run(argv, cwd=root, env=env, log=root / "omp.log", timeout=15)
                         if mode == "M2":
                             other = root / "other"
@@ -126,10 +126,16 @@ class OmpSmokeTest(unittest.TestCase):
         self.assertEqual("<workspace_symbol_map>" in json.dumps(requests), mode == "M2")
         self.assertEqual("cw105-private-register" in json.dumps(requests), mode == "M2")
         if mode == "M2":
-            self.assertIn("<workspace_symbol_map>", json.dumps(requests[2]))
-            self.assertNotIn("cw105-private-register", json.dumps(requests[2]))
+            self.assertIn("<workspace_symbol_map>", json.dumps(requests[4]))
+            self.assertNotIn("cw105-private-register", json.dumps(requests[4]))
             system = [m["content"] for m in requests[1]["messages"] if m["role"] == "system"]
             self.assertIn("cw105-private-register", json.dumps(system))
             names = [t["function"]["name"] for t in requests[0].get("tools", [])]
             for name in ("cw_pin", "cw_mount", "cw_unmount"):
                 self.assertTrue(any(name in n for n in names), names)
+            def system_text(index):
+                return json.dumps([m["content"] for m in requests[index]["messages"]
+                                   if m["role"] == "system"])
+            self.assertNotIn("mounted-only-marker", system_text(1))
+            self.assertIn("mounted-only-marker", system_text(2))
+            self.assertNotIn("mounted-only-marker", system_text(3))

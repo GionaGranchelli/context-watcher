@@ -33,3 +33,38 @@ class LiveTransportTest(unittest.TestCase):
             authorize_transport({}, {"benchmark_revision": "a" * 40}, None,
                                 checkout=None, merged_revision="a" * 40)
         claim.assert_not_called()
+
+    @patch("live_transport.git", side_effect=[b"a" * 40 + b"\n", b""])
+    @patch("live_transport.verify_merged_pr")
+    @patch("live_transport.HTTPConnection")
+    def test_transport_requires_durable_claim_and_pins_destination(self, connect, merged, git):
+        from datetime import datetime, timedelta, timezone
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        from authorization import ENDPOINT, MODEL, PROVIDER, plan_digest
+
+        now = datetime.now(timezone.utc)
+        plan = {
+            "status": "ready_for_authorization", "benchmark_revision": "a" * 40,
+            "provider": PROVIDER, "endpoint": ENDPOINT, "model": MODEL,
+            "max_requests": 1, "max_wall_seconds": 60,
+            "provider_cost_cap_nanodollars": 0,
+            "local_resource_cap": {"gpu_watts": 707, "junction_c": 80,
+                                   "sample_max_age_seconds": 5},
+        }
+        document = {
+            "authorization_id": "cw105-synthetic-authorization",
+            "approved_by": "test fixture", "approval_reference": "offline only",
+            "plan_sha256": plan_digest(plan), "issued_at": now.isoformat(),
+            "expires_at": (now + timedelta(minutes=10)).isoformat(),
+        }
+        with TemporaryDirectory() as directory:
+            registry = Path(directory) / "claims"
+            factory = authorize_transport(document, plan, registry,
+                                          checkout=None, merged_revision="a" * 40)
+            merged.assert_called_once_with("a" * 40)
+            self.assertTrue((registry / "cw105-synthetic-authorization.json").is_file())
+            connect.assert_not_called()
+            self.assertIs(factory(2), connect.return_value)
+            connect.assert_called_once_with("192.168.1.156", 1234, timeout=2)

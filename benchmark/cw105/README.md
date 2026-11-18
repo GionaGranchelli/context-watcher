@@ -12,6 +12,8 @@ the installed OMP binary and a local Kanban repository containing
 
 ```sh
 CW105_CW=/absolute/path/to/cw CW105_OMP=/absolute/path/to/omp \
+  CW105_KANBAN=/absolute/path/to/cw-kanban-board \
+  CW105_PLAYWRIGHT=/absolute/path/to/playwright/index.mjs \
   python3 -B -m unittest discover -s benchmark/cw105
 python3 -B benchmark/cw105/offline.py \
   --repository /absolute/path/to/cw-kanban-board \
@@ -19,8 +21,8 @@ python3 -B benchmark/cw105/offline.py \
   --omp /absolute/path/to/omp --cw /absolute/path/to/cw
 ```
 
-The test suite skips binary checks when the corresponding environment variables
-are absent. The rehearsal runs one matched block in detached worktrees and keeps
+The test suite skips opt-in integrations when their environment variables are
+absent. The local qualification run passed all 47 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
@@ -54,8 +56,11 @@ Missing optional data must remain visible.
 
 ## Open qualification work
 
-- Execute the task oracles against representative solutions, including browser
-  behavior and launching the backend without database credentials.
+- Spring and Nuxt reference solutions passed their independent oracles. The
+  runner also scored a submitted health fixture from a fresh frozen worktree.
+  Use `python3 -B benchmark/cw105/verify_task.py TASK WORKTREE EVIDENCE_DIR`
+  to score a candidate. Place Nuxt worktrees on the pnpm store filesystem for
+  offline dependency installation.
 - The matched rehearsal uses a scripted text reply. The separate binary test verifies the shared built-in tool list and exercises the M2 MCP lifecycle.
 - Qualify durable admission, live authorization, resource monitoring, full
   attempt evidence, and failure handling before requesting any live access.

@@ -61,3 +61,23 @@ Missing optional data must remain visible.
   attempt evidence, and failure handling before requesting any live access.
 - Record exact binaries, endpoint identity, cache controls, and the approved
   merged revision for the separately authorized experiment.
+
+## Machinist read-only resource preflight
+
+The loaded model reported a 262,144-token context and two parallel slots.
+Three AMD PCI devices exposed readable GPU power, power caps, and junction
+temperature through sysfs. Readings are a point-in-time inventory.
+
+| PCI device | Power reading type | Observed idle power | Reported board cap |
+| --- | --- | ---: | ---: |
+| 0000:04:00.0 | average | 6 W | 182 W |
+| 0000:85:00.0 | input | 19 W | 225 W |
+| 0000:88:00.0 | input | 21 W | 300 W |
+
+The three reported caps sum to 707 W. At those caps, 21 agent-hours would
+correspond to 14.847 kWh of GPU energy alone. This is a scenario calculation.
+It excludes CPU, cooling, idle time outside the agent budgets, PSU losses and
+electricity tariffs. The actual GPU assignment, caps under load, whole-host
+energy, and server cancellation behavior still need qualification. A live
+authorization envelope must state an enforced limit rather than rely on this
+inventory.

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from daemon import daemon
 from routing import route
+from tool_metrics import tool_metrics
 from agent import BUILTINS, enable_memory, offline_agent
 from budget import Budget
 from capture import relay
@@ -117,6 +118,8 @@ class OmpSmokeTest(unittest.TestCase):
                                          log=root / "other.log", timeout=10)
                             self.assertEqual(second.returncode, 0, (root / "other.log").read_text()[-3000:])
             output = (root / "omp.log").read_text()
+            parsed = tool_metrics(root / "omp.log")
+            self.assertEqual(parsed["mcp_count"], 3 if mode == "M2" else 0, parsed)
             self.assertEqual(result.returncode, 0, output[-3000:])
             self.assertIn("cw105-mock-pass", output)
         self.assertEqual([request["model"] for request in requests], ["qwen3.8-27b-ud"] * request_count)

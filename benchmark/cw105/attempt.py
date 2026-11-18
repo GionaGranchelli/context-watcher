@@ -6,6 +6,7 @@ from dataclasses import asdict
 
 from evidence import request_metrics
 from process import run
+from tool_metrics import tool_metrics
 from workspace import checkout, cleanup, diff
 
 
@@ -40,6 +41,8 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None):
                 cleanup(repository, worktree)
             except (OSError, subprocess.SubprocessError) as error:
                 result.update(status="incomplete", cleanup_error=str(error))
+        if records is not None and (root / "agent.log").exists():
+            result.update(tool_metrics(root / "agent.log"))
         if records is not None:
             with (root / "requests.jsonl").open("x", encoding="utf-8") as output:
                 for record in records:

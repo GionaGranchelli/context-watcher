@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 47 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
+absent. The local qualification run passed all 60 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
@@ -68,8 +68,15 @@ Missing optional data must remain visible.
   to score a candidate. Place Nuxt worktrees on the pnpm store filesystem for
   offline dependency installation.
 - The matched rehearsal uses a scripted text reply. The separate binary test verifies the shared built-in tool list and exercises the M2 MCP lifecycle.
-- Qualify durable admission, live authorization, resource monitoring, full
-  attempt evidence, and failure handling before requesting any live access.
+- The guarded launcher has exercised smoke-to-scoring on loopback with real OMP
+  and Spring. Approval, replay prevention, request and spend enforcement, and
+  local process cancellation have deterministic tests. Live LM Studio usage
+  and cancellation remain unverified.
+- The tool list and private profiles isolate configuration. OMP's Bash tool
+  still runs under the benchmark operator's OS account. A worktree and
+  `--offline` provide no OS security boundary. Verify outbound containment
+  before treating the relay limits as enforced against agent-generated shell
+  commands.
 - Record exact binaries, endpoint identity, cache controls, and the approved
   merged revision for the separately authorized experiment.
 

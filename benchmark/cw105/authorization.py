@@ -6,6 +6,11 @@ import re
 from datetime import datetime, timedelta, timezone
 
 
+PROVIDER = "Machinist LM Studio"
+ENDPOINT = "http://192.168.1.156:1234/v1"
+MODEL = "qwen3.8-27b-ud"
+
+
 def plan_digest(plan):
     encoded = json.dumps(plan, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(encoded.encode()).hexdigest()
@@ -15,6 +20,13 @@ def claim(document, plan, registry, *, now=None):
     """Consume only after all preflight checks, before opening provider access."""
     if plan.get("status") != "ready_for_authorization":
         raise ValueError("Execution plan is not ready for authorization")
+    if (plan.get("provider"), plan.get("endpoint"), plan.get("model")) != (
+        PROVIDER, ENDPOINT, MODEL,
+    ):
+        raise ValueError("Execution plan does not match the approved provider route")
+    revision = plan.get("benchmark_revision")
+    if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise ValueError("Execution plan must bind a full benchmark commit SHA")
     for field in ("max_requests", "max_wall_seconds"):
         limit = plan.get(field)
         if type(limit) is not int or limit <= 0:

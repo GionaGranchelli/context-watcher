@@ -3,14 +3,14 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from authorization import claim, plan_digest
+from authorization import ENDPOINT, MODEL, PROVIDER, claim, plan_digest
 
 
 class AuthorizationTest(unittest.TestCase):
     now = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
     plan = {
-        "revision": "fixture", "max_requests": 10, "max_wall_seconds": 60,
-        "endpoint": "loopback", "status": "ready_for_authorization",
+        "benchmark_revision": "a" * 40, "max_requests": 10, "max_wall_seconds": 60,
+        "provider": PROVIDER, "endpoint": ENDPOINT, "model": MODEL, "status": "ready_for_authorization",
         "provider_cost_cap_nanodollars": 0,
         "local_resource_cap": {"gpu_watts": 100, "junction_c": 80,
                                "sample_max_age_seconds": 5},
@@ -50,7 +50,10 @@ class AuthorizationTest(unittest.TestCase):
             registry = Path(directory) / "claims"
             for plan in (dict(self.plan, status="not_ready_for_authorization"),
                          dict(self.plan, provider_cost_cap_nanodollars=None),
-                         dict(self.plan, local_resource_cap={})):
+                         dict(self.plan, local_resource_cap={}),
+                         dict(self.plan, model="different"),
+                         dict(self.plan, endpoint="http://127.0.0.1:1234/v1"),
+                         dict(self.plan, benchmark_revision="a" * 7)):
                 doc = dict(self.document(), plan_sha256=plan_digest(plan))
                 with self.assertRaises(ValueError):
                     claim(doc, plan, registry, now=self.now)

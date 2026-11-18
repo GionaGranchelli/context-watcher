@@ -2,14 +2,12 @@
 import json
 from pathlib import Path
 
-from authorization import plan_digest
+from authorization import ENDPOINT, MODEL, PROVIDER, plan_digest
 from schedule import schedule
 
-MODEL = "qwen3.8-27b-ud"
 ATTEMPT_OVERHEAD_SECONDS = 600
 SMOKE_MAX_REQUESTS = 4
 SMOKE_MAX_SECONDS = 600
-ENDPOINT = "http://192.168.1.156:1234/v1"
 
 
 def proposal():
@@ -22,7 +20,8 @@ def proposal():
     agent_seconds = sum(run["budget_seconds"] for run in runs)
     return {
         "version": 1,
-        "provider": "Machinist LM Studio",
+        "provider": PROVIDER,
+        "benchmark_revision": None,
         "endpoint": ENDPOINT,
         "model": MODEL,
         "concurrency": 1,

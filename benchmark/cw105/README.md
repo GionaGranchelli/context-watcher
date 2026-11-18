@@ -24,7 +24,7 @@ are absent. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
-test verifies a pin written via MCP and its absence from a second session.
+test scripts OMP pin, mount, and unmount calls and verifies their effects on the upstream system message. A second authenticated session sharing the same database does not receive the pin.
 
 ## Evidence
 
@@ -56,7 +56,7 @@ Missing optional data must remain visible.
 
 - Execute the task oracles against representative solutions, including browser
   behavior and launching the backend without database credentials.
-- Expose MCP tools to OMP only in M2 and demonstrate agent-driven register calls.
+- Match the built-in OMP tool allowlist across all modes before task execution. The rehearsal uses a scripted text reply and the separate binary test exercises the MCP lifecycle.
 - Qualify durable admission, live authorization, resource monitoring, full
   attempt evidence, and failure handling before requesting any live access.
 - Record exact binaries, endpoint identity, cache controls, and the approved

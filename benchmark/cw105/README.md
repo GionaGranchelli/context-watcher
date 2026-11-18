@@ -42,7 +42,11 @@ matched, correct M1 and M2 runs for each measured field.
 The schedule uses all six mode orders for each of three tasks, totaling 54
 attempts. The task caps give a maximum of 1,008 task requests and 21 hours of
 agent execution before setup, verification, or authorized smoke requests.
-These are design ceilings, not an authorization envelope. The offline
+The machine-readable proposal also reserves four smoke requests, 10 minutes for
+smoke, and 10 minutes per run for setup, verification and cleanup. This gives
+proposed overall ceilings of 1,012 requests and 30 hours 10 minutes, subject
+to offline verification of campaign-wide enforcement. Render the proposal
+and digest with `python3 -B benchmark/cw105/plan.py`. The offline
 rehearsal allows three requests across all modes with a 120 second admission
 deadline. There is no provider charge in the rehearsal.
 

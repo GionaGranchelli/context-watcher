@@ -491,7 +491,11 @@ async fn main() -> Result<()> {
             println!("{}", cw_core::control::control_token(true)?);
         }
         Commands::Mcp { daemon_url } => {
-            run_mcp_stdio_server(&daemon_url).await?;
+            // Virtual memory tools write Zone 2 registers to the same DB file that
+            // handle_proxy_request reads them from: open exactly the path every
+            // other command resolves (cli.db > CW_DB_PATH > home default).
+            let store = CwStore::open(&db_path)?;
+            run_mcp_stdio_server(&daemon_url, store).await?;
         }
         Commands::Serve {
             port,

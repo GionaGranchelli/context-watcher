@@ -108,3 +108,17 @@ cd web && npm run build && npm run check
 # Run contextWatcher daemon locally (once scaffolded)
 cargo run -p cw-cli -- serve --port 4400 --proxy-port 4401
 ```
+
+---
+
+## 6. Virtual memory mode (`<cw_memory_protocol>` usage guidelines)
+
+When a `cw` daemon runs with `CW_ENABLE_SYMBOL_MAP=1`, active proxied turns carry the deterministic Zone 1 prefix (`<cw_memory_protocol>` + `<workspace_symbol_map>`) followed by per-session Zone 2 registers (`<mounted_context>`, `<pinned_invariants>`), and duplicate raw reads of mounted URIs are stubbed in history (Zone 3). Agents working **in this repository** while that mode is active must follow the protocol exactly as injected:
+
+1. **Locate before reading.** Find code through `repo://<path>#<symbol>` URIs from the symbol map instead of `find`/`grep`/`cat`; mount what you need with the MCP syscall `cw_mount(uri, mode)` — `mode: "signature"` for interfaces, `mode: "full"` for active edits. Mounts re-index the target file from disk at read time (freshness invariant), so line numbers and bytes reflect current on-disk content even if files changed mid-session.
+2. **Keep Zone 2 lean.** Call `cw_unmount(uri)` as soon as you are done with a symbol; only actively touched code stays mounted, because every mounted slice is re-sent in the system prompt of each subsequent turn.
+3. **Lock what matters.** When an architectural invariant becomes clear (e.g. `key: "arch"`, `rule: "no unwrap in proxy"`), persist it with `cw_pin(key, rule)` so it survives across turns; registers are strictly per-session, and one session's mounts/pins never leak into another's requests.
+4. **Respect the stable prefix.** Zone 1 is byte-stable for the daemon's lifetime: do not assume it changes mid-session (workspace edits only affect future mounts via per-file refresh, not the rendered map — restart the daemon to re-index Zone 1), and never hand-edit or depend on bytes beyond `</workspace_symbol_map>`.
+5. **Treat estimates as estimates.** The trailing `[cw: ...]` budget HUD line is a token estimate with mounted/pinned counts, not provider-observed usage; per §0 it must not be quoted as measured savings or cache evidence.
+
+These rules mirror the golden invariants above: registers are deterministic per-session overlays (KV-cache awareness comes from stable Zone 1/2 prefixes and tail-only history edits). The proxy's per-request register load is fail-open — a store error logs a warning and the turn continues without Zone 2/3 — while tool calls surface their own store/index errors to the caller, and raw provider bytes outside the injected zones stay untouched.

@@ -7,7 +7,7 @@ use cw_core::{
     },
     working_set::WorkingSetState,
 };
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
@@ -93,6 +93,7 @@ impl CwStore {
         }
         drop(file);
         let conn = Connection::open(path)?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              PRAGMA synchronous = NORMAL;
@@ -134,6 +135,7 @@ impl CwStore {
 
     pub fn open_in_memory() -> Result<Self, StoreError> {
         let conn = Connection::open_in_memory()?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let store = Self {
             conn: Arc::new(Mutex::new(conn)),
         };
@@ -504,6 +506,39 @@ impl CwStore {
             params![session_id, state_json, Utc::now().to_rfc3339()],
         )?;
         Ok(())
+    }
+
+    /// Atomically read, update, and persist a session's Zone 2 registers. The
+    /// immediate transaction serializes updates across independent processes
+    /// sharing this database, so concurrent mounts and pins cannot overwrite
+    /// one another.
+    pub fn update_working_set<R>(
+        &self,
+        session_id: &str,
+        update: impl FnOnce(&mut WorkingSetState) -> Result<(R, bool), StoreError>,
+    ) -> Result<R, StoreError> {
+        let mut conn = self.conn.lock().map_err(|_| StoreError::LockPoisoned)?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let mut state = match tx.query_row(
+            "SELECT state_json FROM session_working_sets WHERE session_id = ?1",
+            params![session_id],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(json) => serde_json::from_str(&json)?,
+            Err(rusqlite::Error::QueryReturnedNoRows) => WorkingSetState::default(),
+            Err(error) => return Err(error.into()),
+        };
+        let (result, changed) = update(&mut state)?;
+        if changed {
+            let state_json = serde_json::to_string(&state)?;
+            tx.execute(
+                "INSERT INTO session_working_sets(session_id,state_json,updated_at) VALUES (?1,?2,?3) \
+                 ON CONFLICT(session_id) DO UPDATE SET state_json=excluded.state_json,updated_at=excluded.updated_at",
+                params![session_id, state_json, Utc::now().to_rfc3339()],
+            )?;
+        }
+        tx.commit()?;
+        Ok(result)
     }
 
     /// Missing, revoked, or unreadable policy never grants reinforcement permission.
@@ -2672,5 +2707,51 @@ mod tests {
                 .mounted
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn concurrent_working_set_updates_from_separate_connections_are_not_lost() {
+        let path = std::env::temp_dir().join(format!(
+            "cw_atomic_working_set_{}.db",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let first = CwStore::open(&path).unwrap();
+        let second = CwStore::open(&path).unwrap();
+        let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+        let first_start = start.clone();
+        let first = std::thread::spawn(move || {
+            first_start.wait();
+            first
+                .update_working_set("same-session", |state| {
+                    state.pin("arch", "preserve mounts");
+                    Ok(((), true))
+                })
+                .unwrap();
+        });
+        let second_start = start.clone();
+        let second = std::thread::spawn(move || {
+            second_start.wait();
+            second
+                .update_working_set("same-session", |state| {
+                    state.pin("safety", "reject excluded files");
+                    Ok(((), true))
+                })
+                .unwrap();
+        });
+        first.join().unwrap();
+        second.join().unwrap();
+
+        let verify = CwStore::open(&path).unwrap();
+        let state = verify.get_working_set("same-session").unwrap();
+        assert_eq!(state.invariants.get("arch").unwrap(), "preserve mounts");
+        assert_eq!(
+            state.invariants.get("safety").unwrap(),
+            "reject excluded files"
+        );
+        drop(verify);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("db-wal"));
+        let _ = std::fs::remove_file(path.with_extension("db-shm"));
     }
 }

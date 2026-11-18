@@ -1,15 +1,23 @@
 //! Agent-callable inspection cannot grant or revoke consent, even with forged acknowledgement fields.
 use axum::Router;
 use cw_core::ir::{HarnessKind, MutationOp, ProviderKind, Session};
+use cw_mcp::virtual_memory::VirtualMemoryContext;
 use cw_mcp::{handle_mcp_request, mcp_tool_definitions};
 use cw_proxy::{DaemonState, build_api_router};
 use cw_store::CwStore;
 use serde_json::{Value, json};
 
-async fn call(client: &reqwest::Client, base: &str, name: &str, args: Value) -> Value {
+async fn call(
+    vm: &VirtualMemoryContext,
+    client: &reqwest::Client,
+    base: &str,
+    name: &str,
+    args: Value,
+) -> Value {
     handle_mcp_request(
         client,
         base,
+        vm,
         Some(json!(1)),
         "tools/call",
         &json!({"name":name,"arguments":args}),
@@ -44,6 +52,7 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
             updated_at: chrono::Utc::now(),
         })
         .unwrap();
+    let vm = VirtualMemoryContext::with_workspace_root(store.clone(), std::env::temp_dir());
     let mut state = DaemonState::new(store.clone());
     state.control_token = "offline-token".into();
     let (base, server) = serve(build_api_router(state)).await;
@@ -55,7 +64,7 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
         .build()
         .unwrap();
     let args = json!({"session_id":"mcp-session"});
-    let pin=call(&client,&base,"cw_pin_context",json!({"session_id":"mcp-session","label":"Invariant","content":"Do not change public API."})).await;
+    let pin=call(&vm, &client,&base,"cw_pin_context",json!({"session_id":"mcp-session","label":"Invariant","content":"Do not change public API."})).await;
     assert_eq!(pin["isError"], false, "{pin}");
     assert!(
         pin["content"][0]["text"]
@@ -63,7 +72,7 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
             .unwrap()
             .contains("Consent is unchanged")
     );
-    let status = call(&client, &base, "cw_pin_policy_status", args.clone()).await;
+    let status = call(&vm, &client, &base, "cw_pin_policy_status", args.clone()).await;
     assert_eq!(status["isError"], false, "{status}");
     let body: Value = serde_json::from_str(status["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(body["policy"]["enabled"], false);
@@ -91,6 +100,7 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
     ] {
         assert_eq!(
             call(
+                &vm,
                 &client,
                 &base,
                 name,
@@ -102,6 +112,7 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
     }
     assert_eq!(
         call(
+            &vm,
             &client,
             &base,
             "cw_pin_policy_status",
@@ -122,13 +133,13 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
         json!({"session_id":"bad/id"}),
     ] {
         assert_eq!(
-            call(&client, &base, "cw_pin_policy_status", args).await["isError"],
+            call(&vm, &client, &base, "cw_pin_policy_status", args).await["isError"],
             true
         );
     }
     // Existing non-pin mutation behavior is preserved under default-off consent.
     assert_eq!(
-        call(&client, &base, "cw_shadow_dedupe", args.clone()).await["isError"],
+        call(&vm, &client, &base, "cw_shadow_dedupe", args.clone()).await["isError"],
         false
     );
     assert!(
@@ -141,7 +152,7 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
     store
         .set_pin_context_policy("mcp-session", true, true)
         .unwrap();
-    let enabled = call(&client, &base, "cw_pin_policy_status", args.clone()).await;
+    let enabled = call(&vm, &client, &base, "cw_pin_policy_status", args.clone()).await;
     assert!(
         enabled["content"][0]["text"]
             .as_str()
@@ -150,7 +161,7 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
     );
     // Unpin deletes rules but neither grants nor revokes the human's session consent.
     assert_eq!(
-        call(&client, &base, "cw_unpin_context", args.clone()).await["isError"],
+        call(&vm, &client, &base, "cw_unpin_context", args.clone()).await["isError"],
         false
     );
     assert!(
@@ -162,7 +173,7 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
     assert_eq!(store.list_mutations("mcp-session").unwrap().len(), 1);
     let unauthorized = reqwest::Client::new();
     assert_eq!(
-        call(&unauthorized, &base, "cw_pin_policy_status", args).await["isError"],
+        call(&vm, &unauthorized, &base, "cw_pin_policy_status", args).await["isError"],
         true
     );
     server.abort();
@@ -170,6 +181,10 @@ async fn inspection_and_manual_pin_creation_never_grant_consent() {
 }
 #[tokio::test]
 async fn malformed_unavailable_and_invalid_policy_queries_fail_closed() {
+    let vm = VirtualMemoryContext::with_workspace_root(
+        CwStore::open_in_memory().unwrap(),
+        std::env::temp_dir(),
+    );
     for body in ["invalid JSON", "null", "{\"enabled\":true}"] {
         let (base, server) = serve(Router::new().route(
             "/api/v1/sessions/mcp-session/pin-context-policy",
@@ -179,6 +194,7 @@ async fn malformed_unavailable_and_invalid_policy_queries_fail_closed() {
         let client = reqwest::Client::new();
         assert_eq!(
             call(
+                &vm,
                 &client,
                 &base,
                 "cw_pin_policy_status",
@@ -189,6 +205,7 @@ async fn malformed_unavailable_and_invalid_policy_queries_fail_closed() {
         );
         assert_eq!(
             call(
+                &vm,
                 &client,
                 &base,
                 "cw_pin_policy_status",
@@ -201,6 +218,7 @@ async fn malformed_unavailable_and_invalid_policy_queries_fail_closed() {
         let _ = server.await;
         assert_eq!(
             call(
+                &vm,
                 &client,
                 &base,
                 "cw_pin_policy_status",

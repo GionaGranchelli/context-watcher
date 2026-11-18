@@ -1,11 +1,16 @@
+pub mod virtual_memory;
+
+use crate::virtual_memory::{VirtualMemoryContext, execute_virtual_memory_tool};
 use anyhow::Result;
 use cw_core::ir::{MutationOp, MutationStatus};
+use cw_store::CwStore;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 /// Runs the JSON-RPC 2.0 MCP Server over `stdio`, bridging tool calls to the local `cw` daemon
-/// (or directly against `CwStore` when embedded).
-pub async fn run_mcp_stdio_server(daemon_api_url: &str) -> Result<()> {
+/// (and directly against `CwStore` for the virtual memory tools, which share the daemon's store).
+pub async fn run_mcp_stdio_server(daemon_api_url: &str, store: CwStore) -> Result<()> {
+    let vm = VirtualMemoryContext::new(store);
     let stdin = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
     let mut reader = BufReader::new(stdin).lines();
@@ -31,7 +36,9 @@ pub async fn run_mcp_stdio_server(daemon_api_url: &str) -> Result<()> {
         let method = req.get("method").and_then(|m| m.as_str()).unwrap_or("");
         let params = req.get("params").cloned().unwrap_or(Value::Null);
 
-        if let Some(resp) = handle_mcp_request(&client, daemon_api_url, id, method, &params).await {
+        if let Some(resp) =
+            handle_mcp_request(&client, daemon_api_url, &vm, id, method, &params).await
+        {
             let out_line = format!("{}\n", serde_json::to_string(&resp)?);
             stdout.write_all(out_line.as_bytes()).await?;
             stdout.flush().await?;
@@ -43,6 +50,7 @@ pub async fn run_mcp_stdio_server(daemon_api_url: &str) -> Result<()> {
 pub async fn handle_mcp_request(
     client: &reqwest::Client,
     daemon_api_url: &str,
+    vm: &VirtualMemoryContext,
     id: Option<Value>,
     method: &str,
     params: &Value,
@@ -75,7 +83,7 @@ pub async fn handle_mcp_request(
                 .get("arguments")
                 .cloned()
                 .unwrap_or(Value::Object(Default::default()));
-            match execute_mcp_tool(client, daemon_api_url, tool_name, &args).await {
+            match execute_mcp_tool(client, daemon_api_url, vm, tool_name, &args).await {
                 Ok(text) => (
                     Some(json!({
                         "content": [{ "type": "text", "text": text }],
@@ -241,6 +249,44 @@ pub fn mcp_tool_definitions() -> Value {
                 },
                 "required": ["strategy_id"]
             }
+        },
+        {
+            "name": "cw_mount",
+            "description": "Mount a deterministic symbol or file URI (e.g. repo://src/lib.rs#foo) into Zone 2 (<mounted_context>) instead of reading files via bash. Use mode='signature' for interfaces or mode='full' for active edits.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "uri": { "type": "string", "description": "Symbol or file URI formatted as repo://<rel_path> or repo://<rel_path>#<symbol>" },
+                    "mode": { "type": "string", "enum": ["full", "signature"], "default": "full" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or the unique session matching the current workspace; pass explicitly when several sessions share the workspace)" }
+                },
+                "required": ["uri"]
+            }
+        },
+        {
+            "name": "cw_unmount",
+            "description": "Evict a previously mounted symbol or file URI from Zone 2 (<mounted_context>) to free context tokens.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "uri": { "type": "string" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or the unique session matching the current workspace; pass explicitly when several sessions share the workspace)" }
+                },
+                "required": ["uri"]
+            }
+        },
+        {
+            "name": "cw_pin",
+            "description": "Pin a short architectural invariant or constraint into Zone 2 (<pinned_invariants>) so it persists across turns.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string", "description": "Short unique identifier for the invariant" },
+                    "rule": { "type": "string", "description": "Concise invariant statement" },
+                    "session_id": { "type": "string", "description": "Optional session ID (defaults to CW_SESSION_ID or the unique session matching the current workspace; pass explicitly when several sessions share the workspace)" }
+                },
+                "required": ["key", "rule"]
+            }
         }
     ])
 }
@@ -248,6 +294,7 @@ pub fn mcp_tool_definitions() -> Value {
 async fn execute_mcp_tool(
     client: &reqwest::Client,
     base_url: &str,
+    vm: &VirtualMemoryContext,
     tool_name: &str,
     args: &Value,
 ) -> Result<String> {
@@ -263,8 +310,17 @@ async fn execute_mcp_tool(
             | "cw_unpin_context"
             | "cw_gate_tools"
             | "cw_optimize_strategy"
+            | "cw_mount"
+            | "cw_unmount"
+            | "cw_pin"
     ) {
         anyhow::bail!("Unknown tool: {tool_name}");
+    }
+
+    // Virtual memory tools operate directly against the shared CwStore (the same
+    // database file as the proxy daemon); no HTTP session/graph resolution.
+    if matches!(tool_name, "cw_mount" | "cw_unmount" | "cw_pin") {
+        return execute_virtual_memory_tool(vm, tool_name, args);
     }
 
     if tool_name == "cw_pin_policy_status"
@@ -595,12 +651,22 @@ async fn post_mutation(
 mod tests {
     use super::*;
 
+    /// Offline context for handlers that need a store but never touch the index.
+    fn offline_vm() -> VirtualMemoryContext {
+        VirtualMemoryContext::with_workspace_root(
+            cw_store::CwStore::open_in_memory().unwrap(),
+            std::env::temp_dir(),
+        )
+    }
+
     #[tokio::test]
     async fn test_mcp_initialize_and_tools_list() {
         let client = reqwest::Client::new();
+        let vm = offline_vm();
         let init_resp = handle_mcp_request(
             &client,
             "http://127.0.0.1:4400",
+            &vm,
             Some(json!(1)),
             "initialize",
             &json!({}),
@@ -615,6 +681,7 @@ mod tests {
         let list_resp = handle_mcp_request(
             &client,
             "http://127.0.0.1:4400",
+            &vm,
             Some(json!(2)),
             "tools/list",
             &json!({}),
@@ -622,18 +689,36 @@ mod tests {
         .await
         .unwrap();
         let tools = list_resp["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 10);
+        assert_eq!(tools.len(), 13);
         assert!(tools.iter().any(|t| t["name"] == "cw_shadow_dedupe"));
         assert!(tools.iter().any(|t| t["name"] == "cw_evict_stale_reads"));
         assert!(tools.iter().any(|t| t["name"] == "cw_unpin_context"));
+        for name in ["cw_mount", "cw_unmount", "cw_pin"] {
+            let tool = tools
+                .iter()
+                .find(|t| t["name"].as_str() == Some(name))
+                .unwrap_or_else(|| panic!("{name} not registered"));
+            assert!(
+                tool["description"].is_string(),
+                "{name} needs a description"
+            );
+        }
+        let mount = tools.iter().find(|t| t["name"] == "cw_mount").unwrap();
+        assert_eq!(mount["inputSchema"]["required"], json!(["uri"]));
+        assert_eq!(
+            mount["inputSchema"]["properties"]["mode"]["enum"],
+            json!(["full", "signature"])
+        );
     }
 
     #[tokio::test]
     async fn test_mcp_unknown_tool_and_unsupported_method() {
         let client = reqwest::Client::new();
+        let vm = offline_vm();
         let resp = handle_mcp_request(
             &client,
             "http://127.0.0.1:4400",
+            &vm,
             Some(json!(42)),
             "unknown_method",
             &json!({}),
@@ -645,6 +730,7 @@ mod tests {
         let call_unknown = handle_mcp_request(
             &client,
             "http://127.0.0.1:4400",
+            &vm,
             Some(json!(43)),
             "tools/call",
             &json!({

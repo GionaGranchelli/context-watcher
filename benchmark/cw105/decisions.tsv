@@ -1,0 +1,2 @@
+ts	phase	decision	why	evidence	result
+2026-11-18T22:37:04Z	design	Branch from merged Milestone C and select the prior OMP Kanban snapshot for task design	Main Kanban contains specifications only and the OMP branch has both runnable project scaffolds	CW 86b86c1; Kanban 790d5ed1394965cd8c68ffe14bf6a8fdb7504774	worktree created; task oracles pending

@@ -1,0 +1,40 @@
+"""Request admission for a single benchmark campaign."""
+import threading
+import time
+
+
+class BudgetExceeded(RuntimeError):
+    pass
+
+
+class Budget:
+    def __init__(self, *, campaign_limit, seconds, clock=time.monotonic):
+        if type(campaign_limit) is not int or campaign_limit <= 0:
+            raise ValueError("Campaign request cap must be a positive integer")
+        if type(seconds) is not int or seconds <= 0:
+            raise ValueError("Campaign duration must be a positive integer")
+        self._clock = clock
+        self._deadline = clock() + seconds
+        self._remaining = campaign_limit
+        self._runs = {}
+        self._lock = threading.Lock()
+
+    def start(self, run_id, *, request_limit, seconds):
+        if any(type(n) is not int or n <= 0 for n in (request_limit, seconds)):
+            raise ValueError("Run limits must be positive integers")
+        with self._lock:
+            if run_id in self._runs:
+                raise ValueError("Run ID already admitted")
+            deadline = min(self._deadline, self._clock() + seconds)
+            self._runs[run_id] = (request_limit, deadline)
+
+    def admit(self, run_id):
+        """Debit before I/O. Failed or cancelled attempts are never refunded."""
+        with self._lock:
+            remaining, deadline = self._runs.get(run_id, (0, self._deadline))
+            seconds_left = deadline - self._clock()
+            if seconds_left <= 0 or self._remaining <= 0 or remaining <= 0:
+                raise BudgetExceeded("Request admission denied")
+            self._runs[run_id] = (remaining - 1, deadline)
+            self._remaining -= 1
+            return seconds_left

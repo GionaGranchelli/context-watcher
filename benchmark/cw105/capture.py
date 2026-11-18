@@ -10,7 +10,7 @@ from stream_metrics import StreamMetrics
 PATH = "/v1/chat/completions"
 
 
-def relay(upstream_port, budget, run_id, evidence):
+def relay(upstream_port, budget, run_id, evidence, *, spend=None):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
             if self.path != PATH:
@@ -25,6 +25,8 @@ def relay(upstream_port, budget, run_id, evidence):
                 if len(body) != size:
                     raise ValueError("Incomplete body")
                 remaining = budget.admit(run_id)
+                if spend is not None:
+                    spend.reserve()
             except BudgetExceeded:
                 self.send_error(429)
                 return
@@ -60,7 +62,14 @@ def relay(upstream_port, budget, run_id, evidence):
                     self.send_error(502)
             finally:
                 upstream.close()
+                cost = None
+                if spend is not None:
+                    try:
+                        cost = spend.settle(metrics.usage if metrics.complete and error is None else None)
+                    except BudgetExceeded as exc:
+                        error = error or str(exc)
                 evidence({
+                    "cost_nanodollars": cost,
                     "run_id": run_id, "usage": asdict(metrics.usage) if metrics.usage else None,
                     "ttft_seconds": metrics.ttft_seconds,
                     "elapsed_seconds": time.monotonic() - metrics.started,

@@ -1,3 +1,4 @@
+import hashlib
 import threading
 import unittest
 from contextlib import contextmanager
@@ -83,6 +84,9 @@ class CaptureTest(unittest.TestCase):
                     connection.close()
         self.assertEqual(forwarded, [b'{}'])
         self.assertTrue(evidence[0]["admitted"])
+        self.assertEqual(evidence[0]["request_sha256"], hashlib.sha256(b"{}").hexdigest())
+        self.assertGreater(evidence[0]["response_bytes"], 0)
+        self.assertRegex(evidence[0]["response_prefix_sha256"], r"^[a-f0-9]{64}$")
         self.assertFalse(evidence[1]["admitted"])
         with self.assertRaisesRegex(RuntimeError, "denied|Unsettled"):
             budget.start("next", request_limit=1, seconds=10)

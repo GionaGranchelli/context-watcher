@@ -1,4 +1,5 @@
 """Offline chat completion relay. Both sockets are confined to loopback."""
+import hashlib
 import time
 from dataclasses import asdict
 from http.client import HTTPConnection
@@ -42,6 +43,8 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                 return
             metrics = StreamMetrics(time.monotonic())
             upstream = HTTPConnection("127.0.0.1", upstream_port, timeout=remaining)
+            response_digest = hashlib.sha256()
+            response_bytes = 0
             error = None
             sent_headers = False
             try:
@@ -54,6 +57,8 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                 self.end_headers()
                 sent_headers = True
                 for line in iter(response.readline, b""):
+                    response_digest.update(line)
+                    response_bytes += len(line)
                     now = time.monotonic()
                     if now - metrics.started >= remaining:
                         raise TimeoutError("Request deadline exceeded")
@@ -81,6 +86,9 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                     budget.stop(error)
                 evidence({
                     "admitted": True, "cost_nanodollars": cost,
+                    "request_sha256": hashlib.sha256(body).hexdigest(),
+                    "response_prefix_sha256": response_digest.hexdigest() if response_bytes else None,
+                    "request_bytes": len(body), "response_bytes": response_bytes,
                     "run_id": run_id, "usage": asdict(metrics.usage) if metrics.usage else None,
                     "ttft_seconds": metrics.ttft_seconds,
                     "elapsed_seconds": time.monotonic() - metrics.started,

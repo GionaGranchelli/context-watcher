@@ -63,3 +63,6 @@ jobs:
           "$RUNNER_TEMP/cw122a-tests/bin/python" -m pip install -r benchmark/cw122a/requirements-test.txt
           "$RUNNER_TEMP/cw122a-tests/bin/python" -B -m unittest discover -s benchmark/cw122a -p test_campaign.py -v
           "$RUNNER_TEMP/cw122a-tests/bin/python" -B benchmark/cw122a/rehearse.py --output "$RUNNER_TEMP/cw122a-offline"
+
+      - name: CW-105 offline benchmark checks
+        run: python3 -B -m unittest discover -s benchmark/cw105 -v

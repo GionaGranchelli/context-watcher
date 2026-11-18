@@ -2,6 +2,10 @@
 import argparse
 import json
 import hashlib
+import os
+from dataclasses import asdict
+from datetime import datetime, timezone
+from threading import Lock
 from functools import partial
 from pathlib import Path
 
@@ -46,10 +50,10 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
                   output_rate=rates["output_nanodollars_per_token"],
                   max_input=CONTEXT_WINDOW, max_output=MAX_OUTPUT_TOKENS)
     limits = plan["local_resource_cap"]
-    guard = partial(read_sample, max_watts=limits["gpu_watts"],
+    sample = partial(read_sample, max_watts=limits["gpu_watts"],
                     max_junction_c=limits["junction_c"], max_age=limits["sample_max_age_seconds"])
     loaded_model = check_loaded_model(MODEL, CONTEXT_WINDOW)
-    guard()
+    initial_sample = sample()
     registry = Path.home() / ".local/state/cw105-claims"
     connect = authorize_transport(document, plan, registry, checkout=checkout,
                                     merged_revision=merged_revision)
@@ -57,6 +61,21 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
     (output / "plan.json").write_text(json.dumps(plan, indent=2) + "\n")
     (output / "model-preflight.json").write_text(json.dumps(loaded_model, indent=2) + "\n")
     budget = Budget(campaign_limit=plan["max_requests"], seconds=plan["max_wall_seconds"])
+    resource_lock = Lock()
+
+    def record_sample(reading):
+        rows, watts = reading
+        with (output / "gpu-samples.jsonl").open("a", encoding="utf-8") as log:
+            log.write(json.dumps({"utc": datetime.now(timezone.utc).isoformat(),
+                                  "watts": watts, "devices": [asdict(row) for row in rows]}) + "\n")
+            log.flush()
+            os.fsync(log.fileno())
+
+    def guard():
+        with resource_lock:
+            record_sample(sample())
+
+    record_sample(initial_sample)
     policy = partial(check_request, model=MODEL, max_output_tokens=MAX_OUTPUT_TOKENS)
     metadata_by_id = {row["run_id"]: row for row in schedule()}
 

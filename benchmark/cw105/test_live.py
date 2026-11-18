@@ -40,7 +40,9 @@ class LiveEntryTest(unittest.TestCase):
             output = Path(directory) / "evidence"
             with serving(HTTPServer(("127.0.0.1", 0), Mock)) as port:
                 connect = lambda timeout: HTTPConnection("127.0.0.1", port, timeout=timeout)
-                with patch("live.read_sample", return_value=([], 0)), patch(
+                with patch("live.check_loaded_model", return_value={}), patch(
+                    "live.read_sample", return_value=([], 0)
+                ), patch(
                     "live.authorize_transport", return_value=connect
                 ) as transport:
                     passed = run_live(

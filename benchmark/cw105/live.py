@@ -9,7 +9,7 @@ from agent import CONTEXT_WINDOW, MAX_OUTPUT_TOKENS
 from budget import Budget
 from campaign import execute_plan, run_attempt
 from live_transport import authorize_transport
-from machinist import read_sample
+from machinist import check_loaded_model, read_sample
 from plan import MODEL, proposal
 from report import summarize
 from request_policy import check_request
@@ -48,12 +48,14 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
     limits = plan["local_resource_cap"]
     guard = partial(read_sample, max_watts=limits["gpu_watts"],
                     max_junction_c=limits["junction_c"], max_age=limits["sample_max_age_seconds"])
+    loaded_model = check_loaded_model(MODEL, CONTEXT_WINDOW)
     guard()
     registry = Path.home() / ".local/state/cw105-claims"
     connect = authorize_transport(document, plan, registry, checkout=checkout,
                                     merged_revision=merged_revision)
     output.mkdir(mode=0o700)
     (output / "plan.json").write_text(json.dumps(plan, indent=2) + "\n")
+    (output / "model-preflight.json").write_text(json.dumps(loaded_model, indent=2) + "\n")
     budget = Budget(campaign_limit=plan["max_requests"], seconds=plan["max_wall_seconds"])
     policy = partial(check_request, model=MODEL, max_output_tokens=MAX_OUTPUT_TOKENS)
     metadata_by_id = {row["run_id"]: row for row in schedule()}

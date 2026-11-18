@@ -37,3 +37,22 @@ def read_sample(*, max_watts, max_junction_c, max_age):
                          max_junction_c=max_junction_c, age=time.monotonic() - started,
                          max_age=max_age)
     return rows, total
+
+
+def check_loaded_model(model, context_window):
+    try:
+        result = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
+             "machinist", "~/.lmstudio/bin/lms ps"],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BudgetExceeded("LM Studio model inventory unavailable") from exc
+    rows = [line.split() for line in result.stdout.splitlines()]
+    models = [row for row in rows if row and row[0] == model]
+    if len(models) != 1:
+        raise BudgetExceeded("Expected one loaded instance of the approved model")
+    row = models[0]
+    if len(row) < 9 or row[1:3] != [model, "IDLE"] or row[5] != str(context_window) or row[9:] != ["Local"]:
+        raise BudgetExceeded("Loaded model is not idle and local with the approved context window")
+    return {"model": model, "context_window": context_window, "parallel_slots": int(row[6])}

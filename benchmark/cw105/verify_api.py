@@ -1,5 +1,6 @@
 """Build and verify the candidate Spring API from a benchmark worktree."""
 import argparse
+import json
 import os
 import socket
 import subprocess
@@ -9,7 +10,6 @@ from pathlib import Path
 from board_oracle import FIXTURE, verify as verify_board
 from health_oracle import verify as verify_health
 from process import run, stop_group
-import json
 
 
 def verify_api(worktree, evidence, task):
@@ -46,6 +46,9 @@ def verify_api(worktree, evidence, task):
                     return True
                 except ConnectionRefusedError:
                     time.sleep(0.1)
+                except (ValueError, KeyError, TypeError) as error:
+                    (evidence / "api-oracle.log").write_text(str(error) + "\n")
+                    return False
             raise RuntimeError("Spring did not start. See server.log")
         finally:
             stop_group(server)
@@ -57,5 +60,4 @@ if __name__ == "__main__":
     parser.add_argument("worktree", type=Path)
     parser.add_argument("evidence", type=Path)
     args = parser.parse_args()
-    verify_api(args.worktree.resolve(), args.evidence.resolve(), args.task)
-    print("Spring API oracle passed")
+    raise SystemExit(not verify_api(args.worktree.resolve(), args.evidence.resolve(), args.task))

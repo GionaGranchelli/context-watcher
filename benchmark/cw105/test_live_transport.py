@@ -23,3 +23,13 @@ class LiveTransportTest(unittest.TestCase):
                                 checkout=None, merged_revision="a" * 40)
         claim.assert_not_called()
         connect.assert_not_called()
+
+    @patch("live_transport.git", side_effect=[b"a" * 40 + b"\n", b""])
+    @patch("live_transport.subprocess.run")
+    @patch("live_transport.claim")
+    def test_open_pr_cannot_consume_authorization(self, claim, query, git):
+        query.return_value.stdout = '{"state":"OPEN","baseRefName":"main","mergeCommit":null}'
+        with self.assertRaisesRegex(ValueError, "must be merged"):
+            authorize_transport({}, {"benchmark_revision": "a" * 40}, None,
+                                checkout=None, merged_revision="a" * 40)
+        claim.assert_not_called()

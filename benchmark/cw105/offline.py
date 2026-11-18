@@ -1,11 +1,14 @@
 """Rehearse one matched block using real OMP/CW and a scripted provider."""
 import argparse
+from functools import partial
 import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from budget import Budget
 from report import summarize
+from request_policy import check_request
+from spend import Spend
 from schedule import schedule
 from campaign import execute_plan, run_attempt, serving
 
@@ -31,6 +34,8 @@ def rehearse(repository, output, omp, cw):
     output.mkdir(mode=0o700)
     plan = list(schedule())[:3]
     budget = Budget(campaign_limit=3, seconds=120)
+    spend = Spend(cap=0, input_rate=0, output_rate=0, max_input=262144, max_output=4096)
+    policy = partial(check_request, model="qwen3.8-27b-ud", max_output_tokens=4096)
     execution = [dict(entry, request_cap=1, budget_seconds=30) for entry in plan]
     with serving(HTTPServer(("127.0.0.1", 0), Mock)) as upstream:
         def execute(entry):
@@ -38,6 +43,7 @@ def rehearse(repository, output, omp, cw):
             return run_attempt(
                 metadata, repository, output / entry["run_id"], omp, cw, upstream, budget,
                 prompt="Reply with cw105-rehearsed.", verify=lambda *_: None, seconds=20,
+                spend=spend, request_policy=policy,
             )
 
         results = execute_plan(execution, budget, execute)

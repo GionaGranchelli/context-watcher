@@ -2,11 +2,11 @@
   "health-contract": {
     "budget_seconds": 600,
     "request_cap": 8,
-    "prompt": "Find how the Spring API exposes health. Add a lightweight GET /api/v1/health endpoint for a local supervisor. A successful response must be JSON with exactly the field status set to UP. It must not require a database or expose settings. Preserve the existing actuator routes.",
+    "prompt": "Inspect the Spring API scaffold and identify the missing supervisor health routes. Add a lightweight GET /api/v1/health endpoint for a local supervisor. A successful response must be JSON with exactly the field status set to UP. It must not require a database or expose settings. Also expose /actuator/health with status UP for local clients.",
     "acceptance": [
       "GET /api/v1/health returns 200 with JSON exactly equal to {\"status\":\"UP\"}",
       "The application starts with no database credentials",
-      "Existing actuator health remains available"
+      "GET /actuator/health returns 200 with status UP"
     ]
   },
   "web-api-base-url": {
@@ -22,7 +22,7 @@
   "board-query": {
     "budget_seconds": 2400,
     "request_cap": 32,
-    "prompt": "Implement the read-only board task list slice described in the product and backend design. Add GET /api/v1/tasks using an injectable in-memory source so no database or writes are needed. Return items and nextCursor, default limit 20 and maximum 50, with exact status and priority filters that combine. Sort by task key ascending and use opaque continuation cursors. Invalid filters, limits, and cursors return HTTP 400. Wire the home page to show returned task keys and titles plus loading, empty, and failure states; a Load more button should append the next page. Preserve existing health behavior. For integration testing, allow the local launcher to set CWK_TASK_FIXTURE to an absolute path to a JSON array of objects with key, title, status and priority string fields. Without that setting, start with an empty source. Support Ready and In Progress statuses and P0 and P1 priorities. Use NUXT_PUBLIC_API_BASE_URL for the API origin and show the exact state labels Loading tasks, No tasks, and Unable to load tasks.",
+    "prompt": "Implement the read-only board task list slice described in the product and backend design. Add GET /api/v1/tasks using an injectable in-memory source so no database or writes are needed. Return items and nextCursor, default limit 20 and maximum 50, with exact status and priority filters that combine. Sort by task key ascending and use opaque continuation cursors. Invalid filters, limits, and cursors return HTTP 400. Wire the home page to show returned task keys and titles plus loading, empty, and failure states; a Load more button should append the next page. Preserve existing application startup behavior. For integration testing, allow the local launcher to set CWK_TASK_FIXTURE to an absolute path to a JSON array of objects with key, title, status and priority string fields. Without that setting, start with an empty source. Support Ready and In Progress statuses and P0 and P1 priorities. Use NUXT_PUBLIC_API_BASE_URL for the API origin and show the exact state labels Loading tasks, No tasks, and Unable to load tasks.",
     "acceptance": [
       "Independent HTTP tests use an injected populated source to verify stable ordering, combined filters, paging without omission or duplication, invalid query responses, and empty results",
       "Independent browser tests exercise loading, populated, empty, failure and next-page append states using a mock API",

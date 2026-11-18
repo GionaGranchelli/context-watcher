@@ -56,7 +56,7 @@ Missing optional data must remain visible.
 
 - Execute the task oracles against representative solutions, including browser
   behavior and launching the backend without database credentials.
-- Match the built-in OMP tool allowlist across all modes before task execution. The rehearsal uses a scripted text reply and the separate binary test exercises the MCP lifecycle.
+- The matched rehearsal uses a scripted text reply. The separate binary test verifies the shared built-in tool list and exercises the M2 MCP lifecycle.
 - Qualify durable admission, live authorization, resource monitoring, full
   attempt evidence, and failure handling before requesting any live access.
 - Record exact binaries, endpoint identity, cache controls, and the approved

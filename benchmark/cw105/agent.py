@@ -4,6 +4,8 @@ import os
 
 from routing import route
 
+BUILTINS = ("read", "edit", "write", "bash", "grep", "glob")
+
 
 def offline_agent(binary, state, port, prompt, *, mode="M0", proxy_port=None, workspace=None):
     selected = route(mode, port, proxy_port, workspace)
@@ -32,7 +34,7 @@ def offline_agent(binary, state, port, prompt, *, mode="M0", proxy_port=None, wo
     return [
         str(binary), "--print", "--mode", "json", "--model", "cw105/qwen3.8-27b-ud",
         "--no-extensions", "--no-skills", "--no-rules", "--offline",
-        "--no-tools", "--thinking", "off", prompt,
+        "--tools", ",".join(BUILTINS), "--thinking", "off", prompt,
     ], env
 
 
@@ -47,4 +49,3 @@ def enable_memory(argv, state, *, binary, daemon_state, api_port, session_id):
     }}}
     (state / "mcp.json").write_text(json.dumps(config), encoding="utf-8")
     argv[1:1] = ["--config", str(overlay)]
-    argv.remove("--no-tools")

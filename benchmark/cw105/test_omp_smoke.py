@@ -9,7 +9,7 @@ from pathlib import Path
 
 from daemon import daemon
 from routing import route
-from agent import enable_memory, offline_agent
+from agent import BUILTINS, enable_memory, offline_agent
 from budget import Budget
 from capture import relay
 from process import run
@@ -125,6 +125,10 @@ class OmpSmokeTest(unittest.TestCase):
         self.assertEqual(metrics[0]["usage"]["input_tokens"], 12)
         self.assertEqual("<workspace_symbol_map>" in json.dumps(requests), mode == "M2")
         self.assertEqual("cw105-private-register" in json.dumps(requests), mode == "M2")
+        names = {t["function"]["name"] for t in requests[0].get("tools", [])}
+        self.assertEqual(names.intersection(BUILTINS), set(BUILTINS))
+        if mode != "M2":
+            self.assertEqual(names, set(BUILTINS))
         if mode == "M2":
             self.assertIn("<workspace_symbol_map>", json.dumps(requests[4]))
             self.assertNotIn("cw105-private-register", json.dumps(requests[4]))

@@ -3,7 +3,6 @@ import json
 import os
 import tempfile
 import socket
-import subprocess
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -37,10 +36,22 @@ class OmpSmokeTest(unittest.TestCase):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
+                delta, finish = {"content": "cw105-mock-pass"}, "stop"
+                if mode == "M2" and len(requests) == 1:
+                    name = next(
+                        t["function"]["name"] for t in requests[0]["tools"]
+                        if t["function"]["name"].endswith("cw_pin")
+                    )
+                    delta = {"tool_calls": [{"index": 0, "id": "call_cw105_pin",
+                                             "type": "function", "function": {
+                        "name": name,
+                        "arguments": json.dumps({"session_id": "cw105-smoke",
+                                                 "key": "fixture", "rule": "cw105-private-register"}),
+                    }}]}
+                    finish = "tool_calls"
                 for chunk in (
-                    {"choices": [{"index": 0, "delta": {"content": "cw105-mock-pass"},
-                                  "finish_reason": None}]},
-                    {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+                    {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
+                    {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
                     {"choices": [], "usage": {"prompt_tokens": 12, "completion_tokens": 3}},
                 ):
                     self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode())
@@ -52,7 +63,7 @@ class OmpSmokeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "fixture.py").write_text("def fixture(): pass\n")
-            request_count = 2 if mode == "M2" else 1
+            request_count = 3 if mode == "M2" else 1
             budget = Budget(campaign_limit=request_count, seconds=30)
             budget.start("smoke", request_limit=request_count, seconds=30)
             with serving(HTTPServer(("127.0.0.1", 0), Mock)) as upstream:
@@ -77,21 +88,17 @@ class OmpSmokeTest(unittest.TestCase):
                             }
                             config_path.write_text(json.dumps(config))
                         if mode == "M2":
-                            rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-                                "name": "cw_pin", "arguments": {
-                                    "session_id": "cw105-smoke", "key": "fixture",
-                                    "rule": "cw105-private-register",
-                                },
-                            }}
-                            pin = subprocess.run(
-                                [os.environ["CW105_CW"], "--db", str(root / "cw/cw.db"), "mcp"],
-                                input=json.dumps(rpc) + "\n", text=True, capture_output=True,
-                                timeout=5, check=True, cwd=root,
-                                env={"HOME": str(root / "cw"), "PATH": os.defpath},
-                            )
-                            reply = json.loads(pin.stdout)
-                            self.assertIn("result", reply)
-                            self.assertFalse(reply["result"].get("isError", False))
+                            state = root / "state"
+                            overlay = state / "mcp-settings.yml"
+                            overlay.write_text("tools:\n  xdev: false\nmcp:\n  startupTimeoutMs: 5000\n")
+                            (state / "mcp.json").write_text(json.dumps({
+                                "mcpServers": {"cw": {
+                                    "command": os.environ["CW105_CW"],
+                                    "args": ["--db", str(root / "cw/cw.db"), "mcp"],
+                                }},
+                            }))
+                            argv[1:1] = ["--config", str(overlay)]
+                            argv.remove("--no-tools")
                         result = run(argv, cwd=root, env=env, log=root / "omp.log", timeout=15)
                         if mode == "M2":
                             other = root / "other"
@@ -119,5 +126,10 @@ class OmpSmokeTest(unittest.TestCase):
         self.assertEqual("<workspace_symbol_map>" in json.dumps(requests), mode == "M2")
         self.assertEqual("cw105-private-register" in json.dumps(requests), mode == "M2")
         if mode == "M2":
-            self.assertIn("<workspace_symbol_map>", json.dumps(requests[1]))
-            self.assertNotIn("cw105-private-register", json.dumps(requests[1]))
+            self.assertIn("<workspace_symbol_map>", json.dumps(requests[2]))
+            self.assertNotIn("cw105-private-register", json.dumps(requests[2]))
+            system = [m["content"] for m in requests[1]["messages"] if m["role"] == "system"]
+            self.assertIn("cw105-private-register", json.dumps(system))
+            names = [t["function"]["name"] for t in requests[0].get("tools", [])]
+            for name in ("cw_pin", "cw_mount", "cw_unmount"):
+                self.assertTrue(any(name in n for n in names), names)

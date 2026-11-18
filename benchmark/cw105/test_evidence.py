@@ -11,7 +11,12 @@ class EvidenceTest(unittest.TestCase):
         second = dict(complete=True, ttft_seconds=4, usage={
             "input_tokens": 3, "output_tokens": 1, "cached_input_tokens": None,
         })
-        result = request_metrics([first, second])
+        first.update(admitted=True, cost_nanodollars=10)
+        second.update(admitted=True, cost_nanodollars=15)
+        result = request_metrics([first, second], context_window=10)
+        self.assertEqual(result["peak_observed_context_fraction"], 0.5)
+        self.assertEqual(result["admitted_requests"], 2)
+        self.assertEqual(result["provider_cost_usd"], 25 / 1_000_000_000)
         self.assertEqual(result["input_tokens"], 8)
         self.assertEqual(result["output_tokens"], 3)
         self.assertIsNone(result["cached_input_tokens"])

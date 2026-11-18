@@ -10,7 +10,7 @@ from tool_metrics import tool_metrics
 from workspace import checkout, cleanup, diff
 
 
-def attempt(entry, repository, root, launch, verify, *, seconds, records=None, guard=None):
+def attempt(entry, repository, root, launch, verify, *, seconds, records=None, guard=None, context_window=None):
     """Use a context manager supplied by the offline transport for argv and env."""
     root.mkdir(mode=0o700)
     worktree = root / "workspace"
@@ -47,7 +47,7 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
             with (root / "requests.jsonl").open("x", encoding="utf-8") as output:
                 for record in records:
                     output.write(json.dumps(record) + "\n")
-            result.update(request_metrics(records))
+            result.update(request_metrics(records, context_window=context_window))
             if result["status"] == "complete" and not result["telemetry_complete"]:
                 result["status"] = "incomplete"
         temporary = root / "manifest.tmp"

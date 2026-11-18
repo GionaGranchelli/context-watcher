@@ -4,6 +4,8 @@ import os
 
 from routing import route
 
+CONTEXT_WINDOW = 262144
+MAX_OUTPUT_TOKENS = 4096
 BUILTINS = ("read", "edit", "write", "bash", "grep", "glob")
 
 
@@ -19,7 +21,7 @@ def offline_agent(binary, state, port, prompt, *, mode="M0", proxy_port=None, wo
             "apiKey": "offline-fixture",
             "models": [{
                 "id": "qwen3.8-27b-ud", "name": "CW-105 offline fixture",
-                "contextWindow": 262144, "maxTokens": 4096,
+                "contextWindow": CONTEXT_WINDOW, "maxTokens": MAX_OUTPUT_TOKENS,
             }],
         }},
     }

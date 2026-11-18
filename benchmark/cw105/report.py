@@ -10,6 +10,7 @@ from schedule import MODES, schedule
 METRICS = (
     "wall_seconds", "input_tokens", "output_tokens", "cached_input_tokens",
     "ttft_seconds", "provider_cost_usd", "tool_seconds", "mcp_seconds",
+    "peak_observed_context_fraction", "tool_count", "mcp_count",
 )
 
 

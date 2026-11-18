@@ -4,7 +4,7 @@ import socket
 import threading
 from contextlib import contextmanager
 
-from agent import enable_memory, offline_agent
+from agent import CONTEXT_WINDOW, enable_memory, offline_agent
 from attempt import attempt
 from budget import BudgetExceeded
 from capture import relay
@@ -67,7 +67,8 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
                 raise
 
     return attempt(entry, repository, root, launch, verify,
-                   seconds=seconds, records=records, guard=supervise)
+                   seconds=seconds, records=records, guard=supervise,
+                   context_window=CONTEXT_WINDOW)
 
 
 def execute_plan(plan, budget, execute):

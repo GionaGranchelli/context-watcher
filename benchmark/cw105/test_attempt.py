@@ -11,6 +11,33 @@ from workspace import git
 
 
 class AttemptTest(unittest.TestCase):
+    def test_verifier_outputs_are_excluded_from_agent_patch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+            git(repo, "init")
+            git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "--allow-empty", "-m", "fixture")
+            revision = git(repo, "rev-parse", "HEAD").decode().strip()
+
+            @contextmanager
+            def launch(worktree, evidence):
+                yield [sys.executable, "-c", "open('answer','w').write('candidate')"], os.environ
+
+            def verify(worktree, evidence):
+                (worktree / "verifier-output").write_text("transient")
+                return False
+
+            evidence = root / "attempt"
+            result = attempt({"revision": revision, "run_id": "fixture"},
+                             repo, evidence, launch, verify, seconds=5)
+            self.assertEqual(result["status"], "complete")
+            self.assertIs(result["correct"], False)
+            patch = (evidence / "final.patch").read_bytes()
+            self.assertIn(b"+candidate", patch)
+            self.assertNotIn(b"verifier-output", patch)
+
     def test_failed_process_keeps_patch_and_terminal_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

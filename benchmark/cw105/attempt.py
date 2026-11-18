@@ -16,6 +16,7 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None):
     revision = entry["revision"]
     result = dict(entry, status="incomplete", correct=None)
     checked_out = False
+    patch = root / "final.patch"
     try:
         checkout(repository, worktree, revision)
         checked_out = True
@@ -27,13 +28,15 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None):
         elif agent.returncode:
             result["status"] = "failed"
         else:
+            patch.write_bytes(diff(worktree, revision))
             result.update(correct=verify(worktree, root), status="complete")
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         result.update(status="incomplete", error=str(error))
     finally:
         if checked_out:
             try:
-                (root / "final.patch").write_bytes(diff(worktree, revision))
+                if not patch.exists():
+                    patch.write_bytes(diff(worktree, revision))
                 cleanup(repository, worktree)
             except (OSError, subprocess.SubprocessError) as error:
                 result.update(status="incomplete", cleanup_error=str(error))

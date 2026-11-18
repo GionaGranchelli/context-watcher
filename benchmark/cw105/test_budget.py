@@ -28,3 +28,16 @@ class BudgetTest(unittest.TestCase):
         now[0] = 4
         with self.assertRaises(ValueError):
             budget.start("a", request_limit=3, seconds=10)
+
+    def test_running_guard_observes_latched_fault_and_deadline(self):
+        now = [0]
+        budget = Budget(campaign_limit=1, seconds=20, clock=lambda: now[0])
+        budget.start("a", request_limit=1, seconds=5)
+        budget.admit("a")
+        budget.check_running("a")
+        now[0] = 5
+        with self.assertRaisesRegex(BudgetExceeded, "deadline"):
+            budget.check_running("a")
+        budget.stop("usage fault")
+        with self.assertRaisesRegex(BudgetExceeded, "usage fault"):
+            budget.check_running("a")

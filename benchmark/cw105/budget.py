@@ -36,6 +36,15 @@ class Budget:
             if self._stop_reason is None:
                 self._stop_reason = reason
 
+    def check_running(self, run_id):
+        """Stop a running agent on a latched fault or expired deadline."""
+        with self._lock:
+            if self._stop_reason is not None:
+                raise BudgetExceeded(self._stop_reason)
+            run = self._runs.get(run_id)
+            if run is None or self._clock() >= run[1]:
+                raise BudgetExceeded("Run deadline exceeded or run not admitted")
+
     def admit(self, run_id):
         """Debit before I/O. Failed or cancelled attempts are never refunded."""
         with self._lock:

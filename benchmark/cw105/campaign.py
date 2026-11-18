@@ -56,8 +56,17 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
                                   api_port=api_port, session_id=run_id)
                 yield argv, env
 
+    def supervise():
+        budget.check_running(run_id)
+        if guard is not None:
+            try:
+                guard()
+            except BudgetExceeded as error:
+                budget.stop(str(error))
+                raise
+
     return attempt(entry, repository, root, launch, verify,
-                   seconds=seconds, records=records, guard=guard)
+                   seconds=seconds, records=records, guard=supervise)
 
 
 def execute_plan(plan, budget, execute):

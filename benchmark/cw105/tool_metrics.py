@@ -15,10 +15,13 @@ def tool_metrics(path, timing_path=None):
     event_keys = []
     ended = False
     malformed = False
-    with path.open(encoding="utf-8") as output:
+    with path.open("rb") as output:
         for line in output:
             try:
                 event = json.loads(line)
+            except UnicodeError:
+                malformed = True
+                continue
             except ValueError:
                 continue
             if not isinstance(event, dict):

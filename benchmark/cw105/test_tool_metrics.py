@@ -57,3 +57,11 @@ class ToolMetricsTest(unittest.TestCase):
             self.assertFalse(result["tool_events_complete"])
             self.assertEqual(result["observed_tool_count"], 1)
             self.assertIsNone(result["tool_count"])
+
+    def test_non_utf8_output_marks_events_incomplete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "agent.log"
+            path.write_bytes(b"\xff\n" + b'{"type":"agent_end"}\n')
+            result = tool_metrics(path)
+            self.assertFalse(result["tool_events_complete"])
+            self.assertIsNone(result["tool_count"])

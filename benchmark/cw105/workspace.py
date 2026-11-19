@@ -21,10 +21,14 @@ def checkout(repository, destination, revision):
         raise RuntimeError("Worktree is not clean")
 
 
-def diff(workspace, revision):
-    # Intent-to-add puts new files in the diff without changing their contents.
-    git(workspace, "add", "--intent-to-add", "--all")
-    return git(workspace, "diff", "--no-ext-diff", "--binary", "--")
+def snapshot(workspace):
+    return git(workspace, "write-tree").decode().strip()
+
+
+def diff(workspace, baseline):
+    # Capture the actual final worktree, including staged and untracked changes.
+    git(workspace, "add", "--all")
+    return git(workspace, "diff", "--cached", "--no-ext-diff", "--binary", baseline, "--")
 
 
 def cleanup(repository, destination):

@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from workspace import checkout, cleanup, diff, git
+from workspace import checkout, cleanup, diff, git, snapshot
 
 
 class WorkspaceTest(unittest.TestCase):
@@ -45,8 +45,10 @@ class WorkspaceTest(unittest.TestCase):
             checkout(repo, candidate, revision)
             (candidate / "source").write_text("seed\n")
             git(candidate, "add", "source")
+            baseline = snapshot(candidate)
             (candidate / "source").write_text("repair\n")
-            patch = diff(candidate, revision)
+            git(candidate, "add", "source")
+            patch = diff(candidate, baseline)
             self.assertIn(b"-seed", patch)
             self.assertIn(b"+repair", patch)
             self.assertNotIn(b"-original", patch)

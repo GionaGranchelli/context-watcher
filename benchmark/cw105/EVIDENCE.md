@@ -5,7 +5,9 @@ request records. The manifest identifies the run, task, frozen repository
 revision, repetition, mode, terminal status and correctness outcome.
 The final patch is relative to the seeded baseline when a task has a seed.
 Agent logs and patches can contain workspace data and should remain private
-until reviewed.
+until reviewed. `wall_seconds` covers attempt setup, agent execution, verification,
+cleanup and evidence summarization up to the final manifest write.
+`agent_seconds` records agent-process elapsed time separately.
 
 Each admitted request record contains request and response byte counts and
 SHA-256 digests, time to first output, elapsed time, completion state,
@@ -23,7 +25,8 @@ readings and do not measure whole-host energy.
 
 The OMP event log is the source for tool call counts and any reported
 durations. Missing durations remain null. The report includes planned,
-completed, correct and missing counts per arm. Matched comparisons use
+completed, correct and missing counts per arm, plus completion and correctness
+rates using all planned runs as the denominator. Matched comparisons use
 correct completed M1/M2 pairs and show a sample count for every median.
 The long-task pressure counter uses the proposed 80% input threshold. Cache
 fairness and provider cache hits need direct provider evidence.
@@ -37,5 +40,7 @@ authorization headers are not written by the relay.
 These bodies can contain source code, prompts, tool output and other private
 workspace content. Review and redact evidence before publishing. Interrupted
 streams retain the received prefix and stop further admission. Capture-file creation failure and an injected in-progress disk write
-failure both stop further admissions in offline tests. The live campaign remains NO-GO pending review and the other
+failure both stop further admissions in offline tests. Malformed completion
+events are retained in the response prefix, recorded as errors, and stop
+further admission. The live campaign remains NO-GO pending review and the other
 readiness gates.

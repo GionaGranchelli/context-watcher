@@ -28,3 +28,11 @@ class StreamMetricsTest(unittest.TestCase):
         stream.observe(data, 1)
         with self.assertRaisesRegex(ValueError, "Multiple usage"):
             stream.observe(data, 2)
+
+    def test_malformed_choices_are_rejected_even_after_first_output(self):
+        stream = StreamMetrics(0)
+        stream.observe('{"choices":[{"delta":{"content":"hi"}}]}', 1)
+        for data in ('{"choices":null}', '{"choices":[null]}',
+                     '{"choices":[{"delta":null}]}'):
+            with self.subTest(data=data), self.assertRaisesRegex(ValueError, "Invalid completion"):
+                stream.observe(data, 2)

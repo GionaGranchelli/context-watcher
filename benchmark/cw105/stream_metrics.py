@@ -27,14 +27,17 @@ class StreamMetrics:
             if self.usage is not None:
                 raise ValueError("Multiple usage records for one completion")
             self.usage = usage
-        if self.ttft_seconds is None:
-            for choice in event.get("choices", []):
-                delta = choice.get("delta", {})
-                if any(delta.get(field) for field in (
-                    "content", "reasoning_content", "tool_calls"
-                )):
-                    self.ttft_seconds = now - self.started
-                    break
+        choices = event.get("choices", [])
+        if not isinstance(choices, list):
+            raise ValueError("Invalid completion choices")
+        for choice in choices:
+            if not isinstance(choice, dict) or not isinstance(choice.get("delta", {}), dict):
+                raise ValueError("Invalid completion delta")
+            delta = choice.get("delta", {})
+            if self.ttft_seconds is None and any(delta.get(field) for field in (
+                "content", "reasoning_content", "tool_calls"
+            )):
+                self.ttft_seconds = now - self.started
 
     @property
     def complete(self):

@@ -171,6 +171,38 @@ class CaptureTest(unittest.TestCase):
             with self.assertRaises(BudgetExceeded):
                 budget.admit("run")
 
+    def test_malformed_stream_is_recorded_and_stops_campaign(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        class Malformed(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(b'data: {"choices":[null]}\n\n')
+
+            def log_message(self, *_args):
+                pass
+
+        budget = Budget(campaign_limit=2, seconds=10)
+        budget.start("run", request_limit=2, seconds=10)
+        evidence = []
+        with TemporaryDirectory() as directory:
+            with serving(HTTPServer(("127.0.0.1", 0), Malformed)) as upstream:
+                with serving(relay(upstream, budget, "run", evidence.append,
+                                   wire_dir=Path(directory))) as port:
+                    connection = HTTPConnection("127.0.0.1", port, timeout=3)
+                    connection.request("POST", PATH, b"{}")
+                    self.assertEqual(connection.getresponse().read(), b"")
+                    connection.close()
+            self.assertFalse(evidence[0]["complete"])
+            self.assertEqual(evidence[0]["error"], "Invalid completion delta")
+            self.assertIn(b'null', (Path(directory) / evidence[0]["response_file"]).read_bytes())
+        with self.assertRaisesRegex(BudgetExceeded, "Invalid completion delta"):
+            budget.admit("run")
+
     def test_capture_creation_failure_prevents_forwarding(self):
         from pathlib import Path
         from tempfile import TemporaryDirectory

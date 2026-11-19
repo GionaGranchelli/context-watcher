@@ -52,9 +52,7 @@ def verify_web(worktree, evidence, task):
             if result.timed_out or result.returncode not in (0, 1):
                 raise RuntimeError("Browser oracle infrastructure failed. See browser.log")
             if result.returncode != 0 or task != "web-api-base-url":
-                if result.timed_out or result.returncode not in (0, 1):
-                raise RuntimeError("Browser oracle infrastructure failed. See browser-default.log")
-            return result.returncode == 0
+                return result.returncode == 0
         finally:
             if server.poll() is None:
                 server.terminate()

@@ -49,8 +49,12 @@ def verify_web(worktree, evidence, task):
             oracle = Path(__file__).with_name("browser_oracle.mjs").resolve()
             result = run(["node", str(oracle), task, web_origin, api_origin],
                          cwd=worktree, env=env, log=evidence / "browser.log", timeout=30, own_group=False)
+            if result.timed_out or result.returncode not in (0, 1):
+                raise RuntimeError("Browser oracle infrastructure failed. See browser.log")
             if result.returncode != 0 or task != "web-api-base-url":
-                return result.returncode == 0
+                if result.timed_out or result.returncode not in (0, 1):
+                raise RuntimeError("Browser oracle infrastructure failed. See browser-default.log")
+            return result.returncode == 0
         finally:
             if server.poll() is None:
                 server.terminate()
@@ -79,6 +83,8 @@ def verify_web(worktree, evidence, task):
                 raise RuntimeError("Nuxt default-origin run did not start")
             result = run(["node", str(oracle), task, web_origin, "http://127.0.0.1:8080"],
                          cwd=worktree, env=env, log=evidence / "browser-default.log", timeout=30, own_group=False)
+            if result.timed_out or result.returncode not in (0, 1):
+                raise RuntimeError("Browser oracle infrastructure failed. See browser-default.log")
             return result.returncode == 0
         finally:
             if server.poll() is None:

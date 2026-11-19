@@ -1,6 +1,12 @@
 // Run with a reviewer-provided Playwright installation and a local Nuxt server.
 import assert from 'node:assert/strict'
-const { chromium } = await import(process.env.CW105_PLAYWRIGHT ?? 'playwright')
+let chromium
+try {
+  ;({ chromium } = await import(process.env.CW105_PLAYWRIGHT ?? 'playwright'))
+} catch (error) {
+  console.error('Browser infrastructure unavailable:', error.message)
+  process.exit(2)
+}
 
 const [task, webOrigin, apiOrigin] = process.argv.slice(2)
 for (const origin of [webOrigin, apiOrigin]) {
@@ -11,7 +17,13 @@ for (const origin of [webOrigin, apiOrigin]) {
 }
 assert.notEqual(webOrigin, apiOrigin)
 
-const browser = await chromium.launch()
+let browser
+try {
+  browser = await chromium.launch()
+} catch (error) {
+  console.error('Browser infrastructure unavailable:', error.message)
+  process.exit(2)
+}
 try {
   const page = await browser.newPage()
   page.setDefaultTimeout(5000)

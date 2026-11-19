@@ -25,3 +25,16 @@ class VerifyTaskTest(unittest.TestCase):
             self.assertFalse(documents_api_override(root))
             (root / "README.md").write_text("Set NUXT_PUBLIC_API_BASE_URL for the API.")
             self.assertTrue(documents_api_override(root))
+
+    def test_missing_workspace_exits_as_infrastructure_failure(self):
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        script = Path(__file__).with_name("verify_task.py")
+        result = subprocess.run(
+            [sys.executable, str(script), "health-contract", "/missing", "/missing"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Verification infrastructure failed", result.stderr)

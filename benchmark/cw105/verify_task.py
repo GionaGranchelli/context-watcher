@@ -32,4 +32,8 @@ if __name__ == "__main__":
     parser.add_argument("worktree", type=Path)
     parser.add_argument("evidence", type=Path)
     args = parser.parse_args()
-    raise SystemExit(not verify_task(args.worktree.resolve(), args.evidence.resolve(), args.task))
+    try:
+        passed = verify_task(args.worktree.resolve(), args.evidence.resolve(), args.task)
+    except Exception as error:
+        parser.exit(2, f"Verification infrastructure failed: {error}\n")
+    raise SystemExit(0 if passed else 1)

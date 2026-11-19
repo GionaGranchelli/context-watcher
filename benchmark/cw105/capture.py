@@ -71,21 +71,25 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                     wire = os.fdopen(fd, "wb")
                 upstream = (connect(remaining) if connect is not None else
                             HTTPConnection("127.0.0.1", upstream_port, timeout=remaining))
+                upstream_socket = None
+
                 def cancel_on_stop():
                     while not finished.wait(0.1):
                         try:
                             budget.check_running(run_id)
                         except BudgetExceeded:
-                            if upstream.sock is not None:
+                            connection = upstream_socket or upstream.sock
+                            if connection is not None:
                                 try:
-                                    upstream.sock.shutdown(socket.SHUT_RDWR)
+                                    connection.shutdown(socket.SHUT_RDWR)
                                 except OSError:
                                     pass
-                            return
+                                return
 
                 watcher = threading.Thread(target=cancel_on_stop, daemon=True)
                 watcher.start()
                 upstream.request("POST", PATH, body, {"Content-Type": "application/json"})
+                upstream_socket = upstream.sock
                 response = upstream.getresponse()
                 if response.status != 200 or response.headers.get_content_type() != "text/event-stream":
                     raise ValueError(f"Expected SSE response, got HTTP {response.status}")

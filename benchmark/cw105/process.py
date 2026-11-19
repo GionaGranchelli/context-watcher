@@ -28,6 +28,13 @@ def run(command, *, cwd, env, log, timeout, guard=None, own_group=True):
     started = time.monotonic()
     fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "wb") as output:
+        if guard is not None:
+            try:
+                guard()
+            except BudgetExceeded as error:
+                output.flush()
+                os.fsync(output.fileno())
+                return ProcessResult(-signal.SIGKILL, time.monotonic() - started, False, str(error))
         process = subprocess.Popen(
             command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
             stdout=output, stderr=subprocess.STDOUT, start_new_session=own_group,

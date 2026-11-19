@@ -37,7 +37,7 @@ class ProcessTest(unittest.TestCase):
         def guard():
             nonlocal polls
             polls += 1
-            if polls == 2:
+            if polls == 3:
                 raise BudgetExceeded("GPU temperature limit")
 
         with tempfile.TemporaryDirectory() as root:
@@ -50,3 +50,17 @@ class ProcessTest(unittest.TestCase):
             self.assertFalse(result.timed_out)
             self.assertLess(result.returncode, 0)
             self.assertEqual(log.read_text(), "partial\n")
+
+    def test_expired_guard_does_not_start_process(self):
+        def guard():
+            raise BudgetExceeded("Campaign deadline exceeded")
+
+        with tempfile.TemporaryDirectory() as root:
+            marker = Path(root) / "started"
+            result = run(
+                [sys.executable, "-c", "from pathlib import Path; Path('started').touch()"],
+                cwd=root, env=os.environ, log=Path(root) / "agent.log", timeout=5, guard=guard,
+            )
+            self.assertEqual(result.cancelled_reason, "Campaign deadline exceeded")
+            self.assertFalse(marker.exists())
+            self.assertTrue((Path(root) / "agent.log").is_file())

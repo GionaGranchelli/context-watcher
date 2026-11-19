@@ -71,7 +71,12 @@ and a larger cross-stack implementation. The second prompt starts from an
 unimplemented feature and does not yet establish the requested multi-file
 debugging task with a seeded fault and repeated reference to earlier findings.
 The third prompt has a longer budget, but meaningful context pressure has not
-been established. Phase A remains incomplete until both task designs have
+been established. The Kanban repository has no implemented multi-file debugging
+target at the selected revision. A reproducible task therefore needs a committed,
+versioned fixture derived from that revision, an intentional fault, and an oracle
+that fails on the fixture and passes after a reference repair. The fixture must
+be identical across all three configurations and its patch hash must enter the
+authorized plan. Phase A remains incomplete until both task designs have
 independent oracles and their baseline and reference solutions are qualified.
 
 ## Open qualification work

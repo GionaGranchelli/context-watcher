@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 94 tests with these variables set.
+absent. The local qualification run passed all 97 tests with these variables set.
 The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
@@ -118,6 +118,10 @@ observed utilization and a representative task that reaches that condition.
   evidence writes lack an independently enforced bound. The stated
   wall-clock ceiling is therefore not enforced end to end. Qualify those paths
   and cancellation before live authorization.
+- OMP's tested JSON events identify tool starts and ends but do not include
+  timestamps or durations. Counts are qualified only for a complete event
+  log; tool and MCP seconds are unavailable for nonempty calls. Add a fair,
+  tested timing observer before relying on tool-call overhead comparisons.
 - The common relay uses the harness `Spend` reservation and settlement guard
   for all three modes. It does not configure CW’s named `SpendGuard`. The
   existing CLI smoke configuration requires a positive authorization and

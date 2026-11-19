@@ -26,7 +26,9 @@ uses the approved local provider rate. GPU samples are separate timestamped
 readings and do not measure whole-host energy.
 
 The OMP event log is the source for tool call counts and any reported
-durations. Missing durations remain null. The report includes planned,
+durations. Final counts require a terminal agent event and matched tool events;
+observed partial counts are retained separately. The tested OMP events have no
+durations, so nonempty tool and MCP duration totals remain null. The report includes planned,
 completed, correct and missing counts per arm, plus completion and correctness
 rates using all planned runs as the denominator. Matched comparisons use
 correct completed pairs for M1 versus M0, M2 versus M0, and M2 versus M1,

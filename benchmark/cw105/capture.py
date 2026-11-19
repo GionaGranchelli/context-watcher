@@ -1,6 +1,8 @@
 """Offline chat completion relay. Both sockets are confined to loopback."""
 import hashlib
 import os
+import socket
+import threading
 import time
 from dataclasses import asdict
 from http.client import HTTPConnection
@@ -51,6 +53,8 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
             response_bytes = 0
             error = None
             sent_headers = False
+            finished = threading.Event()
+            watcher = None
             wire = None
             request_path = response_path = None
             try:
@@ -67,6 +71,20 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                     wire = os.fdopen(fd, "wb")
                 upstream = (connect(remaining) if connect is not None else
                             HTTPConnection("127.0.0.1", upstream_port, timeout=remaining))
+                def cancel_on_stop():
+                    while not finished.wait(0.1):
+                        try:
+                            budget.check_running(run_id)
+                        except BudgetExceeded:
+                            if upstream.sock is not None:
+                                try:
+                                    upstream.sock.shutdown(socket.SHUT_RDWR)
+                                except OSError:
+                                    pass
+                            return
+
+                watcher = threading.Thread(target=cancel_on_stop, daemon=True)
+                watcher.start()
                 upstream.request("POST", PATH, body, {"Content-Type": "application/json"})
                 response = upstream.getresponse()
                 if response.status != 200 or response.headers.get_content_type() != "text/event-stream":
@@ -97,6 +115,9 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                 if not sent_headers:
                     self.send_error(502)
             finally:
+                finished.set()
+                if watcher is not None:
+                    watcher.join()
                 if upstream is not None:
                     upstream.close()
                 if wire is not None:

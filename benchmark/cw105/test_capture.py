@@ -231,3 +231,39 @@ class CaptureTest(unittest.TestCase):
             self.assertFalse(evidence[0]["complete"])
             with self.assertRaises(BudgetExceeded):
                 budget.admit("run")
+
+    def test_campaign_stop_interrupts_stalled_upstream(self):
+        import threading
+        from contextlib import closing
+
+        started = threading.Event()
+        release = threading.Event()
+        evidence = []
+
+        class Stalled(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.flush()
+                started.set()
+                release.wait(3)
+
+            def log_message(self, *_args):
+                pass
+
+        budget = Budget(campaign_limit=1, seconds=30)
+        budget.start("run", request_limit=1, seconds=30)
+        with serving(HTTPServer(("127.0.0.1", 0), Stalled)) as upstream:
+            try:
+                with serving(relay(upstream, budget, "run", evidence.append)) as port:
+                    with closing(HTTPConnection("127.0.0.1", port, timeout=3)) as connection:
+                        connection.request("POST", PATH, b"{}")
+                        response = connection.getresponse()
+                        self.assertTrue(started.wait(2))
+                        budget.stop("resource fault")
+                        self.assertEqual(response.read(), b"")
+                self.assertFalse(evidence[0]["complete"])
+            finally:
+                release.set()

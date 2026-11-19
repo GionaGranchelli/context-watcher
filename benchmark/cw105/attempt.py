@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from dataclasses import asdict
 
@@ -13,6 +14,7 @@ from workspace import checkout, cleanup, diff, snapshot
 
 def attempt(entry, repository, root, launch, verify, *, seconds, records=None, guard=None, context_window=None, remaining=None):
     """Use a context manager supplied by the offline transport for argv and env."""
+    started = time.monotonic()
     root.mkdir(mode=0o700)
     worktree = root / "workspace"
     revision = entry["revision"]
@@ -32,7 +34,7 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
             remaining()
         with launch(worktree, root) as (argv, env):
             agent = run(argv, cwd=worktree, env=env, log=root / "agent.log", timeout=seconds, guard=guard)
-        result.update(agent=asdict(agent), wall_seconds=agent.elapsed_seconds)
+        result.update(agent=asdict(agent), agent_seconds=agent.elapsed_seconds)
         if agent.timed_out or agent.cancelled_reason:
             result["status"] = "cancelled"
         elif agent.returncode:
@@ -59,6 +61,7 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
             result.update(request_metrics(records, context_window=context_window))
             if result["status"] == "complete" and not result["telemetry_complete"]:
                 result["status"] = "incomplete"
+        result["wall_seconds"] = time.monotonic() - started
         temporary = root / "manifest.tmp"
         with temporary.open("x", encoding="utf-8") as output:
             json.dump(result, output, indent=2)

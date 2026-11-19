@@ -9,16 +9,20 @@ class ReportTest(unittest.TestCase):
         plan = list(schedule())[:6]
         results = [
             dict(plan[0], status="failed", correct=False),
-            dict(plan[1], status="complete", correct=True, wall_seconds=7),
-            dict(plan[2], status="complete", correct=True, wall_seconds=5,
+            dict(plan[1], status="complete", correct=True, wall_seconds=7, agent_seconds=4),
+            dict(plan[2], status="complete", correct=True, wall_seconds=5, agent_seconds=3,
                  cached_input_tokens=0),
         ]
         report = summarize(results, plan)
         self.assertEqual(report["arms"]["M0"]["planned"], 2)
         self.assertEqual(report["arms"]["M0"]["missing"], 1)
         self.assertEqual(report["arms"]["M0"]["complete"], 0)
+        self.assertEqual(report["arms"]["M0"]["completion_rate"], 0)
+        self.assertEqual(report["arms"]["M1"]["completion_rate"], 0.5)
+        self.assertEqual(report["arms"]["M1"]["correctness_rate"], 0.5)
         self.assertEqual(report["matched_correct_pairs"], 1)
         self.assertEqual(report["m2_minus_m1"]["wall_seconds"], {"count": 1, "median": -2})
+        self.assertEqual(report["m2_minus_m1"]["agent_seconds"], {"count": 1, "median": -1})
         self.assertEqual(report["m2_minus_m1"]["cached_input_tokens"]["count"], 0)
 
     def test_refuses_duplicate_or_mislabeled_results(self):

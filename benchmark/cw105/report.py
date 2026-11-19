@@ -8,7 +8,7 @@ from statistics import median
 from schedule import MODES, schedule
 
 METRICS = (
-    "wall_seconds", "input_tokens", "output_tokens", "cached_input_tokens",
+    "wall_seconds", "agent_seconds", "input_tokens", "output_tokens", "cached_input_tokens",
     "ttft_seconds", "provider_cost_usd", "tool_seconds", "mcp_seconds",
     "peak_observed_context_fraction", "tool_count", "mcp_count",
 )
@@ -54,10 +54,12 @@ def summarize(results, plan=None):
     for mode in MODES:
         group = groups.get(mode, [])
         good = [result for result in group if accepted(result)]
+        completed = sum(result.get("status") == "complete" for result in group)
         arms[mode] = {
             "planned": len(group), "missing": sum(not result for result in group),
-            "complete": sum(result.get("status") == "complete" for result in group),
-            "correct": len(good),
+            "complete": completed, "correct": len(good),
+            "completion_rate": completed / len(group) if group else None,
+            "correctness_rate": len(good) / len(group) if group else None,
             "metrics": {
                 metric: stats([v for r in good if (v := measured(r, metric)) is not None])
                 for metric in METRICS

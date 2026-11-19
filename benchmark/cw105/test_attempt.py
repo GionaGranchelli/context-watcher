@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -123,4 +124,30 @@ class AttemptTest(unittest.TestCase):
             self.assertEqual(result["status"], "incomplete")
             self.assertIn("deadline", result["cleanup_error"])
             self.assertEqual((evidence / "workspace" / "answer").read_text(), "candidate")
+            self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)
+
+    def test_wall_time_includes_verification_and_keeps_agent_time_separate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+            git(repo, "init")
+            git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "--allow-empty", "-m", "fixture")
+            revision = git(repo, "rev-parse", "HEAD").decode().strip()
+
+            @contextmanager
+            def launch(worktree, evidence):
+                yield [sys.executable, "-c", "pass"], os.environ
+
+            def verify(*_):
+                time.sleep(0.15)
+                return True
+
+            evidence = root / "attempt"
+            result = attempt({"revision": revision, "run_id": "fixture"}, repo, evidence,
+                             launch, verify, seconds=5)
+            self.assertEqual(result["status"], "complete")
+            self.assertGreaterEqual(result["wall_seconds"] - result["agent_seconds"], 0.15)
+            self.assertEqual(result["agent_seconds"], result["agent"]["elapsed_seconds"])
             self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)

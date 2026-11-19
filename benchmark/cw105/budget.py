@@ -36,6 +36,15 @@ class Budget:
             if self._stop_reason is None:
                 self._stop_reason = reason
 
+    def campaign_remaining(self):
+        with self._lock:
+            if self._stop_reason is not None:
+                raise BudgetExceeded(self._stop_reason)
+            remaining = self._deadline - self._clock()
+            if remaining <= 0:
+                raise BudgetExceeded("Campaign deadline exceeded")
+            return remaining
+
     def check_running(self, run_id):
         """Stop a running agent on a latched fault or expired deadline."""
         with self._lock:

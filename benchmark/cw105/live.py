@@ -7,6 +7,9 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from threading import Lock
 from functools import partial
+import sys
+
+from process import run
 from pathlib import Path
 
 from agent import CONTEXT_WINDOW, MAX_OUTPUT_TOKENS
@@ -19,7 +22,6 @@ from report import summarize
 from request_policy import check_request
 from schedule import REVISION, schedule
 from spend import Spend
-from verify_task import verify_task
 
 
 def binary_identities(omp, cw):
@@ -79,13 +81,24 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
     policy = partial(check_request, model=MODEL, max_output_tokens=MAX_OUTPUT_TOKENS)
     metadata_by_id = {row["run_id"]: row for row in schedule()}
 
+    def score(worktree, evidence, task):
+        verifier = Path(__file__).with_name("verify_task.py").resolve()
+        result = run([sys.executable, str(verifier), task, str(worktree), str(evidence)],
+                     cwd=worktree, env=os.environ, log=evidence / "verifier.log",
+                     timeout=budget.campaign_remaining(),
+                     guard=lambda: budget.campaign_remaining())
+        if result.timed_out or result.cancelled_reason:
+            budget.stop("Campaign deadline exceeded during verification")
+            raise RuntimeError("Verification exceeded the campaign deadline")
+        return result.returncode == 0
+
     def execute(row):
         run_id = row["run_id"]
         return run_attempt(
             metadata_by_id[run_id], repository, output / run_id, omp, cw, None, budget,
             prompt=row["prompt"], seconds=row["budget_seconds"], spend=spend, guard=guard,
             request_policy=policy, connect=connect,
-            verify=lambda worktree, evidence: verify_task(worktree, evidence, row["task"]),
+            verify=lambda worktree, evidence: score(worktree, evidence, row["task"]),
         )
 
     smoke_entry = {"run_id": "provider-smoke", "mode": "M0", "revision": REVISION}

@@ -9,7 +9,7 @@ from authorization import ENDPOINT, MODEL, PROVIDER, claim, plan_digest
 class AuthorizationTest(unittest.TestCase):
     now = datetime(2026, 11, 19, 12, tzinfo=timezone.utc)
     plan = {
-        "benchmark_revision": "a" * 40, "max_requests": 10, "max_wall_seconds": 60,
+        "benchmark_revision": "a" * 40, "max_requests": 10, "max_admission_window_seconds": 60,
         "provider": PROVIDER, "endpoint": ENDPOINT, "model": MODEL, "status": "ready_for_authorization",
         "provider_cost_cap_nanodollars": 0,
         "local_resource_cap": {"gpu_watts": 100, "junction_c": 80,
@@ -62,7 +62,7 @@ class AuthorizationTest(unittest.TestCase):
     def test_authorization_must_cover_campaign_wall_time(self):
         with tempfile.TemporaryDirectory() as directory:
             registry = Path(directory) / "claims"
-            plan = dict(self.plan, max_wall_seconds=108600)
+            plan = dict(self.plan, max_admission_window_seconds=108600)
             doc = dict(self.document(), plan_sha256=plan_digest(plan))
             with self.assertRaisesRegex(ValueError, "entire campaign"):
                 claim(doc, plan, registry, now=self.now)

@@ -22,7 +22,8 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 103 tests with these variables set.
+absent. The local qualification run passed all 112 tests with these variables
+set (four optional provider or hardware checks skipped).
 The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
@@ -43,6 +44,12 @@ over matched, correct runs, both overall and by task. Each metric includes its
 sample count. These comparisons exclude failures, so interpret them alongside
 the completion and correctness rates rather than as overall success rates.
 
+Completed-but-incorrect answers and agent exits with complete telemetry are
+recorded as outcomes; they do not stop later matched arms. Timeouts, incomplete
+provider or tool telemetry, failed cleanup, and processes that survive
+cancellation stop the campaign. There are no harness-level retries. The report
+records the stop reason, stopped run, and number of unstarted runs.
+
 ## Proposed campaign envelope
 
 The schedule uses all six mode orders for each of three tasks, totaling 54
@@ -50,15 +57,25 @@ attempts. It uses all six task orders and all six mode orders. Each task and eac
 mode occurs twice in each position. Task and mode order remain paired, so
 order interactions cannot be isolated independently. Cache state is not reset or independently
 verified between attempts. Report order effects and initial cache state as
-uncontrolled rather than claiming cache fairness. The task caps give a maximum of 1,008 task requests and 21 hours of
-agent execution before setup, verification, or authorized smoke requests.
-The machine-readable proposal also reserves four smoke requests, 10 minutes for
-smoke, and 10 minutes per run for setup, verification and cleanup. This gives
-proposed overall ceilings of 1,012 requests and 30 hours 10 minutes, subject
-to offline verification of campaign-wide enforcement. Render the proposal
-and digest with `python3 -B benchmark/cw105/plan.py`. The offline
-rehearsal allows three requests across all modes with a 120 second admission
-deadline. There is no provider charge in the rehearsal.
+uncontrolled rather than claiming cache fairness. The task caps allow up to
+1,008 task requests and 21 hours of agent execution. The proposal adds four
+smoke requests, 10 minutes for smoke, and 10 minutes per run for setup,
+verification and cleanup. The resulting 1,012-request, 30-hour-10-minute
+figure is an **admission window**, not a hard wall-clock guarantee. The relay
+denies new requests after the deadline and controlled child processes are
+cancelled, but blocking filesystem operations, surviving processes, and final
+evidence writes can overrun it. Do not authorize the full campaign on a claim
+of a strict 30-hour wall limit. Render the full proposal and digest with
+`python3 -B benchmark/cw105/plan.py --campaign full`.
+
+The separately authorized pilot plan contains one matched M0/M1/M2
+`board-query` block, with up to 100 provider requests including smoke, 64 M2
+virtual-memory calls, and a 9,600-second (2-hour-40-minute) request-admission
+window. It is an operational qualification only: one block cannot establish
+product value or isolate mode-order effects. Create its plan and digest with
+`python3 -B benchmark/cw105/plan.py --campaign pilot`. The offline rehearsal
+allows three requests across all modes with a 120-second admission deadline.
+There is no provider charge in the rehearsal.
 
 The intended live route is Machinist LM Studio with model
 `qwen3.8-27b-ud`. Before requesting authorization, establish the exact live
@@ -79,9 +96,31 @@ The README check verifies that the override variable is named, and a reviewer
 must assess whether its explanation is sufficient.
 
 The longer cross-stack implementation has a larger budget, but meaningful
-context pressure has not been established. A live run could finish well below
-the context limit, so it cannot establish the long-context claim without
-observed utilization and a representative task that reaches that condition.
+context pressure has not been established. A context-pressure comparison is
+eligible only after at least three correct matched M1/M2 `board-query` pairs
+show M1 peak observed context at or above 80% of the model window. If fewer
+than three such pairs occur, report the result as ordinary-length coding only;
+do not claim a long-context benefit. A pilot cannot meet this evidence
+threshold and cannot support a product-value recommendation.
+
+## Pre-registered decision rule
+
+The full campaign can recommend **GO** only with at least nine correct matched
+M1/M2 pairs overall and at least three per task, at least three completed M2
+runs per task that actually use a virtual-memory tool, no M2 completion or
+correctness regression by task, and at least 10% lower median provider-reported
+input tokens on the matched correct pairs. The 10% threshold is a decision
+target, not a claim of statistical significance. A long-context claim also
+requires the three-pair 80% pressure criterion above; otherwise any GO is
+limited to ordinary-length coding sessions.
+
+Use **ITERATE** when safety stops or incomplete telemetry leave too few pairs,
+when M2 does not use the tools enough to evaluate the treatment, or when a
+correctness regression has a bounded fix to evaluate. Use **NO-GO** when a
+complete full campaign meets the evidence minimums but misses the input-token
+target. Latency alone cannot establish GO while cache state is uncontrolled;
+local provider cost is zero and local energy is not measured, so neither is a
+value signal in this experiment.
 
 ## Open qualification work
 
@@ -105,19 +144,17 @@ observed utilization and a representative task that reaches that condition.
   TCP ports rather than addresses and does not filter UDP or Unix sockets.
   Use this runner for a trusted local benchmark. It is not isolation for a
   hostile agent or third-party workspace.
-- The campaign deadline gates request admission, agent and verification
-  processes, Git operations, and daemon startup. If the deadline prevents patch
-  capture, the runner preserves the worktree and records the error. The deadline
-  starts before live preflight; SSH preflight commands use the remaining time
-  and hashing checks it between chunks. Blocking filesystem operations can
-  still overrun it. A process that does not exit after SIGKILL is reported
-  as incomplete and its worktree is retained; the runner cannot guarantee the
-  process has stopped. A finished run closes its request admission and
-  interrupts an in-flight loopback stream. Relay shutdown has bounded waits;
-  a surviving relay is marked incomplete and may still alter evidence. Final
-  evidence writes lack an independently enforced bound. The stated
-  wall-clock ceiling is therefore not enforced end to end. Qualify those paths
-  and cancellation before live authorization.
+- The request-admission deadline gates new requests, agent and verification
+  subprocesses, Git operations, and daemon startup. It begins before live
+  preflight; SSH preflight commands use its remaining time and hashing checks
+  it between chunks. Blocking filesystem operations can still overrun the
+  window. A process that does not exit after SIGKILL is reported as incomplete
+  and its worktree is retained; the runner cannot guarantee that process has
+  stopped. A finished run closes request admission and interrupts an in-flight
+  loopback stream. Relay shutdown has bounded waits; a surviving relay is
+  marked incomplete and may still alter evidence. Final evidence writes have
+  no independent bound. This is explicitly not a hard wall-clock ceiling and
+  remains a live-authorization blocker.
 - OMP's tested JSON events identify tool starts and ends but do not include
   timestamps or durations. An identical wrapper in all three modes records
   monotonic arrival times while forwarding the original bytes. The resulting
@@ -136,6 +173,12 @@ observed utilization and a representative task that reaches that condition.
   allows at most eight requests, so it cannot simply represent this proposed
   zero-provider-charge campaign. Reconcile and verify the requested
   SpendGuard configuration before requesting live authorization.
+- The matched pilot is a separate authorization target and must be reviewed
+  before any full-campaign authorization. It does not authorize the full plan.
+- Initial provider cache state is unknown and is not reset or independently
+  verified. Report provider-reported cached-token values when present, but
+  latency and token differences remain descriptive; do not attribute them to
+  Context-Watcher or claim cache fairness.
 - Record exact binaries, endpoint identity, cache controls, and the approved
   merged revision for the separately authorized experiment.
 

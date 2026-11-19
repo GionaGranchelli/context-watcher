@@ -2,12 +2,15 @@
 
 Each attempt directory contains a manifest, agent log, final patch, and
 request records. The manifest identifies the run, task, frozen repository
-revision, repetition, mode, terminal status and correctness outcome.
+revision, repetition, mode, terminal status, correctness outcome, and optional
+`campaign_stop_reason`. A correctness failure is distinct from a safety stop.
 The final patch is relative to the seeded baseline when a task has a seed.
 Agent logs and patches can contain workspace data and should remain private
 until reviewed. `wall_seconds` covers attempt setup, agent execution, verification,
 cleanup and evidence summarization up to the final manifest write.
-`agent_seconds` records agent-process elapsed time separately. If a process or
+`agent_seconds` records agent-process elapsed time separately. The campaign
+admission window is not a hard wall-clock limit: blocking filesystem operations,
+surviving processes, and final evidence writes can overrun it. If a process or
 relay does not stop, `workspace_retained` and `evidence_may_change` are true;
 the manifest and captured records are partial and require operator inspection.
 
@@ -32,13 +35,24 @@ durations. The identical observer in all modes records monotonic event arrival
 times in `tool-timing.jsonl`; matched start and end arrivals give observed
 durations. Buffering and observation add uncertainty, and overlapping call
 durations are summed. Missing or mismatched timing remains null. The report includes planned,
-completed, correct and missing counts per arm, plus completion and correctness
-rates using all planned runs as the denominator. Matched comparisons use
+completed, correct, correctness-failure, agent-failure, cancelled, incomplete,
+safety-stop and missing counts per arm, plus completion and correctness rates
+using all planned runs as the denominator. Matched comparisons use
 correct completed pairs for M1 versus M0, M2 versus M0, and M2 versus M1,
 overall and per task; every median has a sample count. These performance
 comparisons exclude failed runs and must be interpreted with success rates.
-The long-task pressure counter uses the proposed 80% input threshold. Cache
-fairness and provider cache hits need direct provider evidence.
+TTFT and response elapsed time are measured at the relay, not reported by the
+provider. Tool duration is an OMP event-arrival interval, not provider timing
+or causal MCP overhead.
+The long-task pressure claim requires at least three correct matched M1/M2
+`board-query` pairs where M1 reaches 80% observed context utilization. Otherwise
+the conclusion is limited to ordinary-length coding. Provider-reported cached
+input is retained when available, but initial cache state is uncontrolled, so
+latency differences are descriptive and not attributable to Context-Watcher.
+The full-plan decision rule requires nine correct M1/M2 pairs, at least three
+per task, sufficient M2 virtual-memory use, no task-level correctness or
+completion regression, and at least 10% lower median input tokens. A pilot is
+operational qualification only and cannot produce GO.
 
 The private `wire` directory retains admitted request bodies and the received
 response stream prefix. Files use mode 0600 and the directory uses mode 0700.

@@ -27,7 +27,7 @@ def claim(document, plan, registry, *, now=None):
     revision = plan.get("benchmark_revision")
     if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("Execution plan must bind a full benchmark commit SHA")
-    for field in ("max_requests", "max_wall_seconds"):
+    for field in ("max_requests", "max_admission_window_seconds"):
         limit = plan.get(field)
         if type(limit) is not int or limit <= 0:
             raise ValueError(f"Missing or invalid {field}")
@@ -60,7 +60,7 @@ def claim(document, plan, registry, *, now=None):
         expires = datetime.fromisoformat(document["expires_at"])
         valid = (
             issued <= now < expires <= issued + timedelta(hours=48)
-            and (expires - now).total_seconds() >= plan["max_wall_seconds"]
+            and (expires - now).total_seconds() >= plan["max_admission_window_seconds"]
         )
     except (TypeError, ValueError, OverflowError):
         valid = False

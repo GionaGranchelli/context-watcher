@@ -63,6 +63,7 @@ class AttemptTest(unittest.TestCase):
             result = attempt({"revision": revision, "run_id": "fixture"},
                              repo, evidence, launch, verify, seconds=5)
             self.assertEqual(result["status"], "failed")
+            self.assertIsNone(result["campaign_stop_reason"])
             self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)
             self.assertIn(b"+edited", (evidence / "final.patch").read_bytes())
             self.assertFalse((evidence / "workspace").exists())
@@ -180,6 +181,7 @@ class AttemptTest(unittest.TestCase):
             self.assertEqual(result["status"], "incomplete")
             self.assertTrue(result["workspace_retained"])
             self.assertTrue(result["evidence_may_change"])
+            self.assertEqual(result["campaign_stop_reason"], "process_did_not_terminate")
             self.assertEqual((evidence / "workspace" / "answer").read_text(), "partial")
             self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)
 
@@ -204,3 +206,4 @@ class AttemptTest(unittest.TestCase):
             self.assertTrue(result["correct"])
             self.assertEqual(result["status"], "incomplete")
             self.assertEqual(result["telemetry_error"], "Tool event timing is incomplete")
+            self.assertEqual(result["campaign_stop_reason"], "incomplete_tool_event_telemetry")

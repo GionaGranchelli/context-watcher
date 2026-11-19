@@ -26,7 +26,7 @@ class Budget:
             raise ValueError("Run limits must be positive integers")
         with self._lock:
             if self._stop_reason is not None or self._clock() >= self._deadline:
-                raise BudgetExceeded(self._stop_reason or "Campaign deadline exceeded")
+                raise BudgetExceeded(self._stop_reason or "Campaign request-admission deadline exceeded")
             if run_id in self._runs:
                 raise ValueError("Run ID already admitted")
             deadline = min(self._deadline, self._clock() + seconds)
@@ -49,7 +49,7 @@ class Budget:
                 raise BudgetExceeded(self._stop_reason)
             remaining = self._deadline - self._clock()
             if remaining <= 0:
-                raise BudgetExceeded("Campaign deadline exceeded")
+                raise BudgetExceeded("Campaign request-admission deadline exceeded")
             return remaining
 
     def check_running(self, run_id):

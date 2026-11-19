@@ -1,6 +1,7 @@
 import unittest
 
 from report import summarize
+from plan import proposal
 from schedule import schedule
 
 
@@ -17,6 +18,7 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(report["arms"]["M0"]["planned"], 2)
         self.assertEqual(report["arms"]["M0"]["missing"], 1)
         self.assertEqual(report["arms"]["M0"]["complete"], 0)
+        self.assertEqual(report["arms"]["M0"]["agent_failures"], 1)
         self.assertEqual(report["arms"]["M0"]["completion_rate"], 0)
         self.assertEqual(report["arms"]["M1"]["completion_rate"], 0.5)
         self.assertEqual(report["arms"]["M1"]["correctness_rate"], 0.5)
@@ -34,14 +36,39 @@ class ReportTest(unittest.TestCase):
             summarize([dict(entry, mode="M2")], plan)
 
     def test_context_pressure_uses_observed_peak_only(self):
-        rows = [row for row in schedule() if row["task"] == "board-query"][:2]
+        rows = [row for row in schedule()
+                if row["task"] == "board-query" and row["repetition"] == 1
+                and row["mode"] in ("M1", "M2")]
         result = summarize([
             dict(rows[0], status="complete", correct=True, peak_observed_context_fraction=0.81),
             dict(rows[1], status="incomplete"),
         ], rows)
         self.assertEqual(result["long_task_context_pressure"], {
-            "threshold_fraction": 0.8, "runs_at_or_above_threshold": 1, "planned_runs": 2,
+            "threshold_fraction": 0.8,
+            "runs_at_or_above_threshold_by_mode": {"M0": 0, "M1": 1, "M2": 0},
+            "planned_runs": 2, "matched_m1_m2_pressure_pairs": 0,
+            "minimum_pairs_for_pressure_claim": 3, "claim_eligible": False,
+            "conclusion_scope": "ordinary_length_coding_only",
         })
+        self.assertEqual(result["campaign_execution"]["unstarted_runs"], 0)
+        self.assertIn("descriptive", result["timing_interpretation"]["provider_cache_state"])
+        self.assertIn("not provider-server timing",
+                      result["timing_interpretation"]["relay_observed_response_timing"])
+
+    def test_context_pressure_claim_requires_three_correct_m1_m2_pairs(self):
+        plan = [row for row in schedule()
+                if row["task"] == "board-query" and row["repetition"] <= 3]
+        results = []
+        for row in plan:
+            results.append(dict(row, status="complete", correct=True,
+                                peak_observed_context_fraction=(
+                                    0.83 if row["mode"] == "M1" else 0.35
+                                )))
+        result = summarize(results, plan)
+        pressure = result["long_task_context_pressure"]
+        self.assertEqual(pressure["matched_m1_m2_pressure_pairs"], 3)
+        self.assertTrue(pressure["claim_eligible"])
+        self.assertEqual(pressure["conclusion_scope"], "context_pressure_evaluated")
 
     def test_each_mode_is_paired_against_baseline_and_by_task(self):
         plan = list(schedule())[:3]
@@ -63,3 +90,37 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(report["comparisons"]["m2_minus_m0"]["matched_correct_pairs"], 0)
         self.assertIsNone(report["comparisons"]["m2_minus_m0"]["metrics"]["wall_seconds"]["median"])
         self.assertEqual(report["comparisons"]["m2_minus_m1"]["matched_correct_pairs"], 1)
+
+    def test_go_requires_matched_token_gain_and_no_task_regression(self):
+        plan = list(proposal()["runs"])
+        results = []
+        for row in plan:
+            result = dict(row, status="complete", correct=True, input_tokens=100,
+                          mcp_count=0, peak_observed_context_fraction=0.85)
+            if row["mode"] == "M2":
+                result.update(input_tokens=80, mcp_count=3,
+                              peak_observed_context_fraction=0.35)
+            results.append(result)
+        report = summarize(results, plan, campaign_type="full")
+        self.assertEqual(report["recommendation"]["label"], "GO")
+        self.assertEqual(report["recommendation"]["scope"], "long-context value evaluated")
+
+    def test_pilot_never_claims_product_value(self):
+        plan = list(proposal("pilot")["runs"])
+        results = [dict(row, status="complete", correct=True, input_tokens=10, mcp_count=1)
+                   for row in plan]
+        report = summarize(results, plan, campaign_type="pilot")
+        self.assertEqual(report["recommendation"]["label"], "ITERATE")
+
+    def test_uncontrolled_cache_latency_gain_cannot_produce_go(self):
+        plan = list(proposal()["runs"])
+        results = []
+        for row in plan:
+            result = dict(row, status="complete", correct=True, input_tokens=100,
+                          wall_seconds=10, mcp_count=0)
+            if row["mode"] == "M2":
+                result.update(wall_seconds=5, mcp_count=3)
+            results.append(result)
+        report = summarize(results, plan, campaign_type="full")
+        self.assertEqual(report["recommendation"]["label"], "NO-GO")
+        self.assertIn("descriptive", report["timing_interpretation"]["provider_cache_state"])

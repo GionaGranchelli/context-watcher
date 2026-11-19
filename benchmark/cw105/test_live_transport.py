@@ -63,7 +63,7 @@ class LiveTransportTest(unittest.TestCase):
         plan = {
             "status": "ready_for_authorization", "benchmark_revision": "a" * 40,
             "provider": PROVIDER, "endpoint": ENDPOINT, "model": MODEL,
-            "max_requests": 1, "max_wall_seconds": 60,
+            "max_requests": 1, "max_admission_window_seconds": 60,
             "provider_cost_cap_nanodollars": 0,
             "local_resource_cap": {"gpu_watts": 707, "junction_c": 80,
                                    "sample_max_age_seconds": 5},

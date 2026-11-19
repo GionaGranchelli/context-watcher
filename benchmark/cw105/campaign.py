@@ -2,6 +2,7 @@
 import json
 import socket
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 import threading
 from contextlib import contextmanager
@@ -14,6 +15,14 @@ from daemon import daemon
 from routing import route
 from plan import MCP_CALLS_PER_RUN
 from process import ProcessStillRunning
+
+
+@dataclass(frozen=True)
+class PlanExecution:
+    results: tuple[dict, ...]
+    stop_reason: str | None
+    stopped_run_id: str | None
+    unstarted_runs: int
 
 
 @contextmanager
@@ -79,16 +88,24 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
                     }
                     profile.write_text(json.dumps(config))
                 if selected.virtual_memory:
-                    enable_memory(argv, state, binary=cw, daemon_state=root / "cw",
-                                  api_port=api_port, session_id=run_id)
+                    mcp_config = enable_memory(
+                        argv, state, binary=cw, daemon_state=root / "cw",
+                        api_port=api_port, session_id=run_id, workspace=worktree,
+                    )
+                else:
+                    mcp_config = None
                 wrapper = Path(__file__).with_name("network_guard.py").resolve()
                 observer = Path(__file__).with_name("observe_agent.py").resolve()
                 observer_env = dict(env)
                 if mode == "M2":
                     observer_env["CW105_MCP_CALL_LIMIT"] = str(MCP_CALLS_PER_RUN)
-                yield [sys.executable, str(wrapper),
-                       str(capture if mode == "M0" else proxy_port),
-                       sys.executable, str(observer), str(root / "tool-timing.jsonl"), *argv], observer_env
+                try:
+                    yield [sys.executable, str(wrapper),
+                           str(capture if mode == "M0" else proxy_port),
+                           sys.executable, str(observer), str(root / "tool-timing.jsonl"), *argv], observer_env
+                finally:
+                    if mcp_config is not None:
+                        mcp_config.unlink(missing_ok=True)
 
     def supervise():
         budget.check_running(run_id)
@@ -105,17 +122,24 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
 
 
 def execute_plan(plan, budget, execute):
-    """Run serially and leave later rows unstarted after a guard breach."""
+    """Continue after outcome failures; stop only when execution safety is uncertain."""
+    plan = list(plan)
     results = []
-    for entry in plan:
+    for index, entry in enumerate(plan):
         try:
             budget.start(entry["run_id"], request_limit=entry["request_cap"],
                          seconds=entry["budget_seconds"])
-        except BudgetExceeded:
-            break
-        result = execute(entry)
+        except BudgetExceeded as error:
+            return PlanExecution(tuple(results), str(error), entry["run_id"], len(plan) - index)
+        try:
+            result = execute(entry)
+        except Exception as error:
+            reason = f"attempt_execution_exception:{type(error).__name__}"
+            budget.stop(reason)
+            return PlanExecution(tuple(results), reason, entry["run_id"], len(plan) - index - 1)
         results.append(result)
-        if result["status"] != "complete" or result.get("correct") is False:
-            budget.stop(f"Attempt did not pass: {entry['run_id']}")
-            break
-    return results
+        if result.get("campaign_stop_reason"):
+            reason = result["campaign_stop_reason"]
+            budget.stop(reason)
+            return PlanExecution(tuple(results), reason, entry["run_id"], len(plan) - index - 1)
+    return PlanExecution(tuple(results), None, None, 0)

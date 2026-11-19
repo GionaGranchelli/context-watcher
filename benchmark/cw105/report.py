@@ -5,6 +5,7 @@ import math
 from pathlib import Path
 from statistics import median
 
+from plan import proposal
 from schedule import MODES, schedule
 
 METRICS = (
@@ -23,7 +24,7 @@ def measured(result, metric):
     return value
 
 
-def summarize(results, plan=None):
+def summarize(results, plan=None, *, execution=None, campaign_type=None):
     plan = list(schedule() if plan is None else plan)
     by_id = {entry["run_id"]: entry for entry in plan}
     recorded = {}
@@ -36,6 +37,10 @@ def summarize(results, plan=None):
         if result.get("status") not in ("complete", "failed", "cancelled", "incomplete"):
             raise ValueError(f"Invalid run status for {key}")
         recorded[key] = result
+    if campaign_type is None:
+        campaign_types = {result.get("campaign_type") for result in results
+                          if result.get("campaign_type") is not None}
+        campaign_type = next(iter(campaign_types)) if len(campaign_types) == 1 else "full"
 
     groups = {}
     pairs = {}
@@ -58,6 +63,14 @@ def summarize(results, plan=None):
         arms[mode] = {
             "planned": len(group), "missing": sum(not result for result in group),
             "complete": completed, "correct": len(good),
+            "correctness_failures": sum(
+                result.get("status") == "complete" and result.get("correct") is False
+                for result in group
+            ),
+            "agent_failures": sum(result.get("status") == "failed" for result in group),
+            "cancelled": sum(result.get("status") == "cancelled" for result in group),
+            "incomplete": sum(result.get("status") == "incomplete" for result in group),
+            "safety_stops": sum(bool(result.get("campaign_stop_reason")) for result in group),
             "completion_rate": completed / len(group) if group else None,
             "correctness_rate": len(good) / len(group) if group else None,
             "metrics": {
@@ -68,6 +81,7 @@ def summarize(results, plan=None):
 
     def compare(reference, candidate, task=None):
         deltas = {metric: [] for metric in METRICS}
+        token_reductions = []
         matched = 0
         for (task_id, _), group in pairs.items():
             if task is not None and task_id != task:
@@ -79,7 +93,13 @@ def summarize(results, plan=None):
                     left, right = measured(before, metric), measured(after, metric)
                     if left is not None and right is not None:
                         deltas[metric].append(right - left)
+                if candidate == "M2" and reference == "M1":
+                    left = measured(before, "input_tokens")
+                    right = measured(after, "input_tokens")
+                    if left is not None and right is not None and left > 0:
+                        token_reductions.append((left - right) / left)
         return {"matched_correct_pairs": matched,
+                "input_token_reduction_fraction": stats(token_reductions),
                 "metrics": {name: stats(values) for name, values in deltas.items()}}
 
     comparisons = {
@@ -94,15 +114,112 @@ def summarize(results, plan=None):
     } for task in sorted({entry["task"] for entry in plan})}
     long_runs = [recorded.get(row["run_id"], {}) for row in plan
                  if row["task"] == "board-query"]
-    pressure_observed = sum(
-        1 for result in long_runs
-        if (value := measured(result, "peak_observed_context_fraction")) is not None
-        and value >= 0.8
+    threshold = 0.8
+    pressure_by_mode = {
+        mode: sum(
+            result.get("mode") == mode
+            and (value := measured(result, "peak_observed_context_fraction")) is not None
+            and value >= threshold
+            for result in long_runs
+        ) for mode in MODES
+    }
+    pressure_pairs = sum(
+        accepted(group.get("M1", {})) and accepted(group.get("M2", {}))
+        and (value := measured(group["M1"], "peak_observed_context_fraction")) is not None
+        and value >= threshold
+        for (task_id, _), group in pairs.items() if task_id == "board-query"
     )
+    execution_report = {
+        "stop_reason": execution.stop_reason,
+        "stopped_run_id": execution.stopped_run_id,
+        "unstarted_runs": execution.unstarted_runs,
+    } if execution is not None else {
+        "stop_reason": next((result["campaign_stop_reason"] for result in results
+                              if result.get("campaign_stop_reason")), None),
+        "stopped_run_id": next((result["run_id"] for result in results
+                                 if result.get("campaign_stop_reason")), None),
+        "unstarted_runs": max(0, len(plan) - len(results)),
+    }
+    task_outcomes = {}
+    for task_id in sorted({entry["task"] for entry in plan}):
+        task_outcomes[task_id] = {}
+        for mode in MODES:
+            group = [recorded.get(row["run_id"], {}) for row in plan
+                     if row["task"] == task_id and row["mode"] == mode]
+            task_outcomes[task_id][mode] = {
+                "planned": len(group),
+                "complete": sum(result.get("status") == "complete" for result in group),
+                "correct": sum(accepted(result) for result in group),
+                "m2_virtual_memory_runs": sum(
+                    result.get("status") == "complete"
+                    and (value := measured(result, "mcp_count")) is not None and value > 0
+                    for result in group
+                ) if mode == "M2" else None,
+            }
+
+    decision_rule = proposal().get("value_decision_rule")
+    recommendation = {"label": "ITERATE", "reason": "Insufficient qualified full-campaign evidence"}
+    if campaign_type != "full":
+        recommendation["reason"] = "Pilot or offline rehearsal is operational qualification, not product-value evidence"
+    elif (execution_report["stop_reason"] is not None or execution_report["unstarted_runs"]
+          or len(results) < len(plan)):
+        recommendation["reason"] = "Safety stop or incomplete schedule leaves the comparison incomplete"
+    else:
+        pair_counts = [by_task[task]["m2_minus_m1"]["matched_correct_pairs"]
+                       for task in by_task]
+        token_counts = [by_task[task]["m2_minus_m1"]["input_token_reduction_fraction"]["count"]
+                        for task in by_task]
+        if (sum(pair_counts) < decision_rule["minimum_correct_m1_m2_pairs"]
+                or any(count < decision_rule["minimum_pairs_per_task"] for count in pair_counts)
+                or any(count < decision_rule["minimum_pairs_per_task"] for count in token_counts)):
+            recommendation["reason"] = "Too few correct matched M1/M2 pairs"
+        elif any(
+            task_outcomes[task]["M2"][field] < task_outcomes[task]["M1"][field]
+            for task in task_outcomes for field in ("complete", "correct")
+        ):
+            recommendation["reason"] = "M2 has a task-level completion or correctness regression"
+        elif any(
+            task_outcomes[task]["M2"]["m2_virtual_memory_runs"]
+            < decision_rule["minimum_m2_virtual_memory_runs_per_task"]
+            for task in task_outcomes
+        ):
+            recommendation["reason"] = "M2 did not use virtual-memory tools enough in every task family"
+        else:
+            reduction = comparisons["m2_minus_m1"]["input_token_reduction_fraction"]
+            target = decision_rule["minimum_median_input_token_reduction_fraction"]
+            if reduction["count"] < decision_rule["minimum_correct_m1_m2_pairs"]:
+                recommendation["reason"] = "Too few matched provider input-token measurements"
+            elif reduction["median"] is not None and reduction["median"] >= target:
+                recommendation = {
+                    "label": "GO",
+                    "reason": "M2 met the preregistered input-token target without task-level correctness or completion regression",
+                    "scope": "long-context value evaluated" if pressure_pairs >= 3
+                             else "ordinary-length coding only",
+                }
+            else:
+                recommendation = {
+                    "label": "NO-GO",
+                    "reason": "A complete qualified campaign missed the preregistered input-token target",
+                }
     return {"long_task_context_pressure": {
-                "threshold_fraction": 0.8,
-                "runs_at_or_above_threshold": pressure_observed,
+                "threshold_fraction": threshold,
+                "runs_at_or_above_threshold_by_mode": pressure_by_mode,
                 "planned_runs": len(long_runs),
+                "matched_m1_m2_pressure_pairs": pressure_pairs,
+                "minimum_pairs_for_pressure_claim": 3,
+                "claim_eligible": pressure_pairs >= 3,
+                "conclusion_scope": "context_pressure_evaluated" if pressure_pairs >= 3
+                                    else "ordinary_length_coding_only",
+            },
+            "campaign_execution": execution_report,
+            "campaign_type": campaign_type,
+            "value_decision_rule": decision_rule,
+            "recommendation": recommendation,
+            "task_outcomes": task_outcomes,
+            "timing_interpretation": {
+                "relay_observed_response_timing": "Relay-measured TTFT and elapsed time, not provider-server timing",
+                "tool_durations": "OMP event arrival intervals; subject to buffering and wrapper overhead",
+                "provider_cache_state": "Unknown unless directly observed; latency differences are descriptive",
             },
             "arms": arms, "comparisons": comparisons, "comparisons_by_task": by_task}
 

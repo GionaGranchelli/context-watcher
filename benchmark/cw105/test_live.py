@@ -33,10 +33,10 @@ class LiveEntryTest(unittest.TestCase):
         plan = dict(proposal(), status="ready_for_authorization",
                     binaries_sha256={"omp": "fixture", "cw": "fixture"})
         budget = Budget(campaign_limit=plan["max_requests"],
-                        seconds=plan["max_wall_seconds"], clock=lambda: now[0])
+                        seconds=plan["max_admission_window_seconds"], clock=lambda: now[0])
 
         def inventory(*_, **_kwargs):
-            now[0] = plan["max_wall_seconds"]
+            now[0] = plan["max_admission_window_seconds"]
             return {}
 
         with tempfile.TemporaryDirectory() as directory, \
@@ -60,7 +60,14 @@ class LiveEntryTest(unittest.TestCase):
         transport.assert_not_called()
         sample.assert_not_called()
 
-    def test_guarded_scored_path_stops_on_unchanged_checkout(self):
+    def test_pilot_cannot_be_expanded_after_plan_creation(self):
+        plan = dict(proposal("pilot"), status="ready_for_authorization")
+        plan["runs"] = proposal()["runs"]
+        with self.assertRaisesRegex(ValueError, "frozen runs"):
+            run_live(plan, {}, checkout=None, merged_revision=None,
+                     repository=None, output=None, omp=None, cw=None)
+
+    def test_guarded_scored_path_continues_after_incorrect_answer(self):
         import json
         import os
         import tempfile
@@ -74,18 +81,13 @@ class LiveEntryTest(unittest.TestCase):
         if not all(os.environ.get(key) for key in ("CW105_KANBAN", "CW105_OMP", "CW105_CW")):
             self.skipTest("set CW105_KANBAN, CW105_OMP and CW105_CW")
         pins = binary_identities(Path(os.environ["CW105_OMP"]), Path(os.environ["CW105_CW"]))
-        plan = dict(proposal(), binaries_sha256=pins, status="ready_for_authorization",
-                    provider_cost_cap_nanodollars=0,
-                    pricing={"evidence": "synthetic loopback",
-                             "input_nanodollars_per_token": 0,
-                             "output_nanodollars_per_token": 0},
-                    local_resource_cap={"gpu_watts": 100, "junction_c": 80,
-                                        "sample_max_age_seconds": 5})
+        plan = dict(proposal("pilot"), binaries_sha256=pins, status="ready_for_authorization")
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "evidence"
             with serving(HTTPServer(("127.0.0.1", 0), Mock)) as port:
                 connect = lambda timeout: HTTPConnection("127.0.0.1", port, timeout=timeout)
-                with patch("live.check_loaded_model", return_value={}), patch(
+                with patch("live.score", return_value=False) as score, patch(
+                    "live.check_loaded_model", return_value={}), patch(
                     "live.read_sample", return_value=([], 0)
                 ), patch(
                     "live.authorize_transport", return_value=connect
@@ -103,16 +105,20 @@ class LiveEntryTest(unittest.TestCase):
             self.assertGreaterEqual(len(readings), 3)
             self.assertEqual(json.loads(readings[0])["watts"], 0)
             self.assertIsNone(smoke["correct"])
-            manifests = list(output.glob("health-contract-*/manifest.json"))
-            self.assertEqual(len(manifests), 1)
+            manifests = list(output.glob("board-query-1-*/manifest.json"))
+            self.assertEqual(len(manifests), 3)
+            self.assertEqual(score.call_count, 3)
             result = json.loads(manifests[0].read_text())
             self.assertTrue(result["telemetry_complete"], result)
             self.assertEqual(result["agent"]["returncode"], 0)
             self.assertEqual(result["status"], "complete")
             self.assertIs(result["correct"], False)
-            self.assertIn("404", (manifests[0].parent / "api-oracle.log").read_text())
             report = json.loads((output / "report.json").read_text())
-            self.assertEqual(report["arms"]["M1"]["missing"], 18)
+            self.assertEqual(report["campaign_execution"]["unstarted_runs"], 0)
+            self.assertEqual(report["arms"]["M0"]["missing"], 0)
+            self.assertEqual(report["arms"]["M1"]["missing"], 0)
+            self.assertEqual(report["arms"]["M2"]["missing"], 0)
+            self.assertEqual(report["recommendation"]["label"], "ITERATE")
 
     @patch("live.authorize_transport")
     @patch("live.binary_identities", return_value={"omp": "actual", "cw": "actual"})

@@ -1,6 +1,7 @@
 """Build an isolated offline OMP launch configuration."""
 import json
 import os
+from pathlib import Path
 
 from routing import route
 
@@ -40,14 +41,21 @@ def offline_agent(binary, state, port, prompt, *, mode="M0", proxy_port=None, wo
     ], env
 
 
-def enable_memory(argv, state, *, binary, daemon_state, api_port, session_id):
+def enable_memory(argv, state, *, binary, daemon_state, api_port, session_id, workspace):
     overlay = state / "mcp-settings.yml"
-    overlay.write_text("tools:\n  xdev: false\nmcp:\n  startupTimeoutMs: 5000\n")
+    overlay.write_text(
+        "tools:\n  xdev: false\nmcp:\n"
+        "  enableProjectConfig: true\n  startupTimeoutMs: 5000\n"
+    )
     config = {"mcpServers": {"cw": {
         "command": str(binary),
         "args": ["--db", str(daemon_state / "cw.db"), "mcp", "--daemon-url",
                  f"http://127.0.0.1:{api_port}"],
         "env": {"CW_SESSION_ID": session_id, "HOME": str(daemon_state)},
     }}}
-    (state / "mcp.json").write_text(json.dumps(config), encoding="utf-8")
+    path = Path(workspace) / "mcp.json"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as output:
+        json.dump(config, output)
     argv[1:1] = ["--config", str(overlay)]
+    return path

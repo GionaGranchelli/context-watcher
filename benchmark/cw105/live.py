@@ -14,13 +14,13 @@ from pathlib import Path
 
 from agent import CONTEXT_WINDOW, MAX_OUTPUT_TOKENS
 from budget import Budget
-from campaign import execute_plan, run_attempt
+from campaign import PlanExecution, execute_plan, run_attempt
 from live_transport import authorize_transport
 from machinist import check_loaded_model, read_sample
 from plan import MODEL, proposal
 from report import summarize
 from request_policy import check_request
-from schedule import REVISION, schedule
+from schedule import REVISION
 from spend import Spend
 
 
@@ -52,7 +52,7 @@ def score(worktree, evidence, task, budget, resource_guard):
                  cwd=worktree, env=os.environ, log=evidence / "verifier.log",
                  timeout=budget.campaign_remaining(), guard=guard)
     if result.timed_out or result.cancelled_reason:
-        reason = result.cancelled_reason or "Campaign deadline exceeded during verification"
+        reason = result.cancelled_reason or "Request-admission deadline exceeded during verification"
         budget.stop(reason)
         raise RuntimeError(f"Verification cancelled: {reason}")
     if result.returncode not in (0, 1):
@@ -63,12 +63,14 @@ def score(worktree, evidence, task, budget, resource_guard):
 def run_live(plan, document, *, checkout, merged_revision, repository, output, omp, cw):
     if plan.get("status") != "ready_for_authorization":
         raise ValueError("Live execution plan has not passed readiness review")
-    frozen = proposal()
-    for field in ("runs", "debug_seed_sha256", "max_requests", "max_wall_seconds", "concurrency",
-                  "smoke_max_requests", "smoke_max_seconds"):
-        if plan.get(field) != frozen[field]:
+    frozen = proposal(plan.get("campaign_type"))
+    for field, expected in frozen.items():
+        if field in ("benchmark_revision", "binaries_sha256", "status"):
+            continue
+        if plan.get(field) != expected:
             raise ValueError(f"Execution envelope differs from the frozen {field}")
-    budget = Budget(campaign_limit=plan["max_requests"], seconds=plan["max_wall_seconds"])
+    budget = Budget(campaign_limit=plan["max_requests"],
+                    seconds=plan["max_admission_window_seconds"])
     if plan.get("binaries_sha256") != binary_identities(omp, cw, remaining=budget.campaign_remaining):
         raise ValueError("Execution binaries do not match the approved hashes")
     if output.exists():
@@ -113,7 +115,7 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
 
     record_sample(initial_sample)
     policy = partial(check_request, model=MODEL, max_output_tokens=MAX_OUTPUT_TOKENS)
-    metadata_by_id = {row["run_id"]: row for row in schedule()}
+    metadata_by_id = {row["run_id"]: row for row in plan["runs"]}
 
     def execute(row):
         run_id = row["run_id"]
@@ -134,12 +136,18 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
         spend=spend, guard=guard, request_policy=policy, connect=connect,
     )
     if smoke["status"] != "complete" or not smoke.get("telemetry_complete"):
-        budget.stop("Provider smoke did not capture complete usage")
-        results = []
+        stop_reason = smoke.get("campaign_stop_reason") or "provider_smoke_failed_or_incomplete"
+        budget.stop(stop_reason)
+        execution = PlanExecution((), stop_reason, smoke_entry["run_id"], len(plan["runs"]))
     else:
-        results = execute_plan(plan["runs"], budget, execute)
-    (output / "report.json").write_text(json.dumps(summarize(results), indent=2) + "\n")
-    return len(results) == len(plan["runs"]) and all(r["correct"] is True for r in results)
+        execution = execute_plan(plan["runs"], budget, execute)
+    (output / "report.json").write_text(json.dumps(
+        summarize(execution.results, plan["runs"], execution=execution,
+                  campaign_type=plan["campaign_type"]), indent=2,
+    ) + "\n")
+    return (len(execution.results) == len(plan["runs"])
+            and all(r["status"] == "complete" and r["correct"] is True
+                    for r in execution.results))
 
 
 if __name__ == "__main__":

@@ -46,10 +46,12 @@ def rehearse(repository, output, omp, cw):
                 spend=spend, request_policy=policy,
             )
 
-        results = execute_plan(execution, budget, execute)
-    report = summarize(results, plan)
+        result = execute_plan(execution, budget, execute)
+    report = summarize(result.results, plan, execution=result)
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
-    return len(results) == len(plan) and all(r["status"] == "complete" for r in results)
+    return len(result.results) == len(plan) and all(
+        r["status"] == "complete" for r in result.results
+    )
 
 
 if __name__ == "__main__":

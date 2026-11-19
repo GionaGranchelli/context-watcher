@@ -47,16 +47,15 @@ class OmpSmokeTest(unittest.TestCase):
                 if mode == "M2" and len(requests) <= len(steps):
                     tool, arguments = steps[len(requests) - 1]
                     arguments["session_id"] = "cw105-smoke"
-                    name = next(
-                        t["function"]["name"] for t in requests[0]["tools"]
-                        if t["function"]["name"].endswith(tool)
-                    )
-                    delta = {"tool_calls": [{"index": 0, "id": f"call_{tool}",
-                                             "type": "function", "function": {
-                        "name": name,
-                        "arguments": json.dumps(arguments),
-                    }}]}
-                    finish = "tool_calls"
+                    name = next((t["function"]["name"] for t in requests[0].get("tools", [])
+                                 if t["function"]["name"].endswith(tool)), None)
+                    if name is not None:
+                        delta = {"tool_calls": [{"index": 0, "id": f"call_{tool}",
+                                                 "type": "function", "function": {
+                            "name": name,
+                            "arguments": json.dumps(arguments),
+                        }}]}
+                        finish = "tool_calls"
                 for chunk in (
                     {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
                     {"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]},
@@ -71,9 +70,10 @@ class OmpSmokeTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "fixture.py").write_text("def fixture():\n    return 'mounted-only-marker'\n")
-            request_count = 5 if mode == "M2" else 1
-            budget = Budget(campaign_limit=request_count, seconds=30)
-            budget.start("smoke", request_limit=request_count, seconds=30)
+            request_count = 4 if mode == "M2" else 1
+            expected_requests = request_count + (1 if mode == "M2" else 0)
+            budget = Budget(campaign_limit=expected_requests, seconds=30)
+            budget.start("smoke", request_limit=expected_requests, seconds=30)
             with serving(HTTPServer(("127.0.0.1", 0), Mock)) as upstream:
                 with serving(relay(upstream, budget, "smoke", metrics.append)) as port:
                     with socket.socket() as api, socket.socket() as proxy:
@@ -99,7 +99,7 @@ class OmpSmokeTest(unittest.TestCase):
                             enable_memory(
                                 argv, root / "state", binary=os.environ["CW105_CW"],
                                 daemon_state=root / "cw", api_port=api_port,
-                                session_id="cw105-smoke",
+                                session_id="cw105-smoke", workspace=root,
                             )
                         observer = Path(__file__).with_name("observe_agent.py")
                         argv = [sys.executable, str(observer), str(root / "tool-timing.jsonl"), *argv]
@@ -120,7 +120,11 @@ class OmpSmokeTest(unittest.TestCase):
                             second = run(argv, cwd=root, env=env,
                                          log=root / "other.log", timeout=10)
                             self.assertEqual(second.returncode, 0, (root / "other.log").read_text()[-3000:])
+                            (root / "mcp.json").unlink(missing_ok=True)
             output = (root / "omp.log").read_text()
+            if mode == "M2":
+                names = {t["function"]["name"] for t in requests[0].get("tools", [])}
+                self.assertTrue(any("cw_mount" in name for name in names), (names, output[-3000:]))
             parsed = tool_metrics(root / "omp.log", root / "tool-timing.jsonl")
             self.assertEqual(parsed["mcp_count"], 3 if mode == "M2" else 0, parsed)
             self.assertEqual(parsed["tool_timing_source"], "observer_monotonic")
@@ -128,8 +132,8 @@ class OmpSmokeTest(unittest.TestCase):
                 self.assertGreaterEqual(parsed["mcp_seconds"], 0)
             self.assertEqual(result.returncode, 0, output[-3000:])
             self.assertIn("cw105-mock-pass", output)
-        self.assertEqual([request["model"] for request in requests], ["qwen3.8-27b-ud"] * request_count)
-        self.assertEqual(len(metrics), request_count)
+        self.assertEqual([request["model"] for request in requests], ["qwen3.8-27b-ud"] * expected_requests)
+        self.assertEqual(len(metrics), expected_requests)
         self.assertTrue(metrics[0]["complete"])
         self.assertEqual(metrics[0]["usage"]["input_tokens"], 12)
         self.assertEqual("<workspace_symbol_map>" in json.dumps(requests), mode == "M2")

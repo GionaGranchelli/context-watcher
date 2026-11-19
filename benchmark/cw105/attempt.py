@@ -18,7 +18,7 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
     root.mkdir(mode=0o700)
     worktree = root / "workspace"
     revision = entry["revision"]
-    result = dict(entry, status="incomplete", correct=None)
+    result = dict(entry, status="incomplete", correct=None, campaign_stop_reason=None)
     checked_out = False
     preserve_workspace = False
     baseline = None
@@ -38,6 +38,7 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
         result.update(agent=asdict(agent), agent_seconds=agent.elapsed_seconds)
         if agent.timed_out or agent.cancelled_reason:
             result["status"] = "cancelled"
+            result["campaign_stop_reason"] = agent.cancelled_reason or "attempt_time_limit_exceeded"
         elif agent.returncode:
             result["status"] = "failed"
         else:
@@ -46,9 +47,11 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
     except ProcessStillRunning as error:
         preserve_workspace = True
         result.update(status="incomplete", error=str(error), workspace_retained=True,
-                      evidence_may_change=True)
+                      evidence_may_change=True,
+                      campaign_stop_reason="process_did_not_terminate")
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
-        result.update(status="incomplete", error=str(error))
+        result.update(status="incomplete", error=str(error),
+                      campaign_stop_reason="attempt_infrastructure_failure")
     finally:
         if checked_out and not preserve_workspace:
             try:
@@ -56,7 +59,8 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
                     patch.write_bytes(diff(worktree, baseline or revision, remaining=remaining))
                 cleanup(repository, worktree, remaining=remaining)
             except (OSError, RuntimeError, subprocess.SubprocessError) as error:
-                result.update(status="incomplete", cleanup_error=str(error))
+                result.update(status="incomplete", cleanup_error=str(error),
+                              campaign_stop_reason="workspace_cleanup_failure")
         if records is not None and (root / "agent.log").exists():
             result.update(tool_metrics(root / "agent.log", root / "tool-timing.jsonl"))
         if records is not None:
@@ -64,10 +68,14 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
                 for record in records:
                     output.write(json.dumps(record) + "\n")
             result.update(request_metrics(records, context_window=context_window))
-            if result["status"] == "complete":
-                if not result["telemetry_complete"]:
+            if not result["telemetry_complete"]:
+                result["campaign_stop_reason"] = "incomplete_provider_telemetry"
+                if result["status"] == "complete":
                     result.update(status="incomplete", telemetry_error="Provider usage is incomplete")
-                elif not result.get("tool_events_complete") or result.get("tool_timing_source") != "observer_monotonic":
+            elif (not result.get("tool_events_complete")
+                  or result.get("tool_timing_source") != "observer_monotonic"):
+                result["campaign_stop_reason"] = "incomplete_tool_event_telemetry"
+                if result["status"] == "complete":
                     result.update(status="incomplete", telemetry_error="Tool event timing is incomplete")
         result["wall_seconds"] = time.monotonic() - started
         temporary = root / "manifest.tmp"

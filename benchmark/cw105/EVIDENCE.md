@@ -7,7 +7,9 @@ The final patch is relative to the seeded baseline when a task has a seed.
 Agent logs and patches can contain workspace data and should remain private
 until reviewed. `wall_seconds` covers attempt setup, agent execution, verification,
 cleanup and evidence summarization up to the final manifest write.
-`agent_seconds` records agent-process elapsed time separately.
+`agent_seconds` records agent-process elapsed time separately. If a process or
+relay does not stop, `workspace_retained` and `evidence_may_change` are true;
+the manifest and captured records are partial and require operator inspection.
 
 Each admitted request record contains request and response byte counts and
 SHA-256 digests, time to first output, elapsed time, completion state,

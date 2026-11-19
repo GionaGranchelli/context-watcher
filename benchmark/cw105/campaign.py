@@ -12,20 +12,37 @@ from budget import BudgetExceeded
 from capture import relay
 from daemon import daemon
 from routing import route
+from process import ProcessStillRunning
 
 
 @contextmanager
-def serving(server, *, on_exit=None):
+def serving(server, *, on_exit=None, shutdown_timeout=2):
     with server:
-        thread = threading.Thread(target=server.serve_forever, args=(0.01,))
+        thread = threading.Thread(target=server.serve_forever, args=(0.01,), daemon=True)
         thread.start()
         try:
             yield server.server_port
         finally:
             if on_exit is not None:
                 on_exit()
-            server.shutdown()
-            thread.join()
+            shutdown_errors = []
+
+            def shutdown():
+                try:
+                    server.shutdown()
+                except Exception as error:
+                    shutdown_errors.append(error)
+
+            stopper = threading.Thread(target=shutdown, daemon=True)
+            stopper.start()
+            stopper.join(shutdown_timeout)
+            if stopper.is_alive():
+                raise ProcessStillRunning("Relay shutdown did not finish")
+            if shutdown_errors:
+                raise ProcessStillRunning(f"Relay shutdown failed: {shutdown_errors[0]}")
+            thread.join(shutdown_timeout)
+            if thread.is_alive():
+                raise ProcessStillRunning("Relay serving thread did not exit")
 
 
 def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,

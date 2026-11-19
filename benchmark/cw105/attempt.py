@@ -45,7 +45,8 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
             result.update(correct=verify(worktree, root), status="complete")
     except ProcessStillRunning as error:
         preserve_workspace = True
-        result.update(status="incomplete", error=str(error), workspace_retained=True)
+        result.update(status="incomplete", error=str(error), workspace_retained=True,
+                      evidence_may_change=True)
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         result.update(status="incomplete", error=str(error))
     finally:

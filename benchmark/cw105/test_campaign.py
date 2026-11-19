@@ -1,7 +1,7 @@
 import unittest
 
 from budget import Budget, BudgetExceeded
-from campaign import execute_plan
+from campaign import execute_plan, serving
 from report import summarize
 from schedule import schedule
 
@@ -35,3 +35,30 @@ class CampaignTest(unittest.TestCase):
             [{"run_id": "expired", "request_cap": 1, "budget_seconds": 5}],
             budget, lambda _: self.fail("expired attempt launched"),
         ), [])
+
+    def test_stalled_relay_shutdown_is_reported_and_bounded(self):
+        import threading
+        from process import ProcessStillRunning
+
+        release = threading.Event()
+
+        class StalledServer:
+            server_port = 1234
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                release.set()
+
+            def serve_forever(self, _interval):
+                release.wait(2)
+
+            def shutdown(self):
+                release.wait(2)
+
+        closed = []
+        with self.assertRaisesRegex(ProcessStillRunning, "Relay shutdown"):
+            with serving(StalledServer(), on_exit=lambda: closed.append(True), shutdown_timeout=0.05):
+                pass
+        self.assertEqual(closed, [True])

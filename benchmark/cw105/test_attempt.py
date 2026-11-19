@@ -179,5 +179,6 @@ class AttemptTest(unittest.TestCase):
                                  launch, lambda *_: self.fail("must not score"), seconds=5)
             self.assertEqual(result["status"], "incomplete")
             self.assertTrue(result["workspace_retained"])
+            self.assertTrue(result["evidence_may_change"])
             self.assertEqual((evidence / "workspace" / "answer").read_text(), "partial")
             self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)

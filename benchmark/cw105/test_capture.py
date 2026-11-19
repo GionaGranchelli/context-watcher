@@ -120,3 +120,57 @@ class CaptureTest(unittest.TestCase):
                 conn.request("POST", PATH, b"{}")
                 self.assertEqual(conn.getresponse().status, 429)
         self.assertEqual(events[0]["error"], "Unexpected model")
+
+    def test_interrupted_stream_preserves_prefix_and_stops_campaign(self):
+        import tempfile
+        from pathlib import Path
+
+        evidence = []
+        partial = b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+
+        class Interrupted(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(partial)
+
+            def log_message(self, *_args):
+                pass
+
+        budget = Budget(campaign_limit=2, seconds=10)
+        budget.start("run", request_limit=2, seconds=10)
+        with tempfile.TemporaryDirectory() as directory:
+            wire = Path(directory)
+            with serving(HTTPServer(("127.0.0.1", 0), Interrupted)) as upstream:
+                with serving(relay(upstream, budget, "run", evidence.append, wire_dir=wire)) as port:
+                    connection = HTTPConnection("127.0.0.1", port, timeout=3)
+                    connection.request("POST", PATH, b"{}")
+                    response = connection.getresponse()
+                    self.assertEqual(response.read(), partial)
+                    connection.close()
+            self.assertEqual((wire / evidence[0]["response_file"]).read_bytes(), partial)
+            self.assertFalse(evidence[0]["complete"])
+            with self.assertRaises(BudgetExceeded):
+                budget.admit("run")
+
+    def test_capture_creation_failure_prevents_forwarding(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        evidence = []
+        budget = Budget(campaign_limit=1, seconds=10)
+        budget.start("run", request_limit=1, seconds=10)
+        with TemporaryDirectory() as directory:
+            with serving(relay(1, budget, "run", evidence.append,
+                               wire_dir=Path(directory) / "missing")) as port:
+                connection = HTTPConnection("127.0.0.1", port, timeout=3)
+                connection.request("POST", PATH, b"{}")
+                response = connection.getresponse()
+                self.assertEqual(response.status, 502)
+                response.read()
+                connection.close()
+        self.assertFalse(evidence[0]["complete"])
+        with self.assertRaises(BudgetExceeded):
+            budget.admit("run")

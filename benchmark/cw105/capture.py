@@ -44,7 +44,11 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                           "usage": None, "ttft_seconds": None, "error": str(exc)})
                 self.send_error(429)
                 return
-            except (ValueError, OSError):
+            except (ValueError, OSError) as exc:
+                reason = f"Invalid or incomplete request: {exc}"
+                budget.stop(reason)
+                evidence({"run_id": run_id, "admitted": False, "complete": False,
+                          "usage": None, "ttft_seconds": None, "error": reason})
                 self.send_error(400)
                 return
             metrics = StreamMetrics(time.monotonic())

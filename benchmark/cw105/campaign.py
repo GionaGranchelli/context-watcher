@@ -74,7 +74,7 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
 
     return attempt(entry, repository, root, launch, verify,
                    seconds=seconds, records=records, guard=supervise,
-                   context_window=CONTEXT_WINDOW)
+                   context_window=CONTEXT_WINDOW, remaining=budget.campaign_remaining)
 
 
 def execute_plan(plan, budget, execute):

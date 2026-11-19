@@ -11,7 +11,7 @@ from tool_metrics import tool_metrics
 from workspace import checkout, cleanup, diff, snapshot
 
 
-def attempt(entry, repository, root, launch, verify, *, seconds, records=None, guard=None, context_window=None):
+def attempt(entry, repository, root, launch, verify, *, seconds, records=None, guard=None, context_window=None, remaining=None):
     """Use a context manager supplied by the offline transport for argv and env."""
     root.mkdir(mode=0o700)
     worktree = root / "workspace"
@@ -21,13 +21,15 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
     baseline = None
     patch = root / "final.patch"
     try:
-        checkout(repository, worktree, revision)
+        checkout(repository, worktree, revision, remaining=remaining)
         checked_out = True
         if entry.get("task") == "web-api-base-url":
             seed = Path(__file__).with_name("fixtures") / "debug-seed.patch"
             subprocess.run(["git", "-C", str(worktree), "apply", "--index", str(seed)],
-                           check=True, timeout=30)
-        baseline = snapshot(worktree)
+                           check=True, timeout=min(30, remaining()) if remaining else 30)
+        baseline = snapshot(worktree, remaining=remaining)
+        if remaining is not None:
+            remaining()
         with launch(worktree, root) as (argv, env):
             agent = run(argv, cwd=worktree, env=env, log=root / "agent.log", timeout=seconds, guard=guard)
         result.update(agent=asdict(agent), wall_seconds=agent.elapsed_seconds)

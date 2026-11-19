@@ -50,6 +50,22 @@ class CaptureTest(unittest.TestCase):
         with self.assertRaisesRegex(BudgetExceeded, "Stale GPU telemetry"):
             budget.admit("run")
 
+    def test_invalid_request_stops_campaign_and_records_failure(self):
+        evidence = []
+        budget = Budget(campaign_limit=2, seconds=10)
+        budget.start("run", request_limit=2, seconds=10)
+        with serving(relay(1, budget, "run", evidence.append)) as port:
+            connection = HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("POST", PATH, b"")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 400)
+            response.read()
+            connection.close()
+        self.assertFalse(evidence[0]["admitted"])
+        self.assertIn("Invalid body size", evidence[0]["error"])
+        with self.assertRaisesRegex(BudgetExceeded, "Invalid or incomplete request"):
+            budget.admit("run")
+
     def check_admission(self, missing_usage):
         forwarded, evidence = [], []
 

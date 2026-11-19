@@ -3,26 +3,27 @@ import re
 import subprocess
 
 
-def git(directory, *args):
+def git(directory, *args, remaining=None):
     return subprocess.check_output(
-        ["git", "-C", str(directory), *args], timeout=30,
+        ["git", "-C", str(directory), *args],
+        timeout=min(30, remaining()) if remaining else 30,
     )
 
 
-def checkout(repository, destination, revision):
+def checkout(repository, destination, revision, *, remaining=None):
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("Expected a full frozen Git commit SHA")
     if destination.exists() or destination.is_symlink():
         raise FileExistsError(destination)
-    git(repository, "worktree", "add", "--detach", str(destination.resolve()), revision)
-    if git(destination, "rev-parse", "HEAD").decode().strip() != revision:
+    git(repository, "worktree", "add", "--detach", str(destination.resolve()), revision, remaining=remaining)
+    if git(destination, "rev-parse", "HEAD", remaining=remaining).decode().strip() != revision:
         raise RuntimeError("Worktree revision does not match the frozen commit")
-    if git(destination, "status", "--porcelain", "--untracked-files=all"):
+    if git(destination, "status", "--porcelain", "--untracked-files=all", remaining=remaining):
         raise RuntimeError("Worktree is not clean")
 
 
-def snapshot(workspace):
-    return git(workspace, "write-tree").decode().strip()
+def snapshot(workspace, *, remaining=None):
+    return git(workspace, "write-tree", remaining=remaining).decode().strip()
 
 
 def diff(workspace, baseline):

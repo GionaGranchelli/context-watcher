@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 73 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
+absent. The local qualification run passed all 75 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
@@ -98,9 +98,16 @@ observed utilization and a representative task that reaches that condition.
   Use this runner for a trusted local benchmark. It is not isolation for a
   hostile agent or third-party workspace.
 - The campaign deadline gates request admission, the agent process, and the
-  outer verification process. Setup and cleanup are not fully covered by that
-  deadline. The stated wall-clock ceiling is therefore not yet enforced end to
+  outer verification process. Worktree checkout and task seeding are bounded
+  by the remaining campaign time. Daemon setup and cleanup are not fully
+  covered by that deadline. The stated wall-clock ceiling is therefore not yet enforced end to
   end. Add and test cancellation across all phases before live authorization.
+- The common relay uses the harness `Spend` reservation and settlement guard
+  for all three modes. It does not configure CW’s named `SpendGuard`. The
+  existing CLI smoke configuration requires a positive authorization and
+  allows at most eight requests, so it cannot simply represent this proposed
+  zero-provider-charge campaign. Reconcile and verify the requested
+  SpendGuard configuration before requesting live authorization.
 - Record exact binaries, endpoint identity, cache controls, and the approved
   merged revision for the separately authorized experiment.
 

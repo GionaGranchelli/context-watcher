@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from attempt import attempt
+from budget import BudgetExceeded
 from workspace import git
 
 
@@ -64,3 +65,32 @@ class AttemptTest(unittest.TestCase):
             self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)
             self.assertIn(b"+edited", (evidence / "final.patch").read_bytes())
             self.assertFalse((evidence / "workspace").exists())
+
+    def test_deadline_during_checkout_preserves_partial_worktree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+            git(repo, "init")
+            git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "--allow-empty", "-m", "fixture")
+            revision = git(repo, "rev-parse", "HEAD").decode().strip()
+            calls = 0
+
+            def remaining():
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    raise BudgetExceeded("Campaign deadline exceeded")
+                return 10
+
+            def launch(*args):
+                self.fail("Agent must not start after the deadline")
+
+            evidence = root / "attempt"
+            result = attempt({"revision": revision, "run_id": "fixture"}, repo, evidence,
+                             launch, lambda *_: False, seconds=5, remaining=remaining)
+            self.assertEqual(result["status"], "incomplete")
+            self.assertIn("deadline", result["error"])
+            self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)
+            self.assertTrue((evidence / "workspace").is_dir())

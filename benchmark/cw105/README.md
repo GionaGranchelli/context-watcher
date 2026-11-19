@@ -66,18 +66,16 @@ Missing optional data must remain visible.
 
 ## Task coverage limitation
 
-The three candidate prompts exercise exploration, a web-to-API integration,
-and a larger cross-stack implementation. The second prompt starts from an
-unimplemented feature and does not yet establish the requested multi-file
-debugging task with a seeded fault and repeated reference to earlier findings.
-The third prompt has a longer budget, but meaningful context pressure has not
-been established. The Kanban repository has no implemented multi-file debugging
-target at the selected revision. A reproducible task therefore needs a committed,
-versioned fixture derived from that revision, an intentional fault, and an oracle
-that fails on the fixture and passes after a reference repair. The fixture must
-be identical across all three configurations and its patch hash must enter the
-authorized plan. Phase A remains incomplete until both task designs have
-independent oracles and their baseline and reference solutions are qualified.
+The debugging task applies a versioned four-file seed to the frozen Kanban
+revision. The browser oracle rejected the seed and accepted a reference repair
+for route, response handling and default origin. The plan binds the seed hash.
+The README check verifies that the override variable is named, and a reviewer
+must assess whether its explanation is sufficient.
+
+The longer cross-stack implementation has a larger budget, but meaningful
+context pressure has not been established. A live run could finish well below
+the context limit, so it cannot establish the long-context claim without
+observed utilization and a representative task that reaches that condition.
 
 ## Open qualification work
 

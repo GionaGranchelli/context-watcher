@@ -24,6 +24,33 @@ class LiveEntryTest(unittest.TestCase):
         with self.assertRaisesRegex(BudgetExceeded, "GPU temperature limit"):
             budget.campaign_remaining()
 
+    def test_expired_preflight_does_not_consume_authorization(self):
+        import tempfile
+        from pathlib import Path
+        from budget import Budget, BudgetExceeded
+
+        now = [0]
+        plan = dict(proposal(), status="ready_for_authorization",
+                    binaries_sha256={"omp": "fixture", "cw": "fixture"})
+        budget = Budget(campaign_limit=plan["max_requests"],
+                        seconds=plan["max_wall_seconds"], clock=lambda: now[0])
+
+        def inventory(*_):
+            now[0] = plan["max_wall_seconds"]
+            return {}
+
+        with tempfile.TemporaryDirectory() as directory, \
+             patch("live.Budget", return_value=budget), \
+             patch("live.binary_identities", return_value=plan["binaries_sha256"]), \
+             patch("live.check_loaded_model", side_effect=inventory), \
+             patch("live.read_sample") as sample, \
+             patch("live.authorize_transport") as transport:
+            with self.assertRaisesRegex(BudgetExceeded, "deadline"):
+                run_live(plan, {}, checkout=None, merged_revision=None, repository=None,
+                         output=Path(directory) / "evidence", omp=None, cw=None)
+            sample.assert_not_called()
+            transport.assert_not_called()
+
     @patch("live.read_sample")
     @patch("live.authorize_transport")
     def test_unready_proposal_cannot_reach_telemetry_or_transport(self, transport, sample):

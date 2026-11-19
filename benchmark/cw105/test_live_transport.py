@@ -36,6 +36,21 @@ class LiveTransportTest(unittest.TestCase):
 
     @patch("live_transport.git", side_effect=[b"a" * 40 + b"\n", b""])
     @patch("live_transport.verify_merged_pr")
+    @patch("live_transport.claim")
+    def test_deadline_after_merge_check_does_not_consume_authorization(self, claim, merged, git):
+        from budget import BudgetExceeded
+
+        def expired():
+            raise BudgetExceeded("Campaign deadline exceeded")
+
+        with self.assertRaisesRegex(BudgetExceeded, "deadline"):
+            authorize_transport({}, {"benchmark_revision": "a" * 40}, None,
+                                checkout=None, merged_revision="a" * 40, remaining=expired)
+        merged.assert_called_once()
+        claim.assert_not_called()
+
+    @patch("live_transport.git", side_effect=[b"a" * 40 + b"\n", b""])
+    @patch("live_transport.verify_merged_pr")
     @patch("live_transport.HTTPConnection")
     def test_transport_requires_durable_claim_and_pins_destination(self, connect, merged, git):
         from datetime import datetime, timedelta, timezone
@@ -63,7 +78,7 @@ class LiveTransportTest(unittest.TestCase):
             registry = Path(directory) / "claims"
             factory = authorize_transport(document, plan, registry,
                                           checkout=None, merged_revision="a" * 40)
-            merged.assert_called_once_with("a" * 40)
+            merged.assert_called_once_with("a" * 40, remaining=None)
             self.assertTrue((registry / "cw105-synthetic-authorization.json").is_file())
             connect.assert_not_called()
             self.assertIs(factory(2), connect.return_value)

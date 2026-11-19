@@ -10,11 +10,12 @@ from budget import BudgetExceeded
 from workspace import git
 
 
-def verify_merged_pr(revision):
+def verify_merged_pr(revision, *, remaining=None):
     result = subprocess.run(
         ["gh", "pr", "view", "53", "--repo", "GionaGranchelli/context-watcher",
          "--json", "state,baseRefName,mergeCommit"],
-        capture_output=True, text=True, check=True, timeout=15,
+        capture_output=True, text=True, check=True,
+        timeout=min(15, remaining()) if remaining else 15,
     )
     pr = json.loads(result.stdout)
     if (pr.get("state"), pr.get("baseRefName"), (pr.get("mergeCommit") or {}).get("oid")) != (
@@ -23,15 +24,17 @@ def verify_merged_pr(revision):
         raise ValueError("PR #53 must be merged into main at the approved revision")
 
 
-def authorize_transport(document, plan, registry, *, checkout, merged_revision):
+def authorize_transport(document, plan, registry, *, checkout, merged_revision, remaining=None):
     revision = plan.get("benchmark_revision")
     if revision is None or revision != merged_revision:
         raise ValueError("Execution plan must match the reviewed merge commit")
-    if git(checkout, "rev-parse", "HEAD").decode().strip() != revision:
+    if git(checkout, "rev-parse", "HEAD", remaining=remaining).decode().strip() != revision:
         raise ValueError("Checkout does not match the reviewed merge commit")
-    if git(checkout, "status", "--porcelain", "--untracked-files=all"):
+    if git(checkout, "status", "--porcelain", "--untracked-files=all", remaining=remaining):
         raise ValueError("Benchmark checkout must be clean")
-    verify_merged_pr(revision)
+    verify_merged_pr(revision, remaining=remaining)
+    if remaining is not None:
+        remaining()
     claim(document, plan, registry)
     expires = datetime.fromisoformat(document["expires_at"])
     endpoint = urlsplit(ENDPOINT)

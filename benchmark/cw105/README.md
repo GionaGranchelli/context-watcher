@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 81 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
+absent. The local qualification run passed all 83 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
@@ -85,7 +85,9 @@ observed utilization and a representative task that reaches that condition.
 
 - Spring and Nuxt reference solutions passed their independent oracles. The
   board reference, including `fixtures/BoardPage.test.ts`, also passed the
-  complete scorer and frozen project checks from a fresh worktree. The runner
+  complete scorer and frozen project checks from a fresh worktree. Its API
+  oracle uses 55 records to check default and maximum page sizes, continuation,
+  ordering, filters, and returned task fields. The runner
   scored a submitted health fixture from a fresh frozen worktree.
   Use `python3 -B benchmark/cw105/verify_task.py TASK WORKTREE EVIDENCE_DIR`
   to score a candidate. Place Nuxt worktrees on the pnpm store filesystem for

@@ -11,6 +11,9 @@ FIXTURE = [
         (5, "Ready", "P0"), (2, "In Progress", "P0"), (4, "Ready", "P1"),
         (1, "Ready", "P0"), (3, "Ready", "P0"),
     ]
+] + [
+    {"key": f"CWK-{i:03}", "title": f"Task {i}", "status": "In Progress", "priority": "P0"}
+    for i in range(6, 56)
 ]
 
 
@@ -25,7 +28,13 @@ def verify(port):
             raise ValueError(f"Unexpected HTTP response for {params}: {response.status}")
         if expected_status == 200:
             body = json.loads(raw)
-            return [item["key"] for item in body["items"]], body["nextCursor"]
+            items = body["items"]
+            expected = {item["key"]: item for item in FIXTURE}
+            for item in items:
+                reference = expected.get(item["key"])
+                if reference is None or any(item.get(field) != value for field, value in reference.items()):
+                    raise ValueError("Task fields differ from the injected source")
+            return [item["key"] for item in items], body["nextCursor"]
 
     try:
         filters = {"status": "Ready", "priority": "P0", "limit": 2}
@@ -36,8 +45,19 @@ def verify(port):
             raise ValueError("Continuation duplicates or omits a task")
         if query(status="In Progress", priority="P1") != ([], None):
             raise ValueError("Nonmatching filters must yield an empty page")
-        if query() != ([f"CWK-{i:03}" for i in range(1, 6)], None):
-            raise ValueError("Unexpected unfiltered page")
+        keys, cursor = query()
+        if keys != [f"CWK-{i:03}" for i in range(1, 21)] or not cursor:
+            raise ValueError("Default page must contain 20 ordered items and a cursor")
+        keys, cursor = query(cursor=cursor)
+        if keys != [f"CWK-{i:03}" for i in range(21, 41)] or not cursor:
+            raise ValueError("Default continuation has incorrect items")
+        if query(cursor=cursor) != ([f"CWK-{i:03}" for i in range(41, 56)], None):
+            raise ValueError("Default final page has incorrect items")
+        keys, cursor = query(limit=50)
+        if keys != [f"CWK-{i:03}" for i in range(1, 51)] or not cursor:
+            raise ValueError("Maximum page must contain 50 ordered items and a cursor")
+        if query(limit=50, cursor=cursor) != ([f"CWK-{i:03}" for i in range(51, 56)], None):
+            raise ValueError("Maximum-page continuation has incorrect items")
         for params in ({"status": "sentinel"}, {"priority": "sentinel"},
                        {"limit": 0}, {"limit": 51}, {"cursor": "!!invalid!!"}):
             query(400, **params)

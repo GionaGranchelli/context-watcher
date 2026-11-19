@@ -1,0 +1,87 @@
+"""Run one prepared offline attempt and retain evidence outside its worktree."""
+import json
+import os
+import subprocess
+import time
+from pathlib import Path
+from dataclasses import asdict
+
+from evidence import request_metrics
+from process import ProcessStillRunning, run
+from tool_metrics import tool_metrics
+from workspace import checkout, cleanup, diff, snapshot
+
+
+def attempt(entry, repository, root, launch, verify, *, seconds, records=None, guard=None, context_window=None, remaining=None):
+    """Use a context manager supplied by the offline transport for argv and env."""
+    started = time.monotonic()
+    root.mkdir(mode=0o700)
+    worktree = root / "workspace"
+    revision = entry["revision"]
+    result = dict(entry, status="incomplete", correct=None, campaign_stop_reason=None)
+    checked_out = False
+    preserve_workspace = False
+    baseline = None
+    patch = root / "final.patch"
+    try:
+        checkout(repository, worktree, revision, remaining=remaining)
+        checked_out = True
+        if entry.get("task") == "web-api-base-url":
+            seed = Path(__file__).with_name("fixtures") / "debug-seed.patch"
+            subprocess.run(["git", "-C", str(worktree), "apply", "--index", str(seed)],
+                           check=True, timeout=min(30, remaining()) if remaining else 30)
+        baseline = snapshot(worktree, remaining=remaining)
+        if remaining is not None:
+            remaining()
+        with launch(worktree, root) as (argv, env):
+            agent = run(argv, cwd=worktree, env=env, log=root / "agent.log", timeout=seconds, guard=guard)
+        result.update(agent=asdict(agent), agent_seconds=agent.elapsed_seconds)
+        if agent.timed_out or agent.cancelled_reason:
+            result["status"] = "cancelled"
+            result["campaign_stop_reason"] = agent.cancelled_reason or "attempt_time_limit_exceeded"
+        elif agent.returncode:
+            result["status"] = "failed"
+        else:
+            patch.write_bytes(diff(worktree, baseline or revision, remaining=remaining))
+            result.update(correct=verify(worktree, root), status="complete")
+    except ProcessStillRunning as error:
+        preserve_workspace = True
+        result.update(status="incomplete", error=str(error), workspace_retained=True,
+                      evidence_may_change=True,
+                      campaign_stop_reason="process_did_not_terminate")
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        result.update(status="incomplete", error=str(error),
+                      campaign_stop_reason="attempt_infrastructure_failure")
+    finally:
+        if checked_out and not preserve_workspace:
+            try:
+                if not patch.exists():
+                    patch.write_bytes(diff(worktree, baseline or revision, remaining=remaining))
+                cleanup(repository, worktree, remaining=remaining)
+            except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+                result.update(status="incomplete", cleanup_error=str(error),
+                              campaign_stop_reason="workspace_cleanup_failure")
+        if records is not None and (root / "agent.log").exists():
+            result.update(tool_metrics(root / "agent.log", root / "tool-timing.jsonl"))
+        if records is not None:
+            with (root / "requests.jsonl").open("x", encoding="utf-8") as output:
+                for record in records:
+                    output.write(json.dumps(record) + "\n")
+            result.update(request_metrics(records, context_window=context_window))
+            if not result["telemetry_complete"]:
+                result["campaign_stop_reason"] = "incomplete_provider_telemetry"
+                if result["status"] == "complete":
+                    result.update(status="incomplete", telemetry_error="Provider usage is incomplete")
+            elif (not result.get("tool_events_complete")
+                  or result.get("tool_timing_source") != "observer_monotonic"):
+                result["campaign_stop_reason"] = "incomplete_tool_event_telemetry"
+                if result["status"] == "complete":
+                    result.update(status="incomplete", telemetry_error="Tool event timing is incomplete")
+        result["wall_seconds"] = time.monotonic() - started
+        temporary = root / "manifest.tmp"
+        with temporary.open("x", encoding="utf-8") as output:
+            json.dump(result, output, indent=2)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(root / "manifest.json")
+    return result

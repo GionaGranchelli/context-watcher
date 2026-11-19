@@ -1,0 +1,60 @@
+"""Read Machinist GPU telemetry over SSH without invoking the model."""
+import subprocess
+import time
+
+from budget import BudgetExceeded
+from resources import GpuSample, check_sample
+
+DEVICES = {"0000:04:00.0", "0000:85:00.0", "0000:88:00.0"}
+
+READ_SENSORS = r"""
+for sensor in /sys/class/drm/card[0-9]/device/hwmon/hwmon*; do
+    [ -r "$sensor/name" ] && [ "$(cat "$sensor/name")" = amdgpu ] || continue
+    pci=$(basename "$(readlink -f "$sensor/device")")
+    power="$sensor/power1_input"
+    [ -r "$power" ] || power="$sensor/power1_average"
+    watts=$(cat "$power") || exit 1
+    junction=$(cat "$sensor/temp2_input") || exit 1
+    printf '%s %s %s\n' "$pci" "$watts" "$junction"
+done
+"""
+
+
+def read_sample(*, max_watts, max_junction_c, max_age, remaining=None):
+    started = time.monotonic()
+    try:
+        result = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", "machinist", READ_SENSORS],
+            capture_output=True, text=True, check=True,
+            timeout=min(max_age, remaining()) if remaining else max_age,
+        )
+        rows = []
+        for line in result.stdout.splitlines():
+            pci, power, temp = line.split()
+            rows.append(GpuSample(pci, int(power) / 1_000_000, int(temp) / 1000))
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise BudgetExceeded("Machinist telemetry could not be read") from exc
+    total = check_sample(rows, expected_devices=DEVICES, max_watts=max_watts,
+                         max_junction_c=max_junction_c, age=time.monotonic() - started,
+                         max_age=max_age)
+    return rows, total
+
+
+def check_loaded_model(model, context_window, *, remaining=None):
+    try:
+        result = subprocess.run(
+            ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
+             "machinist", "~/.lmstudio/bin/lms ps"],
+            capture_output=True, text=True, check=True,
+            timeout=min(5, remaining()) if remaining else 5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BudgetExceeded("LM Studio model inventory unavailable") from exc
+    rows = [line.split() for line in result.stdout.splitlines()]
+    models = [row for row in rows if row and row[0] == model]
+    if len(models) != 1:
+        raise BudgetExceeded("Expected one loaded instance of the approved model")
+    row = models[0]
+    if len(row) < 9 or row[1:3] != [model, "IDLE"] or row[5] != str(context_window) or row[9:] != ["Local"]:
+        raise BudgetExceeded("Loaded model is not idle and local with the approved context window")
+    return {"model": model, "context_window": context_window, "parallel_slots": int(row[6])}

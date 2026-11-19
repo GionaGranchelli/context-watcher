@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import socket
+import sys
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -100,6 +101,8 @@ class OmpSmokeTest(unittest.TestCase):
                                 daemon_state=root / "cw", api_port=api_port,
                                 session_id="cw105-smoke",
                             )
+                        observer = Path(__file__).with_name("observe_agent.py")
+                        argv = [sys.executable, str(observer), str(root / "tool-timing.jsonl"), *argv]
                         result = run(argv, cwd=root, env=env, log=root / "omp.log", timeout=15)
                         if mode == "M2":
                             other = root / "other"
@@ -118,8 +121,11 @@ class OmpSmokeTest(unittest.TestCase):
                                          log=root / "other.log", timeout=10)
                             self.assertEqual(second.returncode, 0, (root / "other.log").read_text()[-3000:])
             output = (root / "omp.log").read_text()
-            parsed = tool_metrics(root / "omp.log")
+            parsed = tool_metrics(root / "omp.log", root / "tool-timing.jsonl")
             self.assertEqual(parsed["mcp_count"], 3 if mode == "M2" else 0, parsed)
+            self.assertEqual(parsed["tool_timing_source"], "observer_monotonic")
+            if mode == "M2":
+                self.assertGreaterEqual(parsed["mcp_seconds"], 0)
             self.assertEqual(result.returncode, 0, output[-3000:])
             self.assertIn("cw105-mock-pass", output)
         self.assertEqual([request["model"] for request in requests], ["qwen3.8-27b-ud"] * request_count)

@@ -182,3 +182,25 @@ class AttemptTest(unittest.TestCase):
             self.assertTrue(result["evidence_may_change"])
             self.assertEqual((evidence / "workspace" / "answer").read_text(), "partial")
             self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)
+
+    def test_missing_tool_observer_marks_successful_agent_incomplete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+            git(repo, "init")
+            git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "--allow-empty", "-m", "fixture")
+            revision = git(repo, "rev-parse", "HEAD").decode().strip()
+
+            @contextmanager
+            def launch(worktree, evidence):
+                yield [sys.executable, "-c", "print('{\"type\":\"agent_end\"}')"], os.environ
+
+            records = [{"complete": True, "usage": {"input_tokens": 1, "output_tokens": 1,
+                        "cached_input_tokens": None}, "ttft_seconds": None}]
+            result = attempt({"revision": revision, "run_id": "fixture"}, repo, root / "attempt",
+                             launch, lambda *_: True, seconds=5, records=records)
+            self.assertTrue(result["correct"])
+            self.assertEqual(result["status"], "incomplete")
+            self.assertEqual(result["telemetry_error"], "Tool event timing is incomplete")

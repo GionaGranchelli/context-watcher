@@ -10,8 +10,9 @@ def is_memory_tool(name):
     )
 
 
-def tool_metrics(path):
+def tool_metrics(path, timing_path=None):
     calls = {}
+    event_keys = []
     ended = False
     malformed = False
     with path.open(encoding="utf-8") as output:
@@ -32,6 +33,7 @@ def tool_metrics(path):
             if not isinstance(identifier, str) or not isinstance(name, str):
                 malformed = True
                 continue
+            event_keys.append((kind, identifier))
             record = calls.setdefault(identifier, {"name": name, "started": False, "finished": False})
             if record["name"] != name:
                 malformed = True
@@ -48,6 +50,25 @@ def tool_metrics(path):
                 if type(duration) in (int, float) and 0 <= duration < float("inf"):
                     record["duration_seconds"] = duration / 1000
 
+    timing_valid = False
+    if timing_path is not None and timing_path.is_file():
+        try:
+            timings = [json.loads(line) for line in timing_path.read_text().splitlines()]
+            keys = [(event["type"], event["toolCallId"]) for event in timings]
+            times = [event["observed_ns"] for event in timings]
+            timing_valid = (keys == event_keys and all(type(value) is int and value >= 0 for value in times)
+                            and times == sorted(times))
+            if timing_valid:
+                starts = {}
+                for event in timings:
+                    name, identifier, timestamp = event["type"], event["toolCallId"], event["observed_ns"]
+                    if name == "tool_execution_start":
+                        starts[identifier] = timestamp
+                    elif identifier in starts:
+                        calls[identifier]["duration_seconds"] = (timestamp - starts.pop(identifier)) / 1e9
+        except (OSError, ValueError, TypeError, KeyError):
+            timing_valid = False
+
     memory = [call for call in calls.values() if is_memory_tool(call["name"])]
     complete = ended and not malformed and all(call["finished"] for call in calls.values())
 
@@ -58,6 +79,7 @@ def tool_metrics(path):
 
     return {
         "tool_calls": calls, "tool_events_complete": complete,
+        "tool_timing_source": "observer_monotonic" if timing_valid and complete else None,
         "observed_tool_count": len(calls), "observed_mcp_count": len(memory),
         "tool_count": len(calls) if complete else None,
         "mcp_count": len(memory) if complete else None,

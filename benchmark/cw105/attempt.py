@@ -58,14 +58,17 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
             except (OSError, RuntimeError, subprocess.SubprocessError) as error:
                 result.update(status="incomplete", cleanup_error=str(error))
         if records is not None and (root / "agent.log").exists():
-            result.update(tool_metrics(root / "agent.log"))
+            result.update(tool_metrics(root / "agent.log", root / "tool-timing.jsonl"))
         if records is not None:
             with (root / "requests.jsonl").open("x", encoding="utf-8") as output:
                 for record in records:
                     output.write(json.dumps(record) + "\n")
             result.update(request_metrics(records, context_window=context_window))
-            if result["status"] == "complete" and not result["telemetry_complete"]:
-                result["status"] = "incomplete"
+            if result["status"] == "complete":
+                if not result["telemetry_complete"]:
+                    result.update(status="incomplete", telemetry_error="Provider usage is incomplete")
+                elif not result.get("tool_events_complete") or result.get("tool_timing_source") != "observer_monotonic":
+                    result.update(status="incomplete", telemetry_error="Tool event timing is incomplete")
         result["wall_seconds"] = time.monotonic() - started
         temporary = root / "manifest.tmp"
         with temporary.open("x", encoding="utf-8") as output:

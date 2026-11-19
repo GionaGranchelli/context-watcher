@@ -64,6 +64,16 @@ includes complete request usage and wall time. Cache comparisons additionally
 need provider cache observations and evidence of comparable initial state.
 Missing optional data must remain visible.
 
+## Task coverage limitation
+
+The three candidate prompts exercise exploration, a web-to-API integration,
+and a larger cross-stack implementation. The second prompt starts from an
+unimplemented feature and does not yet establish the requested multi-file
+debugging task with a seeded fault and repeated reference to earlier findings.
+The third prompt has a longer budget, but meaningful context pressure has not
+been established. Phase A remains incomplete until both task designs have
+independent oracles and their baseline and reference solutions are qualified.
+
 ## Open qualification work
 
 - Spring and Nuxt reference solutions passed their independent oracles. The

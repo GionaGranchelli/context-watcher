@@ -40,7 +40,11 @@ matched, correct M1 and M2 runs for each measured field.
 ## Proposed campaign envelope
 
 The schedule uses all six mode orders for each of three tasks, totaling 54
-attempts. The task caps give a maximum of 1,008 task requests and 21 hours of
+attempts. It deterministically rotates the task order. This balances mode
+position within each task, but task positions are not fully counterbalanced
+across all six permutations. Cache state is not reset or independently
+verified between attempts. Report order effects and initial cache state as
+uncontrolled rather than claiming cache fairness. The task caps give a maximum of 1,008 task requests and 21 hours of
 agent execution before setup, verification, or authorized smoke requests.
 The machine-readable proposal also reserves four smoke requests, 10 minutes for
 smoke, and 10 minutes per run for setup, verification and cleanup. This gives

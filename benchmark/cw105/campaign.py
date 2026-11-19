@@ -33,8 +33,10 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
 
     @contextmanager
     def launch(worktree, root):
+        wire_dir = root / "wire"
+        wire_dir.mkdir(mode=0o700)
         with serving(relay(upstream, budget, run_id, records.append, spend=spend, guard=guard,
-                           request_policy=request_policy, connect=connect)) as capture:
+                           request_policy=request_policy, connect=connect, wire_dir=wire_dir)) as capture:
             with socket.socket() as api, socket.socket() as proxy:
                 api.bind(("127.0.0.1", 0))
                 proxy.bind(("127.0.0.1", 0))

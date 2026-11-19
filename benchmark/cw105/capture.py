@@ -1,5 +1,6 @@
 """Offline chat completion relay. Both sockets are confined to loopback."""
 import hashlib
+import os
 import time
 from dataclasses import asdict
 from http.client import HTTPConnection
@@ -11,7 +12,7 @@ from stream_metrics import StreamMetrics
 PATH = "/v1/chat/completions"
 
 
-def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, request_policy=None, connect=None):
+def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, request_policy=None, connect=None, wire_dir=None):
     if connect is not None and (upstream_port is not None or
                                 any(value is None for value in (spend, guard, request_policy))):
         raise ValueError("External transport requires spend, resource, and request guards")
@@ -50,7 +51,20 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
             response_bytes = 0
             error = None
             sent_headers = False
+            wire = None
+            request_path = response_path = None
             try:
+                if wire_dir is not None:
+                    sequence = len(list(wire_dir.glob("request-*.json"))) + 1
+                    request_path = wire_dir / f"request-{sequence:04}.json"
+                    response_path = wire_dir / f"response-{sequence:04}.sse"
+                    fd = os.open(request_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    with os.fdopen(fd, "wb") as output:
+                        output.write(body)
+                        output.flush()
+                        os.fsync(output.fileno())
+                    fd = os.open(response_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    wire = os.fdopen(fd, "wb")
                 upstream = (connect(remaining) if connect is not None else
                             HTTPConnection("127.0.0.1", upstream_port, timeout=remaining))
                 upstream.request("POST", PATH, body, {"Content-Type": "application/json"})
@@ -62,6 +76,11 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                 self.end_headers()
                 sent_headers = True
                 for line in iter(response.readline, b""):
+                    if response_bytes + len(line) > 32 * 1024 * 1024:
+                        raise ValueError("Response exceeds wire capture limit")
+                    if wire is not None:
+                        wire.write(line)
+                        wire.flush()
                     response_digest.update(line)
                     response_bytes += len(line)
                     now = time.monotonic()
@@ -80,6 +99,14 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
             finally:
                 if upstream is not None:
                     upstream.close()
+                if wire is not None:
+                    try:
+                        wire.flush()
+                        os.fsync(wire.fileno())
+                    except OSError as exc:
+                        error = error or f"Wire capture failed: {exc}"
+                    finally:
+                        wire.close()
                 cost = None
                 if spend is not None:
                     try:
@@ -95,6 +122,8 @@ def relay(upstream_port, budget, run_id, evidence, *, spend=None, guard=None, re
                     "request_sha256": hashlib.sha256(body).hexdigest(),
                     "response_prefix_sha256": response_digest.hexdigest() if response_bytes else None,
                     "request_bytes": len(body), "response_bytes": response_bytes,
+                    "request_file": request_path.name if request_path else None,
+                    "response_file": response_path.name if response_path else None,
                     "run_id": run_id, "usage": asdict(metrics.usage) if metrics.usage else None,
                     "ttft_seconds": metrics.ttft_seconds,
                     "elapsed_seconds": time.monotonic() - metrics.started,

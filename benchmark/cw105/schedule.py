@@ -9,8 +9,8 @@ MODES = ("M0", "M1", "M2")
 
 def schedule():
     for repetition, modes in enumerate(itertools.permutations(MODES), 1):
-        offset = (repetition - 1) % len(TASKS)
-        for task in TASKS[offset:] + TASKS[:offset]:
+        task_order = tuple(itertools.permutations(TASKS))[repetition - 1]
+        for task in task_order:
             for mode in modes:
                 yield {
                     "run_id": f"{task}-{repetition}-{mode}",

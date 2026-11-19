@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 70 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
+absent. The local qualification run passed all 72 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
@@ -80,7 +80,9 @@ observed utilization and a representative task that reaches that condition.
 ## Open qualification work
 
 - Spring and Nuxt reference solutions passed their independent oracles. The
-  runner also scored a submitted health fixture from a fresh frozen worktree.
+  board reference, including `fixtures/BoardPage.test.ts`, also passed the
+  complete scorer and frozen project checks from a fresh worktree. The runner
+  scored a submitted health fixture from a fresh frozen worktree.
   Use `python3 -B benchmark/cw105/verify_task.py TASK WORKTREE EVIDENCE_DIR`
   to score a candidate. Place Nuxt worktrees on the pnpm store filesystem for
   offline dependency installation.
@@ -95,11 +97,10 @@ observed utilization and a representative task that reaches that condition.
   TCP ports rather than addresses and does not filter UDP or Unix sockets.
   Use this runner for a trusted local benchmark. It is not isolation for a
   hostile agent or third-party workspace.
-- The campaign deadline currently gates request admission and the agent process.
-  Builds and browser/API verification run after the agent and have separate
-  timeouts. The stated campaign wall-clock ceiling is therefore not yet
-  enforced across setup, verification, and cleanup. Add a shared deadline and
-  test cancellation during each of those phases before live authorization.
+- The campaign deadline gates request admission, the agent process, and the
+  outer verification process. Setup and cleanup are not fully covered by that
+  deadline. The stated wall-clock ceiling is therefore not yet enforced end to
+  end. Add and test cancellation across all phases before live authorization.
 - Record exact binaries, endpoint identity, cache controls, and the approved
   merged revision for the separately authorized experiment.
 

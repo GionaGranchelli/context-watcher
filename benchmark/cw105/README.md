@@ -95,6 +95,11 @@ observed utilization and a representative task that reaches that condition.
   TCP ports rather than addresses and does not filter UDP or Unix sockets.
   Use this runner for a trusted local benchmark. It is not isolation for a
   hostile agent or third-party workspace.
+- The campaign deadline currently gates request admission and the agent process.
+  Builds and browser/API verification run after the agent and have separate
+  timeouts. The stated campaign wall-clock ceiling is therefore not yet
+  enforced across setup, verification, and cleanup. Add a shared deadline and
+  test cancellation during each of those phases before live authorization.
 - Record exact binaries, endpoint identity, cache controls, and the approved
   merged revision for the separately authorized experiment.
 

@@ -24,7 +24,7 @@ def checkout(repository, destination, revision):
 def diff(workspace, revision):
     # Intent-to-add puts new files in the diff without changing their contents.
     git(workspace, "add", "--intent-to-add", "--all")
-    return git(workspace, "diff", "--no-ext-diff", "--binary", revision, "--")
+    return git(workspace, "diff", "--no-ext-diff", "--binary", "--")
 
 
 def cleanup(repository, destination):

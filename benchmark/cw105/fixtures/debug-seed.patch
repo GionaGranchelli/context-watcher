@@ -1,0 +1,59 @@
+diff --git a/apps/web/app/composables/useApiHealth.js b/apps/web/app/composables/useApiHealth.js
+new file mode 100644
+index 0000000..e68b327
+--- /dev/null
++++ b/apps/web/app/composables/useApiHealth.js
+@@ -0,0 +1,5 @@
++export async function loadApiHealth(baseUrl) {
++  const response = await fetch(new URL("/api/health", baseUrl))
++  if (!response.ok) throw new Error("Health request failed")
++  return (await response.json()).healthy === true
++}
+diff --git a/apps/web/app/pages/index.vue b/apps/web/app/pages/index.vue
+index 499c687..49cfc5d 100644
+--- a/apps/web/app/pages/index.vue
++++ b/apps/web/app/pages/index.vue
+@@ -1,5 +1,14 @@
++<script setup>
++const { public: { apiBaseUrl } } = useRuntimeConfig()
++const status = ref("Checking")
++onMounted(async () => {
++  try {
++    status.value = await loadApiHealth(apiBaseUrl) ? "API online" : "API unavailable"
++  } catch {
++    status.value = "API unavailable"
++  }
++})
++</script>
+ <template>
+-  <main>
+-    <h1>CW Kanban Board</h1>
+-  </main>
++  <main><h1>CW Kanban Board</h1><p>{{ status }}</p></main>
+ </template>
+diff --git a/apps/web/nuxt.config.ts b/apps/web/nuxt.config.ts
+index 21f51d1..4a7610e 100644
+--- a/apps/web/nuxt.config.ts
++++ b/apps/web/nuxt.config.ts
+@@ -1,4 +1,5 @@
+ export default defineNuxtConfig({
+   ssr: false,
++  runtimeConfig: { public: { apiBaseUrl: "http://127.0.0.1:8081" } },
+   devtools: { enabled: false },
+ })
+diff --git a/services/api/src/main/kotlin/com/cwk/api/HealthController.kt b/services/api/src/main/kotlin/com/cwk/api/HealthController.kt
+new file mode 100644
+index 0000000..4eb7365
+--- /dev/null
++++ b/services/api/src/main/kotlin/com/cwk/api/HealthController.kt
+@@ -0,0 +1,10 @@
++package com.cwk.api
++
++import org.springframework.web.bind.annotation.GetMapping
++import org.springframework.web.bind.annotation.RestController
++
++@RestController
++class HealthController {
++    @GetMapping("/actuator/health")
++    fun health(): Map<String, String> = mapOf("status" to "UP")
++}

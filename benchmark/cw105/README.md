@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 78 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
+absent. The local qualification run passed all 79 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration

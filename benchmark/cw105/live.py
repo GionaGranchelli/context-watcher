@@ -32,6 +32,26 @@ def binary_identities(omp, cw):
     return identities
 
 
+def score(worktree, evidence, task, budget, resource_guard):
+    verifier = Path(__file__).with_name("verify_task.py").resolve()
+
+    def guard():
+        budget.campaign_remaining()
+        resource_guard()
+        budget.campaign_remaining()
+
+    result = run([sys.executable, str(verifier), task, str(worktree), str(evidence)],
+                 cwd=worktree, env=os.environ, log=evidence / "verifier.log",
+                 timeout=budget.campaign_remaining(), guard=guard)
+    if result.timed_out or result.cancelled_reason:
+        reason = result.cancelled_reason or "Campaign deadline exceeded during verification"
+        budget.stop(reason)
+        raise RuntimeError(f"Verification cancelled: {reason}")
+    if result.returncode not in (0, 1):
+        raise RuntimeError("Verification infrastructure failed; see verifier.log")
+    return result.returncode == 0
+
+
 def run_live(plan, document, *, checkout, merged_revision, repository, output, omp, cw):
     if plan.get("status") != "ready_for_authorization":
         raise ValueError("Live execution plan has not passed readiness review")
@@ -81,26 +101,13 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
     policy = partial(check_request, model=MODEL, max_output_tokens=MAX_OUTPUT_TOKENS)
     metadata_by_id = {row["run_id"]: row for row in schedule()}
 
-    def score(worktree, evidence, task):
-        verifier = Path(__file__).with_name("verify_task.py").resolve()
-        result = run([sys.executable, str(verifier), task, str(worktree), str(evidence)],
-                     cwd=worktree, env=os.environ, log=evidence / "verifier.log",
-                     timeout=budget.campaign_remaining(),
-                     guard=lambda: budget.campaign_remaining())
-        if result.timed_out or result.cancelled_reason:
-            budget.stop("Campaign deadline exceeded during verification")
-            raise RuntimeError("Verification exceeded the campaign deadline")
-        if result.returncode not in (0, 1):
-            raise RuntimeError("Verification infrastructure failed; see verifier.log")
-        return result.returncode == 0
-
     def execute(row):
         run_id = row["run_id"]
         return run_attempt(
             metadata_by_id[run_id], repository, output / run_id, omp, cw, None, budget,
             prompt=row["prompt"], seconds=row["budget_seconds"], spend=spend, guard=guard,
             request_policy=policy, connect=connect,
-            verify=lambda worktree, evidence: score(worktree, evidence, row["task"]),
+            verify=lambda worktree, evidence: score(worktree, evidence, row["task"], budget, guard),
         )
 
     smoke_entry = {"run_id": "provider-smoke", "mode": "M0", "revision": REVISION}

@@ -1,11 +1,29 @@
 import unittest
 from unittest.mock import patch
 
-from live import binary_identities, run_live
+from live import binary_identities, run_live, score
 from plan import proposal
 
 
 class LiveEntryTest(unittest.TestCase):
+    def test_resource_guard_cancels_verification_and_latches_fault(self):
+        import tempfile
+        from pathlib import Path
+        from budget import Budget, BudgetExceeded
+
+        budget = Budget(campaign_limit=1, seconds=10)
+
+        def reject():
+            raise BudgetExceeded("GPU temperature limit")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, "GPU temperature limit"):
+                score(root, root, "health-contract", budget, reject)
+            self.assertTrue((root / "verifier.log").exists())
+        with self.assertRaisesRegex(BudgetExceeded, "GPU temperature limit"):
+            budget.campaign_remaining()
+
     @patch("live.read_sample")
     @patch("live.authorize_transport")
     def test_unready_proposal_cannot_reach_telemetry_or_transport(self, transport, sample):

@@ -36,7 +36,6 @@ authorization headers are not written by the relay.
 
 These bodies can contain source code, prompts, tool output and other private
 workspace content. Review and redact evidence before publishing. Interrupted
-streams retain the received prefix and stop further admission. Capture-file
-creation failure is tested. An in-progress disk write failure remains to be
-qualified. The live campaign remains NO-GO pending review and the other
+streams retain the received prefix and stop further admission. Capture-file creation failure and an injected in-progress disk write
+failure both stop further admissions in offline tests. The live campaign remains NO-GO pending review and the other
 readiness gates.

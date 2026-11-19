@@ -22,6 +22,8 @@ def verify_web(worktree, evidence, task):
         web_port, api_port = web.getsockname()[1], api.getsockname()[1]
     web_origin = f"http://127.0.0.1:{web_port}"
     api_origin = f"http://127.0.0.1:{api_port}"
+    # The first launch verifies the documented override. A second launch below
+    # removes it to exercise the default origin.
     env["NUXT_PUBLIC_API_BASE_URL"] = api_origin
     with (evidence / "web-server.log").open("xb") as log:
         server = subprocess.Popen(
@@ -47,6 +49,34 @@ def verify_web(worktree, evidence, task):
             oracle = Path(__file__).with_name("browser_oracle.mjs").resolve()
             result = run(["node", str(oracle), task, web_origin, api_origin],
                          cwd=worktree, env=env, log=evidence / "browser.log", timeout=30)
+            if result.returncode != 0 or task != "web-api-base-url":
+                return result.returncode == 0
+        finally:
+            stop_group(server)
+    env.pop("NUXT_PUBLIC_API_BASE_URL", None)
+    with (evidence / "web-default-server.log").open("xb") as log:
+        server = subprocess.Popen(
+            ["pnpm", "exec", "nuxt", "dev", "--host", "127.0.0.1", "--port", str(web_port)],
+            cwd=worktree / "apps/web", env=env, stdout=log, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + 30
+            while server.poll() is None and time.monotonic() < deadline:
+                connection = HTTPConnection("127.0.0.1", web_port, timeout=1)
+                try:
+                    connection.request("GET", "/")
+                    if connection.getresponse().status == 200:
+                        break
+                except OSError:
+                    pass
+                finally:
+                    connection.close()
+                time.sleep(0.2)
+            else:
+                raise RuntimeError("Nuxt default-origin run did not start")
+            result = run(["node", str(oracle), task, web_origin, "http://127.0.0.1:8080"],
+                         cwd=worktree, env=env, log=evidence / "browser-default.log", timeout=30)
             return result.returncode == 0
         finally:
             stop_group(server)

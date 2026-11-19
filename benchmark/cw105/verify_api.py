@@ -15,7 +15,7 @@ from process import run, stop_group
 def verify_api(worktree, evidence, task):
     app = worktree / "services/api"
     build = run([str(app / "gradlew"), "--offline", "--no-daemon", "bootJar"],
-                cwd=app, env=os.environ, log=evidence / "build.log", timeout=180)
+                cwd=app, env=os.environ, log=evidence / "build.log", timeout=180, own_group=False)
     if build.returncode != 0:
         raise RuntimeError("Spring build failed. See build.log")
     jars = list((app / "build/libs").glob("*.jar"))
@@ -36,7 +36,7 @@ def verify_api(worktree, evidence, task):
         server = subprocess.Popen(
             ["java", "-jar", str(jars[0]), "--server.address=127.0.0.1",
              f"--server.port={port}"],
-            cwd=app, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+            cwd=app, env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=False,
         )
         try:
             deadline = time.monotonic() + 15
@@ -51,7 +51,9 @@ def verify_api(worktree, evidence, task):
                     return False
             raise RuntimeError("Spring did not start. See server.log")
         finally:
-            stop_group(server)
+            if server.poll() is None:
+                server.terminate()
+                server.wait(timeout=10)
 
 
 if __name__ == "__main__":

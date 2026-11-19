@@ -13,7 +13,7 @@ from process import run, stop_group
 def verify_web(worktree, evidence, task):
     env = dict(os.environ, NUXT_TELEMETRY_DISABLED="1")
     install = run(["pnpm", "install", "--offline", "--frozen-lockfile"],
-                  cwd=worktree, env=env, log=evidence / "web-install.log", timeout=90)
+                  cwd=worktree, env=env, log=evidence / "web-install.log", timeout=90, own_group=False)
     if install.returncode:
         raise RuntimeError("Offline dependency install failed. See web-install.log")
     with socket.socket() as web, socket.socket() as api:
@@ -29,7 +29,7 @@ def verify_web(worktree, evidence, task):
         server = subprocess.Popen(
             ["pnpm", "exec", "nuxt", "dev", "--host", "127.0.0.1", "--port", str(web_port)],
             cwd=worktree / "apps/web", env=env, stdout=log, stderr=subprocess.STDOUT,
-            start_new_session=True,
+            start_new_session=False,
         )
         try:
             deadline = time.monotonic() + 30
@@ -48,17 +48,19 @@ def verify_web(worktree, evidence, task):
                 raise RuntimeError("Nuxt did not become ready. See web-server.log")
             oracle = Path(__file__).with_name("browser_oracle.mjs").resolve()
             result = run(["node", str(oracle), task, web_origin, api_origin],
-                         cwd=worktree, env=env, log=evidence / "browser.log", timeout=30)
+                         cwd=worktree, env=env, log=evidence / "browser.log", timeout=30, own_group=False)
             if result.returncode != 0 or task != "web-api-base-url":
                 return result.returncode == 0
         finally:
-            stop_group(server)
+            if server.poll() is None:
+                server.terminate()
+                server.wait(timeout=10)
     env.pop("NUXT_PUBLIC_API_BASE_URL", None)
     with (evidence / "web-default-server.log").open("xb") as log:
         server = subprocess.Popen(
             ["pnpm", "exec", "nuxt", "dev", "--host", "127.0.0.1", "--port", str(web_port)],
             cwd=worktree / "apps/web", env=env, stdout=log, stderr=subprocess.STDOUT,
-            start_new_session=True,
+            start_new_session=False,
         )
         try:
             deadline = time.monotonic() + 30
@@ -76,10 +78,12 @@ def verify_web(worktree, evidence, task):
             else:
                 raise RuntimeError("Nuxt default-origin run did not start")
             result = run(["node", str(oracle), task, web_origin, "http://127.0.0.1:8080"],
-                         cwd=worktree, env=env, log=evidence / "browser-default.log", timeout=30)
+                         cwd=worktree, env=env, log=evidence / "browser-default.log", timeout=30, own_group=False)
             return result.returncode == 0
         finally:
-            stop_group(server)
+            if server.poll() is None:
+                server.terminate()
+                server.wait(timeout=10)
 
 
 if __name__ == "__main__":

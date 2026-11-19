@@ -24,13 +24,13 @@ def stop_group(process):
     process.wait()
 
 
-def run(command, *, cwd, env, log, timeout, guard=None):
+def run(command, *, cwd, env, log, timeout, guard=None, own_group=True):
     started = time.monotonic()
     fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "wb") as output:
         process = subprocess.Popen(
             command, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-            stdout=output, stderr=subprocess.STDOUT, start_new_session=True,
+            stdout=output, stderr=subprocess.STDOUT, start_new_session=own_group,
         )
         timed_out = False
         cancelled_reason = None
@@ -49,7 +49,11 @@ def run(command, *, cwd, env, log, timeout, guard=None):
         except BudgetExceeded as error:
             cancelled_reason = str(error)
         finally:
-            stop_group(process)
+            if own_group:
+                stop_group(process)
+            elif process.poll() is None:
+                process.kill()
+                process.wait()
             output.flush()
             os.fsync(output.fileno())
     return ProcessResult(process.returncode, time.monotonic() - started, timed_out, cancelled_reason)

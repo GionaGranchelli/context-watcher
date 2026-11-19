@@ -4,7 +4,7 @@ import sys
 import tempfile
 import unittest
 
-from process import run
+from process import ProcessStillRunning, run, stop_group
 from budget import BudgetExceeded
 
 
@@ -64,3 +64,15 @@ class ProcessTest(unittest.TestCase):
             self.assertEqual(result.cancelled_reason, "Campaign deadline exceeded")
             self.assertFalse(marker.exists())
             self.assertTrue((Path(root) / "agent.log").is_file())
+
+    def test_unresponsive_killed_process_has_bounded_wait(self):
+        import subprocess
+        from unittest.mock import Mock, patch
+
+        process = Mock(pid=12345)
+        process.wait.side_effect = subprocess.TimeoutExpired("fake", 2)
+        with patch("process.os.killpg") as kill:
+            with self.assertRaisesRegex(ProcessStillRunning, "did not exit"):
+                stop_group(process)
+        kill.assert_called_once()
+        process.wait.assert_called_once_with(timeout=2)

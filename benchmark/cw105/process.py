@@ -8,6 +8,10 @@ from dataclasses import dataclass
 from budget import BudgetExceeded
 
 
+class ProcessStillRunning(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class ProcessResult:
     returncode: int
@@ -21,7 +25,10 @@ def stop_group(process):
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    process.wait()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired as error:
+        raise ProcessStillRunning(f"Process {process.pid} did not exit after SIGKILL") from error
 
 
 def run(command, *, cwd, env, log, timeout, guard=None, own_group=True):
@@ -56,11 +63,16 @@ def run(command, *, cwd, env, log, timeout, guard=None, own_group=True):
         except BudgetExceeded as error:
             cancelled_reason = str(error)
         finally:
-            if own_group:
-                stop_group(process)
-            elif process.poll() is None:
-                process.kill()
-                process.wait()
-            output.flush()
-            os.fsync(output.fileno())
+            try:
+                if own_group:
+                    stop_group(process)
+                elif process.poll() is None:
+                    process.kill()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired as error:
+                        raise ProcessStillRunning(f"Process {process.pid} did not exit after SIGKILL") from error
+            finally:
+                output.flush()
+                os.fsync(output.fileno())
     return ProcessResult(process.returncode, time.monotonic() - started, timed_out, cancelled_reason)

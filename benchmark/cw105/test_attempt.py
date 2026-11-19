@@ -151,3 +151,33 @@ class AttemptTest(unittest.TestCase):
             self.assertGreaterEqual(result["wall_seconds"] - result["agent_seconds"], 0.15)
             self.assertEqual(result["agent_seconds"], result["agent"]["elapsed_seconds"])
             self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)
+
+    def test_surviving_process_keeps_workspace_and_manifest(self):
+        from unittest.mock import patch
+        from process import ProcessStillRunning
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+            git(repo, "init")
+            git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "--allow-empty", "-m", "fixture")
+            revision = git(repo, "rev-parse", "HEAD").decode().strip()
+
+            @contextmanager
+            def launch(worktree, evidence):
+                yield ["ignored"], os.environ
+
+            def stuck(*args, **kwargs):
+                (kwargs["cwd"] / "answer").write_text("partial")
+                raise ProcessStillRunning("Process 42 did not exit after SIGKILL")
+
+            evidence = root / "attempt"
+            with patch("attempt.run", side_effect=stuck):
+                result = attempt({"revision": revision, "run_id": "fixture"}, repo, evidence,
+                                 launch, lambda *_: self.fail("must not score"), seconds=5)
+            self.assertEqual(result["status"], "incomplete")
+            self.assertTrue(result["workspace_retained"])
+            self.assertEqual((evidence / "workspace" / "answer").read_text(), "partial")
+            self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)

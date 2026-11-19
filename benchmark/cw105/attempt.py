@@ -7,7 +7,7 @@ from pathlib import Path
 from dataclasses import asdict
 
 from evidence import request_metrics
-from process import run
+from process import ProcessStillRunning, run
 from tool_metrics import tool_metrics
 from workspace import checkout, cleanup, diff, snapshot
 
@@ -20,6 +20,7 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
     revision = entry["revision"]
     result = dict(entry, status="incomplete", correct=None)
     checked_out = False
+    preserve_workspace = False
     baseline = None
     patch = root / "final.patch"
     try:
@@ -42,10 +43,13 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
         else:
             patch.write_bytes(diff(worktree, baseline or revision, remaining=remaining))
             result.update(correct=verify(worktree, root), status="complete")
+    except ProcessStillRunning as error:
+        preserve_workspace = True
+        result.update(status="incomplete", error=str(error), workspace_retained=True)
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         result.update(status="incomplete", error=str(error))
     finally:
-        if checked_out:
+        if checked_out and not preserve_workspace:
             try:
                 if not patch.exists():
                     patch.write_bytes(diff(worktree, baseline or revision, remaining=remaining))

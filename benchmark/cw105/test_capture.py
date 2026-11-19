@@ -281,6 +281,12 @@ class CaptureTest(unittest.TestCase):
                 budget.admit("run")
 
     def test_campaign_stop_interrupts_stalled_upstream(self):
+        self.check_stalled_upstream(lambda budget: budget.stop("resource fault"))
+
+    def test_finished_run_interrupts_stalled_upstream(self):
+        self.check_stalled_upstream(lambda budget: budget.finish("run"))
+
+    def check_stalled_upstream(self, stop):
         import threading
         from contextlib import closing
 
@@ -310,7 +316,7 @@ class CaptureTest(unittest.TestCase):
                         connection.request("POST", PATH, b"{}")
                         response = connection.getresponse()
                         self.assertTrue(started.wait(2))
-                        budget.stop("resource fault")
+                        stop(budget)
                         self.assertEqual(response.read(), b"")
                 self.assertFalse(evidence[0]["complete"])
             finally:

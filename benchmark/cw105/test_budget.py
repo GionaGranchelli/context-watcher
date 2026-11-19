@@ -41,3 +41,16 @@ class BudgetTest(unittest.TestCase):
         budget.stop("usage fault")
         with self.assertRaisesRegex(BudgetExceeded, "usage fault"):
             budget.check_running("a")
+
+    def test_finished_run_cannot_request_or_replay_but_next_run_can_start(self):
+        budget = Budget(campaign_limit=3, seconds=10, clock=lambda: 0)
+        budget.start("first", request_limit=2, seconds=10)
+        budget.finish("first")
+        with self.assertRaises(BudgetExceeded):
+            budget.admit("first")
+        with self.assertRaises(BudgetExceeded):
+            budget.check_running("first")
+        with self.assertRaises(ValueError):
+            budget.start("first", request_limit=1, seconds=10)
+        budget.start("second", request_limit=1, seconds=10)
+        self.assertEqual(budget.admit("second"), 10)

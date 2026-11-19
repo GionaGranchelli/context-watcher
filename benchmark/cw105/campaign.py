@@ -15,13 +15,15 @@ from routing import route
 
 
 @contextmanager
-def serving(server):
+def serving(server, *, on_exit=None):
     with server:
         thread = threading.Thread(target=server.serve_forever, args=(0.01,))
         thread.start()
         try:
             yield server.server_port
         finally:
+            if on_exit is not None:
+                on_exit()
             server.shutdown()
             thread.join()
 
@@ -36,7 +38,8 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
         wire_dir = root / "wire"
         wire_dir.mkdir(mode=0o700)
         with serving(relay(upstream, budget, run_id, records.append, spend=spend, guard=guard,
-                           request_policy=request_policy, connect=connect, wire_dir=wire_dir)) as capture:
+                           request_policy=request_policy, connect=connect, wire_dir=wire_dir),
+                     on_exit=lambda: budget.finish(run_id)) as capture:
             with socket.socket() as api, socket.socket() as proxy:
                 api.bind(("127.0.0.1", 0))
                 proxy.bind(("127.0.0.1", 0))

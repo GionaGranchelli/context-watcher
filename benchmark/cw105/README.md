@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 89 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
+absent. The local qualification run passed all 91 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
@@ -110,8 +110,9 @@ observed utilization and a representative task that reaches that condition.
   and hashing checks it between chunks. Blocking filesystem operations can
   still overrun it. A process that does not exit after SIGKILL is reported
   as incomplete and its worktree is retained; the runner cannot guarantee the
-  process has stopped. Relay shutdown and final evidence writes also lack an
-  independently enforced bound. The stated
+  process has stopped. A finished run closes its request admission and
+  interrupts an in-flight loopback stream. Relay shutdown and final evidence
+  writes still lack an independently enforced bound. The stated
   wall-clock ceiling is therefore not enforced end to end. Qualify those paths
   and cancellation before live authorization.
 - The common relay uses the harness `Spend` reservation and settlement guard

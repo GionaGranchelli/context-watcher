@@ -17,6 +17,7 @@ class Budget:
         self._deadline = clock() + seconds
         self._remaining = campaign_limit
         self._runs = {}
+        self._finished = set()
         self._stop_reason = None
         self._lock = threading.Lock()
 
@@ -30,6 +31,12 @@ class Budget:
                 raise ValueError("Run ID already admitted")
             deadline = min(self._deadline, self._clock() + seconds)
             self._runs[run_id] = (request_limit, deadline)
+
+    def finish(self, run_id):
+        with self._lock:
+            if run_id not in self._runs:
+                raise ValueError("Run was not admitted")
+            self._finished.add(run_id)
 
     def stop(self, reason):
         with self._lock:
@@ -51,7 +58,7 @@ class Budget:
             if self._stop_reason is not None:
                 raise BudgetExceeded(self._stop_reason)
             run = self._runs.get(run_id)
-            if run is None or self._clock() >= run[1]:
+            if run is None or run_id in self._finished or self._clock() >= run[1]:
                 raise BudgetExceeded("Run deadline exceeded or run not admitted")
 
     def admit(self, run_id):
@@ -61,7 +68,7 @@ class Budget:
                 raise BudgetExceeded(self._stop_reason)
             remaining, deadline = self._runs.get(run_id, (0, self._deadline))
             seconds_left = deadline - self._clock()
-            if seconds_left <= 0 or self._remaining <= 0 or remaining <= 0:
+            if run_id in self._finished or seconds_left <= 0 or self._remaining <= 0 or remaining <= 0:
                 raise BudgetExceeded("Request admission denied")
             self._runs[run_id] = (remaining - 1, deadline)
             self._remaining -= 1

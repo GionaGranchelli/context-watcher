@@ -90,6 +90,8 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
         if result.timed_out or result.cancelled_reason:
             budget.stop("Campaign deadline exceeded during verification")
             raise RuntimeError("Verification exceeded the campaign deadline")
+        if result.returncode not in (0, 1):
+            raise RuntimeError("Verification infrastructure failed; see verifier.log")
         return result.returncode == 0
 
     def execute(row):

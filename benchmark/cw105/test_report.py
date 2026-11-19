@@ -28,3 +28,13 @@ class ReportTest(unittest.TestCase):
             summarize([entry, entry], plan)
         with self.assertRaises(ValueError):
             summarize([dict(entry, mode="M2")], plan)
+
+    def test_context_pressure_uses_observed_peak_only(self):
+        rows = [row for row in schedule() if row["task"] == "board-query"][:2]
+        result = summarize([
+            dict(rows[0], status="complete", correct=True, peak_observed_context_fraction=0.81),
+            dict(rows[1], status="incomplete"),
+        ], rows)
+        self.assertEqual(result["long_task_context_pressure"], {
+            "threshold_fraction": 0.8, "runs_at_or_above_threshold": 1, "planned_runs": 2,
+        })

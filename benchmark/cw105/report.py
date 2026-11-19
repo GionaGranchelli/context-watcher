@@ -74,7 +74,19 @@ def summarize(results, plan=None):
                 left, right = measured(before, metric), measured(after, metric)
                 if left is not None and right is not None:
                     deltas[metric].append(right - left)
-    return {"arms": arms, "matched_correct_pairs": matched,
+    long_runs = [recorded.get(row["run_id"], {}) for row in plan
+                 if row["task"] == "board-query"]
+    pressure_observed = sum(
+        1 for result in long_runs
+        if (value := measured(result, "peak_observed_context_fraction")) is not None
+        and value >= 0.8
+    )
+    return {"long_task_context_pressure": {
+                "threshold_fraction": 0.8,
+                "runs_at_or_above_threshold": pressure_observed,
+                "planned_runs": len(long_runs),
+            },
+            "arms": arms, "matched_correct_pairs": matched,
             "m2_minus_m1": {name: stats(values) for name, values in deltas.items()}}
 
 

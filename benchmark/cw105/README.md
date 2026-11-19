@@ -158,3 +158,10 @@ electricity tariffs. The actual GPU assignment, caps under load, whole-host
 energy, and server cancellation behavior still need qualification. A live
 authorization envelope must state an enforced limit rather than rely on this
 inventory.
+
+A read-only follow-up on 2026-11-19 found `power1_input` or `power1_average`
+and `temp2_input` for all three devices, but no `energy1_input` counter. The
+runner therefore enforces only the sampled instantaneous GPU wattage and
+temperature ceilings; it cannot enforce a cumulative GPU-energy ceiling from
+this telemetry. The 14.847 kWh figure is not an enforced cap. Whole-host energy
+and electricity cost remain unmeasured.

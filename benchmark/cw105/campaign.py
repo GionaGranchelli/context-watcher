@@ -48,7 +48,8 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
                 mode=mode, proxy_port=proxy_port, workspace=worktree,
             )
             with daemon(cw, selected, workspace=worktree, state=root / "cw",
-                        api_port=api_port, proxy_port=proxy_port) as control:
+                        api_port=api_port, proxy_port=proxy_port,
+                        remaining=budget.campaign_remaining) as control:
                 if control:
                     profile = state / "models.json"
                     config = json.loads(profile.read_text())

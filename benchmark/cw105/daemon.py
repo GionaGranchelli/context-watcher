@@ -9,7 +9,7 @@ from process import stop_group
 
 
 @contextmanager
-def daemon(binary, selected, *, workspace, state, api_port, proxy_port):
+def daemon(binary, selected, *, workspace, state, api_port, proxy_port, remaining=None):
     if selected.daemon_env is None:
         yield
         return
@@ -19,8 +19,10 @@ def daemon(binary, selected, *, workspace, state, api_port, proxy_port):
         subprocess.run(
             [str(binary), "--db", str(state / "cw.db"), "autopilot", "--enable"],
             cwd=workspace, env=env, stdout=setup, stderr=subprocess.STDOUT,
-            check=True, timeout=10,
+            check=True, timeout=min(10, remaining()) if remaining else 10,
         )
+    if remaining is not None:
+        remaining()
     log = state / "cw.log"
     with log.open("xb") as output:
         process = subprocess.Popen(
@@ -33,7 +35,8 @@ def daemon(binary, selected, *, workspace, state, api_port, proxy_port):
         try:
             deadline = time.monotonic() + 10
             while time.monotonic() < deadline and process.poll() is None:
-                connection = HTTPConnection("127.0.0.1", proxy_port, timeout=0.25)
+                left = remaining() if remaining else 0.25
+                connection = HTTPConnection("127.0.0.1", proxy_port, timeout=min(0.25, left))
                 try:
                     connection.request("GET", "/health")
                     response = connection.getresponse()
@@ -43,9 +46,11 @@ def daemon(binary, selected, *, workspace, state, api_port, proxy_port):
                     pass
                 finally:
                     connection.close()
-                time.sleep(0.05)
+                time.sleep(min(0.05, remaining()) if remaining else 0.05)
             else:
                 raise RuntimeError(f"Context-Watcher failed to start; see {log}")
+            if remaining is not None:
+                remaining()
             yield (state / ".local/share/context-watcher/control-token").read_text().strip()
         finally:
             stop_group(process)

@@ -94,3 +94,33 @@ class AttemptTest(unittest.TestCase):
             self.assertIn("deadline", result["error"])
             self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)
             self.assertTrue((evidence / "workspace").is_dir())
+
+    def test_deadline_during_patch_capture_preserves_worktree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repo = root / "repo"
+            repo.mkdir()
+            git(repo, "init")
+            git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                "commit", "--allow-empty", "-m", "fixture")
+            revision = git(repo, "rev-parse", "HEAD").decode().strip()
+            calls = 0
+
+            def remaining():
+                nonlocal calls
+                calls += 1
+                if calls >= 6:
+                    raise BudgetExceeded("Campaign deadline exceeded")
+                return 10
+
+            @contextmanager
+            def launch(worktree, evidence):
+                yield [sys.executable, "-c", "open('answer','w').write('candidate')"], os.environ
+
+            evidence = root / "attempt"
+            result = attempt({"revision": revision, "run_id": "fixture"}, repo, evidence,
+                             launch, lambda *_: False, seconds=5, remaining=remaining)
+            self.assertEqual(result["status"], "incomplete")
+            self.assertIn("deadline", result["cleanup_error"])
+            self.assertEqual((evidence / "workspace" / "answer").read_text(), "candidate")
+            self.assertEqual(json.loads((evidence / "manifest.json").read_text()), result)

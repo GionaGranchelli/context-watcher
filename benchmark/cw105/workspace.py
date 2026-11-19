@@ -26,11 +26,12 @@ def snapshot(workspace, *, remaining=None):
     return git(workspace, "write-tree", remaining=remaining).decode().strip()
 
 
-def diff(workspace, baseline):
+def diff(workspace, baseline, *, remaining=None):
     # Capture the actual final worktree, including staged and untracked changes.
-    git(workspace, "add", "--all")
-    return git(workspace, "diff", "--cached", "--no-ext-diff", "--binary", baseline, "--")
+    git(workspace, "add", "--all", remaining=remaining)
+    return git(workspace, "diff", "--cached", "--no-ext-diff", "--binary", baseline, "--",
+               remaining=remaining)
 
 
-def cleanup(repository, destination):
-    git(repository, "worktree", "remove", "--force", str(destination.resolve()))
+def cleanup(repository, destination, *, remaining=None):
+    git(repository, "worktree", "remove", "--force", str(destination.resolve()), remaining=remaining)

@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 75 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
+absent. The local qualification run passed all 77 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
@@ -97,11 +97,13 @@ observed utilization and a representative task that reaches that condition.
   TCP ports rather than addresses and does not filter UDP or Unix sockets.
   Use this runner for a trusted local benchmark. It is not isolation for a
   hostile agent or third-party workspace.
-- The campaign deadline gates request admission, the agent process, and the
-  outer verification process. Worktree checkout and task seeding are bounded
-  by the remaining campaign time. Daemon setup and cleanup are not fully
-  covered by that deadline. The stated wall-clock ceiling is therefore not yet enforced end to
-  end. Add and test cancellation across all phases before live authorization.
+- The campaign deadline gates request admission, agent and verification
+  processes, Git operations, and daemon startup. If the deadline prevents patch
+  capture, the runner preserves the worktree and records the error. The deadline
+  starts after live preflight; process shutdown, relay shutdown, and final
+  evidence writes do not have an independently enforced bound. The stated
+  wall-clock ceiling is therefore not enforced end to end. Qualify those paths
+  and cancellation before live authorization.
 - The common relay uses the harness `Spend` reservation and settlement guard
   for all three modes. It does not configure CW’s named `SpendGuard`. The
   existing CLI smoke configuration requires a positive authorization and

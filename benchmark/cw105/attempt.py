@@ -38,7 +38,7 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
         elif agent.returncode:
             result["status"] = "failed"
         else:
-            patch.write_bytes(diff(worktree, baseline or revision))
+            patch.write_bytes(diff(worktree, baseline or revision, remaining=remaining))
             result.update(correct=verify(worktree, root), status="complete")
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         result.update(status="incomplete", error=str(error))
@@ -46,9 +46,9 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
         if checked_out:
             try:
                 if not patch.exists():
-                    patch.write_bytes(diff(worktree, baseline or revision))
-                cleanup(repository, worktree)
-            except (OSError, subprocess.SubprocessError) as error:
+                    patch.write_bytes(diff(worktree, baseline or revision, remaining=remaining))
+                cleanup(repository, worktree, remaining=remaining)
+            except (OSError, RuntimeError, subprocess.SubprocessError) as error:
                 result.update(status="incomplete", cleanup_error=str(error))
         if records is not None and (root / "agent.log").exists():
             result.update(tool_metrics(root / "agent.log"))

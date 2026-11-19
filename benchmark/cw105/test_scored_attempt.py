@@ -39,3 +39,27 @@ class ScoredAttemptTest(unittest.TestCase):
             self.assertIn(b"HealthController.kt", (root / "final.patch").read_bytes())
             self.assertTrue((root / "build.log").exists())
             self.assertFalse((root / "workspace").exists())
+
+    def test_debug_seed_is_present_and_patch_contains_only_repair(self):
+        entry = next(row for row in schedule() if row["task"] == "web-api-base-url")
+
+        @contextmanager
+        def launch(worktree, evidence):
+            yield [
+                sys.executable, "-c",
+                "from pathlib import Path; p=Path('apps/web/app/composables/useApiHealth.js'); "
+                "p.write_text(p.read_text().replace('/api/health', '/actuator/health'))",
+            ], {"PATH": os.defpath}
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "evidence"
+            result = attempt(
+                entry, Path(os.environ["CW105_KANBAN"]), root, launch,
+                lambda *_: True, seconds=10,
+            )
+            self.assertEqual(result["status"], "complete", result)
+            patch = (root / "final.patch").read_text()
+            self.assertIn("-  const response = await fetch", patch)
+            self.assertIn("+  const response = await fetch", patch)
+            self.assertNotIn("new file mode", patch)
+            self.assertNotIn("HealthController.kt", patch)

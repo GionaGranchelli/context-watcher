@@ -80,3 +80,13 @@ class BrowserOracleTest(unittest.TestCase):
         result = self.invoke("board-query", BOARD, replace=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("0 !== 1", result.stderr)
+
+    def test_missing_playwright_is_infrastructure_failure(self):
+        env = dict(os.environ, CW105_PLAYWRIGHT="/nonexistent/cw105-playwright.mjs")
+        result = subprocess.run(
+            ["node", str(ORACLE), "web-api-base-url",
+             "http://127.0.0.1:43210", API],
+            env=env, text=True, capture_output=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Browser infrastructure unavailable", result.stderr)

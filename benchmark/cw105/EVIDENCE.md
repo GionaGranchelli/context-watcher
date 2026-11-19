@@ -29,7 +29,9 @@ The OMP event log is the source for tool call counts and any reported
 durations. Missing durations remain null. The report includes planned,
 completed, correct and missing counts per arm, plus completion and correctness
 rates using all planned runs as the denominator. Matched comparisons use
-correct completed M1/M2 pairs and show a sample count for every median.
+correct completed pairs for M1 versus M0, M2 versus M0, and M2 versus M1,
+overall and per task; every median has a sample count. These performance
+comparisons exclude failed runs and must be interpreted with success rates.
 The long-task pressure counter uses the proposed 80% input threshold. Cache
 fairness and provider cache hits need direct provider evidence.
 

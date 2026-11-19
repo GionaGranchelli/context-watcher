@@ -22,7 +22,8 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 92 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
+absent. The local qualification run passed all 94 tests with these variables set.
+The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
@@ -35,11 +36,12 @@ Lines, and a terminal manifest. Request records preserve completion status,
 usage, first output timing, elapsed time, and any capture error. Attempt wall time
 covers workspace setup, agent execution, verification, cleanup, and evidence
 summarization through the start of the final manifest write; agent-only time is
-reported separately. First output
-includes visible text, reasoning text, or a tool call delta. Unknown cache
-counts stay null. The report uses all planned attempts as the denominator for completion and
-correctness rates, and compares only matched, correct M1 and M2 runs for each
-measured field.
+reported separately. First output includes visible text, reasoning text, or a tool call delta. Unknown cache
+counts stay null. The report uses all planned attempts as the denominator for
+completion and correctness rates. It reports paired M1–M0, M2–M0 and M2–M1 differences
+over matched, correct runs, both overall and by task. Each metric includes its
+sample count. These comparisons exclude failures, so interpret them alongside
+the completion and correctness rates rather than as overall success rates.
 
 ## Proposed campaign envelope
 

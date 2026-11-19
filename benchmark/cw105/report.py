@@ -66,16 +66,32 @@ def summarize(results, plan=None):
             },
         }
 
-    deltas = {metric: [] for metric in METRICS}
-    matched = 0
-    for group in pairs.values():
-        before, after = group.get("M1", {}), group.get("M2", {})
-        if accepted(before) and accepted(after):
-            matched += 1
-            for metric in METRICS:
-                left, right = measured(before, metric), measured(after, metric)
-                if left is not None and right is not None:
-                    deltas[metric].append(right - left)
+    def compare(reference, candidate, task=None):
+        deltas = {metric: [] for metric in METRICS}
+        matched = 0
+        for (task_id, _), group in pairs.items():
+            if task is not None and task_id != task:
+                continue
+            before, after = group.get(reference, {}), group.get(candidate, {})
+            if accepted(before) and accepted(after):
+                matched += 1
+                for metric in METRICS:
+                    left, right = measured(before, metric), measured(after, metric)
+                    if left is not None and right is not None:
+                        deltas[metric].append(right - left)
+        return {"matched_correct_pairs": matched,
+                "metrics": {name: stats(values) for name, values in deltas.items()}}
+
+    comparisons = {
+        "m1_minus_m0": compare("M0", "M1"),
+        "m2_minus_m0": compare("M0", "M2"),
+        "m2_minus_m1": compare("M1", "M2"),
+    }
+    by_task = {task: {
+        "m1_minus_m0": compare("M0", "M1", task),
+        "m2_minus_m0": compare("M0", "M2", task),
+        "m2_minus_m1": compare("M1", "M2", task),
+    } for task in sorted({entry["task"] for entry in plan})}
     long_runs = [recorded.get(row["run_id"], {}) for row in plan
                  if row["task"] == "board-query"]
     pressure_observed = sum(
@@ -88,8 +104,7 @@ def summarize(results, plan=None):
                 "runs_at_or_above_threshold": pressure_observed,
                 "planned_runs": len(long_runs),
             },
-            "arms": arms, "matched_correct_pairs": matched,
-            "m2_minus_m1": {name: stats(values) for name, values in deltas.items()}}
+            "arms": arms, "comparisons": comparisons, "comparisons_by_task": by_task}
 
 
 if __name__ == "__main__":

@@ -20,10 +20,10 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(report["arms"]["M0"]["completion_rate"], 0)
         self.assertEqual(report["arms"]["M1"]["completion_rate"], 0.5)
         self.assertEqual(report["arms"]["M1"]["correctness_rate"], 0.5)
-        self.assertEqual(report["matched_correct_pairs"], 1)
-        self.assertEqual(report["m2_minus_m1"]["wall_seconds"], {"count": 1, "median": -2})
-        self.assertEqual(report["m2_minus_m1"]["agent_seconds"], {"count": 1, "median": -1})
-        self.assertEqual(report["m2_minus_m1"]["cached_input_tokens"]["count"], 0)
+        self.assertEqual(report["comparisons"]["m2_minus_m1"]["matched_correct_pairs"], 1)
+        self.assertEqual(report["comparisons"]["m2_minus_m1"]["metrics"]["wall_seconds"], {"count": 1, "median": -2})
+        self.assertEqual(report["comparisons"]["m2_minus_m1"]["metrics"]["agent_seconds"], {"count": 1, "median": -1})
+        self.assertEqual(report["comparisons"]["m2_minus_m1"]["metrics"]["cached_input_tokens"]["count"], 0)
 
     def test_refuses_duplicate_or_mislabeled_results(self):
         plan = list(schedule())[:1]
@@ -42,3 +42,24 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(result["long_task_context_pressure"], {
             "threshold_fraction": 0.8, "runs_at_or_above_threshold": 1, "planned_runs": 2,
         })
+
+    def test_each_mode_is_paired_against_baseline_and_by_task(self):
+        plan = list(schedule())[:3]
+        results = [dict(row, status="complete", correct=True, wall_seconds=seconds)
+                   for row, seconds in zip(plan, (12, 10, 7))]
+        report = summarize(results, plan)
+        self.assertEqual(report["comparisons"]["m1_minus_m0"]["metrics"]["wall_seconds"]["median"], -2)
+        self.assertEqual(report["comparisons"]["m2_minus_m0"]["metrics"]["wall_seconds"]["median"], -5)
+        task = plan[0]["task"]
+        pair = report["comparisons_by_task"][task]["m2_minus_m1"]
+        self.assertEqual(pair["matched_correct_pairs"], 1)
+        self.assertEqual(pair["metrics"]["wall_seconds"]["median"], -3)
+
+    def test_incorrect_baseline_is_excluded_from_paired_metrics(self):
+        plan = list(schedule())[:3]
+        results = [dict(row, status="complete", correct=(row["mode"] != "M0"), wall_seconds=1)
+                   for row in plan]
+        report = summarize(results, plan)
+        self.assertEqual(report["comparisons"]["m2_minus_m0"]["matched_correct_pairs"], 0)
+        self.assertIsNone(report["comparisons"]["m2_minus_m0"]["metrics"]["wall_seconds"]["median"])
+        self.assertEqual(report["comparisons"]["m2_minus_m1"]["matched_correct_pairs"], 1)

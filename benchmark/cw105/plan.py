@@ -1,5 +1,6 @@
 """Build a reviewable CW-105 proposal without contacting the provider."""
 import json
+import hashlib
 from pathlib import Path
 
 from authorization import ENDPOINT, MODEL, PROVIDER, plan_digest
@@ -20,6 +21,9 @@ def proposal():
     agent_seconds = sum(run["budget_seconds"] for run in runs)
     return {
         "version": 1,
+        "debug_seed_sha256": hashlib.sha256(
+            Path(__file__).with_name("fixtures").joinpath("debug-seed.patch").read_bytes()
+        ).hexdigest(),
         "provider": PROVIDER,
         "benchmark_revision": None,
         "binaries_sha256": None,

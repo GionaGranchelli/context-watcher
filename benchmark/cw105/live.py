@@ -34,7 +34,7 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
     if plan.get("status") != "ready_for_authorization":
         raise ValueError("Live execution plan has not passed readiness review")
     frozen = proposal()
-    for field in ("runs", "max_requests", "max_wall_seconds", "concurrency",
+    for field in ("runs", "debug_seed_sha256", "max_requests", "max_wall_seconds", "concurrency",
                   "smoke_max_requests", "smoke_max_seconds"):
         if plan.get(field) != frozen[field]:
             raise ValueError(f"Execution envelope differs from the frozen {field}")

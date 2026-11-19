@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+from pathlib import Path
 from dataclasses import asdict
 
 from evidence import request_metrics
@@ -21,6 +22,10 @@ def attempt(entry, repository, root, launch, verify, *, seconds, records=None, g
     try:
         checkout(repository, worktree, revision)
         checked_out = True
+        if entry.get("task") == "web-api-base-url":
+            seed = Path(__file__).with_name("fixtures") / "debug-seed.patch"
+            subprocess.run(["git", "-C", str(worktree), "apply", "--index", str(seed)],
+                           check=True, timeout=30)
         with launch(worktree, root) as (argv, env):
             agent = run(argv, cwd=worktree, env=env, log=root / "agent.log", timeout=seconds, guard=guard)
         result.update(agent=asdict(agent), wall_seconds=agent.elapsed_seconds)

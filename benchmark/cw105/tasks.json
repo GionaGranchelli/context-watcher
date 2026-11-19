@@ -12,7 +12,7 @@
   "web-api-base-url": {
     "budget_seconds": 1200,
     "request_cap": 16,
-    "prompt": "The Kanban home page has no way to tell whether the API is reachable. Trace how the web and API are configured for local development, then show API status on the home page. Use NUXT_PUBLIC_API_BASE_URL with a loopback default of http://127.0.0.1:8080. Query /actuator/health, show Checking while pending, API online for status UP, and API unavailable for all other outcomes. Explain how to set the URL in local development.",
+    "prompt": "The existing Kanban health indicator always reports the API unavailable even when the local API is healthy. Investigate and fix the cross-stack configuration and health contract. The local API runs at http://127.0.0.1:8080 by default and serves GET /actuator/health with JSON status UP. Honor NUXT_PUBLIC_API_BASE_URL, show Checking while the request is pending, API online for status UP, and API unavailable on failure or non-UP responses. Document the override in the README.",
     "acceptance": [
       "A browser reaches the configured mock API at /actuator/health",
       "Pending, success, non-UP, and transport failures render the required status",

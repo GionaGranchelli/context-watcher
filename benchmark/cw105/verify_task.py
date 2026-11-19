@@ -6,11 +6,19 @@ from verify_api import verify_api
 from verify_web import verify_web
 
 
+def documents_api_override(worktree):
+    readme = worktree / "README.md"
+    if not readme.is_file():
+        return False
+    text = readme.read_text(encoding="utf-8")
+    return "NUXT_PUBLIC_API_BASE_URL" in text
+
+
 def verify_task(worktree, evidence, task):
     if task == "health-contract":
         return verify_api(worktree, evidence, task)
     if task == "web-api-base-url":
-        return verify_web(worktree, evidence, task)
+        return verify_web(worktree, evidence, task) and documents_api_override(worktree)
     if task == "board-query":
         api_passed = verify_api(worktree, evidence, task)
         web_passed = verify_web(worktree, evidence, task)

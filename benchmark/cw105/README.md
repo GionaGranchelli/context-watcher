@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 85 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
+absent. The local qualification run passed all 87 tests with these variables set. The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
 M2 additionally enables symbol map injection. The existing offline integration
@@ -106,8 +106,9 @@ observed utilization and a representative task that reaches that condition.
 - The campaign deadline gates request admission, agent and verification
   processes, Git operations, and daemon startup. If the deadline prevents patch
   capture, the runner preserves the worktree and records the error. The deadline
-  starts before live preflight and is checked between its operations; some
-  individual preflight operations can still overrun it. Process shutdown, relay
+  starts before live preflight; SSH preflight commands use the remaining time
+  and hashing checks it between chunks. Blocking filesystem operations can
+  still overrun it. Process shutdown, relay
   shutdown, and final evidence writes also lack an independently enforced
   bound. The stated
   wall-clock ceiling is therefore not enforced end to end. Qualify those paths

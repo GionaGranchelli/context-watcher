@@ -20,12 +20,13 @@ done
 """
 
 
-def read_sample(*, max_watts, max_junction_c, max_age):
+def read_sample(*, max_watts, max_junction_c, max_age, remaining=None):
     started = time.monotonic()
     try:
         result = subprocess.run(
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", "machinist", READ_SENSORS],
-            capture_output=True, text=True, check=True, timeout=max_age,
+            capture_output=True, text=True, check=True,
+            timeout=min(max_age, remaining()) if remaining else max_age,
         )
         rows = []
         for line in result.stdout.splitlines():
@@ -39,12 +40,13 @@ def read_sample(*, max_watts, max_junction_c, max_age):
     return rows, total
 
 
-def check_loaded_model(model, context_window):
+def check_loaded_model(model, context_window, *, remaining=None):
     try:
         result = subprocess.run(
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
              "machinist", "~/.lmstudio/bin/lms ps"],
-            capture_output=True, text=True, check=True, timeout=5,
+            capture_output=True, text=True, check=True,
+            timeout=min(5, remaining()) if remaining else 5,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise BudgetExceeded("LM Studio model inventory unavailable") from exc

@@ -24,11 +24,19 @@ from schedule import REVISION, schedule
 from spend import Spend
 
 
-def binary_identities(omp, cw):
+def binary_identities(omp, cw, *, remaining=None):
     identities = {}
     for name, path in (("omp", omp), ("cw", cw)):
+        digest = hashlib.sha256()
         with path.open("rb") as binary:
-            identities[name] = hashlib.file_digest(binary, "sha256").hexdigest()
+            while True:
+                if remaining is not None:
+                    remaining()
+                chunk = binary.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        identities[name] = digest.hexdigest()
     return identities
 
 
@@ -61,7 +69,7 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
         if plan.get(field) != frozen[field]:
             raise ValueError(f"Execution envelope differs from the frozen {field}")
     budget = Budget(campaign_limit=plan["max_requests"], seconds=plan["max_wall_seconds"])
-    if plan.get("binaries_sha256") != binary_identities(omp, cw):
+    if plan.get("binaries_sha256") != binary_identities(omp, cw, remaining=budget.campaign_remaining):
         raise ValueError("Execution binaries do not match the approved hashes")
     if output.exists():
         raise FileExistsError(output)
@@ -74,9 +82,10 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
                   max_input=CONTEXT_WINDOW, max_output=MAX_OUTPUT_TOKENS)
     limits = plan["local_resource_cap"]
     sample = partial(read_sample, max_watts=limits["gpu_watts"],
-                    max_junction_c=limits["junction_c"], max_age=limits["sample_max_age_seconds"])
+                    max_junction_c=limits["junction_c"], max_age=limits["sample_max_age_seconds"],
+                    remaining=budget.campaign_remaining)
     budget.campaign_remaining()
-    loaded_model = check_loaded_model(MODEL, CONTEXT_WINDOW)
+    loaded_model = check_loaded_model(MODEL, CONTEXT_WINDOW, remaining=budget.campaign_remaining)
     budget.campaign_remaining()
     initial_sample = sample()
     budget.campaign_remaining()

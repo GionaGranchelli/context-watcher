@@ -35,7 +35,7 @@ class LiveEntryTest(unittest.TestCase):
         budget = Budget(campaign_limit=plan["max_requests"],
                         seconds=plan["max_wall_seconds"], clock=lambda: now[0])
 
-        def inventory(*_):
+        def inventory(*_, **_kwargs):
             now[0] = plan["max_wall_seconds"]
             return {}
 

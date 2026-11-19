@@ -4,6 +4,8 @@ from pathlib import Path
 
 from verify_api import verify_api
 from verify_web import verify_web
+from process import run
+import os
 
 
 def documents_api_override(worktree):
@@ -14,6 +16,23 @@ def documents_api_override(worktree):
     return "NUXT_PUBLIC_API_BASE_URL" in text
 
 
+def project_checks(worktree, evidence):
+    commands = (
+        ("api-check", ["./services/api/gradlew", "-p", "services/api", "--offline", "--no-daemon", "check"]),
+        ("web-typecheck", ["pnpm", "--filter", "web", "lint"]),
+        ("web-test", ["pnpm", "--filter", "web", "test"]),
+        ("web-build", ["pnpm", "--filter", "web", "build"]),
+    )
+    passed = True
+    for name, command in commands:
+        result = run(command, cwd=worktree, env=os.environ, log=evidence / f"{name}.log",
+                     timeout=180, own_group=False)
+        if result.timed_out or result.cancelled_reason:
+            raise RuntimeError(f"{name} timed out")
+        passed = passed and result.returncode == 0
+    return passed
+
+
 def verify_task(worktree, evidence, task):
     if task == "health-contract":
         return verify_api(worktree, evidence, task)
@@ -22,7 +41,8 @@ def verify_task(worktree, evidence, task):
     if task == "board-query":
         api_passed = verify_api(worktree, evidence, task)
         web_passed = verify_web(worktree, evidence, task)
-        return api_passed and web_passed
+        checks_passed = project_checks(worktree, evidence)
+        return api_passed and web_passed and checks_passed
     raise ValueError(f"Unknown benchmark task: {task}")
 
 

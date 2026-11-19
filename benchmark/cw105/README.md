@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 112 tests with these variables
+absent. The local qualification run passed all 113 tests with these variables
 set (four optional provider or hardware checks skipped).
 The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
@@ -99,8 +99,10 @@ The longer cross-stack implementation has a larger budget, but meaningful
 context pressure has not been established. A context-pressure comparison is
 eligible only after at least three correct matched M1/M2 `board-query` pairs
 show M1 peak observed context at or above 80% of the model window. If fewer
-than three such pairs occur, report the result as ordinary-length coding only;
-do not claim a long-context benefit. A pilot cannot meet this evidence
+than three such pairs occur, report the result as ordinary-length coding only.
+The report separately compares M2 with M1 on those pressure-qualified pairs;
+it calls long-context value demonstrated only when that subset also meets the
+preregistered token-reduction target. A pilot cannot meet this evidence
 threshold and cannot support a product-value recommendation.
 
 ## Pre-registered decision rule
@@ -111,8 +113,11 @@ runs per task that actually use a virtual-memory tool, no M2 completion or
 correctness regression by task, and at least 10% lower median provider-reported
 input tokens on the matched correct pairs. The 10% threshold is a decision
 target, not a claim of statistical significance. A long-context claim also
-requires the three-pair 80% pressure criterion above; otherwise any GO is
-limited to ordinary-length coding sessions.
+requires both the three-pair 80% pressure criterion and the token-reduction
+target on those same pressure-qualified pairs; otherwise any GO is limited to
+ordinary-length coding sessions. Reports include the digest and decision rule
+from the frozen plan used for authorization. Recompute a report with
+`python3 -B benchmark/cw105/report.py --plan plan.json <manifest.json>...`.
 
 Use **ITERATE** when safety stops or incomplete telemetry leave too few pairs,
 when M2 does not use the tools enough to evaluate the treatment, or when a

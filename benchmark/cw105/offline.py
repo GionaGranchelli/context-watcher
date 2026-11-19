@@ -7,6 +7,7 @@ from pathlib import Path
 
 from budget import Budget
 from report import summarize
+from plan import proposal
 from request_policy import check_request
 from spend import Spend
 from schedule import schedule
@@ -47,7 +48,11 @@ def rehearse(repository, output, omp, cw):
             )
 
         result = execute_plan(execution, budget, execute)
-    report = summarize(result.results, plan, execution=result)
+    plan_document = proposal()
+    plan_document["runs"] = plan
+    plan_document["campaign_type"] = "offline"
+    (output / "plan.json").write_text(json.dumps(plan_document, indent=2) + "\n")
+    report = summarize(result.results, plan_document, execution=result)
     (output / "report.json").write_text(json.dumps(report, indent=2) + "\n")
     return len(result.results) == len(plan) and all(
         r["status"] == "complete" for r in result.results

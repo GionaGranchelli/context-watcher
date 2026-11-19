@@ -44,11 +44,15 @@ comparisons exclude failed runs and must be interpreted with success rates.
 TTFT and response elapsed time are measured at the relay, not reported by the
 provider. Tool duration is an OMP event-arrival interval, not provider timing
 or causal MCP overhead.
-The long-task pressure claim requires at least three correct matched M1/M2
-`board-query` pairs where M1 reaches 80% observed context utilization. Otherwise
-the conclusion is limited to ordinary-length coding. Provider-reported cached
-input is retained when available, but initial cache state is uncontrolled, so
-latency differences are descriptive and not attributable to Context-Watcher.
+The long-task pressure comparison requires at least three correct matched
+M1/M2 `board-query` pairs where M1 reaches the frozen plan's context threshold.
+The report also gives M2–M1 token, latency, and other metric differences on
+that exact subset. A long-context value claim requires the token target on those
+pressure-qualified pairs; baseline pressure alone is insufficient. Reports
+include the digest and decision rule from the frozen plan used for authorization.
+Provider-reported cached input is retained when available, but initial cache
+state is uncontrolled, so latency differences are descriptive and not
+attributable to Context-Watcher.
 The full-plan decision rule requires nine correct M1/M2 pairs, at least three
 per task, sufficient M2 virtual-memory use, no task-level correctness or
 completion regression, and at least 10% lower median input tokens. A pilot is

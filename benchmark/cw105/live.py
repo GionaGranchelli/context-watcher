@@ -142,8 +142,7 @@ def run_live(plan, document, *, checkout, merged_revision, repository, output, o
     else:
         execution = execute_plan(plan["runs"], budget, execute)
     (output / "report.json").write_text(json.dumps(
-        summarize(execution.results, plan["runs"], execution=execution,
-                  campaign_type=plan["campaign_type"]), indent=2,
+        summarize(execution.results, plan, execution=execution), indent=2,
     ) + "\n")
     return (len(execution.results) == len(plan["runs"])
             and all(r["status"] == "complete" and r["correct"] is True

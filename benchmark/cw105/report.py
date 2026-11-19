@@ -5,8 +5,8 @@ import math
 from pathlib import Path
 from statistics import median
 
-from plan import proposal
-from schedule import MODES, schedule
+from authorization import plan_digest
+from schedule import MODES
 
 METRICS = (
     "wall_seconds", "agent_seconds", "input_tokens", "output_tokens", "cached_input_tokens",
@@ -24,9 +24,15 @@ def measured(result, metric):
     return value
 
 
-def summarize(results, plan=None, *, execution=None, campaign_type=None):
-    plan = list(schedule() if plan is None else plan)
-    by_id = {entry["run_id"]: entry for entry in plan}
+def summarize(results, plan, *, execution=None, campaign_type=None):
+    if not isinstance(plan, dict) or not isinstance(plan.get("runs"), list):
+        raise ValueError("Report requires the frozen execution plan")
+    decision_rule = plan.get("value_decision_rule")
+    if not isinstance(decision_rule, dict):
+        raise ValueError("Frozen execution plan has no value decision rule")
+    plan_rows = plan["runs"]
+    plan_sha256 = plan_digest(plan)
+    by_id = {entry["run_id"]: entry for entry in plan_rows}
     recorded = {}
     for result in results:
         key = result["run_id"]
@@ -37,14 +43,14 @@ def summarize(results, plan=None, *, execution=None, campaign_type=None):
         if result.get("status") not in ("complete", "failed", "cancelled", "incomplete"):
             raise ValueError(f"Invalid run status for {key}")
         recorded[key] = result
-    if campaign_type is None:
-        campaign_types = {result.get("campaign_type") for result in results
-                          if result.get("campaign_type") is not None}
-        campaign_type = next(iter(campaign_types)) if len(campaign_types) == 1 else "full"
+    plan_campaign_type = plan.get("campaign_type", "full")
+    if campaign_type is not None and campaign_type != plan_campaign_type:
+        raise ValueError("Report campaign type does not match the frozen execution plan")
+    campaign_type = plan_campaign_type
 
     groups = {}
     pairs = {}
-    for entry in plan:
+    for entry in plan_rows:
         result = recorded.get(entry["run_id"], {})
         groups.setdefault(entry["mode"], []).append(result)
         pairs.setdefault((entry["task"], entry["repetition"]), {})[entry["mode"]] = result
@@ -79,12 +85,14 @@ def summarize(results, plan=None, *, execution=None, campaign_type=None):
             },
         }
 
-    def compare(reference, candidate, task=None):
+    def compare(reference, candidate, task=None, predicate=None):
         deltas = {metric: [] for metric in METRICS}
         token_reductions = []
         matched = 0
         for (task_id, _), group in pairs.items():
             if task is not None and task_id != task:
+                continue
+            if predicate is not None and not predicate(task_id, group):
                 continue
             before, after = group.get(reference, {}), group.get(candidate, {})
             if accepted(before) and accepted(after):
@@ -111,10 +119,10 @@ def summarize(results, plan=None, *, execution=None, campaign_type=None):
         "m1_minus_m0": compare("M0", "M1", task),
         "m2_minus_m0": compare("M0", "M2", task),
         "m2_minus_m1": compare("M1", "M2", task),
-    } for task in sorted({entry["task"] for entry in plan})}
-    long_runs = [recorded.get(row["run_id"], {}) for row in plan
+    } for task in sorted({entry["task"] for entry in plan_rows})}
+    long_runs = [recorded.get(row["run_id"], {}) for row in plan_rows
                  if row["task"] == "board-query"]
-    threshold = 0.8
+    threshold = decision_rule["context_pressure_threshold_fraction"]
     pressure_by_mode = {
         mode: sum(
             result.get("mode") == mode
@@ -129,6 +137,20 @@ def summarize(results, plan=None, *, execution=None, campaign_type=None):
         and value >= threshold
         for (task_id, _), group in pairs.items() if task_id == "board-query"
     )
+    pressure_comparison = compare(
+        "M1", "M2",
+        predicate=lambda task_id, group: task_id == "board-query"
+        and accepted(group.get("M1", {})) and accepted(group.get("M2", {}))
+        and (value := measured(group["M1"], "peak_observed_context_fraction")) is not None
+        and value >= threshold,
+    )
+    pressure_reduction = pressure_comparison["input_token_reduction_fraction"]
+    pressure_value_demonstrated = (
+        pressure_pairs >= decision_rule["minimum_context_pressure_pairs"]
+        and pressure_reduction["count"] >= decision_rule["minimum_context_pressure_pairs"]
+        and pressure_reduction["median"] is not None
+        and pressure_reduction["median"] >= decision_rule["minimum_median_input_token_reduction_fraction"]
+    )
     execution_report = {
         "stop_reason": execution.stop_reason,
         "stopped_run_id": execution.stopped_run_id,
@@ -138,13 +160,13 @@ def summarize(results, plan=None, *, execution=None, campaign_type=None):
                               if result.get("campaign_stop_reason")), None),
         "stopped_run_id": next((result["run_id"] for result in results
                                  if result.get("campaign_stop_reason")), None),
-        "unstarted_runs": max(0, len(plan) - len(results)),
+        "unstarted_runs": max(0, len(plan_rows) - len(results)),
     }
     task_outcomes = {}
-    for task_id in sorted({entry["task"] for entry in plan}):
+    for task_id in sorted({entry["task"] for entry in plan_rows}):
         task_outcomes[task_id] = {}
         for mode in MODES:
-            group = [recorded.get(row["run_id"], {}) for row in plan
+            group = [recorded.get(row["run_id"], {}) for row in plan_rows
                      if row["task"] == task_id and row["mode"] == mode]
             task_outcomes[task_id][mode] = {
                 "planned": len(group),
@@ -157,7 +179,6 @@ def summarize(results, plan=None, *, execution=None, campaign_type=None):
                 ) if mode == "M2" else None,
             }
 
-    decision_rule = proposal().get("value_decision_rule")
     recommendation = {"label": "ITERATE", "reason": "Insufficient qualified full-campaign evidence"}
     if campaign_type != "full":
         recommendation["reason"] = "Pilot or offline rehearsal is operational qualification, not product-value evidence"
@@ -193,7 +214,7 @@ def summarize(results, plan=None, *, execution=None, campaign_type=None):
                 recommendation = {
                     "label": "GO",
                     "reason": "M2 met the preregistered input-token target without task-level correctness or completion regression",
-                    "scope": "long-context value evaluated" if pressure_pairs >= 3
+                    "scope": "long-context value demonstrated" if pressure_value_demonstrated
                              else "ordinary-length coding only",
                 }
             else:
@@ -206,14 +227,17 @@ def summarize(results, plan=None, *, execution=None, campaign_type=None):
                 "runs_at_or_above_threshold_by_mode": pressure_by_mode,
                 "planned_runs": len(long_runs),
                 "matched_m1_m2_pressure_pairs": pressure_pairs,
-                "minimum_pairs_for_pressure_claim": 3,
-                "claim_eligible": pressure_pairs >= 3,
-                "conclusion_scope": "context_pressure_evaluated" if pressure_pairs >= 3
+                "minimum_pairs_for_pressure_claim": decision_rule["minimum_context_pressure_pairs"],
+                "claim_eligible": pressure_pairs >= decision_rule["minimum_context_pressure_pairs"],
+                "m2_minus_m1_on_pressure_pairs": pressure_comparison,
+                "long_context_value_demonstrated": pressure_value_demonstrated,
+                "conclusion_scope": "context_pressure_value_demonstrated" if pressure_value_demonstrated
                                     else "ordinary_length_coding_only",
             },
             "campaign_execution": execution_report,
             "campaign_type": campaign_type,
             "value_decision_rule": decision_rule,
+            "authorized_plan_sha256": plan_sha256,
             "recommendation": recommendation,
             "task_outcomes": task_outcomes,
             "timing_interpretation": {
@@ -226,6 +250,9 @@ def summarize(results, plan=None, *, execution=None, campaign_type=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("manifests", type=Path, nargs="+")
     args = parser.parse_args()
-    print(json.dumps(summarize(json.loads(p.read_text()) for p in args.manifests), indent=2))
+    plan = json.loads(args.plan.read_text())
+    results = [json.loads(p.read_text()) for p in args.manifests]
+    print(json.dumps(summarize(results, plan), indent=2))

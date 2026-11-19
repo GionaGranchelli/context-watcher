@@ -3,10 +3,17 @@ import unittest
 from budget import Budget, BudgetExceeded
 from campaign import execute_plan, serving
 from report import summarize
+from plan import proposal
 from schedule import schedule
 
 
 class CampaignTest(unittest.TestCase):
+    @staticmethod
+    def report_plan(rows):
+        plan = proposal()
+        plan["runs"] = list(rows)
+        return plan
+
     def test_incorrect_submission_does_not_stop_matched_arms(self):
         plan = list(schedule())[:3]
         executable = [dict(row, request_cap=2, budget_seconds=10) for row in plan]
@@ -22,7 +29,7 @@ class CampaignTest(unittest.TestCase):
         self.assertEqual(started, [row["run_id"] for row in plan])
         self.assertIsNone(execution.stop_reason)
         self.assertEqual(execution.unstarted_runs, 0)
-        report = summarize(execution.results, plan)
+        report = summarize(execution.results, self.report_plan(plan))
         self.assertEqual(report["arms"]["M0"]["correct"], 0)
         self.assertEqual(report["arms"]["M1"]["missing"], 0)
         self.assertEqual(report["arms"]["M2"]["missing"], 0)
@@ -77,7 +84,8 @@ class CampaignTest(unittest.TestCase):
         execution = execute_plan(executable, budget, execute)
         self.assertEqual(started, [row["run_id"] for row in plan])
         self.assertIsNone(execution.stop_reason)
-        self.assertEqual(summarize(execution.results, plan)["arms"]["M0"]["agent_failures"], 1)
+        self.assertEqual(summarize(execution.results, self.report_plan(plan))
+                         ["arms"]["M0"]["agent_failures"], 1)
 
     def test_expired_campaign_launches_nothing(self):
         clock = [0]

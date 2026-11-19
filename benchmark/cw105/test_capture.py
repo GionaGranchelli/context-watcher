@@ -174,3 +174,60 @@ class CaptureTest(unittest.TestCase):
         self.assertFalse(evidence[0]["complete"])
         with self.assertRaises(BudgetExceeded):
             budget.admit("run")
+
+    def test_response_write_failure_stops_admission(self):
+        import os
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+
+        evidence = []
+        real_fdopen = os.fdopen
+
+        class FailingWriter:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+
+            def write(self, data):
+                raise OSError("synthetic disk full")
+
+            def flush(self):
+                self.wrapped.flush()
+
+            def fileno(self):
+                return self.wrapped.fileno()
+
+            def close(self):
+                self.wrapped.close()
+
+        def fdopen(fd, mode):
+            wrapped = real_fdopen(fd, mode)
+            target = os.readlink(f"/proc/self/fd/{fd}")
+            return FailingWriter(wrapped) if "response-" in target else wrapped
+
+        class Upstream(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                self.wfile.write(b'data: {"choices":[]}\n\n')
+
+            def log_message(self, *_args):
+                pass
+
+        budget = Budget(campaign_limit=2, seconds=10)
+        budget.start("run", request_limit=2, seconds=10)
+        with TemporaryDirectory() as directory, patch("capture.os.fdopen", side_effect=fdopen):
+            with serving(HTTPServer(("127.0.0.1", 0), Upstream)) as upstream:
+                with serving(relay(upstream, budget, "run", evidence.append,
+                                   wire_dir=Path(directory))) as port:
+                    connection = HTTPConnection("127.0.0.1", port, timeout=3)
+                    connection.request("POST", PATH, b"{}")
+                    response = connection.getresponse()
+                    response.read()
+                    connection.close()
+            self.assertIn("synthetic disk full", evidence[0]["error"])
+            self.assertFalse(evidence[0]["complete"])
+            with self.assertRaises(BudgetExceeded):
+                budget.admit("run")

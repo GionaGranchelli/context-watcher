@@ -22,7 +22,7 @@ python3 -B benchmark/cw105/offline.py \
 ```
 
 The test suite skips opt-in integrations when their environment variables are
-absent. The local qualification run passed all 102 tests with these variables set.
+absent. The local qualification run passed all 103 tests with these variables set.
 The rehearsal runs one matched block in detached worktrees and keeps
 private evidence directories. M0 goes directly to the measurement relay.
 M1 and M2 route through an authenticated CW proxy with Auto-Pilot enabled.
@@ -125,6 +125,11 @@ observed utilization and a representative task that reaches that condition.
   overhead; they are not provider timings or proof of causal overhead. Counts
   require a complete event log, and timing requires matched observer records.
   A missing observer record makes a successful attempt incomplete.
+- M2 virtual-memory calls have an enforced ceiling of 64 calls per run, or
+  1,152 across the 18 planned M2 runs. The identical OMP observer counts
+  `cw_mount`, `cw_unmount`, and `cw_pin` starts and kills the agent if the
+  per-run cap is exceeded. This is a separate tool-call limit; it does not
+  configure CW’s named financial SpendGuard.
 - The common relay uses the harness `Spend` reservation and settlement guard
   for all three modes. It does not configure CW’s named `SpendGuard`. The
   existing CLI smoke configuration requires a positive authorization and

@@ -9,6 +9,7 @@ from schedule import schedule
 ATTEMPT_OVERHEAD_SECONDS = 600
 SMOKE_MAX_REQUESTS = 4
 SMOKE_MAX_SECONDS = 600
+MCP_CALLS_PER_RUN = 64
 
 
 def proposal():
@@ -31,6 +32,8 @@ def proposal():
         "model": MODEL,
         "concurrency": 1,
         "max_task_requests": tasks_requests,
+        "mcp_calls_per_run": MCP_CALLS_PER_RUN,
+        "max_mcp_calls": sum(run["mode"] == "M2" for run in runs) * MCP_CALLS_PER_RUN,
         "max_agent_seconds": agent_seconds,
         "max_requests": tasks_requests + SMOKE_MAX_REQUESTS,
         "max_wall_seconds": agent_seconds + len(runs) * ATTEMPT_OVERHEAD_SECONDS + SMOKE_MAX_SECONDS,

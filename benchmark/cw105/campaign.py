@@ -12,6 +12,7 @@ from budget import BudgetExceeded
 from capture import relay
 from daemon import daemon
 from routing import route
+from plan import MCP_CALLS_PER_RUN
 from process import ProcessStillRunning
 
 
@@ -82,9 +83,12 @@ def run_attempt(entry, repository, root, omp, cw, upstream, budget, *,
                                   api_port=api_port, session_id=run_id)
                 wrapper = Path(__file__).with_name("network_guard.py").resolve()
                 observer = Path(__file__).with_name("observe_agent.py").resolve()
+                observer_env = dict(env)
+                if mode == "M2":
+                    observer_env["CW105_MCP_CALL_LIMIT"] = str(MCP_CALLS_PER_RUN)
                 yield [sys.executable, str(wrapper),
                        str(capture if mode == "M0" else proxy_port),
-                       sys.executable, str(observer), str(root / "tool-timing.jsonl"), *argv], env
+                       sys.executable, str(observer), str(root / "tool-timing.jsonl"), *argv], observer_env
 
     def supervise():
         budget.check_running(run_id)

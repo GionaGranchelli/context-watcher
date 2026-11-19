@@ -11,6 +11,8 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(plan["max_task_requests"], 1008)
         self.assertEqual(plan["max_agent_seconds"], 75600)
         self.assertEqual(plan["max_requests"], 1012)
+        self.assertEqual(plan["mcp_calls_per_run"], 64)
+        self.assertEqual(plan["max_mcp_calls"], 1152)
         self.assertEqual(plan["max_wall_seconds"], 108600)
         self.assertEqual(plan["provider_cost_cap_nanodollars"], 0)
         self.assertIn("https://lmstudio.ai/docs/app/offline", plan["pricing"]["evidence"])

@@ -58,3 +58,20 @@ class ObserveAgentTest(unittest.TestCase):
                                     capture_output=True)
             self.assertEqual(result.returncode, 7)
             self.assertEqual(result.stdout, b"partial\n")
+
+    def test_mcp_call_cap_kills_agent_before_next_call(self):
+        observer = Path(__file__).with_name("observe_agent.py")
+        program = (
+            "import time; "
+            "print('{\"type\":\"tool_execution_start\",\"toolCallId\":\"1\",\"toolName\":\"mcp__cw__cw_pin\"}',flush=True); "
+            "print('{\"type\":\"tool_execution_start\",\"toolCallId\":\"2\",\"toolName\":\"mcp__cw__cw_mount\"}',flush=True); "
+            "time.sleep(30)"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            env = dict(__import__("os").environ, CW105_MCP_CALL_LIMIT="1")
+            result = subprocess.run([sys.executable, str(observer), str(root / "timing"),
+                                     sys.executable, "-c", program],
+                                    capture_output=True, env=env, timeout=5)
+            self.assertEqual(result.returncode, 125)
+            self.assertEqual(len((root / "timing").read_text().splitlines()), 2)
